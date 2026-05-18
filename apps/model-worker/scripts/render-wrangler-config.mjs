@@ -1,0 +1,28 @@
+import { readFile, writeFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const scriptDir = dirname(fileURLToPath(import.meta.url))
+const workerDir = resolve(scriptDir, '..')
+const templatePath = resolve(workerDir, 'wrangler.template.toml')
+const outputPath = resolve(workerDir, 'wrangler.toml')
+
+const requiredVariables = ['MODEL_KEYS_KV_NAMESPACE_ID', 'MODEL_BUCKET_NAME']
+
+function readRequiredEnv(name) {
+  const value = process.env[name]
+  if (!value) {
+    throw new Error(`${name} is required to render apps/model-worker/wrangler.toml`)
+  }
+  return value
+}
+
+function replacePlaceholders(template) {
+  return requiredVariables.reduce((content, name) => {
+    return content.replaceAll('${' + name + '}', readRequiredEnv(name))
+  }, template)
+}
+
+const template = await readFile(templatePath, 'utf8')
+const rendered = replacePlaceholders(template)
+await writeFile(outputPath, rendered)

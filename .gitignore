@@ -1,0 +1,15 @@
+node_modules/
+**/node_modules/
+**/dist/
+**/coverage/
+.pnpm-store/
+worker/wrangler.toml
+worker/.wrangler/
+apps/model-worker/wrangler.toml
+apps/model-worker/.wrangler/
+apps/userscript/.tmp/
+docs/superpowers/
+.mcp.json
+CLAUDE.md
+.claude/
+.code-review-graph

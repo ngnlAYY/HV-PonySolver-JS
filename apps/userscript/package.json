@@ -1,0 +1,22 @@
+{
+  "name": "@hv-pony-solver/userscript",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-userscript.mjs",
+    "build:bundled-runtime": "HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1 node scripts/build-userscript.mjs",
+    "test": "vitest run && node --test scripts/build-userscript.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hv-pony-solver/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.0",
+    "jsdom": "^27.0.0",
+    "onnxruntime-web": "1.26.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

@@ -1,0 +1,58 @@
+name: Deploy Cloudflare Model Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_model_worker:
+        description: 'Deploy Model Worker after validation'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-model-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Render Wrangler config
+        env:
+          MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
+          MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
+        run: pnpm --filter @hv-pony-solver/model-worker render-config
+
+      - name: Typecheck
+        run: pnpm --filter @hv-pony-solver/model-worker typecheck
+
+      - name: Test
+        run: pnpm --filter @hv-pony-solver/model-worker test
+
+      - name: Deploy Worker
+        if: ${{ inputs.publish_model_worker }}
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
+          MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
+        run: pnpm --filter @hv-pony-solver/model-worker run deploy

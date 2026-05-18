@@ -1,0 +1,21 @@
+name = "hv-pony-models"
+main = "src/index.ts"
+compatibility_date = "2026-05-18"
+
+routes = [
+  { pattern = "models.ngnl.host", custom_domain = true }
+]
+
+[vars]
+PUBLIC_MODEL_PATH = "/yolo26n-640.onnx"
+REAL_MODEL_OBJECT_KEY = "real/yolo26n-640.onnx"
+DECOY_MODEL_OBJECT_KEY = "decoy/yolo26n-640.onnx"
+INVALID_KEY_MODE = "decoy"
+
+[[kv_namespaces]]
+binding = "MODEL_KEYS"
+id = "${MODEL_KEYS_KV_NAMESPACE_ID}"
+
+[[r2_buckets]]
+binding = "MODEL_BUCKET"
+bucket_name = "${MODEL_BUCKET_NAME}"
