@@ -11,6 +11,10 @@ type PendingRequest = Readonly<{
   timeoutId: ReturnType<typeof setTimeout>
 }>
 
+type OnnxWorkerClientOptions = Readonly<{
+  bundledRuntimeSource?: string
+}>
+
 export class OnnxWorkerClient implements DetectorService {
   private worker: Worker | null = null
   private preparePromise: Promise<Worker> | null = null
@@ -22,6 +26,7 @@ export class OnnxWorkerClient implements DetectorService {
   constructor(
     private readonly modelCache: ModelCache,
     private readonly panel: StatusPanel,
+    private readonly options: OnnxWorkerClientOptions = {},
   ) {}
 
   async prepare(): Promise<Worker> {
@@ -92,7 +97,7 @@ export class OnnxWorkerClient implements DetectorService {
     if (this.destroyed) {
       throw new Error('Worker 已关闭')
     }
-    const workerScript = createOnnxWorkerScript()
+    const workerScript = createOnnxWorkerScript(this.options.bundledRuntimeSource)
     const workerBlob = new Blob([workerScript], { type: 'text/javascript' })
     const workerUrl = URL.createObjectURL(workerBlob)
     const worker = new Worker(workerUrl)
@@ -122,7 +127,7 @@ export class OnnxWorkerClient implements DetectorService {
       await this.post(
         {
           type: 'init',
-          ortScriptUrl: inferenceConfig.ortScriptUrl,
+          ...(this.options.bundledRuntimeSource ? {} : { ortScriptUrl: inferenceConfig.ortScriptUrl }),
           wasmPath: inferenceConfig.ortWasmPath,
           modelBuffer,
         },

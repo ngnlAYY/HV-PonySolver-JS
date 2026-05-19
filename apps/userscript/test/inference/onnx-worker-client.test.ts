@@ -25,11 +25,14 @@ class FailingWorker {
 }
 
 class SuccessfulWorker {
+  static messages: Array<{ type?: string; ortScriptUrl?: string; wasmPath?: string }> = []
+
   onmessage: ((event: MessageEvent) => void) | null = null
   onerror: ((event: ErrorEvent) => void) | null = null
   onmessageerror: (() => void) | null = null
 
-  postMessage(message: { requestId?: number }, transfer?: Transferable[]): void {
+  postMessage(message: { requestId?: number; type?: string; ortScriptUrl?: string; wasmPath?: string }, transfer?: Transferable[]): void {
+    SuccessfulWorker.messages.push(message)
     for (const item of transfer ?? []) {
       if (item instanceof ArrayBuffer) {
         structuredClone(item, { transfer: [item] })
@@ -69,6 +72,7 @@ function stubWorker(worker: new (...args: unknown[]) => Worker): void {
 describe('OnnxWorkerClient', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    SuccessfulWorker.messages = []
     stubWorker(FailingWorker as unknown as new (...args: unknown[]) => Worker)
   })
 
@@ -87,7 +91,7 @@ describe('OnnxWorkerClient', () => {
     expect(modelCache.putCached).not.toHaveBeenCalled()
   })
 
-  it('caches a valid copy of a downloaded model after worker init succeeds', async () => {
+  it('sends ortScriptUrl by default when worker init succeeds', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
     const putCached = vi.fn(async (buffer: ArrayBuffer) => {
@@ -105,5 +109,29 @@ describe('OnnxWorkerClient', () => {
 
     expect(modelCache.download).toHaveBeenCalledTimes(1)
     expect(putCached).toHaveBeenCalledTimes(1)
+    expect(SuccessfulWorker.messages[0]).toMatchObject({
+      type: 'init',
+      ortScriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js',
+      wasmPath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/',
+    })
+  })
+
+  it('omits ortScriptUrl when configured for bundled runtime', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    const modelCache = {
+      getCached: vi.fn(async () => modelBuffer),
+      download: vi.fn(async () => modelBuffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createPanel(), { bundledRuntimeSource: 'self.ort = {};' })
+
+    await client.prepare()
+
+    expect(SuccessfulWorker.messages[0]).toMatchObject({
+      type: 'init',
+      wasmPath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/',
+    })
+    expect(SuccessfulWorker.messages[0]?.ortScriptUrl).toBeUndefined()
   })
 })

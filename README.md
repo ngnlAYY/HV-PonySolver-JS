@@ -194,8 +194,8 @@ apps/userscript/dist/hv-pony-solver.user.js
 | `confidenceThreshold`    | `0.30`                                                                | YOLO 行置信度阈值                  |
 | `maxDetections`          | `16`                                                                  | 最多读取 16 个候选框               |
 | `maxKinds`               | `3`                                                                   | 识别到 1 到 3 种不同小马才算成功   |
-| `ortScriptUrl`           | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js` | Worker 内动态加载 ONNX Runtime Web |
-| `ortWasmPath`            | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/`           | ONNX Runtime Web wasm 资源路径     |
+| `ortScriptUrl`           | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js` | 默认构建下 Worker 动态加载 ONNX Runtime Web JS runtime |
+| `ortWasmPath`            | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/`           | ONNX Runtime Web wasm 资源路径，内置 JS runtime 时仍远程加载 |
 | `workerRequestTimeoutMs` | `30000`                                                               | ONNX Worker 单次请求超时           |
 
 YOLO 输出解析规则：
@@ -383,12 +383,14 @@ pnpm --filter @hv-pony-solver/model-worker test
 7. 使用测试值渲染 Worker Wrangler 配置。
 8. `pnpm test`。
 9. `pnpm build`。
+10. 如果 `bundle_onnx_runtime=true`，额外构建内置 ONNX Runtime Web JS runtime 的 userscript。
+11. 如果 `publish_userscript_artifact=true`，上传 `apps/userscript/dist/hv-pony-solver.user.js` artifact；默认不上传。
 
 ### Model Worker 部署 workflow
 
-`.github/workflows/deploy-cloudflare-model-worker.yml` 默认手动触发，用于按需部署 Model Worker。
+`.github/workflows/deploy-cloudflare-model-worker.yml` 默认手动触发，用于按需验证 Model Worker；只有 `publish_model_worker=true` 时才部署，默认不部署。
 
-部署步骤：
+验证与部署步骤：
 
 1. Checkout。
 2. 设置 Node.js 22。
@@ -397,7 +399,7 @@ pnpm --filter @hv-pony-solver/model-worker test
 5. 使用 GitHub Secrets 渲染 Wrangler 配置。
 6. 类型检查 Worker。
 7. 运行 Worker 测试。
-8. 执行 `pnpm --filter @hv-pony-solver/model-worker run deploy`。
+8. 如果 `publish_model_worker=true`，执行 `pnpm --filter @hv-pony-solver/model-worker run deploy`；默认跳过部署。
 
 需要配置的 GitHub Secrets：
 
@@ -415,6 +417,14 @@ pnpm --filter @hv-pony-solver/model-worker test
 ```bash
 pnpm --filter @hv-pony-solver/userscript build
 ```
+
+如需把 `onnxruntime-web` JS runtime 内置进 userscript，可显式运行：
+
+```bash
+pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
+```
+
+默认构建不内置 JS runtime；两种构建都仍通过 `ortWasmPath` 加载 WASM 资源。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
 
 将生成的文件安装到 userscript 管理器：
 

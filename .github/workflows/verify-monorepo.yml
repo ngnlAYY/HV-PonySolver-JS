@@ -1,7 +1,18 @@
-name: CI
+name: Verify Monorepo
 
 on:
   workflow_dispatch:
+    inputs:
+      bundle_onnx_runtime:
+        description: 'Build userscript with bundled onnxruntime-web JS runtime'
+        type: boolean
+        required: true
+        default: false
+      publish_userscript_artifact:
+        description: 'Publish userscript artifact from this run'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -43,3 +54,15 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Build bundled userscript
+        if: ${{ inputs.bundle_onnx_runtime }}
+        run: pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
+
+      - name: Publish userscript artifact
+        if: ${{ inputs.publish_userscript_artifact }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hv-pony-solver-userscript
+          path: apps/userscript/dist/hv-pony-solver.user.js
+          if-no-files-found: error

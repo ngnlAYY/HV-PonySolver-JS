@@ -1,6 +1,24 @@
-export function createOnnxWorkerScript(): string {
+export function createOnnxWorkerScript(runtimeSource?: string): string {
+  const runtimeBootstrap = runtimeSource ? `
+            ${runtimeSource}
+            if (!self.ort && typeof ort !== 'undefined') {
+                self.ort = ort;
+            }
+  ` : ''
+  const runtimeLoader = runtimeSource ? '' : `
+                if (!message.ortScriptUrl) {
+                    throw new Error('onnxruntime-web URL 未配置');
+                }
+                try {
+                    importScripts(message.ortScriptUrl);
+                } catch (error) {
+                    throw new Error('onnxruntime-web 加载失败: ' + (error && error.message ? error.message : String(error)));
+                }
+  `
+
   return `
             'use strict';
+            ${runtimeBootstrap}
 
             let sessionPromise = null;
             let session = null;
@@ -68,11 +86,7 @@ export function createOnnxWorkerScript(): string {
 
             async function handleInit(message) {
                 if (!self.ort) {
-                    try {
-                        importScripts(message.ortScriptUrl);
-                    } catch (error) {
-                        throw new Error('onnxruntime-web 加载失败: ' + (error && error.message ? error.message : String(error)));
-                    }
+                    ${runtimeLoader}
                 }
                 if (!self.ort) {
                     throw new Error('onnxruntime-web 未加载');

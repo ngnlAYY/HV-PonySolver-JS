@@ -21,7 +21,7 @@ export interface DetectorService {
 export type WorkerInitRequest = Readonly<{
   type: 'init'
   requestId?: number
-  ortScriptUrl: string
+  ortScriptUrl?: string
   wasmPath: string
   modelBuffer: ArrayBuffer
 }>

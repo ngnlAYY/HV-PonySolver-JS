@@ -1,4 +1,5 @@
 import { OnnxWorkerClient } from '../inference/onnx-worker-client'
+import { getBundledOnnxRuntimeSource } from '../inference/onnx-runtime-source'
 import { AnswerSubmitter } from '../captcha/answer-submitter'
 import { CachedImageLoader } from '../captcha/captcha-image-loader'
 import { CaptchaSolver } from '../captcha/captcha-solver'
@@ -13,7 +14,12 @@ export class App {
   private readonly history = new HistoryStore()
   private readonly panel = new StatusPanel(this.history)
   private readonly modelCache = new ModelCache(this.panel)
-  private readonly detector = new OnnxWorkerClient(this.modelCache, this.panel)
+  private readonly bundledRuntimeSource = getBundledOnnxRuntimeSource()
+  private readonly detector = new OnnxWorkerClient(
+    this.modelCache,
+    this.panel,
+    this.bundledRuntimeSource ? { bundledRuntimeSource: this.bundledRuntimeSource } : {},
+  )
   private readonly imageLoader = new CachedImageLoader()
   private readonly answerSubmitter = new AnswerSubmitter()
   private readonly solver = new CaptchaSolver(this.panel, this.detector, this.imageLoader, this.answerSubmitter)
