@@ -11,7 +11,7 @@ const entryPoint = resolve(appDir, 'src/main.ts')
 const workerEntryPoint = resolve(appDir, 'src/inference/onnx-worker-entry.ts')
 const outputPath = process.env.HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH || resolve(appDir, 'dist/hv-pony-solver.user.js')
 const metadataPath = resolve(appDir, 'src/userscript/metadata.ts')
-const shouldMinify = process.env.HV_PONY_SOLVER_MINIFY !== '0'
+const shouldMinify = parseMinifyFlag(process.argv.slice(2))
 const metafilePath = process.env.HV_PONY_SOLVER_METAFILE_PATH
 const MAX_ONNX_RUNTIME_BYTES = 2 * 1024 * 1024
 const expectedOnnxRuntimeByteLength = Number(process.env.HV_PONY_SOLVER_ONNX_RUNTIME_BYTE_LENGTH || 360388)
@@ -75,7 +75,7 @@ async function buildWorkerScript() {
     target: 'es2022',
     platform: 'browser',
     legalComments: 'none',
-    minify: true,
+    minify: shouldMinify,
     define: {
       __HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE__: JSON.stringify(workerRuntimeSourcePlaceholder),
     },
@@ -86,6 +86,11 @@ async function buildWorkerScript() {
     throw new Error('esbuild did not return a worker bundle')
   }
   return { text: outputFile.text, metafile: result.metafile }
+}
+
+function parseMinifyFlag(args) {
+  const minifyArg = args.findLast((arg) => arg === '--minify' || arg.startsWith('--minify='))
+  return minifyArg === '--minify' || minifyArg === '--minify=true'
 }
 
 async function readOnnxRuntimeSource() {

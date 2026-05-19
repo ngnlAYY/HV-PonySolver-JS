@@ -11,7 +11,15 @@ The generated userscript metadata keeps `@name        HV-PonySolver-Local`; only
 ## Build
 
 ```bash
-pnpm --filter @hv-pony-solver/userscript build
+corepack pnpm --filter @hv-pony-solver/userscript build
+```
+
+默认生成未压缩 userscript；需要压缩输出时使用 `--minify` 或 `--minify=true`，需要显式关闭时使用 `--minify=false`：
+
+```bash
+corepack pnpm --filter @hv-pony-solver/userscript build -- --minify
+corepack pnpm --filter @hv-pony-solver/userscript build -- --minify=true
+corepack pnpm --filter @hv-pony-solver/userscript build -- --minify=false
 ```
 
 ## Source Layout

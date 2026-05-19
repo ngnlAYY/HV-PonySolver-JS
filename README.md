@@ -101,7 +101,8 @@ corepack pnpm install
 
 | 命令                                                 | 说明                                                                             |
 | ---------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `pnpm --filter @hv-pony-solver/userscript build`     | 用 esbuild 打包 userscript，并写入 `apps/userscript/dist/hv-pony-solver.user.js` |
+| `corepack pnpm --filter @hv-pony-solver/userscript build`     | 用 esbuild 打包未压缩 userscript，并写入 `apps/userscript/dist/hv-pony-solver.user.js` |
+| `corepack pnpm --filter @hv-pony-solver/userscript build -- --minify` | 用 esbuild 打包压缩 userscript |
 | `pnpm --filter @hv-pony-solver/userscript typecheck` | 类型检查 userscript 源码                                                         |
 | `pnpm --filter @hv-pony-solver/userscript test`      | 在 jsdom 环境运行 userscript 单元测试                                            |
 
@@ -131,7 +132,15 @@ corepack pnpm install
 构建命令：
 
 ```bash
-pnpm --filter @hv-pony-solver/userscript build
+corepack pnpm --filter @hv-pony-solver/userscript build
+```
+
+默认输出未压缩产物；需要压缩产物时使用 `--minify` 或 `--minify=true`，需要显式关闭时使用 `--minify=false`：
+
+```bash
+corepack pnpm --filter @hv-pony-solver/userscript build -- --minify
+corepack pnpm --filter @hv-pony-solver/userscript build -- --minify=true
+corepack pnpm --filter @hv-pony-solver/userscript build -- --minify=false
 ```
 
 输出文件：
@@ -416,13 +425,13 @@ pnpm --filter @hv-pony-solver/model-worker test
 ### 发布 userscript
 
 ```bash
-pnpm --filter @hv-pony-solver/userscript build
+corepack pnpm --filter @hv-pony-solver/userscript build
 ```
 
 如需把 `onnxruntime-web` JS runtime 内置进 userscript，可显式运行：
 
 ```bash
-pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
+corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 ```
 
 默认构建不内置 JS runtime；两种构建都仍通过 `ortWasmPath` 加载 WASM 资源。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。

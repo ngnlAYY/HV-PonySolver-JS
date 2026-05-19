@@ -5,7 +5,15 @@
 Build locally or in CI:
 
 ```bash
-pnpm --filter @hv-pony-solver/userscript build
+corepack pnpm --filter @hv-pony-solver/userscript build
+```
+
+The default artifact is unminified. Use `--minify` or `--minify=true` to build a minified artifact, and `--minify=false` to explicitly keep it unminified:
+
+```bash
+corepack pnpm --filter @hv-pony-solver/userscript build -- --minify
+corepack pnpm --filter @hv-pony-solver/userscript build -- --minify=true
+corepack pnpm --filter @hv-pony-solver/userscript build -- --minify=false
 ```
 
 Install or distribute:

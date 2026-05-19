@@ -57,6 +57,56 @@ test('build-userscript rejects bundled runtime sources with unexpected SHA-256',
   )
 })
 
+test('build-userscript does not minify by default', async () => {
+  const output = await runBuildInTempDir({})
+
+  assert.equal(output.includes('(() => {'), true)
+  assert.equal(output.includes('(()=>{'), false)
+})
+
+test('build-userscript minifies main and worker bundles when requested by CLI flag', async () => {
+  const output = await runBuildInTempDir({ args: ['--minify'] })
+
+  assert.equal(output.includes('(()=>{'), true)
+  assert.equal(output.includes('function loadBundledRuntime'), false)
+})
+
+test('build-userscript minifies main and worker bundles when CLI flag is true', async () => {
+  const output = await runBuildInTempDir({ args: ['--minify=true'] })
+
+  assert.equal(output.includes('(()=>{'), true)
+  assert.equal(output.includes('function loadBundledRuntime'), false)
+})
+
+test('build-userscript keeps bundles unminified when CLI flag is false', async () => {
+  const output = await runBuildInTempDir({ args: ['--minify=false'] })
+
+  assert.equal(output.includes('(() => {'), true)
+  assert.equal(output.includes('function loadBundledRuntime'), true)
+})
+
+test('build-userscript keeps bundles unminified for unsupported minify values', async () => {
+  const output = await runBuildInTempDir({ args: ['--minify=1'] })
+
+  assert.equal(output.includes('(() => {'), true)
+  assert.equal(output.includes('function loadBundledRuntime'), true)
+})
+
+test('build-userscript uses the last minify CLI flag', async () => {
+  const minifiedOutput = await runBuildInTempDir({ args: ['--minify=false', '--minify'] })
+  const unminifiedOutput = await runBuildInTempDir({ args: ['--minify', '--minify=false'] })
+
+  assert.equal(minifiedOutput.includes('(()=>{'), true)
+  assert.equal(unminifiedOutput.includes('(() => {'), true)
+})
+
+test('build-userscript ignores the removed HV_PONY_SOLVER_MINIFY environment variable', async () => {
+  const output = await runBuildInTempDir({ HV_PONY_SOLVER_MINIFY: '1' })
+
+  assert.equal(output.includes('(() => {'), true)
+  assert.equal(output.includes('(()=>{'), false)
+})
+
 test('build-userscript writes an esbuild metafile when requested', async () => {
   const { output, metafile } = await runBuildInTempDir({ withMetafile: true })
 
@@ -71,7 +121,7 @@ test('build-userscript writes an esbuild metafile when requested', async () => {
   assert.ok(workerOutput.bytes < workerBundleBudgetBytes, `worker bundle ${workerOutput.bytes} bytes exceeds ${workerBundleBudgetBytes}`)
 })
 
-async function runBuildInTempDir({ runtimeSource, runtimeByteLength, runtimeSha256, withMetafile, ...env }) {
+async function runBuildInTempDir({ args = [], runtimeSource, runtimeByteLength, runtimeSha256, withMetafile, ...env }) {
   const outputDir = await mkdtemp(join(tmpdir(), 'hv-pony-userscript-'))
   try {
     const runtimePath = runtimeSource ? join(outputDir, 'ort.min.js') : undefined
@@ -80,7 +130,7 @@ async function runBuildInTempDir({ runtimeSource, runtimeByteLength, runtimeSha2
     if (runtimePath) {
       await writeFile(runtimePath, runtimeSource)
     }
-    await execFileAsync(process.execPath, [resolve(appDir, 'scripts/build-userscript.mjs')], {
+    await execFileAsync(process.execPath, [resolve(appDir, 'scripts/build-userscript.mjs'), ...args], {
       cwd: resolve(appDir, '../..'),
       env: {
         ...process.env,
