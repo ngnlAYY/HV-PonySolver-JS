@@ -57,17 +57,20 @@ describe('parseYoloOutput', () => {
     expect(result.ponies).toEqual(['RD', 'FS', 'RA', 'TS'])
   })
 
-  it('sorts detections by confidence before applying maxDetections', () => {
+  it('keeps only the top detections sorted by confidence', () => {
     const rows: number[] = []
-    for (let i = 0; i < inferenceConfig.maxDetections; i += 1) {
-      rows.push(0, 0, 0, 0, 0.31, 1)
+    for (let i = 0; i < inferenceConfig.maxDetections + 4; i += 1) {
+      const confidence = i % 2 === 0 ? 0.31 + i / 100 : 0.95 - i / 100
+      rows.push(0, 0, 0, 0, confidence, i % 6)
     }
-    rows.push(0, 0, 0, 0, 0.99, 0)
 
     const result = parseYoloOutput(new Float32Array(rows))
 
-    expect(result.ponies[0]).toBe('TS')
-    expect(result.confidences.TS).toBe(0.99)
+    expect(result.detections).toHaveLength(inferenceConfig.maxDetections)
+    expect(result.detections.map((detection) => detection.confidence)).toEqual(
+      [...result.detections].map((detection) => detection.confidence).sort((left, right) => right - left),
+    )
+    expect(result.detections).not.toContainEqual(expect.objectContaining({ confidence: 0.31 }))
   })
 
   it('ignores non-finite confidences and invalid class ids', () => {

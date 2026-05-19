@@ -26,14 +26,12 @@ export class App {
   private observer: MutationObserver | null = null
   private scheduledScan = false
   private animationFrameId: number | null = null
+  private lastCaptchaKey: string | null = null
   private destroyed = false
 
   init(): void {
     this.destroyed = false
     this.panel.create()
-    this.detector.prepare()
-      .then(() => log('本地 ONNX 已就绪'))
-      .catch((error) => warn('启动预加载失败:', formatErrorMessage(error)))
     if (document.querySelector(captchaSelectors.master)) {
       setTimeout(() => this.scheduleSolve(), 100)
     }
@@ -45,8 +43,9 @@ export class App {
     this.observer?.disconnect()
     this.observer = null
     this.scheduledScan = false
+    this.lastCaptchaKey = null
     if (this.animationFrameId !== null) {
-      cancelAnimationFrame(this.animationFrameId)
+      this.cancelFrame(this.animationFrameId)
       this.animationFrameId = null
     }
     this.detector.destroy()
@@ -58,19 +57,8 @@ export class App {
     if (this.observer) {
       return
     }
-    this.observer = new MutationObserver((mutations) => {
-      if (this.solver.isBusy || this.scheduledScan) {
-        return
-      }
-      for (const mutation of mutations) {
-        for (let i = 0; i < mutation.addedNodes.length; i += 1) {
-          const node = mutation.addedNodes.item(i)
-          if (node && this.containsCaptchaNode(node)) {
-            this.scheduleSolve()
-            return
-          }
-        }
-      }
+    this.observer = new MutationObserver(() => {
+      this.scheduleSolve()
     })
     const target = document.body || document.documentElement
     if (target) {
@@ -78,30 +66,70 @@ export class App {
     }
   }
 
+  private requestFrame(callback: FrameRequestCallback): number {
+    const requestAnimationFrame = globalThis.requestAnimationFrame ?? ((handler: FrameRequestCallback): number => globalThis.setTimeout(() => handler(Date.now()), 0))
+    return requestAnimationFrame(callback)
+  }
+
+  private cancelFrame(id: number): void {
+    const cancelAnimationFrame = globalThis.cancelAnimationFrame ?? globalThis.clearTimeout
+    cancelAnimationFrame(id)
+  }
+
+  private findCaptchaMaster(): Element | null {
+    const masters = document.querySelectorAll(captchaSelectors.master)
+    for (let index = 0; index < masters.length; index += 1) {
+      const master = masters.item(index)
+      const imageContainer = master.querySelector<HTMLElement>('[id="riddleimage"]')
+      const image = imageContainer?.querySelector<HTMLImageElement>('img')
+      const form = master.querySelector<HTMLFormElement>(captchaSelectors.form)
+      if (form && image?.src) {
+        return master
+      }
+    }
+    return null
+  }
+
+  private getCaptchaKey(): string | null {
+    const master = this.findCaptchaMaster()
+    const imageContainer = master?.querySelector<HTMLElement>('[id="riddleimage"]')
+    const image = imageContainer?.querySelector<HTMLImageElement>('img')
+    return image?.src ? image.currentSrc || image.src : null
+  }
+
   private scheduleSolve(): void {
     if (this.destroyed || this.scheduledScan || this.solver.isBusy) {
       return
     }
     this.scheduledScan = true
-    this.animationFrameId = requestAnimationFrame(() => {
+    this.animationFrameId = this.requestFrame(() => {
       this.animationFrameId = null
-      this.scheduledScan = false
-      if (this.destroyed || this.solver.isBusy || !document.querySelector(captchaSelectors.master)) {
+      const captchaKey = this.getCaptchaKey()
+      if (this.destroyed || this.solver.isBusy || !captchaKey || captchaKey === this.lastCaptchaKey) {
+        this.scheduledScan = false
         return
       }
       log('检测到验证码')
-      this.solver.trigger()
+      this.detector.prepare()
+        .then(() => {
+          this.scheduledScan = false
+          if (!this.destroyed) {
+            return this.solver.trigger()
+          }
+          return { solved: false, captchaKey: null }
+        })
+        .then((result) => {
+          if (result.solved && result.captchaKey && !this.destroyed) {
+            this.lastCaptchaKey = result.captchaKey
+          }
+        })
+        .catch((error) => {
+          this.scheduledScan = false
+          if (!this.destroyed) {
+            warn('启动 ONNX 失败:', formatErrorMessage(error))
+          }
+        })
     })
   }
 
-  private containsCaptchaNode(node: Node): boolean {
-    if (node.nodeType !== Node.ELEMENT_NODE) {
-      return false
-    }
-    const element = node as Element
-    return element.id === 'riddlemaster'
-      || element.matches?.(captchaSelectors.form)
-      || element.matches?.(captchaSelectors.image)
-      || Boolean(element.querySelector?.(`${captchaSelectors.master}, ${captchaSelectors.form}, ${captchaSelectors.image}`))
-  }
 }

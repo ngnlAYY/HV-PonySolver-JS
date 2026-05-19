@@ -11,7 +11,6 @@ export const USERSCRIPT_METADATA = `// ==UserScript==
 // @exclude     http*://hentaiverse.org/isekai/equip/*
 // @grant       none
 // @run-at      document-end
-// @connect     raw.githubusercontent.com
 // @connect     cdn.jsdelivr.net
 // @connect     models.ngnl.host
 // ==/UserScript==`

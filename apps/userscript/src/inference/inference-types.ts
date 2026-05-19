@@ -29,7 +29,7 @@ export type WorkerInitRequest = Readonly<{
 export type WorkerDetectRequest = Readonly<{
   type: 'detect'
   requestId?: number
-  imageBuffer: ArrayBuffer
+  imageBlob: Blob
   size: number
 }>
 
@@ -38,7 +38,7 @@ export type WorkerRequest = WorkerInitRequest | WorkerDetectRequest
 export type WorkerResponse = Readonly<{
   type: 'response'
   requestId: number
-  output?: ArrayBuffer
+  result?: YoloParseResult
 }>
 
 export type WorkerErrorResponse = Readonly<{

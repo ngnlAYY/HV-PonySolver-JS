@@ -8,6 +8,11 @@ import type { ImageLoader } from './captcha-types'
 import { captchaSelectors } from './captcha-selectors'
 import { solverConfig } from './solver-config'
 
+export type SolveResult = Readonly<{
+  solved: boolean
+  captchaKey: string | null
+}>
+
 export class CaptchaSolver {
   private busy = false
 
@@ -22,66 +27,86 @@ export class CaptchaSolver {
     return this.busy
   }
 
-  trigger(): void {
+  trigger(): Promise<SolveResult> {
     if (this.busy) {
-      return
+      return Promise.resolve({ solved: false, captchaKey: null })
     }
     this.busy = true
-    this.solve().finally(() => {
+    return this.solve().finally(() => {
       this.busy = false
     })
   }
 
-  private async solve(): Promise<void> {
+  private async solve(): Promise<SolveResult> {
     const startedAt = Date.now()
     const elapsed = (): number => Date.now() - startedAt
+    let captchaKey: string | null = null
+    const result = (solved: boolean): SolveResult => ({ solved, captchaKey })
     const failSubmit = (message: string): void => {
       this.panel.setStatus({ inference: `错误: ${message}` })
       this.panel.addError(message, elapsed())
     }
 
     try {
-      const form = document.querySelector<HTMLFormElement>(captchaSelectors.form)
+      let form: HTMLFormElement | null = null
+      let image: HTMLImageElement | null = null
+      const masters = document.querySelectorAll(captchaSelectors.master)
+      for (let index = 0; index < masters.length; index += 1) {
+        const master = masters.item(index)
+        const imageContainer = master.querySelector<HTMLElement>('[id="riddleimage"]')
+        const candidateImage = imageContainer?.querySelector<HTMLImageElement>('img') ?? null
+        const candidateForm = master.querySelector<HTMLFormElement>(captchaSelectors.form)
+        if (candidateForm && candidateImage?.src) {
+          form = candidateForm
+          image = candidateImage
+          break
+        }
+      }
       if (!form) {
         failSubmit('未找到答题表单')
-        return
+        return result(false)
       }
-
-      const image = document.querySelector<HTMLImageElement>(captchaSelectors.image)
       if (!image?.src) {
         failSubmit('未找到验证码图片')
-        return
+        return result(false)
       }
 
       this.panel.setStatus({ inference: '获取图片' })
-      const blob = await this.imageLoader.get(image.currentSrc || image.src)
-      const result = await this.detector.detect(blob)
+      captchaKey = image.currentSrc || image.src
+      const blob = await this.imageLoader.get(captchaKey)
+      const detectionResult = await this.detector.detect(blob)
 
-      if (result.success && result.ponies.length) {
-        await this.answerSubmitter.submit(form, result.ponies, failSubmit, () => {
-          this.panel.addSuccess(result.ponies, result.confidences, elapsed())
+      if (detectionResult.success && detectionResult.ponies.length) {
+        let submitted = false
+        await this.answerSubmitter.submit(form, detectionResult.ponies, failSubmit, () => {
+          submitted = true
+          this.panel.addSuccess(detectionResult.ponies, detectionResult.confidences, elapsed())
         })
-        return
+        return result(submitted)
       }
 
       if (!solverConfig.randomOnFail) {
         failSubmit('识别失败')
-        return
+        return result(false)
       }
 
       const pony = ANSWER_CODES[Math.floor(Math.random() * ANSWER_CODES.length)]
       if (!pony) {
         failSubmit('无有效答案')
-        return
+        return result(false)
       }
+      let submitted = false
       await this.answerSubmitter.submit(form, [pony], failSubmit, () => {
+        submitted = true
         this.panel.addRandomFailure(pony, elapsed())
       })
+      return result(submitted)
     } catch (error) {
       const message = formatErrorMessage(error)
       this.panel.setStatus({ inference: `错误: ${message}` })
       this.panel.addError(message, elapsed())
       logError('答题失败:', message)
+      return result(false)
     }
   }
 }

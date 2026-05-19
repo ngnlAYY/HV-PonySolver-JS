@@ -7,11 +7,16 @@ import { build } from 'esbuild'
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(scriptDir, '..')
 const entryPoint = resolve(appDir, 'src/main.ts')
+const workerEntryPoint = resolve(appDir, 'src/inference/onnx-worker-entry.ts')
 const outputPath = process.env.HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH || resolve(appDir, 'dist/hv-pony-solver.user.js')
 const metadataPath = resolve(appDir, 'src/userscript/metadata.ts')
+const shouldMinify = process.env.HV_PONY_SOLVER_MINIFY !== '0'
+const metafilePath = process.env.HV_PONY_SOLVER_METAFILE_PATH
 const MAX_ONNX_RUNTIME_BYTES = 2 * 1024 * 1024
 const shouldBundleOnnxRuntime = process.env.HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME === '1'
+const workerRuntimeSourcePlaceholder = '__HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE_PLACEHOLDER__'
 const onnxRuntimeSource = shouldBundleOnnxRuntime ? await readOnnxRuntimeSource() : ''
+const workerBuild = await buildWorkerScript()
 
 const result = await build({
   entryPoints: [entryPoint],
@@ -22,8 +27,12 @@ const result = await build({
   platform: 'browser',
   legalComments: 'none',
   logLevel: 'info',
+  charset: 'utf8',
+  minify: shouldMinify,
+  metafile: Boolean(metafilePath),
   define: {
     __HV_PONY_SOLVER_ONNX_RUNTIME_SOURCE__: JSON.stringify(onnxRuntimeSource),
+    __HV_PONY_SOLVER_WORKER_SCRIPT__: JSON.stringify(workerBuild.text),
   },
 })
 
@@ -49,6 +58,32 @@ if (!outputFile) {
 
 await mkdir(dirname(outputPath), { recursive: true })
 await writeFile(outputPath, `${metadata}\n\n${outputFile.text}`)
+if (metafilePath) {
+  await mkdir(dirname(metafilePath), { recursive: true })
+  await writeFile(metafilePath, JSON.stringify({ main: result.metafile, worker: workerBuild.metafile }, null, 2))
+}
+
+async function buildWorkerScript() {
+  const result = await build({
+    entryPoints: [workerEntryPoint],
+    bundle: true,
+    write: false,
+    format: 'iife',
+    target: 'es2022',
+    platform: 'browser',
+    legalComments: 'none',
+    minify: true,
+    define: {
+      __HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE__: JSON.stringify(workerRuntimeSourcePlaceholder),
+    },
+    metafile: Boolean(metafilePath),
+  })
+  const outputFile = result.outputFiles[0]
+  if (!outputFile) {
+    throw new Error('esbuild did not return a worker bundle')
+  }
+  return { text: outputFile.text, metafile: result.metafile }
+}
 
 async function readOnnxRuntimeSource() {
   const runtimePath = process.env.HV_PONY_SOLVER_ONNX_RUNTIME_PATH || resolveOnnxRuntimePath()

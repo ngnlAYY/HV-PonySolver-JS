@@ -1,3 +1,4 @@
+import { inferenceConfig } from '../inference/inference-config'
 import { modelConfig } from './model-config'
 
 function getModelUrl(): string {
@@ -7,10 +8,23 @@ function getModelUrl(): string {
   return `${modelConfig.urlBase}?key=${encodeURIComponent(modelConfig.accessKey)}`
 }
 
-export async function downloadModel(): Promise<ArrayBuffer> {
-  const response = await fetch(getModelUrl(), { cache: 'no-store' })
-  if (!response.ok) {
-    throw new Error(`模型下载失败: HTTP ${response.status}`)
+export async function downloadModel(signal?: AbortSignal): Promise<ArrayBuffer> {
+  if (signal?.aborted) {
+    throw new Error('模型下载已取消')
   }
-  return response.arrayBuffer()
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), inferenceConfig.modelDownloadTimeoutMs)
+  const abort = (): void => controller.abort()
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    const response = await fetch(getModelUrl(), { cache: 'no-store', signal: controller.signal })
+    if (!response.ok) {
+      throw new Error(`模型下载失败: HTTP ${response.status}`)
+    }
+    const buffer = await response.arrayBuffer()
+    return buffer
+  } finally {
+    clearTimeout(timeoutId)
+    signal?.removeEventListener('abort', abort)
+  }
 }

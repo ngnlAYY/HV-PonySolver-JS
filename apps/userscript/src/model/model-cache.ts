@@ -32,9 +32,9 @@ export class ModelCache {
     return null
   }
 
-  async download(): Promise<ArrayBuffer> {
+  async download(signal?: AbortSignal): Promise<ArrayBuffer> {
     this.panel.setStatus({ model: '下载中' })
-    return downloadModel()
+    return downloadModel(signal)
   }
 
   async putCached(buffer: ArrayBuffer): Promise<void> {
@@ -44,16 +44,6 @@ export class ModelCache {
     } catch (error) {
       warn('写入模型缓存失败，继续使用已下载模型:', formatErrorMessage(error))
     }
-  }
-
-  async loadModel(): Promise<ArrayBuffer> {
-    const cached = await this.getCached()
-    if (cached) {
-      return cached
-    }
-    const buffer = await this.download()
-    await this.putCached(buffer)
-    return buffer
   }
 
   close(): void {

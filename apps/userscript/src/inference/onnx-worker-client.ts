@@ -2,7 +2,6 @@ import type { DetectorService, WorkerMessage, WorkerRequest, WorkerResponse, Yol
 import { inferenceConfig } from './inference-config'
 import { ModelCache } from '../model/model-cache'
 import { createOnnxWorkerScript } from './onnx-worker-script'
-import { parseYoloOutput } from './yolo-output-parser'
 import type { StatusPanel } from '../status-panel/status-panel-types'
 
 type PendingRequest = Readonly<{
@@ -19,9 +18,11 @@ export class OnnxWorkerClient implements DetectorService {
   private worker: Worker | null = null
   private preparePromise: Promise<Worker> | null = null
   private readonly requests = new Map<number, PendingRequest>()
+  private detectQueue = Promise.resolve()
   private nextRequestId = 1
   private ready = false
   private destroyed = false
+  private prepareAbortController: AbortController | null = null
 
   constructor(
     private readonly modelCache: ModelCache,
@@ -48,21 +49,22 @@ export class OnnxWorkerClient implements DetectorService {
     return this.preparePromise
   }
 
-  async detect(blob: Blob): Promise<YoloParseResult> {
+  detect(blob: Blob): Promise<YoloParseResult> {
+    const detectPromise = this.detectQueue.then(() => this.runDetect(blob))
+    this.detectQueue = detectPromise.then(() => undefined, () => undefined)
+    return detectPromise
+  }
+
+  private async runDetect(blob: Blob): Promise<YoloParseResult> {
     await this.prepare()
     this.panel.setStatus({ inference: '推理中' })
     try {
-      const imageBuffer = await blob.arrayBuffer()
-      const response = await this.post(
-        { type: 'detect', imageBuffer, size: inferenceConfig.imageSize },
-        [imageBuffer],
-      )
-      if (response.type !== 'response' || !(response.output instanceof ArrayBuffer)) {
+      const response = await this.post({ type: 'detect', imageBlob: blob, size: inferenceConfig.imageSize })
+      if (response.type !== 'response' || !response.result) {
         throw new Error('ONNX Worker 返回无效结果')
       }
-      const detections = parseYoloOutput(new Float32Array(response.output))
       this.panel.setStatus({ inference: '完成' })
-      return detections
+      return response.result
     } catch (error) {
       this.panel.setStatus({ inference: '错误' })
       throw error
@@ -71,6 +73,8 @@ export class OnnxWorkerClient implements DetectorService {
 
   destroy(): void {
     this.destroyed = true
+    this.prepareAbortController?.abort()
+    this.prepareAbortController = null
     this.rejectPending(new Error('Worker 已关闭'))
     if (this.worker) {
       this.worker.terminate()
@@ -89,23 +93,29 @@ export class OnnxWorkerClient implements DetectorService {
       throw new Error('当前环境不支持 Web Worker')
     }
 
+    const abortController = new AbortController()
+    this.prepareAbortController = abortController
     this.panel.setStatus({ session: '初始化中' })
     const cachedModel = await this.modelCache.getCached()
-    const modelBuffer = cachedModel ?? await this.modelCache.download()
+    const modelBuffer = cachedModel ?? await this.modelCache.download(abortController.signal)
     const cacheBuffer = cachedModel ? null : modelBuffer.slice(0)
     const shouldCacheModel = cacheBuffer !== null
-    if (this.destroyed) {
+    if (this.destroyed || abortController.signal.aborted) {
       throw new Error('Worker 已关闭')
     }
     const workerScript = createOnnxWorkerScript(this.options.bundledRuntimeSource)
     const workerBlob = new Blob([workerScript], { type: 'text/javascript' })
     const workerUrl = URL.createObjectURL(workerBlob)
-    const worker = new Worker(workerUrl)
-    URL.revokeObjectURL(workerUrl)
+    let worker: Worker
+    try {
+      worker = new Worker(workerUrl)
+    } finally {
+      URL.revokeObjectURL(workerUrl)
+    }
 
     this.worker = worker
     this.ready = false
-    if (this.destroyed) {
+    if (this.destroyed || abortController.signal.aborted) {
       worker.terminate()
       if (this.worker === worker) {
         this.worker = null
@@ -121,7 +131,7 @@ export class OnnxWorkerClient implements DetectorService {
     }
 
     try {
-      if (this.destroyed) {
+      if (this.destroyed || abortController.signal.aborted) {
         throw new Error('Worker 已关闭')
       }
       await this.post(
@@ -133,11 +143,17 @@ export class OnnxWorkerClient implements DetectorService {
         },
         [modelBuffer],
       )
-      if (this.destroyed) {
+      if (this.destroyed || abortController.signal.aborted) {
         throw new Error('Worker 已关闭')
       }
       if (shouldCacheModel) {
         await this.modelCache.putCached(cacheBuffer)
+      }
+      if (this.destroyed || abortController.signal.aborted) {
+        throw new Error('Worker 已关闭')
+      }
+      if (this.prepareAbortController === abortController) {
+        this.prepareAbortController = null
       }
     } catch (error) {
       worker.terminate()
@@ -145,7 +161,10 @@ export class OnnxWorkerClient implements DetectorService {
         this.worker = null
       }
       this.ready = false
-      if (this.destroyed) {
+      if (this.prepareAbortController === abortController) {
+        this.prepareAbortController = null
+      }
+      if (this.destroyed || abortController.signal.aborted) {
         throw new Error('Worker 已关闭')
       }
       throw error
@@ -153,6 +172,9 @@ export class OnnxWorkerClient implements DetectorService {
 
     this.ready = true
     this.preparePromise = null
+    if (this.prepareAbortController === abortController) {
+      this.prepareAbortController = null
+    }
     this.panel.setSessionReady(Date.now() - startedAt)
     return worker
   }
