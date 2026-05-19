@@ -1,5 +1,7 @@
 import { inferenceConfig } from '../inference/inference-config'
 import { modelConfig } from './model-config'
+import type { ModelIntegrity } from './model-integrity'
+import { verifyModelIntegrity } from './model-integrity'
 
 function getModelUrl(): string {
   if (!modelConfig.urlBase) {
@@ -8,7 +10,7 @@ function getModelUrl(): string {
   return `${modelConfig.urlBase}?key=${encodeURIComponent(modelConfig.accessKey)}`
 }
 
-export async function downloadModel(signal?: AbortSignal): Promise<ArrayBuffer> {
+export async function downloadModel(signal?: AbortSignal, integrity: ModelIntegrity = modelConfig.integrity): Promise<ArrayBuffer> {
   if (signal?.aborted) {
     throw new Error('模型下载已取消')
   }
@@ -22,6 +24,7 @@ export async function downloadModel(signal?: AbortSignal): Promise<ArrayBuffer> 
       throw new Error(`模型下载失败: HTTP ${response.status}`)
     }
     const buffer = await response.arrayBuffer()
+    await verifyModelIntegrity(buffer, integrity, '下载模型')
     return buffer
   } finally {
     clearTimeout(timeoutId)

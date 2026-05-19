@@ -4,12 +4,22 @@ import { isRecordObject } from '../utils/guards'
 import { warn } from '../utils/logger'
 import { modelConfig } from './model-config'
 import { downloadModel } from './model-downloader'
+import type { ModelIntegrity } from './model-integrity'
+import { verifyModelIntegrity } from './model-integrity'
 
-function readCachedBuffer(row: unknown): ArrayBuffer | null {
+export async function readCachedModelBuffer(row: unknown, integrity: ModelIntegrity = modelConfig.integrity): Promise<ArrayBuffer | null> {
   if (!isRecordObject(row) || row.version !== modelConfig.version || !(row.buffer instanceof ArrayBuffer)) {
     return null
   }
-  return row.buffer
+  if (row.byteLength !== integrity.byteLength || row.sha256 !== integrity.sha256) {
+    return null
+  }
+  try {
+    await verifyModelIntegrity(row.buffer, integrity, '缓存模型')
+    return row.buffer
+  } catch {
+    return null
+  }
 }
 
 export class ModelCache {
@@ -85,7 +95,7 @@ export class ModelCache {
       const request = tx.objectStore('models').get(modelConfig.cacheKey)
       request.onsuccess = () => {
         const row: unknown = request.result
-        resolve(readCachedBuffer(row))
+        readCachedModelBuffer(row).then(resolve, reject)
       }
       request.onerror = () => reject(request.error || new Error('模型缓存读取失败'))
       tx.onabort = () => reject(tx.error || new Error('模型缓存读取事务中止'))
@@ -99,6 +109,8 @@ export class ModelCache {
       tx.objectStore('models').put({
         key: modelConfig.cacheKey,
         version: modelConfig.version,
+        byteLength: modelConfig.integrity.byteLength,
+        sha256: modelConfig.integrity.sha256,
         buffer,
         updatedAt: Date.now(),
       })

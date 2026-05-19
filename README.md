@@ -157,7 +157,7 @@ apps/userscript/dist/hv-pony-solver.user.js
 | `@name`        | `HV-PonySolver-Local`                                               |
 | `@version`     | `3.0.0`                                                             |
 | `@description` | 使用浏览器本地 ONNX Runtime Web 自动识别并答题小马验证码            |
-| `@include`     | `http*://hentaiverse.org/*`, `http*://alt.hentaiverse.org/*`        |
+| `@include`     | `https://hentaiverse.org/*`, `https://alt.hentaiverse.org/*`        |
 | `@exclude`     | `battle_stats` 页面和 `equip` 页面                                  |
 | `@grant`       | `none`                                                              |
 | `@run-at`      | `document-end`                                                      |
