@@ -2,9 +2,11 @@ export function createOnnxWorkerScript(): string {
   return `
             'use strict';
 
-            let modelBuffer = null;
             let sessionPromise = null;
             let session = null;
+            let preprocessCanvas = null;
+            let preprocessContext = null;
+            let preprocessSize = 0;
 
             async function ensureSession() {
                 if (session) {
@@ -15,6 +17,19 @@ export function createOnnxWorkerScript(): string {
                 }
                 session = await sessionPromise;
                 return session;
+            }
+
+            function ensurePreprocessResources(size) {
+                if (preprocessCanvas && preprocessContext && preprocessSize === size) {
+                    return preprocessContext;
+                }
+                preprocessCanvas = new OffscreenCanvas(size, size);
+                preprocessContext = preprocessCanvas.getContext('2d', { willReadFrequently: true });
+                if (!preprocessContext) {
+                    throw new Error('无法创建 2D canvas 上下文');
+                }
+                preprocessSize = size;
+                return preprocessContext;
             }
 
             async function preprocessImage(imageBuffer, size) {
@@ -28,11 +43,7 @@ export function createOnnxWorkerScript(): string {
                 const blob = new Blob([imageBuffer]);
                 const bitmap = await createImageBitmap(blob);
                 try {
-                    const canvas = new OffscreenCanvas(size, size);
-                    const context = canvas.getContext('2d', { willReadFrequently: true });
-                    if (!context) {
-                        throw new Error('无法创建 2D canvas 上下文');
-                    }
+                    const context = ensurePreprocessResources(size);
                     context.fillStyle = 'rgb(114, 114, 114)';
                     context.fillRect(0, 0, size, size);
                     const scale = Math.min(size / bitmap.height, size / bitmap.width);
@@ -57,16 +68,19 @@ export function createOnnxWorkerScript(): string {
 
             async function handleInit(message) {
                 if (!self.ort) {
-                    importScripts(message.ortScriptUrl);
+                    try {
+                        importScripts(message.ortScriptUrl);
+                    } catch (error) {
+                        throw new Error('onnxruntime-web 加载失败: ' + (error && error.message ? error.message : String(error)));
+                    }
                 }
                 if (!self.ort) {
                     throw new Error('onnxruntime-web 未加载');
                 }
                 self.ort.env.wasm.wasmPaths = message.wasmPath;
                 self.ort.env.wasm.numThreads = 1;
-                modelBuffer = message.modelBuffer;
                 if (!sessionPromise) {
-                    sessionPromise = self.ort.InferenceSession.create(modelBuffer, {
+                    sessionPromise = self.ort.InferenceSession.create(message.modelBuffer, {
                         executionProviders: ['wasm'],
                     });
                 }

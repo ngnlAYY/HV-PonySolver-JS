@@ -2,14 +2,6 @@ name: Deploy Model Worker
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'apps/model-worker/**'
-      - 'packages/shared/**'
-      - 'pnpm-lock.yaml'
-      - '.github/workflows/deploy-model-worker.yml'
 
 permissions:
   contents: read

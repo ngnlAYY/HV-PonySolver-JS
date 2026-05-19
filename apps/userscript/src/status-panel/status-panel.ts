@@ -1,6 +1,6 @@
 import type { AnswerCode } from '@hv-pony-solver/shared'
 import { HistoryStore } from '../persistence/answer-history-store'
-import type { World } from '../persistence/answer-history-types'
+import type { HistoryRecord, World } from '../persistence/answer-history-types'
 import type { PanelStatus, StatusPanel as StatusPanelContract } from './status-panel-types'
 import { formatAnswers, renderStatusPanel } from './status-panel-renderer'
 
@@ -11,6 +11,7 @@ function getWorld(): World {
 export class StatusPanel implements StatusPanelContract {
   private el: HTMLDivElement | null = null
   private readonly world: World = getWorld()
+  private records: HistoryRecord[] = []
   private status: PanelStatus = {
     model: '未开始',
     session: '未开始',
@@ -23,6 +24,7 @@ export class StatusPanel implements StatusPanelContract {
     if (this.el) {
       return
     }
+    this.records = this.history.get(this.world)
     this.el = document.createElement('div')
     this.el.className = 'ponyLog'
     this.el.style.cssText = 'position:absolute;top:150px;left:1240px;font-size:12px;text-align:left'
@@ -40,17 +42,16 @@ export class StatusPanel implements StatusPanelContract {
   }
 
   addSuccess(ponies: AnswerCode[], confidences: Partial<Record<AnswerCode, number>>, elapsed: number): void {
-    this.history.add(this.world, {
+    this.records = this.history.add(this.world, {
       type: 'success',
       answers: formatAnswers(ponies, confidences),
       elapsed,
-      message: '',
     })
     this.render()
   }
 
   addRandomFailure(pony: AnswerCode, elapsed: number): void {
-    this.history.add(this.world, {
+    this.records = this.history.add(this.world, {
       type: 'random',
       answers: pony,
       elapsed,
@@ -60,9 +61,8 @@ export class StatusPanel implements StatusPanelContract {
   }
 
   addError(message: string, elapsed = 0): void {
-    this.history.add(this.world, {
+    this.records = this.history.add(this.world, {
       type: 'error',
-      answers: '',
       elapsed,
       message,
     })
@@ -78,6 +78,6 @@ export class StatusPanel implements StatusPanelContract {
     if (!this.el) {
       return
     }
-    this.el.innerHTML = renderStatusPanel(this.world, this.status, this.history.get(this.world))
+    this.el.innerHTML = renderStatusPanel(this.world, this.status, this.records)
   }
 }

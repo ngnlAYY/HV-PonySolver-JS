@@ -18,7 +18,7 @@ export function formatAnswers(ponies: AnswerCode[], confidences: Partial<Record<
 
 export function formatRecord(record: HistoryRecord): string {
   const time = escapeHtml(record.time || '')
-  if (record.type === 'success' && record.answers) {
+  if (record.type === 'success') {
     return `${time} [${escapeHtml(record.answers)}] ${Number(record.elapsed) || 0}ms`
   }
   if (record.type === 'random') {

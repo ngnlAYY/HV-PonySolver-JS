@@ -10,4 +10,4 @@ window.addEventListener('pagehide', (event) => {
   if (!event.persisted) {
     app.destroy()
   }
-}, { once: true })
+})

@@ -8,14 +8,12 @@ const validSuccessRecord: HistoryRecord = {
   type: 'success',
   answers: 'TS(99.9)',
   elapsed: 123,
-  message: '',
   timestamp: 1,
   time: '12:00:00',
 }
 
 const validErrorRecord: HistoryRecord = {
   type: 'error',
-  answers: '',
   elapsed: 456,
   message: '识别失败',
 }
@@ -62,10 +60,12 @@ describe('HistoryStore', () => {
       type: 'success',
       answers: 'RA(88.8)',
       elapsed: 99,
-      message: '',
     }
 
-    new HistoryStore().add('main', newRecord)
+    const records = new HistoryStore().add('main', newRecord)
+
+    expect(records).toHaveLength(2)
+    expect(records[0]).toMatchObject(newRecord)
 
     const raw = localStorage.getItem(HISTORY_KEY)
     expect(raw).not.toBeNull()

@@ -13,7 +13,7 @@ describe('parseYoloOutput', () => {
     const result = parseYoloOutput(data)
 
     expect(result.success).toBe(true)
-    expect(result.ponies).toEqual(['TS', 'FS'])
+    expect(result.ponies).toEqual(['FS', 'TS'])
     expect(result.confidences).toEqual({ TS: 0.4, FS: 0.5 })
   })
 
@@ -54,6 +54,49 @@ describe('parseYoloOutput', () => {
     const result = parseYoloOutput(data)
 
     expect(result.success).toBe(false)
-    expect(result.ponies).toEqual(['TS', 'RA', 'FS', 'RD'])
+    expect(result.ponies).toEqual(['RD', 'FS', 'RA', 'TS'])
+  })
+
+  it('sorts detections by confidence before applying maxDetections', () => {
+    const rows: number[] = []
+    for (let i = 0; i < inferenceConfig.maxDetections; i += 1) {
+      rows.push(0, 0, 0, 0, 0.31, 1)
+    }
+    rows.push(0, 0, 0, 0, 0.99, 0)
+
+    const result = parseYoloOutput(new Float32Array(rows))
+
+    expect(result.ponies[0]).toBe('TS')
+    expect(result.confidences.TS).toBe(0.99)
+  })
+
+  it('ignores non-finite confidences and invalid class ids', () => {
+    const data = new Float32Array([
+      0, 0, 0, 0, Number.NaN, 0,
+      0, 0, 0, 0, Number.POSITIVE_INFINITY, 1,
+      0, 0, 0, 0, 0.88, 999,
+      0, 0, 0, 0, 0.77, 2,
+    ])
+
+    const result = parseYoloOutput(data)
+
+    expect(result.success).toBe(true)
+    expect(result.ponies).toEqual(['FS'])
+    expect(result.confidences).toEqual({ FS: 0.77 })
+  })
+
+  it('falls back to the highest finite row with a valid class id', () => {
+    const data = new Float32Array([
+      0, 0, 0, 0, 0.29, 999,
+      0, 0, 0, 0, Number.NaN, 0,
+      0, 0, 0, 0, 0.21, 3,
+      0, 0, 0, 0, 0.22, 2,
+    ])
+
+    const result = parseYoloOutput(data)
+
+    expect(result.success).toBe(true)
+    expect(result.ponies).toEqual(['FS'])
+    expect(result.confidences).toEqual({ FS: 0.22 })
   })
 })

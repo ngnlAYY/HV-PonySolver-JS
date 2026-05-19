@@ -85,7 +85,10 @@ export class OnnxWorkerClient implements DetectorService {
     }
 
     this.panel.setStatus({ session: '初始化中' })
-    const modelBuffer = await this.modelCache.loadModel()
+    const cachedModel = await this.modelCache.getCached()
+    const modelBuffer = cachedModel ?? await this.modelCache.download()
+    const cacheBuffer = cachedModel ? null : modelBuffer.slice(0)
+    const shouldCacheModel = cacheBuffer !== null
     if (this.destroyed) {
       throw new Error('Worker 已关闭')
     }
@@ -127,6 +130,9 @@ export class OnnxWorkerClient implements DetectorService {
       )
       if (this.destroyed) {
         throw new Error('Worker 已关闭')
+      }
+      if (shouldCacheModel) {
+        await this.modelCache.putCached(cacheBuffer)
       }
     } catch (error) {
       worker.terminate()

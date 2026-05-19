@@ -1,12 +1,9 @@
 import type { StatusPanel } from '../status-panel/status-panel-types'
 import { formatErrorMessage } from '../utils/errors'
+import { isRecordObject } from '../utils/guards'
 import { warn } from '../utils/logger'
 import { modelConfig } from './model-config'
 import { downloadModel } from './model-downloader'
-
-function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function readCachedBuffer(row: unknown): ArrayBuffer | null {
   if (!isRecordObject(row) || row.version !== modelConfig.version || !(row.buffer instanceof ArrayBuffer)) {
@@ -21,10 +18,10 @@ export class ModelCache {
 
   constructor(private readonly panel: StatusPanel) {}
 
-  async loadModel(): Promise<ArrayBuffer> {
+  async getCached(): Promise<ArrayBuffer | null> {
     this.panel.setStatus({ model: '确认中' })
     try {
-      const cached = await this.getCached()
+      const cached = await this.readCached()
       if (cached) {
         this.panel.setStatus({ model: '已缓存' })
         return cached
@@ -32,17 +29,37 @@ export class ModelCache {
     } catch (error) {
       warn('读取模型缓存失败，改为下载模型:', formatErrorMessage(error))
     }
+    return null
+  }
 
+  async download(): Promise<ArrayBuffer> {
     this.panel.setStatus({ model: '下载中' })
-    const buffer = await downloadModel()
+    return downloadModel()
+  }
 
+  async putCached(buffer: ArrayBuffer): Promise<void> {
     try {
-      await this.putCached(buffer)
+      await this.writeCached(buffer)
+      this.panel.setStatus({ model: '已缓存' })
     } catch (error) {
       warn('写入模型缓存失败，继续使用已下载模型:', formatErrorMessage(error))
     }
-    this.panel.setStatus({ model: '已缓存' })
+  }
+
+  async loadModel(): Promise<ArrayBuffer> {
+    const cached = await this.getCached()
+    if (cached) {
+      return cached
+    }
+    const buffer = await this.download()
+    await this.putCached(buffer)
     return buffer
+  }
+
+  close(): void {
+    this.db?.close()
+    this.db = null
+    this.openPromise = null
   }
 
   private async open(): Promise<IDBDatabase> {
@@ -59,6 +76,7 @@ export class ModelCache {
       }
       request.onsuccess = () => {
         this.db = request.result
+        this.db.onversionchange = () => this.close()
         this.openPromise = null
         resolve(this.db)
       }
@@ -70,7 +88,7 @@ export class ModelCache {
     return this.openPromise
   }
 
-  private async getCached(): Promise<ArrayBuffer | null> {
+  private async readCached(): Promise<ArrayBuffer | null> {
     const db = await this.open()
     return new Promise((resolve, reject) => {
       const tx = db.transaction('models', 'readonly')
@@ -84,7 +102,7 @@ export class ModelCache {
     })
   }
 
-  private async putCached(buffer: ArrayBuffer): Promise<void> {
+  private async writeCached(buffer: ArrayBuffer): Promise<void> {
     const db = await this.open()
     return new Promise((resolve, reject) => {
       const tx = db.transaction('models', 'readwrite')

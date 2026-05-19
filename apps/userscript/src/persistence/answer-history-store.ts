@@ -1,26 +1,29 @@
 import { HISTORY_KEY, HISTORY_MAX } from './answer-history-config'
 import type { HistoryRecord, HistoryRecordType, World } from './answer-history-types'
 import { formatErrorMessage } from '../utils/errors'
+import { isRecordObject } from '../utils/guards'
 import { logError, warn } from '../utils/logger'
-
-function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function isHistoryRecordType(value: unknown): value is HistoryRecordType {
   return value === 'success' || value === 'random' || value === 'error'
 }
 
 function isHistoryRecord(value: unknown): value is HistoryRecord {
-  if (!isRecordObject(value) || !isHistoryRecordType(value.type)) {
+  if (!isRecordObject(value) || !isHistoryRecordType(value.type) || typeof value.elapsed !== 'number') {
     return false
   }
-  const hasRequiredFields = typeof value.answers === 'string'
-    && typeof value.elapsed === 'number'
-    && typeof value.message === 'string'
   const hasValidOptionalFields = (value.timestamp === undefined || typeof value.timestamp === 'number')
     && (value.time === undefined || typeof value.time === 'string')
-  return hasRequiredFields && hasValidOptionalFields
+  if (!hasValidOptionalFields) {
+    return false
+  }
+  if (value.type === 'success') {
+    return typeof value.answers === 'string'
+  }
+  if (value.type === 'random') {
+    return typeof value.answers === 'string' && typeof value.message === 'string'
+  }
+  return typeof value.message === 'string'
 }
 
 function parseHistoryRoot(): Record<string, unknown> | null {
@@ -44,25 +47,27 @@ export class HistoryStore {
     }
   }
 
-  add(world: World, record: HistoryRecord): void {
+  add(world: World, record: HistoryRecord): HistoryRecord[] {
     try {
       const root = parseHistoryRoot() ?? {}
       const list = getWorldRecords(root, world)
       const now = Date.now()
-      const next = {
+      const nextRecords = [
+        {
+          timestamp: now,
+          time: new Date(now).toLocaleTimeString('zh-CN', { hour12: false }),
+          ...record,
+        },
+        ...list,
+      ].slice(0, HISTORY_MAX)
+      localStorage.setItem(HISTORY_KEY, JSON.stringify({
         ...root,
-        [world]: [
-          {
-            timestamp: now,
-            time: new Date(now).toLocaleTimeString('zh-CN', { hour12: false }),
-            ...record,
-          },
-          ...list,
-        ].slice(0, HISTORY_MAX),
-      }
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(next))
+        [world]: nextRecords,
+      }))
+      return nextRecords
     } catch (error) {
       logError('保存记录失败:', formatErrorMessage(error))
+      return this.get(world)
     }
   }
 }

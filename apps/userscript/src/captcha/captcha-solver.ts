@@ -18,6 +18,10 @@ export class CaptchaSolver {
     private readonly answerSubmitter: AnswerSubmitter,
   ) {}
 
+  get isBusy(): boolean {
+    return this.busy
+  }
+
   trigger(): void {
     if (this.busy) {
       return

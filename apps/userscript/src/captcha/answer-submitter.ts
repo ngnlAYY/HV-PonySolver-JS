@@ -19,13 +19,20 @@ export class AnswerSubmitter {
       return
     }
 
+    const button = form.querySelector<HTMLInputElement>(captchaSelectors.submit)
+    if (!button) {
+      onError('未找到提交按钮')
+      return
+    }
+
     const indices = ponies.map((pony) => ANSWER_CODES.indexOf(pony)).filter((index) => index >= 0)
     if (!indices.length) {
       onError('无有效答案')
       return
     }
 
-    for (const checkbox of Array.from(checkboxes)) {
+    for (let i = 0; i < checkboxes.length; i += 1) {
+      const checkbox = checkboxes.item(i)
       if (checkbox.checked) {
         checkbox.click()
       }
@@ -47,12 +54,6 @@ export class AnswerSubmitter {
     }
 
     await sleep(randDelay(timingConfig.submitDelay))
-    const button = form.querySelector<HTMLInputElement>(captchaSelectors.submit)
-    if (!button) {
-      onError('未找到提交按钮')
-      return
-    }
-
     button.click()
     onSubmitted()
     log('已提交:', ponies.join(','))

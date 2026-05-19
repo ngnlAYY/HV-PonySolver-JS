@@ -372,7 +372,7 @@ pnpm --filter @hv-pony-solver/model-worker test
 
 ### CI workflow
 
-`.github/workflows/ci.yml` 在 pull request 和 `main` 分支 push 时运行：
+`.github/workflows/verify-monorepo.yml` 默认手动触发，用于按需运行仓库校验：
 
 1. Checkout。
 2. 设置 Node.js 22。
@@ -386,12 +386,7 @@ pnpm --filter @hv-pony-solver/model-worker test
 
 ### Model Worker 部署 workflow
 
-`.github/workflows/deploy-model-worker.yml` 可手动触发，也会在 `main` 分支相关路径变更时触发：
-
-- `apps/model-worker/**`
-- `packages/shared/**`
-- `pnpm-lock.yaml`
-- `.github/workflows/deploy-model-worker.yml`
+`.github/workflows/deploy-cloudflare-model-worker.yml` 默认手动触发，用于按需部署 Model Worker。
 
 部署步骤：
 
