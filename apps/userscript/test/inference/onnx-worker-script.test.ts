@@ -44,11 +44,11 @@ describe('ONNX worker bundle', () => {
     expect(() => new Script(createOnnxWorkerScript('self.ort = { marker: 1 };'))).not.toThrow()
   })
 
-  it('preserves bundled runtime replacement tokens as source text', () => {
+  it.each(['$&', '$$', '$1', "$'", '$`'])('preserves bundled runtime replacement token %s as source text', (token) => {
     vi.stubGlobal(workerScriptGlobal, 'const runtimeSource = "__HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE_PLACEHOLDER__";')
 
-    expect(createOnnxWorkerScript("self.ort = { marker: '$&' };"))
-      .toBe('const runtimeSource = "self.ort = { marker: \'$&\' };";')
+    expect(createOnnxWorkerScript(`self.ort = { marker: '${token}' };`))
+      .toBe(`const runtimeSource = "self.ort = { marker: '${token}' };";`)
   })
 
   it('uses the shared TypeScript YOLO parser', async () => {

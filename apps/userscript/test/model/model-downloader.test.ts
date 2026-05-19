@@ -44,8 +44,14 @@ describe('downloadModel', () => {
     const controller = new AbortController()
     const fetchMock = vi.fn(async (_url: string, options: RequestInit) => ({
       ok: true,
-      arrayBuffer: () => new Promise<ArrayBuffer>((_resolve, reject) => {
-        options.signal?.addEventListener('abort', () => reject(new Error('body aborted')), { once: true })
+      headers: new Headers(),
+      arrayBuffer: async () => {
+        throw new Error('arrayBuffer should not be used')
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(streamController) {
+          options.signal?.addEventListener('abort', () => streamController.error(new Error('body aborted')), { once: true })
+        },
       }),
     } as Response))
     vi.stubGlobal('fetch', fetchMock)
@@ -55,6 +61,50 @@ describe('downloadModel', () => {
     controller.abort()
 
     await expect(downloadPromise).rejects.toThrow('body aborted')
+  })
+
+  it('rejects and cancels responses whose content length is larger than expected', async () => {
+    const arrayBuffer = vi.fn()
+    const cancel = vi.fn()
+    const response = {
+      ok: true,
+      headers: new Headers({ 'content-length': '4' }),
+      arrayBuffer,
+      body: { cancel },
+    } as unknown as Response
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    await expect(downloadModel(undefined, TEST_INTEGRITY)).rejects.toThrow('下载模型大小校验失败')
+
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(arrayBuffer).not.toHaveBeenCalled()
+  })
+
+  it('stops reading when the streamed model exceeds the expected size', async () => {
+    let pulls = 0
+    const arrayBuffer = vi.fn(async () => {
+      throw new Error('arrayBuffer should not be used')
+    })
+    const response = {
+      ok: true,
+      headers: new Headers(),
+      arrayBuffer,
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls += 1
+          controller.enqueue(new Uint8Array([pulls]))
+          if (pulls === 4) {
+            controller.close()
+          }
+        },
+      }),
+    } as unknown as Response
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    await expect(downloadModel(undefined, TEST_INTEGRITY)).rejects.toThrow('下载模型大小校验失败')
+
+    expect(arrayBuffer).not.toHaveBeenCalled()
+    expect(pulls).toBe(4)
   })
 
   it('rejects downloaded models with unexpected integrity', async () => {

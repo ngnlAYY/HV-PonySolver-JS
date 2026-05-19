@@ -1,5 +1,6 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
@@ -13,6 +14,8 @@ const metadataPath = resolve(appDir, 'src/userscript/metadata.ts')
 const shouldMinify = process.env.HV_PONY_SOLVER_MINIFY !== '0'
 const metafilePath = process.env.HV_PONY_SOLVER_METAFILE_PATH
 const MAX_ONNX_RUNTIME_BYTES = 2 * 1024 * 1024
+const expectedOnnxRuntimeByteLength = Number(process.env.HV_PONY_SOLVER_ONNX_RUNTIME_BYTE_LENGTH || 360388)
+const expectedOnnxRuntimeSha256 = process.env.HV_PONY_SOLVER_ONNX_RUNTIME_SHA256 || 'ba5e52f4a87f823a700fa5eb916fd5946b970999e8e0518334b116f7b03bd53d'
 const shouldBundleOnnxRuntime = process.env.HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME === '1'
 const workerRuntimeSourcePlaceholder = '__HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE_PLACEHOLDER__'
 const onnxRuntimeSource = shouldBundleOnnxRuntime ? await readOnnxRuntimeSource() : ''
@@ -94,7 +97,15 @@ async function readOnnxRuntimeSource() {
   if (stats.size === 0 || stats.size > MAX_ONNX_RUNTIME_BYTES) {
     throw new Error(`ONNX runtime source size must be between 1 and ${MAX_ONNX_RUNTIME_BYTES} bytes`)
   }
-  return readFile(runtimePath, 'utf8')
+  if (stats.size !== expectedOnnxRuntimeByteLength) {
+    throw new Error(`ONNX runtime source size must be ${expectedOnnxRuntimeByteLength} bytes`)
+  }
+  const source = await readFile(runtimePath, 'utf8')
+  const sha256 = createHash('sha256').update(source).digest('hex')
+  if (sha256 !== expectedOnnxRuntimeSha256) {
+    throw new Error('ONNX runtime source SHA-256 mismatch')
+  }
+  return source
 }
 
 function resolveOnnxRuntimePath() {

@@ -7,6 +7,18 @@ import { downloadModel } from './model-downloader'
 import type { ModelIntegrity } from './model-integrity'
 import { verifyModelIntegrity } from './model-integrity'
 
+export async function createCachedModelRow(buffer: ArrayBuffer, integrity: ModelIntegrity = modelConfig.integrity): Promise<Record<string, unknown>> {
+  await verifyModelIntegrity(buffer, integrity, '缓存写入模型')
+  return {
+    key: modelConfig.cacheKey,
+    version: modelConfig.version,
+    byteLength: integrity.byteLength,
+    sha256: integrity.sha256,
+    buffer,
+    updatedAt: Date.now(),
+  }
+}
+
 export async function readCachedModelBuffer(row: unknown, integrity: ModelIntegrity = modelConfig.integrity): Promise<ArrayBuffer | null> {
   if (!isRecordObject(row) || row.version !== modelConfig.version || !(row.buffer instanceof ArrayBuffer)) {
     return null
@@ -104,16 +116,10 @@ export class ModelCache {
 
   private async writeCached(buffer: ArrayBuffer): Promise<void> {
     const db = await this.open()
+    const row = await createCachedModelRow(buffer)
     return new Promise((resolve, reject) => {
       const tx = db.transaction('models', 'readwrite')
-      tx.objectStore('models').put({
-        key: modelConfig.cacheKey,
-        version: modelConfig.version,
-        byteLength: modelConfig.integrity.byteLength,
-        sha256: modelConfig.integrity.sha256,
-        buffer,
-        updatedAt: Date.now(),
-      })
+      tx.objectStore('models').put(row)
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error || new Error('模型缓存写入失败'))
       tx.onabort = () => reject(tx.error || new Error('模型缓存写入事务中止'))

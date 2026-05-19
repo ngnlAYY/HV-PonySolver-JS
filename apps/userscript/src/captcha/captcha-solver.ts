@@ -4,8 +4,8 @@ import type { StatusPanel } from '../status-panel/status-panel-types'
 import { formatErrorMessage } from '../utils/errors'
 import { logError } from '../utils/logger'
 import { AnswerSubmitter } from './answer-submitter'
+import { findCaptchaTarget } from './captcha-target'
 import type { ImageLoader } from './captcha-types'
-import { captchaSelectors } from './captcha-selectors'
 import { solverConfig } from './solver-config'
 
 export type SolveResult = Readonly<{
@@ -48,37 +48,20 @@ export class CaptchaSolver {
     }
 
     try {
-      let form: HTMLFormElement | null = null
-      let image: HTMLImageElement | null = null
-      const masters = document.querySelectorAll(captchaSelectors.master)
-      for (let index = 0; index < masters.length; index += 1) {
-        const master = masters.item(index)
-        const imageContainer = master.querySelector<HTMLElement>('[id="riddleimage"]')
-        const candidateImage = imageContainer?.querySelector<HTMLImageElement>('img') ?? null
-        const candidateForm = master.querySelector<HTMLFormElement>(captchaSelectors.form)
-        if (candidateForm && candidateImage?.src) {
-          form = candidateForm
-          image = candidateImage
-          break
-        }
-      }
-      if (!form) {
-        failSubmit('未找到答题表单')
-        return result(false)
-      }
-      if (!image?.src) {
-        failSubmit('未找到验证码图片')
+      const target = findCaptchaTarget()
+      if (!target) {
+        failSubmit('未找到验证码')
         return result(false)
       }
 
       this.panel.setStatus({ inference: '获取图片' })
-      captchaKey = image.currentSrc || image.src
+      captchaKey = target.captchaKey
       const blob = await this.imageLoader.get(captchaKey)
       const detectionResult = await this.detector.detect(blob)
 
       if (detectionResult.success && detectionResult.ponies.length) {
         let submitted = false
-        await this.answerSubmitter.submit(form, detectionResult.ponies, failSubmit, () => {
+        await this.answerSubmitter.submit(target.form, detectionResult.ponies, failSubmit, () => {
           submitted = true
           this.panel.addSuccess(detectionResult.ponies, detectionResult.confidences, elapsed())
         })
@@ -96,7 +79,7 @@ export class CaptchaSolver {
         return result(false)
       }
       let submitted = false
-      await this.answerSubmitter.submit(form, [pony], failSubmit, () => {
+      await this.answerSubmitter.submit(target.form, [pony], failSubmit, () => {
         submitted = true
         this.panel.addRandomFailure(pony, elapsed())
       })

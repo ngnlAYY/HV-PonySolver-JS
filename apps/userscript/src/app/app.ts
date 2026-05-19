@@ -3,6 +3,7 @@ import { getBundledOnnxRuntimeSource } from '../inference/onnx-runtime-source'
 import { AnswerSubmitter } from '../captcha/answer-submitter'
 import { CachedImageLoader } from '../captcha/captcha-image-loader'
 import { CaptchaSolver } from '../captcha/captcha-solver'
+import { findCaptchaTarget } from '../captcha/captcha-target'
 import { captchaSelectors } from '../captcha/captcha-selectors'
 import { HistoryStore } from '../persistence/answer-history-store'
 import { ModelCache } from '../model/model-cache'
@@ -76,25 +77,8 @@ export class App {
     cancelAnimationFrame(id)
   }
 
-  private findCaptchaMaster(): Element | null {
-    const masters = document.querySelectorAll(captchaSelectors.master)
-    for (let index = 0; index < masters.length; index += 1) {
-      const master = masters.item(index)
-      const imageContainer = master.querySelector<HTMLElement>('[id="riddleimage"]')
-      const image = imageContainer?.querySelector<HTMLImageElement>('img')
-      const form = master.querySelector<HTMLFormElement>(captchaSelectors.form)
-      if (form && image?.src) {
-        return master
-      }
-    }
-    return null
-  }
-
   private getCaptchaKey(): string | null {
-    const master = this.findCaptchaMaster()
-    const imageContainer = master?.querySelector<HTMLElement>('[id="riddleimage"]')
-    const image = imageContainer?.querySelector<HTMLImageElement>('img')
-    return image?.src ? image.currentSrc || image.src : null
+    return findCaptchaTarget()?.captchaKey ?? null
   }
 
   private scheduleSolve(): void {

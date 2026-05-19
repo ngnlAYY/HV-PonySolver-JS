@@ -24,6 +24,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Require bundled runtime for published userscript artifacts
+        if: ${{ inputs.publish_userscript_artifact && !inputs.bundle_onnx_runtime }}
+        run: |
+          echo "Publishing userscript artifacts requires bundle_onnx_runtime=true" >&2
+          exit 1
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
