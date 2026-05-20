@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { downloadModel } from '../../src/model/model-downloader'
+const getModelAccessKey = vi.fn(async () => '')
+
+vi.mock('../../src/model/model-settings', () => ({
+  getModelAccessKey,
+}))
+
+const { downloadModel } = await import('../../src/model/model-downloader')
 
 const TEST_INTEGRITY = {
   byteLength: 3,
@@ -10,6 +16,7 @@ const TEST_INTEGRITY = {
 describe('downloadModel', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    getModelAccessKey.mockResolvedValue('')
   })
 
   it('passes abort signal to fetch', async () => {
@@ -26,6 +33,20 @@ describe('downloadModel', () => {
         cache: 'no-store',
         signal: expect.any(AbortSignal),
       }),
+    )
+  })
+
+  it('uses the saved model access key when downloading', async () => {
+    getModelAccessKey.mockResolvedValue('key with spaces & symbols')
+    const response = new Response(new Uint8Array([1, 2, 3]))
+    const fetchMock = vi.fn(async () => response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await downloadModel(undefined, TEST_INTEGRITY)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://models.ngnl.host/yolo26n-640.onnx?key=key%20with%20spaces%20%26%20symbols',
+      expect.objectContaining({ cache: 'no-store' }),
     )
   })
 
@@ -57,7 +78,9 @@ describe('downloadModel', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const downloadPromise = downloadModel(controller.signal)
-    await Promise.resolve()
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
     controller.abort()
 
     await expect(downloadPromise).rejects.toThrow('body aborted')

@@ -20,6 +20,10 @@ test('build-userscript defaults to remote onnxruntime-web runtime', async () => 
 
   assert.equal(output.includes('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js'), true)
   assert.equal(output.includes(runtimeMarker), false)
+  assert.equal(output.includes('// @grant       GM_registerMenuCommand'), true)
+  assert.equal(output.includes('// @grant       GM_getValue'), true)
+  assert.equal(output.includes('// @grant       GM_setValue'), true)
+  assert.equal(output.includes('// @grant       GM_deleteValue'), true)
 })
 
 test('build-userscript embeds onnxruntime-web runtime when enabled', async () => {

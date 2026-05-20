@@ -9,7 +9,10 @@ export const USERSCRIPT_METADATA = `// ==UserScript==
 // @exclude     https://alt.hentaiverse.org/battle_stats*
 // @exclude     https://hentaiverse.org/equip/*
 // @exclude     https://hentaiverse.org/isekai/equip/*
-// @grant       none
+// @grant       GM_registerMenuCommand
+// @grant       GM_getValue
+// @grant       GM_setValue
+// @grant       GM_deleteValue
 // @run-at      document-end
 // @connect     cdn.jsdelivr.net
 // @connect     models.ngnl.host

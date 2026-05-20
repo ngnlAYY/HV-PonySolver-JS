@@ -4,6 +4,10 @@ const prepare = vi.fn(async () => ({} as Worker))
 const detect = vi.fn()
 const destroyDetector = vi.fn()
 const getImageBlob = vi.fn()
+const registerModelSettingsMenu = vi.fn()
+const modelDownload = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
+const modelPutCached = vi.fn(async () => undefined)
+const modelClose = vi.fn()
 const apps: Array<{ destroy: () => void }> = []
 
 vi.mock('../../src/inference/onnx-worker-client', () => ({
@@ -20,6 +24,20 @@ vi.mock('../../src/captcha/captcha-image-loader', () => ({
   CachedImageLoader: vi.fn(function CachedImageLoaderMock() {
     return {
       get: getImageBlob,
+    }
+  }),
+}))
+
+vi.mock('../../src/model/model-settings', () => ({
+  registerModelSettingsMenu,
+}))
+
+vi.mock('../../src/model/model-cache', () => ({
+  ModelCache: vi.fn(function ModelCacheMock() {
+    return {
+      download: modelDownload,
+      putCached: modelPutCached,
+      close: modelClose,
     }
   }),
 }))
@@ -58,6 +76,8 @@ describe('App', () => {
     vi.clearAllMocks()
     getImageBlob.mockResolvedValue(new Blob())
     detect.mockResolvedValue({ success: false, ponies: [], confidences: {}, detections: [] })
+    modelDownload.mockResolvedValue(new Uint8Array([1, 2, 3]).buffer)
+    modelPutCached.mockResolvedValue(undefined)
     window.requestAnimationFrame = (callback: FrameRequestCallback): number => window.setTimeout(() => callback(0), 0)
     window.cancelAnimationFrame = (id: number): void => window.clearTimeout(id)
     apps.length = 0
@@ -79,6 +99,40 @@ describe('App', () => {
     app.init()
 
     expect(prepare).not.toHaveBeenCalled()
+  })
+
+  it('registers model settings menu during init', async () => {
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+
+    expect(registerModelSettingsMenu).toHaveBeenCalledWith(expect.any(Function))
+  })
+
+  it('does not register duplicate model settings menus when init is called twice', async () => {
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    app.init()
+
+    expect(registerModelSettingsMenu).toHaveBeenCalledTimes(1)
+  })
+
+  it('verifies and caches the model from the settings menu callback', async () => {
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    const verify = registerModelSettingsMenu.mock.calls[0][0]
+    await verify()
+
+    expect(modelDownload).toHaveBeenCalledWith(undefined, true)
+    expect(modelPutCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true)
   })
 
   it('coalesces DOM mutations into one captcha scan', async () => {

@@ -59,17 +59,20 @@ export class ModelCache {
     return null
   }
 
-  async download(signal?: AbortSignal): Promise<ArrayBuffer> {
+  async download(signal?: AbortSignal, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<ArrayBuffer> {
     this.panel.setStatus({ model: '下载中' })
-    return downloadModel(signal)
+    return downloadModel(signal, modelConfig.integrity, verifyIntegrity)
   }
 
-  async putCached(buffer: ArrayBuffer): Promise<void> {
+  async putCached(buffer: ArrayBuffer, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<void> {
     try {
-      await this.writeCached(buffer)
+      await this.writeCached(buffer, verifyIntegrity)
       this.panel.setStatus({ model: '已缓存' })
     } catch (error) {
       warn('写入模型缓存失败，继续使用已下载模型:', formatErrorMessage(error))
+      if (verifyIntegrity) {
+        throw error
+      }
     }
   }
 
@@ -119,9 +122,9 @@ export class ModelCache {
     })
   }
 
-  private async writeCached(buffer: ArrayBuffer): Promise<void> {
+  private async writeCached(buffer: ArrayBuffer, verifyIntegrity: boolean): Promise<void> {
     const db = await this.open()
-    const row = await createCachedModelRow(buffer)
+    const row = await createCachedModelRow(buffer, modelConfig.integrity, verifyIntegrity)
     return new Promise((resolve, reject) => {
       const tx = db.transaction('models', 'readwrite')
       tx.objectStore('models').put(row)

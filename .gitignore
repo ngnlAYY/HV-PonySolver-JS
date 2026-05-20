@@ -9,3 +9,7 @@ apps/model-worker/wrangler.toml
 apps/model-worker/.wrangler/
 apps/userscript/.tmp/
 docs/superpowers/
+.mcp.json
+CLAUDE.md
+.code-review-graph/*
+.claude/

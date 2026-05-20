@@ -7,6 +7,7 @@ import { findCaptchaTarget } from '../captcha/captcha-target'
 import { captchaSelectors } from '../captcha/captcha-selectors'
 import { HistoryStore } from '../persistence/answer-history-store'
 import { ModelCache } from '../model/model-cache'
+import { registerModelSettingsMenu } from '../model/model-settings'
 import { StatusPanel } from '../status-panel/status-panel'
 import { formatErrorMessage } from '../utils/errors'
 import { log, warn } from '../utils/logger'
@@ -29,10 +30,15 @@ export class App {
   private animationFrameId: number | null = null
   private lastCaptchaKey: string | null = null
   private destroyed = false
+  private modelSettingsMenuRegistered = false
 
   init(): void {
     this.destroyed = false
     this.panel.create()
+    if (!this.modelSettingsMenuRegistered) {
+      registerModelSettingsMenu(() => this.verifyConfiguredModelKey())
+      this.modelSettingsMenuRegistered = true
+    }
     if (document.querySelector(captchaSelectors.master)) {
       setTimeout(() => this.scheduleSolve(), 100)
     }
@@ -52,6 +58,11 @@ export class App {
     this.detector.destroy()
     this.modelCache.close()
     this.panel.destroy()
+  }
+
+  private async verifyConfiguredModelKey(): Promise<void> {
+    const modelBuffer = await this.modelCache.download(undefined, true)
+    await this.modelCache.putCached(modelBuffer, true)
   }
 
   private observe(): void {

@@ -2,12 +2,20 @@ import { inferenceConfig } from '../inference/inference-config'
 import { modelConfig } from './model-config'
 import type { ModelIntegrity } from './model-integrity'
 import { verifyModelIntegrity } from './model-integrity'
+import { getModelAccessKey } from './model-settings'
 
-function getModelUrl(): string {
+async function getModelUrl(): Promise<string> {
   if (!modelConfig.urlBase) {
     throw new Error('模型下载地址未配置')
   }
-  return `${modelConfig.urlBase}?key=${encodeURIComponent(modelConfig.accessKey)}`
+  let storedAccessKey = ''
+  try {
+    storedAccessKey = await getModelAccessKey()
+  } catch {
+    storedAccessKey = ''
+  }
+  const accessKey = storedAccessKey || modelConfig.accessKey
+  return `${modelConfig.urlBase}?key=${encodeURIComponent(accessKey)}`
 }
 
 async function readModelResponse(response: Response, expectedByteLength: number | null): Promise<ArrayBuffer> {
@@ -52,7 +60,7 @@ export async function downloadModel(signal?: AbortSignal, integrity: ModelIntegr
   const abort = (): void => controller.abort()
   signal?.addEventListener('abort', abort, { once: true })
   try {
-    const response = await fetch(getModelUrl(), { cache: 'no-store', signal: controller.signal })
+    const response = await fetch(await getModelUrl(), { cache: 'no-store', signal: controller.signal })
     if (!response.ok) {
       throw new Error(`模型下载失败: HTTP ${response.status}`)
     }
