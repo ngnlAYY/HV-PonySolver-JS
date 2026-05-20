@@ -7,8 +7,10 @@ import { downloadModel } from './model-downloader'
 import type { ModelIntegrity } from './model-integrity'
 import { verifyModelIntegrity } from './model-integrity'
 
-export async function createCachedModelRow(buffer: ArrayBuffer, integrity: ModelIntegrity = modelConfig.integrity): Promise<Record<string, unknown>> {
-  await verifyModelIntegrity(buffer, integrity, '缓存写入模型')
+export async function createCachedModelRow(buffer: ArrayBuffer, integrity: ModelIntegrity = modelConfig.integrity, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<Record<string, unknown>> {
+  if (verifyIntegrity) {
+    await verifyModelIntegrity(buffer, integrity, '缓存写入模型')
+  }
   return {
     key: modelConfig.cacheKey,
     version: modelConfig.version,
@@ -19,9 +21,12 @@ export async function createCachedModelRow(buffer: ArrayBuffer, integrity: Model
   }
 }
 
-export async function readCachedModelBuffer(row: unknown, integrity: ModelIntegrity = modelConfig.integrity): Promise<ArrayBuffer | null> {
+export async function readCachedModelBuffer(row: unknown, integrity: ModelIntegrity = modelConfig.integrity, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<ArrayBuffer | null> {
   if (!isRecordObject(row) || row.version !== modelConfig.version || !(row.buffer instanceof ArrayBuffer)) {
     return null
+  }
+  if (!verifyIntegrity) {
+    return row.buffer
   }
   if (row.byteLength !== integrity.byteLength || row.sha256 !== integrity.sha256) {
     return null

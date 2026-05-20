@@ -10,9 +10,9 @@ function getModelUrl(): string {
   return `${modelConfig.urlBase}?key=${encodeURIComponent(modelConfig.accessKey)}`
 }
 
-async function readModelResponse(response: Response, expectedByteLength: number): Promise<ArrayBuffer> {
+async function readModelResponse(response: Response, expectedByteLength: number | null): Promise<ArrayBuffer> {
   const contentLength = response.headers.get('content-length')
-  if (contentLength && Number(contentLength) > expectedByteLength) {
+  if (expectedByteLength !== null && contentLength && Number(contentLength) > expectedByteLength) {
     await response.body?.cancel()
     throw new Error(`下载模型大小校验失败: ${contentLength} != ${expectedByteLength}`)
   }
@@ -28,7 +28,7 @@ async function readModelResponse(response: Response, expectedByteLength: number)
       break
     }
     totalBytes += value.byteLength
-    if (totalBytes > expectedByteLength) {
+    if (expectedByteLength !== null && totalBytes > expectedByteLength) {
       await reader.cancel()
       throw new Error(`下载模型大小校验失败: ${totalBytes} != ${expectedByteLength}`)
     }
@@ -43,7 +43,7 @@ async function readModelResponse(response: Response, expectedByteLength: number)
   return bytes.buffer
 }
 
-export async function downloadModel(signal?: AbortSignal, integrity: ModelIntegrity = modelConfig.integrity): Promise<ArrayBuffer> {
+export async function downloadModel(signal?: AbortSignal, integrity: ModelIntegrity = modelConfig.integrity, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<ArrayBuffer> {
   if (signal?.aborted) {
     throw new Error('模型下载已取消')
   }
@@ -56,8 +56,10 @@ export async function downloadModel(signal?: AbortSignal, integrity: ModelIntegr
     if (!response.ok) {
       throw new Error(`模型下载失败: HTTP ${response.status}`)
     }
-    const buffer = await readModelResponse(response, integrity.byteLength)
-    await verifyModelIntegrity(buffer, integrity, '下载模型')
+    const buffer = await readModelResponse(response, verifyIntegrity ? integrity.byteLength : null)
+    if (verifyIntegrity) {
+      await verifyModelIntegrity(buffer, integrity, '下载模型')
+    }
     return buffer
   } finally {
     clearTimeout(timeoutId)

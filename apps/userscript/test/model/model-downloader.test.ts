@@ -63,7 +63,30 @@ describe('downloadModel', () => {
     await expect(downloadPromise).rejects.toThrow('body aborted')
   })
 
-  it('rejects and cancels responses whose content length is larger than expected', async () => {
+  it('downloads models without integrity checks by default', async () => {
+    const response = new Response(new Uint8Array([1, 2, 3, 4]))
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    const buffer = await downloadModel(undefined, {
+      byteLength: 1,
+      sha256: '0000000000000000000000000000000000000000000000000000000000000000',
+    })
+
+    expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3, 4])
+  })
+
+  it('does not reject larger content length when integrity verification is disabled', async () => {
+    const response = new Response(new Uint8Array([1, 2, 3, 4]), {
+      headers: { 'content-length': '4' },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    const buffer = await downloadModel(undefined, TEST_INTEGRITY)
+
+    expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3, 4])
+  })
+
+  it('rejects and cancels responses whose content length is larger than expected when integrity verification is enabled', async () => {
     const arrayBuffer = vi.fn()
     const cancel = vi.fn()
     const response = {
@@ -74,13 +97,35 @@ describe('downloadModel', () => {
     } as unknown as Response
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
-    await expect(downloadModel(undefined, TEST_INTEGRITY)).rejects.toThrow('下载模型大小校验失败')
+    await expect(downloadModel(undefined, TEST_INTEGRITY, true)).rejects.toThrow('下载模型大小校验失败')
 
     expect(cancel).toHaveBeenCalledTimes(1)
     expect(arrayBuffer).not.toHaveBeenCalled()
   })
 
-  it('stops reading when the streamed model exceeds the expected size', async () => {
+  it('reads oversized streamed models when integrity verification is disabled', async () => {
+    let pulls = 0
+    const response = {
+      ok: true,
+      headers: new Headers(),
+      body: new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pulls += 1
+          controller.enqueue(new Uint8Array([pulls]))
+          if (pulls === 4) {
+            controller.close()
+          }
+        },
+      }),
+    } as unknown as Response
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    const buffer = await downloadModel(undefined, TEST_INTEGRITY)
+
+    expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3, 4])
+  })
+
+  it('stops reading when the streamed model exceeds the expected size and integrity verification is enabled', async () => {
     let pulls = 0
     const arrayBuffer = vi.fn(async () => {
       throw new Error('arrayBuffer should not be used')
@@ -101,19 +146,19 @@ describe('downloadModel', () => {
     } as unknown as Response
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
-    await expect(downloadModel(undefined, TEST_INTEGRITY)).rejects.toThrow('下载模型大小校验失败')
+    await expect(downloadModel(undefined, TEST_INTEGRITY, true)).rejects.toThrow('下载模型大小校验失败')
 
     expect(arrayBuffer).not.toHaveBeenCalled()
     expect(pulls).toBe(4)
   })
 
-  it('rejects downloaded models with unexpected integrity', async () => {
+  it('rejects downloaded models with unexpected integrity when integrity verification is enabled', async () => {
     const response = new Response(new Uint8Array([1, 2, 3]))
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
     await expect(downloadModel(undefined, {
       byteLength: 4,
       sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
-    })).rejects.toThrow('下载模型大小校验失败')
+    }, true)).rejects.toThrow('下载模型大小校验失败')
   })
 })

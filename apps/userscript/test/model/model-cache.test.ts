@@ -11,7 +11,20 @@ function bufferFromBytes(bytes: number[]): ArrayBuffer {
 }
 
 describe('readCachedModelBuffer', () => {
-  it('returns cached buffers that match the configured integrity', async () => {
+  it('returns cached buffers without integrity checks by default', async () => {
+    const buffer = bufferFromBytes([9, 9, 9])
+
+    await expect(readCachedModelBuffer({
+      key: modelConfig.cacheKey,
+      version: modelConfig.version,
+      byteLength: 1,
+      sha256: '0000000000000000000000000000000000000000000000000000000000000000',
+      buffer,
+    }, TEST_INTEGRITY))
+      .resolves.toBe(buffer)
+  })
+
+  it('returns cached buffers that match the configured integrity when verification is enabled', async () => {
     const buffer = bufferFromBytes([1, 2, 3])
 
     await expect(readCachedModelBuffer({
@@ -20,36 +33,36 @@ describe('readCachedModelBuffer', () => {
       byteLength: TEST_INTEGRITY.byteLength,
       sha256: TEST_INTEGRITY.sha256,
       buffer,
-    }, TEST_INTEGRITY))
+    }, TEST_INTEGRITY, true))
       .resolves.toBe(buffer)
   })
 
-  it('ignores cached buffers with mismatched integrity', async () => {
+  it('ignores cached buffers with mismatched integrity when verification is enabled', async () => {
     await expect(readCachedModelBuffer({
       key: modelConfig.cacheKey,
       version: modelConfig.version,
       byteLength: 1,
       sha256: TEST_INTEGRITY.sha256,
       buffer: bufferFromBytes([9]),
-    }, TEST_INTEGRITY))
+    }, TEST_INTEGRITY, true))
       .resolves.toBeNull()
   })
 
-  it('ignores cached buffers with forged integrity metadata', async () => {
+  it('ignores cached buffers with forged integrity metadata when verification is enabled', async () => {
     await expect(readCachedModelBuffer({
       key: modelConfig.cacheKey,
       version: modelConfig.version,
       byteLength: TEST_INTEGRITY.byteLength,
       sha256: TEST_INTEGRITY.sha256,
       buffer: bufferFromBytes([9, 9, 9]),
-    }, TEST_INTEGRITY))
+    }, TEST_INTEGRITY, true))
       .resolves.toBeNull()
   })
 })
 
 describe('createCachedModelRow', () => {
-  it('creates cache rows only for buffers that pass integrity verification', async () => {
-    await expect(createCachedModelRow(bufferFromBytes([1, 2, 3]), TEST_INTEGRITY))
+  it('creates cache rows without integrity checks by default', async () => {
+    await expect(createCachedModelRow(bufferFromBytes([9, 9, 9]), TEST_INTEGRITY))
       .resolves.toMatchObject({
         key: modelConfig.cacheKey,
         version: modelConfig.version,
@@ -58,8 +71,18 @@ describe('createCachedModelRow', () => {
       })
   })
 
-  it('rejects cache rows for buffers with unexpected integrity', async () => {
-    await expect(createCachedModelRow(bufferFromBytes([9, 9, 9]), TEST_INTEGRITY))
+  it('creates cache rows only for buffers that pass integrity verification when verification is enabled', async () => {
+    await expect(createCachedModelRow(bufferFromBytes([1, 2, 3]), TEST_INTEGRITY, true))
+      .resolves.toMatchObject({
+        key: modelConfig.cacheKey,
+        version: modelConfig.version,
+        byteLength: TEST_INTEGRITY.byteLength,
+        sha256: TEST_INTEGRITY.sha256,
+      })
+  })
+
+  it('rejects cache rows for buffers with unexpected integrity when verification is enabled', async () => {
+    await expect(createCachedModelRow(bufferFromBytes([9, 9, 9]), TEST_INTEGRITY, true))
       .rejects.toThrow('缓存写入模型 SHA-256 校验失败')
   })
 })
