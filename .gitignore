@@ -12,4 +12,5 @@ docs/superpowers/
 .mcp.json
 CLAUDE.md
 .code-review-graph/*
+.code-review-graph/graph.db
 .claude/
