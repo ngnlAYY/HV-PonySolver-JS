@@ -2,6 +2,7 @@ import type { AnswerCode } from '@hv-pony-solver/shared'
 import { HistoryStore } from '../persistence/answer-history-store'
 import type { HistoryRecord, World } from '../persistence/answer-history-types'
 import type { PanelStatus, StatusPanel as StatusPanelContract } from './status-panel-types'
+import { getPanelPosition } from './panel-settings'
 import { formatAnswers, renderStatusPanel } from './status-panel-renderer'
 
 function getWorld(): World {
@@ -28,6 +29,12 @@ export class StatusPanel implements StatusPanelContract {
     this.el = document.createElement('div')
     this.el.className = 'ponyLog'
     this.el.style.cssText = 'position:absolute;top:150px;left:1240px;font-size:12px;text-align:left'
+    getPanelPosition().then((position) => {
+      if (this.el) {
+        this.el.style.top = `${position.top}px`
+        this.el.style.left = `${position.left}px`
+      }
+    })
     document.body.appendChild(this.el)
     this.render()
   }

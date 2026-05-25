@@ -8,6 +8,7 @@ import { captchaSelectors } from '../captcha/captcha-selectors'
 import { HistoryStore } from '../persistence/answer-history-store'
 import { ModelCache } from '../model/model-cache'
 import { registerModelSettingsMenu } from '../model/model-settings'
+import { registerPanelSettingsMenu } from '../status-panel/panel-settings'
 import { StatusPanel } from '../status-panel/status-panel'
 import { formatErrorMessage } from '../utils/errors'
 import { log, warn } from '../utils/logger'
@@ -27,7 +28,6 @@ export class App {
   private readonly solver = new CaptchaSolver(this.panel, this.detector, this.imageLoader, this.answerSubmitter)
   private observer: MutationObserver | null = null
   private scheduledScan = false
-  private animationFrameId: number | null = null
   private lastCaptchaKey: string | null = null
   private destroyed = false
   private modelSettingsMenuRegistered = false
@@ -37,6 +37,7 @@ export class App {
     this.panel.create()
     if (!this.modelSettingsMenuRegistered) {
       registerModelSettingsMenu(() => this.verifyConfiguredModelKey())
+      registerPanelSettingsMenu()
       this.modelSettingsMenuRegistered = true
     }
     if (document.querySelector(captchaSelectors.master)) {
@@ -51,10 +52,6 @@ export class App {
     this.observer = null
     this.scheduledScan = false
     this.lastCaptchaKey = null
-    if (this.animationFrameId !== null) {
-      this.cancelFrame(this.animationFrameId)
-      this.animationFrameId = null
-    }
     this.detector.destroy()
     this.modelCache.close()
     this.panel.destroy()
@@ -78,16 +75,6 @@ export class App {
     }
   }
 
-  private requestFrame(callback: FrameRequestCallback): number {
-    const requestAnimationFrame = globalThis.requestAnimationFrame ?? ((handler: FrameRequestCallback): number => globalThis.setTimeout(() => handler(Date.now()), 0))
-    return requestAnimationFrame(callback)
-  }
-
-  private cancelFrame(id: number): void {
-    const cancelAnimationFrame = globalThis.cancelAnimationFrame ?? globalThis.clearTimeout
-    cancelAnimationFrame(id)
-  }
-
   private getCaptchaKey(): string | null {
     return findCaptchaTarget()?.captchaKey ?? null
   }
@@ -97,8 +84,7 @@ export class App {
       return
     }
     this.scheduledScan = true
-    this.animationFrameId = this.requestFrame(() => {
-      this.animationFrameId = null
+    queueMicrotask(() => {
       const captchaKey = this.getCaptchaKey()
       if (this.destroyed || this.solver.isBusy || !captchaKey || captchaKey === this.lastCaptchaKey) {
         this.scheduledScan = false

@@ -150,6 +150,20 @@ describe('App', () => {
     expect(prepare).toHaveBeenCalledTimes(1)
   })
 
+  it('scans captcha mutations when animation frames are paused', async () => {
+    window.requestAnimationFrame = vi.fn(() => 1)
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    appendCaptcha()
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+
+    expect(prepare).toHaveBeenCalledTimes(1)
+  })
+
   it('waits for captcha content before marking it handled', async () => {
     const { App } = await import('../../src/app/app')
     const app = new App()

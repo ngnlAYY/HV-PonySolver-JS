@@ -33,9 +33,7 @@ export function renderStatusPanel(world: World, status: PanelStatus, records: Hi
   return [
     'HV-PonySolver',
     '运行: 本地 ONNX',
-    `模型: ${escapeHtml(status.model)}`,
-    `Session: ${escapeHtml(status.session)}`,
-    `识别: ${escapeHtml(status.inference)}`,
+    `当前状态：${escapeHtml(status.inference)}`,
     `当前处于<strong>${escapeHtml(worldName)}</strong>`,
     `${escapeHtml(worldName)}最近答题:`,
     rows,
