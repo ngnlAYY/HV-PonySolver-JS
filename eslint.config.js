@@ -5,7 +5,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', 'apps/model-worker/wrangler.toml'],
+    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', '.claude/worktrees/**', 'apps/model-worker/wrangler.toml'],
   },
   {
     files: ['**/*.mjs'],
