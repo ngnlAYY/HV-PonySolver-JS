@@ -1,6 +1,10 @@
 name: Verify Monorepo
 
 on:
+  pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       bundle_onnx_runtime:
@@ -25,7 +29,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Require bundled runtime for published userscript artifacts
-        if: ${{ inputs.publish_userscript_artifact && !inputs.bundle_onnx_runtime }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_userscript_artifact && !inputs.bundle_onnx_runtime }}
         run: |
           echo "Publishing userscript artifacts requires bundle_onnx_runtime=true" >&2
           exit 1
@@ -58,15 +62,18 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Coverage
+        run: pnpm test:coverage
+
       - name: Build
         run: pnpm build
 
       - name: Build bundled userscript
-        if: ${{ inputs.bundle_onnx_runtime }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_onnx_runtime }}
         run: pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 
       - name: Publish userscript artifact
-        if: ${{ inputs.publish_userscript_artifact }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_userscript_artifact }}
         uses: actions/upload-artifact@v4
         with:
           name: hv-pony-solver-userscript

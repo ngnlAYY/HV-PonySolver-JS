@@ -12,11 +12,11 @@ export async function handleRequest(request: Request, env: NormalizedEnv): Promi
   const url = new URL(request.url)
 
   if (url.pathname !== env.publicModelPath) {
-    return textResponse('Not Found', 404)
+    return textResponse(request, 'Not Found', 404)
   }
 
   if (!isModelMethod(request.method)) {
-    return textResponse('Method Not Allowed', 405, { allow: ALLOWED_METHODS })
+    return textResponse(request, 'Method Not Allowed', 405, { allow: ALLOWED_METHODS })
   }
 
   const decision = await selectModelAccess(request, env)

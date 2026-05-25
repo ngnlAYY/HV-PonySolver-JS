@@ -15,7 +15,8 @@ const shouldMinify = parseMinifyFlag(process.argv.slice(2))
 const metafilePath = process.env.HV_PONY_SOLVER_METAFILE_PATH
 const MAX_ONNX_RUNTIME_BYTES = 2 * 1024 * 1024
 const expectedOnnxRuntimeByteLength = Number(process.env.HV_PONY_SOLVER_ONNX_RUNTIME_BYTE_LENGTH || 360388)
-const expectedOnnxRuntimeSha256 = process.env.HV_PONY_SOLVER_ONNX_RUNTIME_SHA256 || 'ba5e52f4a87f823a700fa5eb916fd5946b970999e8e0518334b116f7b03bd53d'
+const expectedOnnxRuntimeSha256 =
+  process.env.HV_PONY_SOLVER_ONNX_RUNTIME_SHA256 || 'ba5e52f4a87f823a700fa5eb916fd5946b970999e8e0518334b116f7b03bd53d'
 const shouldBundleOnnxRuntime = process.env.HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME === '1'
 const workerRuntimeSourcePlaceholder = '__HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE_PLACEHOLDER__'
 const onnxRuntimeSource = shouldBundleOnnxRuntime ? await readOnnxRuntimeSource() : ''
@@ -39,20 +40,7 @@ const result = await build({
   },
 })
 
-const metadataSource = await readFile(metadataPath, 'utf8')
-const metadataMatch = metadataSource.match(/export\s+const\s+USERSCRIPT_METADATA\s*=\s*`([\s\S]*?)`/)
-if (!metadataMatch) {
-  throw new Error('Unable to read USERSCRIPT_METADATA template literal')
-}
-
-const metadata = metadataMatch[1]
-const metadataLines = metadata.split('\n')
-if (metadataLines[0] !== '// ==UserScript==') {
-  throw new Error('Userscript metadata must start with // ==UserScript==')
-}
-if (metadataLines[metadataLines.length - 1] !== '// ==/UserScript==') {
-  throw new Error('Userscript metadata must end with // ==/UserScript==')
-}
+const metadata = await readUserscriptMetadata()
 
 const outputFile = result.outputFiles[0]
 if (!outputFile) {
@@ -64,6 +52,27 @@ await writeFile(outputPath, `${metadata}\n\n${outputFile.text}`)
 if (metafilePath) {
   await mkdir(dirname(metafilePath), { recursive: true })
   await writeFile(metafilePath, JSON.stringify({ main: result.metafile, worker: workerBuild.metafile }, null, 2))
+}
+
+async function readUserscriptMetadata() {
+  const metadataSource = await readFile(metadataPath, 'utf8')
+  const metadataMatch = metadataSource.match(/export\s+const\s+USERSCRIPT_METADATA\s*=\s*`([\s\S]*?)`/)
+  if (!metadataMatch) {
+    throw new Error('Unable to read USERSCRIPT_METADATA template literal')
+  }
+  const metadata = metadataMatch[1]
+  validateUserscriptMetadata(metadata)
+  return metadata
+}
+
+function validateUserscriptMetadata(metadata) {
+  const metadataLines = metadata.split('\n')
+  if (metadataLines[0] !== '// ==UserScript==') {
+    throw new Error('Userscript metadata must start with // ==UserScript==')
+  }
+  if (metadataLines[metadataLines.length - 1] !== '// ==/UserScript==') {
+    throw new Error('Userscript metadata must end with // ==/UserScript==')
+  }
 }
 
 async function buildWorkerScript() {

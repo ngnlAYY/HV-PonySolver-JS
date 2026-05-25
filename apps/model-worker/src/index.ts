@@ -10,7 +10,7 @@ export default {
     try {
       return await handleRequest(request, normalizeEnv(env))
     } catch {
-      return textResponse('Internal Server Error', 500, { 'content-type': 'text/plain;charset=UTF-8' })
+      return textResponse(request, 'Internal Server Error', 500, { 'content-type': 'text/plain;charset=UTF-8' })
     }
   },
 } satisfies ExportedHandler<Env>

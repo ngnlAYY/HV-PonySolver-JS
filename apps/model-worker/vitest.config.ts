@@ -11,5 +11,15 @@ export default defineConfig({
   ],
   test: {
     include: ['test/**/*.test.ts'],
+    coverage: {
+      provider: 'istanbul',
+      reporter: ['text', 'lcov'],
+      thresholds: {
+        lines: 100,
+        functions: 100,
+        branches: 90,
+        statements: 100,
+      },
+    },
   },
 })

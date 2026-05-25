@@ -10,14 +10,17 @@
   "scripts": {
     "build": "corepack pnpm -r build",
     "test": "corepack pnpm -r test",
+    "test:coverage": "corepack pnpm -r test:coverage",
     "typecheck": "corepack pnpm -r typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build"
+    "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:coverage && corepack pnpm build"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/node": "^22.0.0",
+    "@vitest/coverage-istanbul": "4.1.6",
+    "@vitest/coverage-v8": "4.1.6",
     "eslint": "^9.39.1",
     "prettier": "^3.7.4",
     "typescript": "^5.9.3",

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const prepare = vi.fn(async () => ({} as Worker))
+const prepare = vi.fn(async () => ({}) as Worker)
 const detect = vi.fn()
 const destroyDetector = vi.fn()
 const getImageBlob = vi.fn()
@@ -8,6 +8,10 @@ const registerModelSettingsMenu = vi.fn()
 const modelDownload = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
 const modelPutCached = vi.fn(async () => undefined)
 const modelClose = vi.fn()
+const injectedPanelCreate = vi.fn()
+const injectedPanelDestroy = vi.fn()
+const injectedDetectorDestroy = vi.fn()
+const injectedModelClose = vi.fn()
 const apps: Array<{ destroy: () => void }> = []
 
 vi.mock('../../src/inference/onnx-worker-client', () => ({
@@ -78,6 +82,10 @@ describe('App', () => {
     detect.mockResolvedValue({ success: false, ponies: [], confidences: {}, detections: [] })
     modelDownload.mockResolvedValue(new Uint8Array([1, 2, 3]).buffer)
     modelPutCached.mockResolvedValue(undefined)
+    injectedPanelCreate.mockClear()
+    injectedPanelDestroy.mockClear()
+    injectedDetectorDestroy.mockClear()
+    injectedModelClose.mockClear()
     window.requestAnimationFrame = (callback: FrameRequestCallback): number => window.setTimeout(() => callback(0), 0)
     window.cancelAnimationFrame = (id: number): void => window.clearTimeout(id)
     apps.length = 0
@@ -99,6 +107,46 @@ describe('App', () => {
     app.init()
 
     expect(prepare).not.toHaveBeenCalled()
+  })
+
+  it('uses injected dependencies when provided', async () => {
+    const { App } = await import('../../src/app/app')
+    const app = new App({
+      panel: {
+        create: injectedPanelCreate,
+        destroy: injectedPanelDestroy,
+        setStatus: vi.fn(),
+        setSessionReady: vi.fn(),
+        addSuccess: vi.fn(),
+        addRandomFailure: vi.fn(),
+        addError: vi.fn(),
+      },
+      modelCache: {
+        download: modelDownload,
+        putCached: modelPutCached,
+        close: injectedModelClose,
+      },
+      detector: {
+        prepare,
+        destroy: injectedDetectorDestroy,
+        detect,
+      },
+      solver: {
+        get isBusy() {
+          return false
+        },
+        trigger: vi.fn(async () => ({ solved: false, captchaKey: null })),
+      },
+    })
+    apps.push(app)
+
+    app.init()
+    app.destroy()
+
+    expect(injectedPanelCreate).toHaveBeenCalledTimes(1)
+    expect(injectedDetectorDestroy).toHaveBeenCalledTimes(1)
+    expect(injectedModelClose).toHaveBeenCalledTimes(1)
+    expect(injectedPanelDestroy).toHaveBeenCalledTimes(1)
   })
 
   it('registers model settings menu during init', async () => {
@@ -224,7 +272,12 @@ describe('App', () => {
   })
 
   it('submits the form inside the captcha container when matching selectors exist outside it', async () => {
-    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }] })
+    detect.mockResolvedValueOnce({
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.9 },
+      detections: [{ class_id: 0, confidence: 0.9 }],
+    })
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
@@ -263,10 +316,17 @@ describe('App', () => {
 
   it('marks the captcha solved by the solver when content changes during prepare', async () => {
     let resolvePrepare: (() => void) | undefined
-    prepare.mockReturnValueOnce(new Promise<Worker>((resolve) => {
-      resolvePrepare = () => resolve({} as Worker)
-    }))
-    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }] })
+    prepare.mockReturnValueOnce(
+      new Promise<Worker>((resolve) => {
+        resolvePrepare = () => resolve({} as Worker)
+      }),
+    )
+    detect.mockResolvedValueOnce({
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.9 },
+      detections: [{ class_id: 0, confidence: 0.9 }],
+    })
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)

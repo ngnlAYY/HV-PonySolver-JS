@@ -4,6 +4,7 @@ import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 
 import worker, { type Env, type ModelBucket, type ModelKeyStore } from '../src/index'
+import { addCorsHeaders } from '../src/model-response'
 
 type StoredObject = Readonly<{
   body: string
@@ -146,10 +147,12 @@ function createModelFixture(): ModelFixture {
 }
 
 function createEnv(fixture: ModelFixture, options: EnvOptions = {}): Env {
-  const objects = options.objects ?? new Map<string, StoredObject>([
-    [fixture.realModelObjectKey, { body: fixture.realBody, etag: fixture.realEtag }],
-    [fixture.decoyModelObjectKey, { body: fixture.decoyBody, etag: fixture.decoyEtag }],
-  ])
+  const objects =
+    options.objects ??
+    new Map<string, StoredObject>([
+      [fixture.realModelObjectKey, { body: fixture.realBody, etag: fixture.realEtag }],
+      [fixture.decoyModelObjectKey, { body: fixture.decoyBody, etag: fixture.decoyEtag }],
+    ])
 
   const env: Env = {
     MODEL_KEYS: new MockKvNamespace(options.keyValues),
@@ -222,7 +225,7 @@ describe('model worker', () => {
     expect(response.headers.get('etag')).toBe(fixture.realEtag)
   })
 
-  it('allows model downloads without an Origin header', async () => {
+  it('returns wildcard CORS without Origin header and does not set Vary', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {
       keyValues: new Map<string, string>([[fixture.validKey, '1']]),
@@ -232,9 +235,10 @@ describe('model worker', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('vary')).toBeNull()
   })
 
-  it('allows model downloads from hentaiverse origins', async () => {
+  it('echoes hentaiverse origin and sets Vary for model downloads', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {
       keyValues: new Map<string, string>([[fixture.validKey, '1']]),
@@ -246,10 +250,24 @@ describe('model worker', () => {
     )
 
     expect(response.status).toBe(200)
-    expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('access-control-allow-origin')).toBe(HENTAIVERSE_ORIGIN)
+    expect(response.headers.get('vary')).toBe('Origin')
   })
 
-  it('allows model downloads from alt hentaiverse origins', async () => {
+  it('preserves existing Vary values when adding Origin', () => {
+    const headers = new Headers({ vary: 'Accept-Encoding' })
+
+    addCorsHeaders(
+      headers,
+      new Request('https://models.example/model.onnx', {
+        headers: { origin: HENTAIVERSE_ORIGIN },
+      }),
+    )
+
+    expect(headers.get('vary')).toBe('Accept-Encoding, Origin')
+  })
+
+  it('echoes alt hentaiverse origin and sets Vary for model downloads', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {
       keyValues: new Map<string, string>([[fixture.validKey, '1']]),
@@ -261,7 +279,24 @@ describe('model worker', () => {
     )
 
     expect(response.status).toBe(200)
-    expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('access-control-allow-origin')).toBe(ALT_HENTAIVERSE_ORIGIN)
+    expect(response.headers.get('vary')).toBe('Origin')
+  })
+
+  it('does not allow unknown origin and still sets Vary for model downloads', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+    })
+
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey, { origin: 'https://evil.example' }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('access-control-allow-origin')).toBeNull()
+    expect(response.headers.get('vary')).toBe('Origin')
   })
 
   it('returns the decoy model when key is missing', async () => {
@@ -303,15 +338,29 @@ describe('model worker', () => {
     expect(await readResponseBody(response)).toBe(fixture.decoyBody)
   })
 
-  it('returns 403 with CORS when authorized KV key is missing and INVALID_KEY_MODE is error', async () => {
+  it('returns 403 with trusted-origin CORS when authorized KV key is missing and INVALID_KEY_MODE is error', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey),
+      modelRequest(fixture, 'GET', fixture.validKey, { origin: HENTAIVERSE_ORIGIN }),
       createEnv(fixture, { invalidKeyMode: 'error' }),
     )
 
     expect(response.status).toBe(403)
-    expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('access-control-allow-origin')).toBe(HENTAIVERSE_ORIGIN)
+    expect(response.headers.get('vary')).toBe('Origin')
+    expect(await response.text()).toBe('Forbidden')
+  })
+
+  it('returns 403 without CORS access for untrusted origins when INVALID_KEY_MODE is error', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey, { origin: 'https://evil.example' }),
+      createEnv(fixture, { invalidKeyMode: 'error' }),
+    )
+
+    expect(response.status).toBe(403)
+    expect(response.headers.get('access-control-allow-origin')).toBeNull()
+    expect(response.headers.get('vary')).toBe('Origin')
     expect(await response.text()).toBe('Forbidden')
   })
 
@@ -366,9 +415,7 @@ describe('model worker', () => {
       modelRequest(fixture, 'GET', fixture.validKey),
       createEnv(fixture, {
         keyValues: new Map<string, string>([[fixture.validKey, '1']]),
-        objects: new Map<string, StoredObject>([
-          [fixture.decoyModelObjectKey, { body: fixture.decoyBody }],
-        ]),
+        objects: new Map<string, StoredObject>([[fixture.decoyModelObjectKey, { body: fixture.decoyBody }]]),
       }),
     )
 

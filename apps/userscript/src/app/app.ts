@@ -1,36 +1,28 @@
-import { OnnxWorkerClient } from '../inference/onnx-worker-client'
-import { getBundledOnnxRuntimeSource } from '../inference/onnx-runtime-source'
-import { AnswerSubmitter } from '../captcha/answer-submitter'
-import { CachedImageLoader } from '../captcha/captcha-image-loader'
-import { CaptchaSolver } from '../captcha/captcha-solver'
-import { findCaptchaTarget } from '../captcha/captcha-target'
 import { captchaSelectors } from '../captcha/captcha-selectors'
-import { HistoryStore } from '../persistence/answer-history-store'
-import { ModelCache } from '../model/model-cache'
+import { findCaptchaTarget } from '../captcha/captcha-target'
 import { registerModelSettingsMenu } from '../model/model-settings'
 import { registerPanelSettingsMenu } from '../status-panel/panel-settings'
-import { StatusPanel } from '../status-panel/status-panel'
 import { formatErrorMessage } from '../utils/errors'
 import { log, warn } from '../utils/logger'
+import { createAppDependencies, type AppDependencies } from './app-dependencies'
 
 export class App {
-  private readonly history = new HistoryStore()
-  private readonly panel = new StatusPanel(this.history)
-  private readonly modelCache = new ModelCache(this.panel)
-  private readonly bundledRuntimeSource = getBundledOnnxRuntimeSource()
-  private readonly detector = new OnnxWorkerClient(
-    this.modelCache,
-    this.panel,
-    this.bundledRuntimeSource ? { bundledRuntimeSource: this.bundledRuntimeSource } : {},
-  )
-  private readonly imageLoader = new CachedImageLoader()
-  private readonly answerSubmitter = new AnswerSubmitter()
-  private readonly solver = new CaptchaSolver(this.panel, this.detector, this.imageLoader, this.answerSubmitter)
+  private readonly panel: AppDependencies['panel']
+  private readonly modelCache: AppDependencies['modelCache']
+  private readonly detector: AppDependencies['detector']
+  private readonly solver: AppDependencies['solver']
   private observer: MutationObserver | null = null
   private scheduledScan = false
   private lastCaptchaKey: string | null = null
   private destroyed = false
   private modelSettingsMenuRegistered = false
+
+  constructor(dependencies: AppDependencies = createAppDependencies()) {
+    this.panel = dependencies.panel
+    this.modelCache = dependencies.modelCache
+    this.detector = dependencies.detector
+    this.solver = dependencies.solver
+  }
 
   init(): void {
     this.destroyed = false
@@ -91,7 +83,8 @@ export class App {
         return
       }
       log('检测到验证码')
-      this.detector.prepare()
+      this.detector
+        .prepare()
         .then(() => {
           this.scheduledScan = false
           if (!this.destroyed) {
@@ -112,5 +105,4 @@ export class App {
         })
     })
   }
-
 }

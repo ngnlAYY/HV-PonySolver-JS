@@ -33,7 +33,7 @@ describe('config defaults', () => {
     expect(modelConfig.cacheName).toBe('pony-solver-local')
     expect(modelConfig.cacheKey).toBe('yolo26n-640.onnx')
     expect(modelConfig.version).toBe('yolo26n-640-2026-05-14')
-    expect(modelConfig.verifyIntegrity).toBe(false)
+    expect(modelConfig.verifyIntegrity).toBe(true)
     expect(inferenceConfig.ortScriptUrl).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js')
     expect(inferenceConfig.ortWasmPath).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/')
     expect(inferenceConfig.workerRequestTimeoutMs).toBe(30000)
