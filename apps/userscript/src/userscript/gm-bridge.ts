@@ -46,6 +46,13 @@ export async function getGmValue(key: string, defaultValue = ''): Promise<string
 }
 
 export function getGmValueSync(key: string, defaultValue = ''): string {
+  const userscriptGlobal = getUserscriptGlobal()
+  if (typeof userscriptGlobal.GM_getValue === 'function') {
+    const value = userscriptGlobal.GM_getValue(key, defaultValue)
+    if (typeof value === 'string') {
+      return value.trim()
+    }
+  }
   return (safeStorage.getItem(key) ?? defaultValue).trim()
 }
 

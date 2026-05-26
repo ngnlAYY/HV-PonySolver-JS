@@ -40,6 +40,15 @@ describe('gm-bridge', () => {
     expect(getGmValueSync('key')).toBe('value')
   })
 
+  it('reads from synchronous GM_getValue in the sync path when it is available', async () => {
+    const gmGetValue = vi.fn(() => '  enabled  ')
+    testGlobal.GM_getValue = gmGetValue
+    const { getGmValueSync } = await import('../../src/userscript/gm-bridge')
+
+    expect(getGmValueSync('key', 'fallback')).toBe('enabled')
+    expect(gmGetValue).toHaveBeenCalledWith('key', 'fallback')
+  })
+
   it('returns null when safeStorage.getItem catches localStorage errors', async () => {
     const { safeStorage } = await import('../../src/userscript/gm-bridge')
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {

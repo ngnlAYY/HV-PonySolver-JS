@@ -51,6 +51,18 @@ Worker 读取 `key` query 参数并做 token 校验：
 
 Model access tokens are 64-character hexadecimal strings stored as KV keys. They authorize model distribution but are still visible to users who install a userscript containing or storing the token. Treat tokens as revocable access grants, not as permanent secrets. Rotate tokens if they appear in logs, screenshots, support messages, or public builds.
 
+## Decoy 模型策略
+
+`INVALID_KEY_MODE=decoy` 时，无效或未授权 key 会收到 decoy R2 对象，而不是 `403`。这个策略用于避免从 HTTP 状态直接暴露 key 是否有效。
+
+userscript 仍会按 `packages/shared/src/model.ts` 中的 `MODEL_INTEGRITY` 校验下载内容。推荐 decoy 对象不要匹配真实模型的 byteLength 与 SHA-256；这样未授权下载即使返回 `200`，也会在 userscript 侧被完整性校验阻断。
+
+如果需要更直接的错误语义，可将 `INVALID_KEY_MODE` 设置为 `error`，此时无效 key 返回 `403 Forbidden`。
+
+## 部署 guard
+
+`render-config` 在 `HV_PONY_SOLVER_RENDER_ENV=production` 或 `deploy` 时会拒绝 `test-kv` / `test-bucket` 占位值。`pnpm --filter @hv-pony-solver/model-worker run deploy` 会自动以 `deploy` 模式渲染配置，并在执行 `wrangler deploy` 前校验生成的 `wrangler.toml` 不含测试占位值，避免部署时误用测试资源。
+
 ## 本地验证示例
 
 ```bash

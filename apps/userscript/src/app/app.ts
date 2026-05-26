@@ -2,6 +2,7 @@ import { captchaSelectors } from '../captcha/captcha-selectors'
 import { findCaptchaTarget } from '../captcha/captcha-target'
 import { registerModelSettingsMenu } from '../model/model-settings'
 import { registerPanelSettingsMenu } from '../status-panel/panel-settings'
+import { registerDebugSettingsMenu } from '../userscript/debug-settings'
 import { formatErrorMessage } from '../utils/errors'
 import { log, warn } from '../utils/logger'
 import { createAppDependencies, type AppDependencies } from './app-dependencies'
@@ -34,6 +35,7 @@ export class App {
     if (!this.modelSettingsMenuRegistered) {
       registerModelSettingsMenu(() => this.verifyConfiguredModelKey())
       registerPanelSettingsMenu()
+      registerDebugSettingsMenu()
       this.modelSettingsMenuRegistered = true
     }
     if (document.querySelector(captchaSelectors.master)) {
@@ -68,12 +70,9 @@ export class App {
     const captchaMaster = document.getElementById('riddlemaster')
     for (const record of records) {
       const target = record.target
-      // target 是 #riddlemaster 或其后代
       if (captchaMaster && (target === captchaMaster || captchaMaster.contains(target as Node))) {
         return true
       }
-      // addedNodes / removedNodes 中是否包含 #riddlemaster 本身或其容器
-      // 这同时覆盖了 captcha 初次插入的情形（captchaMaster 尚为 null）
       for (const node of [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)]) {
         if (!(node instanceof Element)) {
           continue
@@ -91,10 +90,7 @@ export class App {
       return
     }
     this.observer = new MutationObserver((records) => {
-      if (!this.isCaptchaRelatedMutation(records)) {
-        return
-      }
-      if (this.observerTimeoutId !== null) {
+      if (!this.isCaptchaRelatedMutation(records) || this.observerTimeoutId !== null) {
         return
       }
       this.observerTimeoutId = setTimeout(() => {

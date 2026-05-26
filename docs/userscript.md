@@ -51,11 +51,19 @@ Prefer GM storage for userscript settings when available. localStorage fallback 
 
 The current model is about 9.8 MB. The downloader reads streamed chunks and combines them into one `ArrayBuffer`; this is acceptable for the current model size. If future models grow significantly, update the downloader to preallocate from `Content-Length` and write chunks directly into a single `Uint8Array` to reduce peak memory.
 
+## 调试日志
+
+userscript 菜单提供 `开启调试日志` 与 `关闭调试日志`。开启后，脚本会在浏览器 console 输出带 `[PonySolverLocal]` 前缀的调试日志。默认关闭，不会输出普通调试日志；警告和错误仍会输出，便于排障。
+
+调试开关存储在 `hvPonySolverDebug`，优先使用 GM storage，回退到 localStorage。不要在调试日志、截图或支持消息中粘贴完整模型 access key 或带 `?key=` 的模型 URL。
+
 ## 构建
 
 ```bash
 corepack pnpm --filter @hv-pony-solver/userscript build
 ```
+
+构建脚本的测试会检查 bundle budget：main bundle 目标小于 80KB，worker bundle 目标小于 20KB。
 
 可选压缩构建：
 

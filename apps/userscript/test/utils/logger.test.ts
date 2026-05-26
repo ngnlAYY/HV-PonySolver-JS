@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('../../src/userscript/debug-settings', () => ({
+  isDebugEnabled: vi.fn(() => false),
+}))
+
+import { isDebugEnabled } from '../../src/userscript/debug-settings'
 import { log, logError, warn } from '../../src/utils/logger'
 
 describe('logger', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
-    localStorage.clear()
+    vi.mocked(isDebugEnabled).mockReturnValue(false)
   })
 
   it('keeps debug logs disabled by default', () => {
@@ -16,9 +21,9 @@ describe('logger', () => {
     expect(consoleLog).not.toHaveBeenCalled()
   })
 
-  it('enables debug logs through localStorage', () => {
+  it('enables debug logs when debug setting is enabled', () => {
     const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => undefined)
-    localStorage.setItem('hvPonySolverDebug', '1')
+    vi.mocked(isDebugEnabled).mockReturnValue(true)
 
     log('visible')
 

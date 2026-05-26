@@ -1,14 +1,10 @@
-import type { DetectorService, WorkerMessage, WorkerRequest, WorkerResponse, YoloParseResult } from './inference-types'
+import type { DetectorService, WorkerRequest, WorkerResponse, YoloParseResult } from './inference-types'
+import { createBlobWorker } from './blob-worker'
 import { inferenceConfig } from './inference-config'
 import { ModelCache } from '../model/model-cache'
 import { createOnnxWorkerScript } from './onnx-worker-script'
+import { WorkerRequestBridge } from './worker-request-bridge'
 import type { StatusPanel } from '../status-panel/status-panel-types'
-
-type PendingRequest = Readonly<{
-  resolve: (message: WorkerMessage) => void
-  reject: (error: unknown) => void
-  timeoutId: ReturnType<typeof setTimeout>
-}>
 
 type OnnxWorkerClientOptions = Readonly<{
   bundledRuntimeSource?: string
@@ -16,10 +12,9 @@ type OnnxWorkerClientOptions = Readonly<{
 
 export class OnnxWorkerClient implements DetectorService {
   private worker: Worker | null = null
+  private requestBridge: WorkerRequestBridge | null = null
   private preparePromise: Promise<Worker> | null = null
-  private readonly requests = new Map<number, PendingRequest>()
   private detectQueue = Promise.resolve()
-  private nextRequestId = 1
   private ready = false
   private destroyed = false
   private prepareAbortController: AbortController | null = null
@@ -109,6 +104,9 @@ export class OnnxWorkerClient implements DetectorService {
       this.panel.setSessionReady(Date.now() - startedAt)
       return worker
     } catch (error) {
+      this.worker?.terminate()
+      this.worker = null
+      this.ready = false
       this.clearPrepareAbortController(abortController)
       if (this.destroyed || abortController.signal.aborted) {
         throw new Error('Worker 已关闭')
@@ -135,20 +133,9 @@ export class OnnxWorkerClient implements DetectorService {
   }
 
   private spawnWorker(): Worker {
-    if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL !== 'function' || typeof URL.createObjectURL !== 'function') {
-      throw new Error('当前环境不支持 Web Worker')
-    }
-
     const workerScript = createOnnxWorkerScript(this.options.bundledRuntimeSource)
-    const workerBlob = new Blob([workerScript], { type: 'text/javascript' })
-    const workerUrl = URL.createObjectURL(workerBlob)
-    let worker: Worker
-    try {
-      worker = new Worker(workerUrl)
-    } finally {
-      URL.revokeObjectURL(workerUrl)
-    }
-    worker.onmessage = (event: MessageEvent<WorkerMessage>) => this.handleMessage(event)
+    const worker = createBlobWorker(workerScript)
+    this.requestBridge = new WorkerRequestBridge(worker, (error) => this.failWorker(error))
     worker.onerror = (event) => this.failWorker(event.error || new Error(event.message || 'Worker 运行错误'))
     worker.onmessageerror = () => this.failWorker(new Error('Worker message 解析失败'))
     return worker
@@ -183,52 +170,10 @@ export class OnnxWorkerClient implements DetectorService {
   }
 
   private post(message: WorkerRequest, transfer: Transferable[] = []): Promise<WorkerResponse> {
-    const worker = this.worker
-    if (!worker) {
+    if (!this.requestBridge) {
       return Promise.reject(new Error('ONNX Worker 尚未创建'))
     }
-    const requestId = this.nextRequestId
-    this.nextRequestId += 1
-    return new Promise<WorkerMessage>((resolve, reject) => {
-      const timeoutMs = message.type === 'init'
-        ? inferenceConfig.workerInitTimeoutMs
-        : inferenceConfig.workerDetectTimeoutMs
-      const timeoutId = setTimeout(() => {
-        this.failWorker(new Error('ONNX Worker 请求超时'))
-      }, timeoutMs)
-      this.requests.set(requestId, { resolve, reject, timeoutId })
-      try {
-        worker.postMessage({ ...message, requestId }, transfer)
-      } catch (error) {
-        clearTimeout(timeoutId)
-        this.requests.delete(requestId)
-        reject(error)
-      }
-    }).then((response) => {
-      if (response.type === 'error') {
-        throw new Error(response.message || 'ONNX Worker 错误')
-      }
-      return response
-    })
-  }
-
-  private handleMessage(event: MessageEvent<WorkerMessage>): void {
-    const message = event.data || {}
-    const requestId = message.requestId
-    if (typeof requestId !== 'number' || !this.requests.has(requestId)) {
-      return
-    }
-    const pending = this.requests.get(requestId)
-    if (!pending) {
-      return
-    }
-    this.requests.delete(requestId)
-    clearTimeout(pending.timeoutId)
-    if (message.type === 'error') {
-      pending.reject(new Error(message.message || 'ONNX Worker 错误'))
-      return
-    }
-    pending.resolve(message)
+    return this.requestBridge.post(message, transfer)
   }
 
   private failWorker(error: unknown): void {
@@ -243,10 +188,7 @@ export class OnnxWorkerClient implements DetectorService {
   }
 
   private rejectPending(error: unknown): void {
-    for (const pending of this.requests.values()) {
-      clearTimeout(pending.timeoutId)
-      pending.reject(error)
-    }
-    this.requests.clear()
+    this.requestBridge?.rejectPending(error)
+    this.requestBridge = null
   }
 }

@@ -1,3 +1,4 @@
+import { calculateLetterboxLayout, copyRgbaToChwFloat32 } from './image-preprocess'
 import { parseYoloOutput } from './yolo-output-parser'
 
 declare const __HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE__: string | undefined
@@ -83,23 +84,15 @@ async function preprocessImage(imageBlob: Blob, size: number): Promise<Float32Ar
     const context = ensurePreprocessResources(size)
     context.fillStyle = 'rgb(114, 114, 114)'
     context.fillRect(0, 0, size, size)
-    const scale = Math.min(size / bitmap.height, size / bitmap.width)
-    const newHeight = Math.max(1, Math.trunc(bitmap.height * scale))
-    const newWidth = Math.max(1, Math.trunc(bitmap.width * scale))
-    const yOffset = Math.trunc((size - newHeight) / 2)
-    const xOffset = Math.trunc((size - newWidth) / 2)
-    context.drawImage(bitmap, xOffset, yOffset, newWidth, newHeight)
+    const layout = calculateLetterboxLayout(bitmap.width, bitmap.height, size)
+    context.drawImage(bitmap, layout.x, layout.y, layout.width, layout.height)
     const imageData = context.getImageData(0, 0, size, size).data
     const plane = size * size
     if (!preprocessInput || preprocessInput.length !== plane * 3) {
       preprocessInput = new Float32Array(plane * 3)
     }
     const input = preprocessInput
-    for (let index = 0, offset = 0; index < plane; index += 1, offset += 4) {
-      input[index] = (imageData[offset] ?? 0) / 255
-      input[plane + index] = (imageData[offset + 1] ?? 0) / 255
-      input[plane * 2 + index] = (imageData[offset + 2] ?? 0) / 255
-    }
+    copyRgbaToChwFloat32(imageData, input, plane)
     return input
   } finally {
     bitmap.close()

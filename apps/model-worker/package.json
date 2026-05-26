@@ -8,9 +8,9 @@
     "dev": "pnpm render-config && wrangler dev",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/render-wrangler-config.test.mjs",
     "test:coverage": "vitest run --coverage",
-    "deploy": "pnpm render-config && wrangler deploy"
+    "deploy": "HV_PONY_SOLVER_RENDER_ENV=deploy pnpm render-config && node scripts/validate-wrangler-config.mjs && wrangler deploy"
   },
   "dependencies": {
     "@hv-pony-solver/shared": "workspace:*"
