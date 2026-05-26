@@ -83,7 +83,7 @@ describe('readCachedModelBuffer', () => {
       byteLength: TEST_INTEGRITY.byteLength,
       sha256: TEST_INTEGRITY.sha256,
       buffer,
-    }, TEST_INTEGRITY))
+    }, { integrity: TEST_INTEGRITY }))
       .resolves.toBe(buffer)
   })
 
@@ -94,7 +94,7 @@ describe('readCachedModelBuffer', () => {
       byteLength: 1,
       sha256: TEST_INTEGRITY.sha256,
       buffer: bufferFromBytes([9]),
-    }, TEST_INTEGRITY))
+    }, { integrity: TEST_INTEGRITY }))
       .resolves.toBeNull()
   })
 
@@ -105,7 +105,7 @@ describe('readCachedModelBuffer', () => {
       byteLength: TEST_INTEGRITY.byteLength,
       sha256: TEST_INTEGRITY.sha256,
       buffer: bufferFromBytes([9, 9, 9]),
-    }, TEST_INTEGRITY))
+    }, { integrity: TEST_INTEGRITY }))
       .resolves.toBeNull()
   })
 
@@ -118,7 +118,7 @@ describe('readCachedModelBuffer', () => {
       byteLength: 1,
       sha256: '0000000000000000000000000000000000000000000000000000000000000000',
       buffer,
-    }, TEST_INTEGRITY, false))
+    }, { integrity: TEST_INTEGRITY, verifyIntegrity: false }))
       .resolves.toBe(buffer)
   })
 })
@@ -145,7 +145,7 @@ describe('ModelCache', () => {
 
 describe('createCachedModelRow', () => {
   it('creates cache rows only for buffers that pass integrity verification by default', async () => {
-    await expect(createCachedModelRow(bufferFromBytes([1, 2, 3]), TEST_INTEGRITY))
+    await expect(createCachedModelRow(bufferFromBytes([1, 2, 3]), { integrity: TEST_INTEGRITY }))
       .resolves.toMatchObject({
         key: modelConfig.cacheKey,
         version: modelConfig.version,
@@ -155,12 +155,12 @@ describe('createCachedModelRow', () => {
   })
 
   it('rejects cache rows for buffers with unexpected integrity by default', async () => {
-    await expect(createCachedModelRow(bufferFromBytes([9, 9, 9]), TEST_INTEGRITY))
+    await expect(createCachedModelRow(bufferFromBytes([9, 9, 9]), { integrity: TEST_INTEGRITY }))
       .rejects.toThrow('缓存写入模型 SHA-256 校验失败')
   })
 
   it('creates cache rows without integrity checks when explicitly disabled', async () => {
-    await expect(createCachedModelRow(bufferFromBytes([9, 9, 9]), TEST_INTEGRITY, false))
+    await expect(createCachedModelRow(bufferFromBytes([9, 9, 9]), { integrity: TEST_INTEGRITY, verifyIntegrity: false }))
       .resolves.toMatchObject({
         key: modelConfig.cacheKey,
         version: modelConfig.version,

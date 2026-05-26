@@ -85,24 +85,60 @@ export class OnnxWorkerClient implements DetectorService {
   }
 
   private async createWorker(): Promise<Worker> {
-    if (this.destroyed) {
+    const startedAt = Date.now()
+    const abortController = new AbortController()
+    this.prepareAbortController = abortController
+    this.panel.setStatus({ session: '初始化中' })
+
+    try {
+      this.checkAbort(abortController)
+      const { modelBuffer, cacheBuffer } = await this.loadModelBuffer(abortController)
+      this.checkAbort(abortController)
+      const worker = this.spawnWorker()
+      this.worker = worker
+      this.ready = false
+      await this.initWorkerSession(worker, abortController, modelBuffer)
+      this.checkAbort(abortController)
+      if (cacheBuffer) {
+        await this.modelCache.putCached(cacheBuffer)
+      }
+      this.checkAbort(abortController)
+      this.ready = true
+      this.preparePromise = null
+      this.clearPrepareAbortController(abortController)
+      this.panel.setSessionReady(Date.now() - startedAt)
+      return worker
+    } catch (error) {
+      this.clearPrepareAbortController(abortController)
+      if (this.destroyed || abortController.signal.aborted) {
+        throw new Error('Worker 已关闭')
+      }
+      throw error
+    }
+  }
+
+  private checkAbort(abortController: AbortController): void {
+    if (this.destroyed || abortController.signal.aborted) {
+      this.worker?.terminate()
+      this.worker = null
       throw new Error('Worker 已关闭')
     }
-    const startedAt = Date.now()
+  }
+
+  private async loadModelBuffer(abortController: AbortController): Promise<{ modelBuffer: ArrayBuffer, cacheBuffer: ArrayBuffer | null }> {
+    const cachedModel = await this.modelCache.getCached()
+    const modelBuffer = cachedModel ?? await this.modelCache.download(abortController.signal)
+    return {
+      modelBuffer,
+      cacheBuffer: cachedModel ? null : modelBuffer.slice(0),
+    }
+  }
+
+  private spawnWorker(): Worker {
     if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL !== 'function' || typeof URL.createObjectURL !== 'function') {
       throw new Error('当前环境不支持 Web Worker')
     }
 
-    const abortController = new AbortController()
-    this.prepareAbortController = abortController
-    this.panel.setStatus({ session: '初始化中' })
-    const cachedModel = await this.modelCache.getCached()
-    const modelBuffer = cachedModel ?? await this.modelCache.download(abortController.signal)
-    const cacheBuffer = cachedModel ? null : modelBuffer.slice(0)
-    const shouldCacheModel = cacheBuffer !== null
-    if (this.destroyed || abortController.signal.aborted) {
-      throw new Error('Worker 已关闭')
-    }
     const workerScript = createOnnxWorkerScript(this.options.bundledRuntimeSource)
     const workerBlob = new Blob([workerScript], { type: 'text/javascript' })
     const workerUrl = URL.createObjectURL(workerBlob)
@@ -112,28 +148,15 @@ export class OnnxWorkerClient implements DetectorService {
     } finally {
       URL.revokeObjectURL(workerUrl)
     }
-
-    this.worker = worker
-    this.ready = false
-    if (this.destroyed || abortController.signal.aborted) {
-      worker.terminate()
-      if (this.worker === worker) {
-        this.worker = null
-      }
-      throw new Error('Worker 已关闭')
-    }
     worker.onmessage = (event: MessageEvent<WorkerMessage>) => this.handleMessage(event)
-    worker.onerror = (event) => {
-      this.failWorker(event.error || new Error(event.message || 'Worker 运行错误'))
-    }
-    worker.onmessageerror = () => {
-      this.failWorker(new Error('Worker message 解析失败'))
-    }
+    worker.onerror = (event) => this.failWorker(event.error || new Error(event.message || 'Worker 运行错误'))
+    worker.onmessageerror = () => this.failWorker(new Error('Worker message 解析失败'))
+    return worker
+  }
 
+  private async initWorkerSession(worker: Worker, abortController: AbortController, modelBuffer: ArrayBuffer): Promise<void> {
     try {
-      if (this.destroyed || abortController.signal.aborted) {
-        throw new Error('Worker 已关闭')
-      }
+      this.checkAbort(abortController)
       await this.post(
         {
           type: 'init',
@@ -143,40 +166,20 @@ export class OnnxWorkerClient implements DetectorService {
         },
         [modelBuffer],
       )
-      if (this.destroyed || abortController.signal.aborted) {
-        throw new Error('Worker 已关闭')
-      }
-      if (shouldCacheModel) {
-        await this.modelCache.putCached(cacheBuffer)
-      }
-      if (this.destroyed || abortController.signal.aborted) {
-        throw new Error('Worker 已关闭')
-      }
-      if (this.prepareAbortController === abortController) {
-        this.prepareAbortController = null
-      }
     } catch (error) {
       worker.terminate()
       if (this.worker === worker) {
         this.worker = null
       }
       this.ready = false
-      if (this.prepareAbortController === abortController) {
-        this.prepareAbortController = null
-      }
-      if (this.destroyed || abortController.signal.aborted) {
-        throw new Error('Worker 已关闭')
-      }
       throw error
     }
+  }
 
-    this.ready = true
-    this.preparePromise = null
+  private clearPrepareAbortController(abortController: AbortController): void {
     if (this.prepareAbortController === abortController) {
       this.prepareAbortController = null
     }
-    this.panel.setSessionReady(Date.now() - startedAt)
-    return worker
   }
 
   private post(message: WorkerRequest, transfer: Transferable[] = []): Promise<WorkerResponse> {
@@ -187,9 +190,12 @@ export class OnnxWorkerClient implements DetectorService {
     const requestId = this.nextRequestId
     this.nextRequestId += 1
     return new Promise<WorkerMessage>((resolve, reject) => {
+      const timeoutMs = message.type === 'init'
+        ? inferenceConfig.workerInitTimeoutMs
+        : inferenceConfig.workerDetectTimeoutMs
       const timeoutId = setTimeout(() => {
         this.failWorker(new Error('ONNX Worker 请求超时'))
-      }, inferenceConfig.workerRequestTimeoutMs)
+      }, timeoutMs)
       this.requests.set(requestId, { resolve, reject, timeoutId })
       try {
         worker.postMessage({ ...message, requestId }, transfer)

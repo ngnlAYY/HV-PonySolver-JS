@@ -5,6 +5,7 @@ export const inferenceConfig = {
   maxKinds: 3,
   ortScriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js',
   ortWasmPath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/',
-  workerRequestTimeoutMs: 30000,
+  workerInitTimeoutMs: 60000,
+  workerDetectTimeoutMs: 30000,
   modelDownloadTimeoutMs: 30000,
 } as const

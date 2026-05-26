@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { inferenceConfig } from '../../src/inference/inference-config'
 import { OnnxWorkerClient } from '../../src/inference/onnx-worker-client'
 import type { ModelCache } from '../../src/model/model-cache'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
@@ -233,6 +234,33 @@ describe('OnnxWorkerClient', () => {
     await expect(preparePromise).rejects.toThrow('Worker 已关闭')
     expect(modelCache.putCached).not.toHaveBeenCalled()
     expect(panel.setSessionReady).not.toHaveBeenCalled()
+  })
+
+  it('uses separate timeout durations for init and detect requests', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    vi.useFakeTimers()
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    const modelCache = {
+      getCached: vi.fn(async () => modelBuffer),
+      download: vi.fn(async () => modelBuffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createPanel())
+
+    const preparePromise = client.prepare()
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+    expect(setTimeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), inferenceConfig.workerInitTimeoutMs)
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+    await preparePromise
+
+    const detectPromise = client.detect({} as Blob)
+    await vi.waitFor(() => expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1))
+    expect(setTimeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), inferenceConfig.workerDetectTimeoutMs)
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[1]?.requestId)
+    await detectPromise
+    vi.useRealTimers()
   })
 
   it('does not mark ready when destroyed while caching the downloaded model', async () => {

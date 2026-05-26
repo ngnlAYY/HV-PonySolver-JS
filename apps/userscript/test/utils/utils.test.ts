@@ -36,7 +36,8 @@ describe('config defaults', () => {
     expect(modelConfig.verifyIntegrity).toBe(true)
     expect(inferenceConfig.ortScriptUrl).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js')
     expect(inferenceConfig.ortWasmPath).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/')
-    expect(inferenceConfig.workerRequestTimeoutMs).toBe(30000)
+    expect(inferenceConfig.workerInitTimeoutMs).toBe(60000)
+    expect(inferenceConfig.workerDetectTimeoutMs).toBe(30000)
   })
 })
 

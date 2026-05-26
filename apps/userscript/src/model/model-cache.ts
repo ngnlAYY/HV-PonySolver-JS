@@ -3,11 +3,19 @@ import { formatErrorMessage } from '../utils/errors'
 import { isRecordObject } from '../utils/guards'
 import { warn } from '../utils/logger'
 import { modelConfig } from './model-config'
-import { downloadModel } from './model-downloader'
-import type { ModelIntegrity } from './model-integrity'
+import { downloadModel, type ModelIntegrityOptions } from './model-downloader'
 import { verifyModelIntegrity } from './model-integrity'
 
-export async function createCachedModelRow(buffer: ArrayBuffer, integrity: ModelIntegrity = modelConfig.integrity, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<Record<string, unknown>> {
+function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): Required<ModelIntegrityOptions> {
+  return {
+    integrity: options.integrity ?? modelConfig.integrity,
+    verifyIntegrity: options.forceVerifyIntegrity ? true : (options.verifyIntegrity ?? modelConfig.verifyIntegrity),
+    forceVerifyIntegrity: options.forceVerifyIntegrity ?? false,
+  }
+}
+
+export async function createCachedModelRow(buffer: ArrayBuffer, options: ModelIntegrityOptions = {}): Promise<Record<string, unknown>> {
+  const { integrity, verifyIntegrity } = resolveIntegrityOptions(options)
   if (verifyIntegrity) {
     await verifyModelIntegrity(buffer, integrity, '缓存写入模型')
   }
@@ -21,7 +29,8 @@ export async function createCachedModelRow(buffer: ArrayBuffer, integrity: Model
   }
 }
 
-export async function readCachedModelBuffer(row: unknown, integrity: ModelIntegrity = modelConfig.integrity, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<ArrayBuffer | null> {
+export async function readCachedModelBuffer(row: unknown, options: ModelIntegrityOptions = {}): Promise<ArrayBuffer | null> {
+  const { integrity, verifyIntegrity } = resolveIntegrityOptions(options)
   if (!isRecordObject(row) || row.version !== modelConfig.version || !(row.buffer instanceof ArrayBuffer)) {
     return null
   }
@@ -61,7 +70,7 @@ export class ModelCache {
 
   async download(signal?: AbortSignal, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<ArrayBuffer> {
     this.panel.setStatus({ model: '下载中' })
-    return downloadModel(signal, modelConfig.integrity, verifyIntegrity)
+    return downloadModel(signal, { verifyIntegrity })
   }
 
   async putCached(buffer: ArrayBuffer, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<void> {
@@ -124,7 +133,7 @@ export class ModelCache {
 
   private async writeCached(buffer: ArrayBuffer, verifyIntegrity: boolean): Promise<void> {
     const db = await this.open()
-    const row = await createCachedModelRow(buffer, modelConfig.integrity, verifyIntegrity)
+    const row = await createCachedModelRow(buffer, { verifyIntegrity })
     return new Promise((resolve, reject) => {
       const tx = db.transaction('models', 'readwrite')
       tx.objectStore('models').put(row)

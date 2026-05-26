@@ -28,6 +28,18 @@ describe('StatusPanel', () => {
     expect(element?.style.left).toBe('1240px')
   })
 
+  it('applies a saved panel position from localStorage immediately on create', () => {
+    localStorage.setItem('hvPonySolverPanelPosition', '200,900')
+    const panel = new StatusPanel(createHistoryStore())
+
+    panel.create()
+    // 位置应在微任务之前就已正确，不需要 await
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')
+
+    expect(element?.style.top).toBe('200px')
+    expect(element?.style.left).toBe('900px')
+  })
+
   it('applies a saved panel position from storage', async () => {
     localStorage.setItem('hvPonySolverPanelPosition', '200,900')
     const panel = new StatusPanel(createHistoryStore())

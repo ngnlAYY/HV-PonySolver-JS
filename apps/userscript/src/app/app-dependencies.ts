@@ -14,7 +14,7 @@ export type AppDependencies = Readonly<{
   solver: CaptchaSolver
 }>
 
-export function createAppDependencies(): AppDependencies {
+export function createAppDependencies(getAbortSignal?: () => AbortSignal | undefined): AppDependencies {
   const history = new HistoryStore()
   const panel = new StatusPanel(history)
   const modelCache = new ModelCache(panel)
@@ -22,7 +22,7 @@ export function createAppDependencies(): AppDependencies {
   const detector = new OnnxWorkerClient(modelCache, panel, bundledRuntimeSource ? { bundledRuntimeSource } : {})
   const imageLoader = new CachedImageLoader()
   const answerSubmitter = new AnswerSubmitter()
-  const solver = new CaptchaSolver(panel, detector, imageLoader, answerSubmitter)
+  const solver = new CaptchaSolver(panel, detector, imageLoader, answerSubmitter, getAbortSignal)
 
   return {
     panel,

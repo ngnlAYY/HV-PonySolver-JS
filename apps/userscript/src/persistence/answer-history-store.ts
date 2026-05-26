@@ -3,6 +3,7 @@ import type { HistoryRecord, HistoryRecordType, World } from './answer-history-t
 import { formatErrorMessage } from '../utils/errors'
 import { isRecordObject } from '../utils/guards'
 import { logError, warn } from '../utils/logger'
+import { safeStorage } from '../userscript/gm-bridge'
 
 function isHistoryRecordType(value: unknown): value is HistoryRecordType {
   return value === 'success' || value === 'random' || value === 'error'
@@ -27,7 +28,7 @@ function isHistoryRecord(value: unknown): value is HistoryRecord {
 }
 
 function parseHistoryRoot(): Record<string, unknown> | null {
-  const parsed: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}')
+  const parsed: unknown = JSON.parse(safeStorage.getItem(HISTORY_KEY) || '{}')
   return isRecordObject(parsed) ? parsed : null
 }
 
@@ -60,7 +61,7 @@ export class HistoryStore {
         },
         ...list,
       ].slice(0, HISTORY_MAX)
-      localStorage.setItem(HISTORY_KEY, JSON.stringify({
+      safeStorage.setItem(HISTORY_KEY, JSON.stringify({
         ...root,
         [world]: nextRecords,
       }))

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 
@@ -35,5 +35,58 @@ describe('AnswerSubmitter', () => {
 
     expect(onError).toHaveBeenCalledWith('未找到提交按钮')
     expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual(initialState)
+  })
+
+  describe('AbortSignal support', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('does not call onSubmitted or onError or click button when signal is already aborted', async () => {
+      const form = createForm(true)
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onError = vi.fn()
+      const onSubmitted = vi.fn()
+
+      const controller = new AbortController()
+      controller.abort()
+
+      await new AnswerSubmitter().submit(form, ['TS'], onError, onSubmitted, { signal: controller.signal })
+
+      expect(onSubmitted).not.toHaveBeenCalled()
+      expect(onError).not.toHaveBeenCalled()
+      expect(button.click).not.toHaveBeenCalled()
+    })
+
+    it('does not call onSubmitted when signal is aborted during sleep', async () => {
+      const form = createForm(true)
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onError = vi.fn()
+      const onSubmitted = vi.fn()
+
+      const controller = new AbortController()
+
+      // 开始提交但不等待完成
+      const submitPromise = new AnswerSubmitter().submit(form, ['TS'], onError, onSubmitted, {
+        signal: controller.signal,
+      })
+
+      // 在 sleep 期间 abort
+      controller.abort()
+
+      // 推进所有定时器，触发 sleep resolve
+      await vi.runAllTimersAsync()
+      await submitPromise
+
+      expect(onSubmitted).not.toHaveBeenCalled()
+      expect(onError).not.toHaveBeenCalled()
+      expect(button.click).not.toHaveBeenCalled()
+    })
   })
 })

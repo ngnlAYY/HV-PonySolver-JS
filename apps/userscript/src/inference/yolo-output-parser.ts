@@ -19,23 +19,8 @@ function readDetection(data: Float32Array, rowIndex: number): Detection | null {
   }
 }
 
-function insertTopDetection(detections: Detection[], detection: Detection): void {
-  if (detections.length === inferenceConfig.maxDetections && detection.confidence <= detections[detections.length - 1]!.confidence) {
-    return
-  }
-  const index = detections.findIndex((candidate) => detection.confidence > candidate.confidence)
-  if (index === -1) {
-    detections.push(detection)
-  } else {
-    detections.splice(index, 0, detection)
-  }
-  if (detections.length > inferenceConfig.maxDetections) {
-    detections.pop()
-  }
-}
-
 export function parseYoloOutput(data: Float32Array): YoloParseResult {
-  const detections: Detection[] = []
+  let detections: Detection[] = []
   let bestDetection: Detection | null = null
   const totalRows = Math.floor(data.length / 6)
 
@@ -48,9 +33,11 @@ export function parseYoloOutput(data: Float32Array): YoloParseResult {
       bestDetection = detection
     }
     if (detection.confidence >= inferenceConfig.confidenceThreshold) {
-      insertTopDetection(detections, detection)
+      detections.push(detection)
     }
   }
+
+  detections = detections.sort((left, right) => right.confidence - left.confidence).slice(0, inferenceConfig.maxDetections)
 
   if (!detections.length && bestDetection) {
     detections.push(bestDetection)

@@ -111,7 +111,7 @@ describe('App', () => {
 
   it('uses injected dependencies when provided', async () => {
     const { App } = await import('../../src/app/app')
-    const app = new App({
+    const dependencies = {
       panel: {
         create: injectedPanelCreate,
         destroy: injectedPanelDestroy,
@@ -137,7 +137,8 @@ describe('App', () => {
         },
         trigger: vi.fn(async () => ({ solved: false, captchaKey: null })),
       },
-    })
+    }
+    const app = new App(dependencies as unknown as ConstructorParameters<typeof App>[0])
     apps.push(app)
 
     app.init()
@@ -147,6 +148,52 @@ describe('App', () => {
     expect(injectedDetectorDestroy).toHaveBeenCalledTimes(1)
     expect(injectedModelClose).toHaveBeenCalledTimes(1)
     expect(injectedPanelDestroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call solver.trigger after destroy', async () => {
+    const { App } = await import('../../src/app/app')
+    const solverTrigger = vi.fn(async () => ({ solved: false, captchaKey: null }))
+    const dependencies = {
+      panel: {
+        create: injectedPanelCreate,
+        destroy: injectedPanelDestroy,
+        setStatus: vi.fn(),
+        setSessionReady: vi.fn(),
+        addSuccess: vi.fn(),
+        addRandomFailure: vi.fn(),
+        addError: vi.fn(),
+      },
+      modelCache: {
+        download: modelDownload,
+        putCached: modelPutCached,
+        close: injectedModelClose,
+      },
+      detector: {
+        prepare,
+        destroy: injectedDetectorDestroy,
+        detect,
+      },
+      solver: {
+        get isBusy() {
+          return false
+        },
+        trigger: solverTrigger,
+      },
+    }
+    const app = new App(dependencies as unknown as ConstructorParameters<typeof App>[0])
+    apps.push(app)
+
+    app.init()
+    appendCaptcha()
+    await Promise.resolve()
+    // destroy 之前 prepare 还未完成时销毁
+    app.destroy()
+    await vi.runAllTimersAsync()
+    await Promise.resolve()
+
+    // destroy 之后 solver.trigger 不应被调用
+    expect(solverTrigger).not.toHaveBeenCalled()
+    apps.length = 0
   })
 
   it('registers model settings menu during init', async () => {
@@ -251,6 +298,62 @@ describe('App', () => {
     await vi.runAllTimersAsync()
 
     expect(prepare).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not schedule a scan for unrelated DOM mutations', async () => {
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    // 在没有 #riddlemaster 的情况下插入无关节点
+    document.body.appendChild(document.createElement('span'))
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+    await Promise.resolve()
+
+    expect(prepare).not.toHaveBeenCalled()
+  })
+
+  it('throttles multiple related mutations into a single scheduleSolve call', async () => {
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    // 插入 #riddlemaster 容器（触发第一个相关变更，启动 100ms timer）
+    const captcha = appendCaptcha()
+    await Promise.resolve()
+    // 在 timer 到期前再触发两次相关变更（timer 已存在，被忽略）
+    captcha.appendChild(document.createElement('span'))
+    await Promise.resolve()
+    captcha.appendChild(document.createElement('span'))
+    await Promise.resolve()
+    // 推进 timer，触发一次 scheduleSolve
+    await vi.runAllTimersAsync()
+    await Promise.resolve()
+
+    expect(prepare).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears the observer timer on destroy so scheduleSolve is never called', async () => {
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    // 触发相关变更，此时 100ms timer 已启动但尚未到期
+    appendCaptcha()
+    await Promise.resolve()
+    // 立即 destroy，应清除 timer
+    app.destroy()
+    // 等待足够长时间确认 timer 不会再触发
+    await vi.runAllTimersAsync()
+    await Promise.resolve()
+
+    expect(prepare).not.toHaveBeenCalled()
+    // 防止 afterEach 重复 destroy
+    apps.length = 0
   })
 
   it('does not solve forms outside the captcha container', async () => {

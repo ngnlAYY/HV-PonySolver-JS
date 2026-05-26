@@ -21,6 +21,7 @@ export class CaptchaSolver {
     private readonly detector: DetectorService,
     private readonly imageLoader: ImageLoader,
     private readonly answerSubmitter: AnswerSubmitter,
+    private readonly getAbortSignal?: () => AbortSignal | undefined,
   ) {}
 
   get isBusy(): boolean {
@@ -46,6 +47,13 @@ export class CaptchaSolver {
       this.panel.setStatus({ inference: `错误: ${message}` })
       this.panel.addError(message, elapsed())
     }
+    const signal: AbortSignal | undefined = this.getAbortSignal?.()
+    const submitOptions = signal ? { signal } : undefined
+
+    // 进入 try 前检查 abort
+    if (signal?.aborted) {
+      return result(false)
+    }
 
     try {
       const target = findCaptchaTarget()
@@ -57,14 +65,25 @@ export class CaptchaSolver {
       this.panel.setStatus({ inference: '获取图片' })
       captchaKey = target.captchaKey
       const blob = await this.imageLoader.get(captchaKey)
+
+      // imageLoader.get 之后检查 abort
+      if (signal?.aborted) {
+        return result(false)
+      }
+
       const detectionResult = await this.detector.detect(blob)
+
+      // detector.detect 之后检查 abort
+      if (signal?.aborted) {
+        return result(false)
+      }
 
       if (detectionResult.success && detectionResult.ponies.length) {
         let submitted = false
         await this.answerSubmitter.submit(target.form, detectionResult.ponies, failSubmit, () => {
           submitted = true
           this.panel.addSuccess(detectionResult.ponies, detectionResult.confidences, elapsed())
-        })
+        }, submitOptions)
         return result(submitted)
       }
 
@@ -82,7 +101,7 @@ export class CaptchaSolver {
       await this.answerSubmitter.submit(target.form, [pony], failSubmit, () => {
         submitted = true
         this.panel.addRandomFailure(pony, elapsed())
-      })
+      }, submitOptions)
       return result(submitted)
     } catch (error) {
       const message = formatErrorMessage(error)

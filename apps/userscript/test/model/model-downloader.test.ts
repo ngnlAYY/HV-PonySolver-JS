@@ -25,7 +25,7 @@ describe('downloadModel', () => {
     vi.stubGlobal('fetch', fetchMock)
     const controller = new AbortController()
 
-    await downloadModel(controller.signal, TEST_INTEGRITY)
+    await downloadModel(controller.signal, { integrity: TEST_INTEGRITY })
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://models.ngnl.host/yolo26n-640.onnx?key=',
@@ -42,7 +42,7 @@ describe('downloadModel', () => {
     const fetchMock = vi.fn(async () => response)
     vi.stubGlobal('fetch', fetchMock)
 
-    await downloadModel(undefined, TEST_INTEGRITY)
+    await downloadModel(undefined, { integrity: TEST_INTEGRITY })
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://models.ngnl.host/yolo26n-640.onnx?key=key%20with%20spaces%20%26%20symbols',
@@ -74,7 +74,7 @@ describe('downloadModel', () => {
           options.signal?.addEventListener('abort', () => streamController.error(new Error('body aborted')), { once: true })
         },
       }),
-    } as Response))
+    } as unknown as Response))
     vi.stubGlobal('fetch', fetchMock)
 
     const downloadPromise = downloadModel(controller.signal)
@@ -108,7 +108,7 @@ describe('downloadModel', () => {
     } as unknown as Response
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
-    await expect(downloadModel(undefined, TEST_INTEGRITY)).rejects.toThrow('下载模型大小校验失败')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('下载模型大小校验失败')
 
     expect(cancel).toHaveBeenCalledTimes(1)
     expect(arrayBuffer).not.toHaveBeenCalled()
@@ -119,8 +119,10 @@ describe('downloadModel', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
     await expect(downloadModel(undefined, {
-      byteLength: 4,
-      sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+      integrity: {
+        byteLength: 4,
+        sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+      },
     })).rejects.toThrow('下载模型大小校验失败')
   })
 
@@ -130,7 +132,7 @@ describe('downloadModel', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
-    const buffer = await downloadModel(undefined, TEST_INTEGRITY, false)
+    const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
 
     expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3, 4])
   })
@@ -152,7 +154,7 @@ describe('downloadModel', () => {
     } as unknown as Response
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
-    const buffer = await downloadModel(undefined, TEST_INTEGRITY, false)
+    const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
 
     expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3, 4])
   })
@@ -178,7 +180,7 @@ describe('downloadModel', () => {
     } as unknown as Response
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
-    await expect(downloadModel(undefined, TEST_INTEGRITY, true)).rejects.toThrow('下载模型大小校验失败')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, forceVerifyIntegrity: true })).rejects.toThrow('下载模型大小校验失败')
 
     expect(arrayBuffer).not.toHaveBeenCalled()
     expect(pulls).toBe(4)
@@ -189,8 +191,11 @@ describe('downloadModel', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
     await expect(downloadModel(undefined, {
-      byteLength: 4,
-      sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
-    }, true)).rejects.toThrow('下载模型大小校验失败')
+      integrity: {
+        byteLength: 4,
+        sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+      },
+      forceVerifyIntegrity: true,
+    })).rejects.toThrow('下载模型大小校验失败')
   })
 })

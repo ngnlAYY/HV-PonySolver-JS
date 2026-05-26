@@ -4,6 +4,19 @@ import type { ModelIntegrity } from './model-integrity'
 import { verifyModelIntegrity } from './model-integrity'
 import { getModelAccessKey } from './model-settings'
 
+export type ModelIntegrityOptions = Readonly<{
+  integrity?: ModelIntegrity
+  verifyIntegrity?: boolean
+  forceVerifyIntegrity?: boolean
+}>
+
+function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): { integrity: ModelIntegrity, verifyIntegrity: boolean } {
+  return {
+    integrity: options.integrity ?? modelConfig.integrity,
+    verifyIntegrity: options.forceVerifyIntegrity ? true : (options.verifyIntegrity ?? modelConfig.verifyIntegrity),
+  }
+}
+
 async function getModelUrl(): Promise<string> {
   if (!modelConfig.urlBase) {
     throw new Error('模型下载地址未配置')
@@ -27,31 +40,44 @@ async function readModelResponse(response: Response, expectedByteLength: number 
   if (!response.body) {
     return response.arrayBuffer()
   }
+  const expectedContentLength = expectedByteLength !== null && contentLength === String(expectedByteLength)
+    ? expectedByteLength
+    : null
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
+  const bytes = expectedContentLength === null ? null : new Uint8Array(expectedContentLength)
   let totalBytes = 0
   while (true) {
     const { done, value } = await reader.read()
     if (done) {
       break
     }
-    totalBytes += value.byteLength
-    if (expectedByteLength !== null && totalBytes > expectedByteLength) {
+    const nextTotalBytes = totalBytes + value.byteLength
+    if (expectedByteLength !== null && nextTotalBytes > expectedByteLength) {
       await reader.cancel()
-      throw new Error(`下载模型大小校验失败: ${totalBytes} != ${expectedByteLength}`)
+      throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedByteLength}`)
     }
-    chunks.push(value)
+    if (bytes) {
+      bytes.set(value, totalBytes)
+    } else {
+      chunks.push(value)
+    }
+    totalBytes = nextTotalBytes
   }
-  const bytes = new Uint8Array(totalBytes)
+  if (bytes) {
+    return bytes.buffer
+  }
+  const mergedBytes = new Uint8Array(totalBytes)
   let offset = 0
   for (const chunk of chunks) {
-    bytes.set(chunk, offset)
+    mergedBytes.set(chunk, offset)
     offset += chunk.byteLength
   }
-  return bytes.buffer
+  return mergedBytes.buffer
 }
 
-export async function downloadModel(signal?: AbortSignal, integrity: ModelIntegrity = modelConfig.integrity, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<ArrayBuffer> {
+export async function downloadModel(signal?: AbortSignal, options: ModelIntegrityOptions = {}): Promise<ArrayBuffer> {
+  const { integrity, verifyIntegrity } = resolveIntegrityOptions(options)
   if (signal?.aborted) {
     throw new Error('模型下载已取消')
   }

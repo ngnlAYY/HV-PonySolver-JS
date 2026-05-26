@@ -2,7 +2,7 @@ import type { AnswerCode } from '@hv-pony-solver/shared'
 import { HistoryStore } from '../persistence/answer-history-store'
 import type { HistoryRecord, World } from '../persistence/answer-history-types'
 import type { PanelStatus, StatusPanel as StatusPanelContract } from './status-panel-types'
-import { getPanelPosition } from './panel-settings'
+import { getPanelPosition, getPanelPositionSync } from './panel-settings'
 import { formatAnswers, renderStatusPanel } from './status-panel-renderer'
 
 function getWorld(): World {
@@ -28,9 +28,10 @@ export class StatusPanel implements StatusPanelContract {
     this.records = this.history.get(this.world)
     this.el = document.createElement('div')
     this.el.className = 'ponyLog'
-    this.el.style.cssText = 'position:absolute;top:150px;left:1240px;font-size:12px;text-align:left'
+    const syncPosition = getPanelPositionSync()
+    this.el.style.cssText = `position:absolute;top:${syncPosition.top}px;left:${syncPosition.left}px;font-size:12px;text-align:left`
     getPanelPosition().then((position) => {
-      if (this.el) {
+      if (this.el && (position.top !== syncPosition.top || position.left !== syncPosition.left)) {
         this.el.style.top = `${position.top}px`
         this.el.style.left = `${position.left}px`
       }

@@ -12,20 +12,24 @@ export class App {
   private readonly detector: AppDependencies['detector']
   private readonly solver: AppDependencies['solver']
   private observer: MutationObserver | null = null
+  private observerTimeoutId: ReturnType<typeof setTimeout> | null = null
   private scheduledScan = false
   private lastCaptchaKey: string | null = null
   private destroyed = false
   private modelSettingsMenuRegistered = false
+  private solveAbortController: AbortController | null = null
 
-  constructor(dependencies: AppDependencies = createAppDependencies()) {
-    this.panel = dependencies.panel
-    this.modelCache = dependencies.modelCache
-    this.detector = dependencies.detector
-    this.solver = dependencies.solver
+  constructor(dependencies?: AppDependencies) {
+    const resolved = dependencies ?? createAppDependencies(() => this.solveAbortController?.signal)
+    this.panel = resolved.panel
+    this.modelCache = resolved.modelCache
+    this.detector = resolved.detector
+    this.solver = resolved.solver
   }
 
   init(): void {
     this.destroyed = false
+    this.solveAbortController = new AbortController()
     this.panel.create()
     if (!this.modelSettingsMenuRegistered) {
       registerModelSettingsMenu(() => this.verifyConfiguredModelKey())
@@ -40,8 +44,14 @@ export class App {
 
   destroy(): void {
     this.destroyed = true
+    this.solveAbortController?.abort()
+    this.solveAbortController = null
     this.observer?.disconnect()
     this.observer = null
+    if (this.observerTimeoutId !== null) {
+      clearTimeout(this.observerTimeoutId)
+      this.observerTimeoutId = null
+    }
     this.scheduledScan = false
     this.lastCaptchaKey = null
     this.detector.destroy()
@@ -54,12 +64,43 @@ export class App {
     await this.modelCache.putCached(modelBuffer, true)
   }
 
+  private isCaptchaRelatedMutation(records: MutationRecord[]): boolean {
+    const captchaMaster = document.getElementById('riddlemaster')
+    for (const record of records) {
+      const target = record.target
+      // target 是 #riddlemaster 或其后代
+      if (captchaMaster && (target === captchaMaster || captchaMaster.contains(target as Node))) {
+        return true
+      }
+      // addedNodes / removedNodes 中是否包含 #riddlemaster 本身或其容器
+      // 这同时覆盖了 captcha 初次插入的情形（captchaMaster 尚为 null）
+      for (const node of [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)]) {
+        if (!(node instanceof Element)) {
+          continue
+        }
+        if (node.id === 'riddlemaster' || node.querySelector('#riddlemaster') !== null) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
   private observe(): void {
     if (this.observer) {
       return
     }
-    this.observer = new MutationObserver(() => {
-      this.scheduleSolve()
+    this.observer = new MutationObserver((records) => {
+      if (!this.isCaptchaRelatedMutation(records)) {
+        return
+      }
+      if (this.observerTimeoutId !== null) {
+        return
+      }
+      this.observerTimeoutId = setTimeout(() => {
+        this.observerTimeoutId = null
+        this.scheduleSolve()
+      }, 100)
     })
     const target = document.body || document.documentElement
     if (target) {
@@ -77,32 +118,31 @@ export class App {
     }
     this.scheduledScan = true
     queueMicrotask(() => {
+      void this.runSolve()
+    })
+  }
+
+  private async runSolve(): Promise<void> {
+    try {
       const captchaKey = this.getCaptchaKey()
       if (this.destroyed || this.solver.isBusy || !captchaKey || captchaKey === this.lastCaptchaKey) {
-        this.scheduledScan = false
         return
       }
       log('检测到验证码')
-      this.detector
-        .prepare()
-        .then(() => {
-          this.scheduledScan = false
-          if (!this.destroyed) {
-            return this.solver.trigger()
-          }
-          return { solved: false, captchaKey: null }
-        })
-        .then((result) => {
-          if (result.solved && result.captchaKey && !this.destroyed) {
-            this.lastCaptchaKey = result.captchaKey
-          }
-        })
-        .catch((error) => {
-          this.scheduledScan = false
-          if (!this.destroyed) {
-            warn('启动 ONNX 失败:', formatErrorMessage(error))
-          }
-        })
-    })
+      await this.detector.prepare()
+      if (this.destroyed) {
+        return
+      }
+      const result = await this.solver.trigger()
+      if (result.solved && result.captchaKey && !this.destroyed) {
+        this.lastCaptchaKey = result.captchaKey
+      }
+    } catch (error) {
+      if (!this.destroyed) {
+        warn('启动 ONNX 失败:', formatErrorMessage(error))
+      }
+    } finally {
+      this.scheduledScan = false
+    }
   }
 }

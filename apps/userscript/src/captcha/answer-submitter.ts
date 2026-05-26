@@ -6,13 +6,25 @@ import { timingConfig } from './timing-config'
 
 export type SubmitErrorHandler = (message: string) => void
 
+export type SubmitOptions = {
+  signal?: AbortSignal
+}
+
 export class AnswerSubmitter {
   async submit(
     form: HTMLFormElement,
     ponies: AnswerCode[],
     onError: SubmitErrorHandler,
     onSubmitted: () => void,
+    options?: SubmitOptions,
   ): Promise<void> {
+    const signal = options?.signal
+
+    // 进入时检查 abort
+    if (signal?.aborted) {
+      return
+    }
+
     const checkboxes = form.querySelectorAll<HTMLInputElement>(captchaSelectors.answers)
     if (checkboxes.length !== ANSWER_CODES.length) {
       onError(`答案框数量异常: ${checkboxes.length}`)
@@ -50,10 +62,19 @@ export class AnswerSubmitter {
       }
       if (i < order.length - 1) {
         await sleep(randDelay(timingConfig.multiClickDelay))
+        // 多选间隔后检查 abort
+        if (signal?.aborted) {
+          return
+        }
       }
     }
 
     await sleep(randDelay(timingConfig.submitDelay))
+    // 提交延迟后检查 abort
+    if (signal?.aborted) {
+      return
+    }
+
     button.click()
     onSubmitted()
     log('已提交:', ponies.join(','))

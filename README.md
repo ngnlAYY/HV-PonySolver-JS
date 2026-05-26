@@ -442,7 +442,7 @@ corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 apps/userscript/dist/hv-pony-solver.user.js
 ```
 
-如果需要访问真实模型，需要确保构建产物中的 `modelConfig.accessKey` 对应 Worker KV 中存在的授权 key。`modelConfig.verifyIntegrity` 默认关闭，避免远端模型变更时被硬编码大小或 SHA-256 阻断下载；需要强校验时可改为 `true`，并同步更新 `modelConfig.integrity`。
+如果需要访问真实模型，需要确保构建产物中的 `modelConfig.accessKey` 对应 Worker KV 中存在的授权 key。`modelConfig.verifyIntegrity` 默认开启（`true`），会按 `packages/shared/src/model.ts` 中 `MODEL_INTEGRITY` 定义的 `byteLength` 与 `sha256` 对下载及缓存读取进行严格校验；当远端模型字节内容变更时，必须同步更新 `MODEL_INTEGRITY` 与 `MODEL_VERSION`，否则下载会被阻断。
 
 ### 部署 Model Worker
 
