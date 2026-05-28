@@ -3,9 +3,14 @@ import type { NormalizedEnv } from './worker-types'
 
 const CACHE_CONTROL = 'public, max-age=86400'
 const MODEL_CONTENT_TYPE = 'application/octet-stream'
-const MISSING_MODEL_MESSAGE = 'Model object is not configured'
+const INTERNAL_ERROR_MESSAGE = 'Internal Server Error'
 const CORS_ALLOW_ORIGIN = '*'
 const ALLOWED_ORIGINS = new Set<string>(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
+
+function addSecurityHeaders(headers: Headers): Headers {
+  headers.set('x-content-type-options', 'nosniff')
+  return headers
+}
 
 export function addCorsHeaders(headers: Headers, request: Request): Headers {
   const origin = request.headers.get('origin')
@@ -38,7 +43,7 @@ function appendVaryOrigin(headers: Headers): void {
 export function textResponse(request: Request, body: string, status: number, headers: HeadersInit = {}): Response {
   return new Response(body, {
     status,
-    headers: addCorsHeaders(new Headers(headers), request),
+    headers: addCorsHeaders(addSecurityHeaders(new Headers(headers)), request),
   })
 }
 
@@ -53,7 +58,7 @@ function createModelHeaders(object: R2ObjectBody, request: Request): Headers {
     headers.set('etag', object.httpEtag)
   }
 
-  return addCorsHeaders(headers, request)
+  return addCorsHeaders(addSecurityHeaders(headers), request)
 }
 
 export async function createModelResponse(
@@ -68,7 +73,7 @@ export async function createModelResponse(
   const objectKey = decision === 'real' ? env.realModelObjectKey : env.decoyModelObjectKey
   const object = await env.modelBucket.get(objectKey)
   if (object === null) {
-    return textResponse(request, MISSING_MODEL_MESSAGE, 500, { 'content-type': 'text/plain;charset=UTF-8' })
+    return textResponse(request, INTERNAL_ERROR_MESSAGE, 500, { 'content-type': 'text/plain;charset=UTF-8' })
   }
 
   return new Response(request.method === 'HEAD' ? null : object.body, {

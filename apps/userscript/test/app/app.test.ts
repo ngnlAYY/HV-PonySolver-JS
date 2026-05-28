@@ -62,7 +62,7 @@ describe('App', () => {
     vi.resetModules()
     vi.clearAllMocks()
     getImageBlob.mockResolvedValue(new Blob())
-    detect.mockResolvedValue({ success: false, ponies: [], confidences: {}, detections: [] })
+    detect.mockResolvedValue({ success: false, ponies: [], confidences: {}, detections: [], candidates: [] })
     modelDownload.mockResolvedValue(new Uint8Array([1, 2, 3]).buffer)
     modelPutCached.mockResolvedValue(undefined)
     window.requestAnimationFrame = (callback: FrameRequestCallback): number => window.setTimeout(() => callback(0), 0)
@@ -181,7 +181,7 @@ describe('App', () => {
   })
 
   it('ignores unrelated DOM mutations when a captcha is already handled', async () => {
-    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }] })
+    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }], candidates: [{ class_id: 0, confidence: 0.9 }] })
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
@@ -219,7 +219,7 @@ describe('App', () => {
   })
 
   it('submits the form inside the captcha container when matching selectors exist outside it', async () => {
-    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }] })
+    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }], candidates: [{ class_id: 0, confidence: 0.9 }] })
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
@@ -261,7 +261,7 @@ describe('App', () => {
     prepare.mockReturnValueOnce(new Promise<Worker>((resolve) => {
       resolvePrepare = () => resolve({} as Worker)
     }))
-    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }] })
+    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }], candidates: [{ class_id: 0, confidence: 0.9 }] })
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)

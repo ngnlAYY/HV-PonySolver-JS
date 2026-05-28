@@ -41,4 +41,35 @@ describe('StatusPanel', () => {
     expect(document.body.textContent).toContain('会话状态：')
     expect(document.body.textContent).toContain('推理状态：')
   })
+
+  it('shows that there is no recent error when history has no errors', () => {
+    const store = createHistoryStore()
+    const panel = new StatusPanel(store)
+
+    panel.create()
+
+    expect(document.body.textContent).toContain('最近错误：无')
+  })
+
+  it('shows the latest error message and elapsed time', () => {
+    const store = createHistoryStore()
+    const panel = new StatusPanel(store)
+
+    panel.create()
+    panel.addError('模型加载失败', 34)
+
+    expect(document.body.textContent).toContain('最近错误：模型加载失败')
+    expect(document.body.textContent).toContain('模型加载失败 34ms')
+  })
+
+  it('escapes error messages before rendering them', () => {
+    const store = createHistoryStore()
+    const panel = new StatusPanel(store)
+
+    panel.create()
+    panel.addError('<img src=x onerror=alert(1)>', 12)
+
+    expect(document.body.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(document.body.innerHTML).not.toContain('<img src=x onerror=alert(1)>')
+  })
 })

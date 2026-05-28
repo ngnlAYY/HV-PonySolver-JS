@@ -10,6 +10,7 @@ export type YoloParseResult = Readonly<{
   ponies: AnswerCode[]
   confidences: Partial<Record<AnswerCode, number>>
   detections: Detection[]
+  candidates: Detection[]
 }>
 
 export interface DetectorService {

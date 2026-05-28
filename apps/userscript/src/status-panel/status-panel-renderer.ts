@@ -24,18 +24,20 @@ export function formatRecord(record: HistoryRecord): string {
   if (record.type === 'random') {
     return `${time} ${escapeHtml(record.message || '识别失败，随机选择')} ${Number(record.elapsed) || 0}ms`
   }
-  return `${time} ${escapeHtml(record.message || '未知错误')}`
+  return `${time} ${escapeHtml(record.message || '未知错误')} ${Number(record.elapsed) || 0}ms`
 }
 
 export function renderStatusPanel(world: World, status: PanelStatus, records: HistoryRecord[]): string {
   const worldName = WORLD_NAMES[world] || '未知'
   const rows = records.length ? records.map((record) => formatRecord(record)).join('<br>') : '暂无记录'
+  const recentError = records.find((record) => record.type === 'error')?.message || '无'
   return [
     'HV-PonySolver',
     '运行: 本地 ONNX',
     `模型状态：${escapeHtml(status.model)}`,
     `会话状态：${escapeHtml(status.session)}`,
     `推理状态：${escapeHtml(status.inference)}`,
+    `最近错误：${escapeHtml(recentError)}`,
     `当前处于<strong>${escapeHtml(worldName)}</strong>`,
     `${escapeHtml(worldName)}最近答题:`,
     rows,

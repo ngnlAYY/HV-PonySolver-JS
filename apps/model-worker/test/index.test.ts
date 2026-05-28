@@ -31,6 +31,8 @@ describe('model worker', () => {
     expect(response.headers.get('content-disposition')).toBe('inline; filename="yolo26n-640.onnx"')
     expect(response.headers.get('cache-control')).toBe('public, max-age=86400')
     expect(response.headers.get('etag')).toBe(fixture.realEtag)
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(response.headers.get('x-hv-model-access')).toBeNull()
   })
 
   it('returns the real model for HEAD when authorized key exists in KV', async () => {
@@ -143,6 +145,8 @@ describe('model worker', () => {
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.decoyBody)
     expect(response.headers.get('etag')).toBe(fixture.decoyEtag)
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(response.headers.get('x-hv-model-access')).toBeNull()
   })
 
   it('returns the decoy model when key format is invalid', async () => {
@@ -183,6 +187,8 @@ describe('model worker', () => {
 
     expect(response.status).toBe(403)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(response.headers.get('x-hv-model-access')).toBeNull()
     expect(await response.text()).toBe('Forbidden')
   })
 
@@ -262,7 +268,8 @@ describe('model worker', () => {
 
     expect(response.status).toBe(500)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
-    expect(await response.text()).toBe('Model object is not configured')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(await response.text()).toBe('Internal Server Error')
   })
 
   it('returns 500 with CORS when required environment config is missing', async () => {

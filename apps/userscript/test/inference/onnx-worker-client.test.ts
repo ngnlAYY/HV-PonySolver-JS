@@ -114,6 +114,41 @@ describe('OnnxWorkerClient', () => {
     expect(result).toMatchObject({ success: true, ponies: ['TS'] })
   })
 
+  it('reports elapsed inference time when detect succeeds', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    const modelCache = {
+      getCached: vi.fn(async () => modelBuffer),
+      download: vi.fn(async () => modelBuffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(modelCache, panel)
+
+    await client.detect({} as Blob)
+
+    expect(panel.setStatus).toHaveBeenCalledWith({ inference: '推理中' })
+    expect(panel.setStatus).toHaveBeenCalledWith({ inference: expect.stringMatching(/^完成 \d+ms$/) })
+  })
+
+  it('does not reset session readiness when prepare is called after ready', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    const modelCache = {
+      getCached: vi.fn(async () => modelBuffer),
+      download: vi.fn(async () => modelBuffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(modelCache, panel)
+
+    await client.prepare()
+    await client.prepare()
+
+    expect(panel.setSessionReady).toHaveBeenCalledTimes(1)
+    expect(SuccessfulWorker.messages.filter((message) => message.type === 'init')).toHaveLength(1)
+  })
+
   it('serializes overlapping detect requests', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     SuccessfulWorker.autoRespond = false

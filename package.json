@@ -7,6 +7,11 @@
   "engines": {
     "node": ">=22"
   },
+  "pnpm": {
+    "overrides": {
+      "ws": "8.20.1"
+    }
+  },
   "scripts": {
     "build": "corepack pnpm -r build",
     "test": "corepack pnpm -r test",

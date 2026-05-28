@@ -44,7 +44,7 @@ describe('WorkerRequestBridge', () => {
     const promise = bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])
 
     worker.onmessage?.({ data: { type: 'response', requestId: 999 } } as MessageEvent)
-    worker.onmessage?.({ data: { type: 'response', requestId: 1, result: { success: false, ponies: [], confidences: {}, detections: [] } } } as MessageEvent)
+    worker.onmessage?.({ data: { type: 'response', requestId: 1, result: { success: false, ponies: [], confidences: {}, detections: [], candidates: [] } } } as MessageEvent)
 
     await expect(promise).resolves.toMatchObject({ requestId: 1 })
   })

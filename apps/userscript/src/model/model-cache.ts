@@ -55,28 +55,36 @@ export class ModelCache {
   constructor(private readonly panel: StatusPanel) {}
 
   async getCached(): Promise<ArrayBuffer | null> {
-    this.panel.setStatus({ model: '确认中' })
+    const startedAt = Date.now()
+    this.panel.setStatus({ model: '确认缓存中' })
     try {
       const cached = await this.readCached()
+      const elapsed = Date.now() - startedAt
       if (cached) {
-        this.panel.setStatus({ model: '已缓存' })
+        this.panel.setStatus({ model: `缓存命中 ${elapsed}ms` })
         return cached
       }
+      this.panel.setStatus({ model: `缓存未命中 ${elapsed}ms` })
     } catch (error) {
+      this.panel.setStatus({ model: '缓存读取失败，准备下载' })
       warn('读取模型缓存失败，改为下载模型:', formatErrorMessage(error))
     }
     return null
   }
 
   async download(signal?: AbortSignal, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<ArrayBuffer> {
+    const startedAt = Date.now()
     this.panel.setStatus({ model: '下载中' })
-    return downloadModel(signal, { verifyIntegrity })
+    const buffer = await downloadModel(signal, { verifyIntegrity })
+    this.panel.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
+    return buffer
   }
 
   async putCached(buffer: ArrayBuffer, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<void> {
+    const startedAt = Date.now()
     try {
       await this.writeCached(buffer, verifyIntegrity)
-      this.panel.setStatus({ model: '已缓存' })
+      this.panel.setStatus({ model: `已缓存 ${Date.now() - startedAt}ms` })
     } catch (error) {
       warn('写入模型缓存失败，继续使用已下载模型:', formatErrorMessage(error))
       if (verifyIntegrity) {

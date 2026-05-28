@@ -1,5 +1,5 @@
 import { ANSWER_CODES } from '@hv-pony-solver/shared'
-import type { DetectorService } from '../inference/inference-types'
+import type { DetectorService, YoloParseResult } from '../inference/inference-types'
 import type { StatusPanel } from '../status-panel/status-panel-types'
 import { formatErrorMessage } from '../utils/errors'
 import { logError } from '../utils/logger'
@@ -64,14 +64,26 @@ export class CaptchaSolver {
 
       this.panel.setStatus({ inference: '获取图片' })
       captchaKey = target.captchaKey
-      const blob = await this.imageLoader.get(captchaKey)
+      let blob: Blob
+      try {
+        blob = await this.imageLoader.get(captchaKey)
+      } catch (error) {
+        failSubmit(`图片获取失败: ${formatErrorMessage(error)}`)
+        return result(false)
+      }
 
       // imageLoader.get 之后检查 abort
       if (signal?.aborted) {
         return result(false)
       }
 
-      const detectionResult = await this.detector.detect(blob)
+      let detectionResult: YoloParseResult
+      try {
+        detectionResult = await this.detector.detect(blob)
+      } catch (error) {
+        failSubmit(`推理失败: ${formatErrorMessage(error)}`)
+        return result(false)
+      }
 
       // detector.detect 之后检查 abort
       if (signal?.aborted) {
@@ -88,7 +100,7 @@ export class CaptchaSolver {
       }
 
       if (!solverConfig.randomOnFail) {
-        failSubmit('识别失败')
+        failSubmit('识别失败: 无可提交答案')
         return result(false)
       }
 
@@ -104,7 +116,7 @@ export class CaptchaSolver {
       }, submitOptions)
       return result(submitted)
     } catch (error) {
-      const message = formatErrorMessage(error)
+      const message = `答题异常: ${formatErrorMessage(error)}`
       this.panel.setStatus({ inference: `错误: ${message}` })
       this.panel.addError(message, elapsed())
       logError('答题失败:', message)

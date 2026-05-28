@@ -52,13 +52,14 @@ export class OnnxWorkerClient implements DetectorService {
 
   private async runDetect(blob: Blob): Promise<YoloParseResult> {
     await this.prepare()
+    const startedAt = Date.now()
     this.panel.setStatus({ inference: '推理中' })
     try {
       const response = await this.post({ type: 'detect', imageBlob: blob, size: inferenceConfig.imageSize })
       if (response.type !== 'response' || !response.result) {
         throw new Error('ONNX Worker 返回无效结果')
       }
-      this.panel.setStatus({ inference: '完成' })
+      this.panel.setStatus({ inference: `完成 ${Date.now() - startedAt}ms` })
       return response.result
     } catch (error) {
       this.panel.setStatus({ inference: '错误' })

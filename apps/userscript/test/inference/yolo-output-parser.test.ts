@@ -102,4 +102,40 @@ describe('parseYoloOutput', () => {
     expect(result.ponies).toEqual(['FS'])
     expect(result.confidences).toEqual({ FS: 0.22 })
   })
+
+  it('keeps below-threshold valid rows in candidates without adding them to threshold detections', () => {
+    const data = new Float32Array([
+      0, 0, 0, 0, inferenceConfig.confidenceThreshold - 0.05, 0,
+      0, 0, 0, 0, inferenceConfig.confidenceThreshold + 0.1, 1,
+      0, 0, 0, 0, inferenceConfig.confidenceThreshold - 0.01, 2,
+    ])
+
+    const result = parseYoloOutput(data)
+
+    expect(result.detections).toEqual([{ class_id: 1, confidence: 0.4 }])
+    expect(result.candidates).toEqual([
+      { class_id: 1, confidence: 0.4 },
+      { class_id: 2, confidence: 0.29 },
+      { class_id: 0, confidence: 0.25 },
+    ])
+  })
+
+  it('limits candidates to maxDetections and ignores invalid rows', () => {
+    const rows: number[] = [
+      0, 0, 0, 0, Number.NaN, 0,
+      0, 0, 0, 0, Number.POSITIVE_INFINITY, 1,
+      0, 0, 0, 0, 0.99, 999,
+    ]
+    for (let i = 0; i < inferenceConfig.maxDetections + 3; i += 1) {
+      rows.push(0, 0, 0, 0, 0.1 + i / 100, i % 6)
+    }
+
+    const result = parseYoloOutput(new Float32Array(rows))
+
+    expect(result.candidates).toHaveLength(inferenceConfig.maxDetections)
+    expect(result.candidates.map((detection) => detection.confidence)).toEqual(
+      [...result.candidates].map((detection) => detection.confidence).sort((left, right) => right - left),
+    )
+    expect(result.candidates).not.toContainEqual(expect.objectContaining({ confidence: 0.1 }))
+  })
 })

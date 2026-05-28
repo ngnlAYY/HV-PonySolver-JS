@@ -56,7 +56,7 @@ export class SuccessfulWorker {
 
   respond(requestId: number | undefined): void {
     const response = SuccessfulWorker.messages.find((message) => message.requestId === requestId)?.type === 'detect'
-      ? { type: 'response', requestId, result: { success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }] } }
+      ? { type: 'response', requestId, result: { success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }], candidates: [{ class_id: 0, confidence: 0.9 }] } }
       : { type: 'response', requestId }
     this.onmessage?.({
       data: response,
