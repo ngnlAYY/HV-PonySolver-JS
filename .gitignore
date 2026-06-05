@@ -11,6 +11,8 @@ apps/userscript/.tmp/
 docs/superpowers/
 .mcp.json
 CLAUDE.md
+AGENTS.md
+graphify-out/
 .claude/
 .code-review-graph
 docs/claude
