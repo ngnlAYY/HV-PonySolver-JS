@@ -2,6 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 function createForm(includeSubmitButton: boolean): HTMLFormElement {
   document.body.innerHTML = '<form name="riddleform"></form>'
   const form = document.querySelector<HTMLFormElement>('form[name="riddleform"]')
@@ -63,30 +69,60 @@ describe('AnswerSubmitter', () => {
       expect(button.click).not.toHaveBeenCalled()
     })
 
-    it('does not call onSubmitted when signal is aborted during sleep', async () => {
+    it('does not click later checkboxes or submit when signal is aborted during multi-select delay', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) {
+        checkbox.checked = false
+      }
+      const checkboxClicks = checkboxes.map((checkbox) => vi.spyOn(checkbox, 'click'))
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onError = vi.fn()
+      const onSubmitted = vi.fn()
+      const controller = new AbortController()
+
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99)
+      try {
+        const submitPromise = new AnswerSubmitter().submit(form, ['TS', 'RA'], onError, onSubmitted, {
+          signal: controller.signal,
+        })
+        await flushMicrotasks()
+
+        controller.abort()
+        await submitPromise
+      } finally {
+        randomSpy.mockRestore()
+      }
+
+      expect(checkboxClicks[0]).toHaveBeenCalledTimes(1)
+      expect(checkboxClicks[1]).not.toHaveBeenCalled()
+      expect(button.click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
+      expect(onError).not.toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('does not click submit when signal is aborted during submit delay', async () => {
       const form = createForm(true)
       const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
       button.click = vi.fn()
       const onError = vi.fn()
       const onSubmitted = vi.fn()
-
       const controller = new AbortController()
 
-      // 开始提交但不等待完成
       const submitPromise = new AnswerSubmitter().submit(form, ['TS'], onError, onSubmitted, {
         signal: controller.signal,
       })
+      await flushMicrotasks()
 
-      // 在 sleep 期间 abort
       controller.abort()
-
-      // 推进所有定时器，触发 sleep resolve
-      await vi.runAllTimersAsync()
       await submitPromise
 
+      expect(button.click).not.toHaveBeenCalled()
       expect(onSubmitted).not.toHaveBeenCalled()
       expect(onError).not.toHaveBeenCalled()
-      expect(button.click).not.toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
     })
   })
 })

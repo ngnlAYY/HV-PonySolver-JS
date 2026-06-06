@@ -7,9 +7,10 @@ function roundConfidence(value: number): number {
 }
 
 function readDetection(data: Float32Array, rowIndex: number): Detection | null {
-  const base = rowIndex * 6
-  const confidence = Number(data[base + 4])
-  const classId = Math.trunc(Number(data[base + 5]))
+  const { rowSize, confidenceIndex, classIndex } = inferenceConfig.yoloOutputConfig
+  const base = rowIndex * rowSize
+  const confidence = Number(data[base + confidenceIndex])
+  const classId = Math.trunc(Number(data[base + classIndex]))
   if (!Number.isFinite(confidence) || !answerCodeForClassId(classId)) {
     return null
   }
@@ -38,7 +39,8 @@ export function parseYoloOutput(data: Float32Array): YoloParseResult {
   const detections: Detection[] = []
   const candidates: Detection[] = []
   let bestDetection: Detection | null = null
-  const totalRows = Math.floor(data.length / 6)
+  const { rowSize } = inferenceConfig.yoloOutputConfig
+  const totalRows = Math.floor(data.length / rowSize)
 
   for (let i = 0; i < totalRows; i += 1) {
     const detection = readDetection(data, i)

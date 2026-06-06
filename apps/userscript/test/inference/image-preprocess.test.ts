@@ -20,6 +20,42 @@ describe('image preprocessing helpers', () => {
     })
   })
 
+  it('keeps a 1xN image at one pixel wide and centers it horizontally', () => {
+    expect(calculateLetterboxLayout(1, 640, 640)).toEqual({
+      width: 1,
+      height: 640,
+      x: 319,
+      y: 0,
+    })
+  })
+
+  it('keeps an Nx1 image at one pixel high and centers it vertically', () => {
+    expect(calculateLetterboxLayout(640, 1, 640)).toEqual({
+      width: 640,
+      height: 1,
+      x: 0,
+      y: 319,
+    })
+  })
+
+  it('fills the target for square images', () => {
+    expect(calculateLetterboxLayout(320, 320, 640)).toEqual({
+      width: 640,
+      height: 640,
+      x: 0,
+      y: 0,
+    })
+  })
+
+  it('scales small images up while preserving aspect ratio', () => {
+    expect(calculateLetterboxLayout(32, 16, 640)).toEqual({
+      width: 640,
+      height: 320,
+      x: 0,
+      y: 160,
+    })
+  })
+
   it('copies RGBA image data into CHW float32 RGB planes', () => {
     const rgba = new Uint8ClampedArray([
       255, 0, 0, 255,

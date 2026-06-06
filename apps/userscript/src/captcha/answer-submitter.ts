@@ -20,7 +20,6 @@ export class AnswerSubmitter {
   ): Promise<void> {
     const signal = options?.signal
 
-    // 进入时检查 abort
     if (signal?.aborted) {
       return
     }
@@ -61,16 +60,14 @@ export class AnswerSubmitter {
         checkbox.click()
       }
       if (i < order.length - 1) {
-        await sleep(randDelay(timingConfig.multiClickDelay))
-        // 多选间隔后检查 abort
+        await sleep(randDelay(timingConfig.multiClickDelay), signal)
         if (signal?.aborted) {
           return
         }
       }
     }
 
-    await sleep(randDelay(timingConfig.submitDelay))
-    // 提交延迟后检查 abort
+    await sleep(randDelay(timingConfig.submitDelay), signal)
     if (signal?.aborted) {
       return
     }

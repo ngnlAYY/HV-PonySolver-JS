@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { inferenceConfig } from '../../src/inference/inference-config'
 import { OnnxWorkerClient } from '../../src/inference/onnx-worker-client'
 import type { ModelCache } from '../../src/model/model-cache'
 import { createMockPanel } from '../helpers/mock-panel'
-import { FailingWorker, SuccessfulWorker } from '../helpers/mock-worker'
+import { FailingWorker, SuccessfulWorker, TimeoutThenSuccessfulWorker } from '../helpers/mock-worker'
 
 function stubWorker(worker: new (...args: unknown[]) => Worker): void {
   vi.stubGlobal('Worker', worker)
@@ -15,8 +16,13 @@ describe('OnnxWorkerClient', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     SuccessfulWorker.reset()
+    TimeoutThenSuccessfulWorker.reset()
     vi.stubGlobal('__HV_PONY_SOLVER_TEST_WORKER_SCRIPT__', 'self.onmessage = () => {}')
     stubWorker(FailingWorker as unknown as new (...args: unknown[]) => Worker)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('does not cache a downloaded model when worker init fails', async () => {
@@ -239,5 +245,31 @@ describe('OnnxWorkerClient', () => {
 
     expect(panel.setSessionReady).not.toHaveBeenCalled()
     expect(SuccessfulWorker.terminateCount).toBeGreaterThanOrEqual(1)
+  })
+
+  it('marks session error, rejects pending init, and creates a new worker on next prepare after timeout', async () => {
+    vi.useFakeTimers()
+    stubWorker(TimeoutThenSuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelCache = {
+      getCached: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      download: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(modelCache, panel)
+
+    const preparePromise = client.prepare()
+    await vi.waitFor(() => expect(TimeoutThenSuccessfulWorker.messages).toHaveLength(1))
+    vi.advanceTimersByTime(inferenceConfig.workerInitTimeoutMs)
+
+    await expect(preparePromise).rejects.toThrow('ONNX Worker 请求超时')
+    expect(panel.setStatus).toHaveBeenCalledWith({ session: '错误' })
+
+    const nextPreparePromise = client.prepare()
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+
+    await expect(nextPreparePromise).resolves.toBe(SuccessfulWorker.instances[0])
+    expect(TimeoutThenSuccessfulWorker.constructedCount).toBe(2)
   })
 })

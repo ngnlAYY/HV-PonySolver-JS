@@ -5,6 +5,7 @@ import worker, { type Env, type ModelBucket, type ModelKeyStore } from '../../sr
 export type StoredObject = Readonly<{
   body: string
   etag?: string
+  httpEtag?: string | null
 }>
 
 export type ModelFixture = Readonly<{
@@ -75,7 +76,7 @@ export class MockR2ObjectBody implements R2ObjectBody {
     private readonly object: StoredObject,
   ) {
     this.size = object.body.length
-    this.httpEtag = object.etag ?? '"mock-etag"'
+    this.httpEtag = object.httpEtag === null ? '' : object.httpEtag ?? object.etag ?? '"mock-etag"'
     this.body = new Response(object.body).body ?? new ReadableStream()
   }
 

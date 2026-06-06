@@ -51,6 +51,10 @@ Prefer GM storage for userscript settings when available. localStorage fallback 
 
 The current model is about 9.8 MB. The downloader reads streamed chunks and combines them into one `ArrayBuffer`; this is acceptable for the current model size. If future models grow significantly, update the downloader to preallocate from `Content-Length` and write chunks directly into a single `Uint8Array` to reduce peak memory.
 
+## YOLO 输出解析
+
+YOLO 输出格式假设集中在 `inferenceConfig.yoloOutputConfig`，当前按每行 6 个 float 读取：第 5 个值是 confidence，第 6 个值是 class id。解析时忽略尾部不完整行、非有限 confidence 和无法映射到答案的 class id；浮点 class id 会先按 `Math.trunc()` 截断。没有任何行达到阈值时，会回退到最高 confidence 的有效行。重复 class 只保留最高 confidence，并返回所有去重后的命中答案；超过 `maxKinds` 时结果为不成功，但不会丢弃超出部分的命中信息。
+
 ## 调试日志
 
 userscript 菜单提供 `开启调试日志` 与 `关闭调试日志`。开启后，脚本会在浏览器 console 输出带 `[PonySolverLocal]` 前缀的调试日志。默认关闭，不会输出普通调试日志；警告和错误仍会输出，便于排障。

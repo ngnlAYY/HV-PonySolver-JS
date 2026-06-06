@@ -1,12 +1,12 @@
 import { ANSWER_CODES } from '@hv-pony-solver/shared'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { captchaSelectors } from '../../src/captcha/captcha-selectors'
 import { solverConfig } from '../../src/captcha/solver-config'
 import { timingConfig } from '../../src/captcha/timing-config'
 import { inferenceConfig } from '../../src/inference/inference-config'
 import { modelConfig } from '../../src/model/model-config'
-import { randDelay, shuffle } from '../../src/utils/delay'
+import { randDelay, shuffle, sleep } from '../../src/utils/delay'
 import { formatErrorMessage } from '../../src/utils/errors'
 import { escapeHtml } from '../../src/utils/html'
 
@@ -42,6 +42,10 @@ describe('config defaults', () => {
 })
 
 describe('utility functions', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('escapes HTML-sensitive characters', () => {
     expect(escapeHtml('<tag a="b">&')).toBe('&lt;tag a=&quot;b&quot;&gt;&amp;')
   })
@@ -67,5 +71,29 @@ describe('utility functions', () => {
 
     expect(source).toEqual(['a', 'b', 'c', 'd'])
     expect([...result].sort()).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('resolves an aborted sleep immediately without scheduling a timer', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    controller.abort()
+
+    await sleep(1000, controller.signal)
+
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('clears its timer and abort listener when aborted during sleep', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const removeEventListener = vi.spyOn(controller.signal, 'removeEventListener')
+    const promise = sleep(1000, controller.signal)
+
+    expect(vi.getTimerCount()).toBe(1)
+    controller.abort()
+    await promise
+
+    expect(vi.getTimerCount()).toBe(0)
+    expect(removeEventListener).toHaveBeenCalledWith('abort', expect.any(Function))
   })
 })

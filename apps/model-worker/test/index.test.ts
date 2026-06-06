@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { textResponse } from '../src/model-response'
+import { addCorsHeaders, textResponse } from '../src/model-response'
 import {
   createEnv,
   createModelFixture,
@@ -124,6 +124,42 @@ describe('model worker', () => {
     expect(response.headers.get('vary')).toBe('Accept-Encoding, Origin')
   })
 
+  it('does not append duplicate Origin to an existing Vary: Origin header', () => {
+    const headers = addCorsHeaders(
+      new Headers({ vary: 'Origin' }),
+      new Request('https://models.example/yolo26n-640.onnx', {
+        headers: { origin: HENTAIVERSE_ORIGIN },
+      }),
+    )
+
+    expect(headers.get('vary')).toBe('Origin')
+    expect(headers.get('access-control-allow-origin')).toBe(HENTAIVERSE_ORIGIN)
+  })
+
+  it('does not append duplicate Origin when existing Vary token is lowercase', () => {
+    const headers = addCorsHeaders(
+      new Headers({ vary: 'origin' }),
+      new Request('https://models.example/yolo26n-640.onnx', {
+        headers: { origin: HENTAIVERSE_ORIGIN },
+      }),
+    )
+
+    expect(headers.get('vary')).toBe('origin')
+    expect(headers.get('access-control-allow-origin')).toBe(HENTAIVERSE_ORIGIN)
+  })
+
+  it('keeps Vary: Origin without ACAO for unknown origins', () => {
+    const headers = addCorsHeaders(
+      new Headers(),
+      new Request('https://models.example/yolo26n-640.onnx', {
+        headers: { origin: 'https://attacker.example' },
+      }),
+    )
+
+    expect(headers.get('vary')).toBe('Origin')
+    expect(headers.get('access-control-allow-origin')).toBeNull()
+  })
+
   it('uses the shared default model path when PUBLIC_MODEL_PATH is omitted', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {
@@ -135,6 +171,47 @@ describe('model worker', () => {
 
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.realBody)
+  })
+
+  it('sets ETag from R2 httpEtag for GET and HEAD model responses', async () => {
+    const fixture = createModelFixture()
+    const storedEtag = 'stored-etag-that-must-not-be-used'
+    const httpEtag = '"http-etag-that-must-be-used"'
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+      objects: new Map<string, StoredObject>([
+        [fixture.realModelObjectKey, { body: fixture.realBody, etag: storedEtag, httpEtag }],
+        [fixture.decoyModelObjectKey, { body: fixture.decoyBody, etag: fixture.decoyEtag }],
+      ]),
+    })
+
+    const getResponse = await fetchWorker(modelRequest(fixture, 'GET', fixture.validKey), env)
+    const headResponse = await fetchWorker(modelRequest(fixture, 'HEAD', fixture.validKey), env)
+
+    expect(getResponse.status).toBe(200)
+    expect(getResponse.headers.get('etag')).toBe(httpEtag)
+    expect(getResponse.headers.get('etag')).not.toBe(storedEtag)
+    expect(headResponse.status).toBe(200)
+    expect(headResponse.headers.get('etag')).toBe(httpEtag)
+    expect(headResponse.headers.get('etag')).not.toBe(storedEtag)
+    expect(await headResponse.text()).toBe('')
+  })
+
+  it('omits ETag when the R2 object has no httpEtag', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey),
+      createEnv(fixture, {
+        keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+        objects: new Map<string, StoredObject>([
+          [fixture.realModelObjectKey, { body: fixture.realBody, httpEtag: null }],
+          [fixture.decoyModelObjectKey, { body: fixture.decoyBody, etag: fixture.decoyEtag }],
+        ]),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('etag')).toBeNull()
   })
 
   it('returns the decoy model when key is missing', async () => {

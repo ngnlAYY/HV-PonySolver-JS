@@ -4,8 +4,29 @@ export function randDelay(range: readonly [number, number]): number {
   return min + Math.floor(Math.random() * (max - min + 1))
 }
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    const cleanup = (): void => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      signal?.removeEventListener('abort', handleAbort)
+    }
+    const finish = (): void => {
+      cleanup()
+      resolve()
+    }
+    const handleAbort = (): void => finish()
+
+    timeoutId = setTimeout(finish, ms)
+    signal?.addEventListener('abort', handleAbort, { once: true })
+  })
 }
 
 export function shuffle<T>(values: readonly T[]): T[] {
