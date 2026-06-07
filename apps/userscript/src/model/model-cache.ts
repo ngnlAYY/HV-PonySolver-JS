@@ -66,7 +66,8 @@ export class ModelCache {
       }
       this.panel.setStatus({ model: `缓存未命中 ${elapsed}ms` })
     } catch (error) {
-      this.panel.setStatus({ model: '缓存读取失败，准备下载' })
+      const elapsed = Date.now() - startedAt
+      this.panel.setStatus({ model: `缓存读取失败 ${elapsed}ms，准备下载` })
       warn('读取模型缓存失败，改为下载模型:', formatErrorMessage(error))
     }
     return null

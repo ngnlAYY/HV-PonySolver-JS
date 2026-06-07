@@ -77,6 +77,8 @@ export class CaptchaSolver {
         return result(false)
       }
 
+      this.panel.setStatus({ inference: `图片获取完成 ${elapsed()}ms` })
+      this.panel.setStatus({ inference: '推理请求中' })
       let detectionResult: YoloParseResult
       try {
         detectionResult = await this.detector.detect(blob)

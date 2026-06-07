@@ -137,6 +137,24 @@ describe('OnnxWorkerClient', () => {
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: expect.stringMatching(/^完成 \d+ms$/) })
   })
 
+  it('reports session readiness after preparing without a transient overwritten status', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    const modelCache = {
+      getCached: vi.fn(async () => modelBuffer),
+      download: vi.fn(async () => modelBuffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(modelCache, panel)
+
+    await client.prepare()
+
+    expect(panel.setStatus).toHaveBeenCalledWith({ session: '初始化中' })
+    expect(panel.setStatus).not.toHaveBeenCalledWith({ session: expect.stringMatching(/^Worker 初始化 \d+ms$/) })
+    expect(panel.setSessionReady).toHaveBeenCalledWith(expect.any(Number))
+  })
+
   it('does not reset session readiness when prepare is called after ready', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer

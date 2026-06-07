@@ -3,14 +3,24 @@ import { parseYoloOutput } from './yolo-output-parser'
 
 declare const __HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE__: string | undefined
 
-type WorkerGlobal = DedicatedWorkerGlobalScope & {
-  ort?: {
-    env: { wasm: { wasmPaths?: string, numThreads?: number } }
-    Tensor: new (type: 'float32', data: Float32Array, dims: number[]) => unknown
-    InferenceSession: {
-      create: (modelBuffer: ArrayBuffer, options: { executionProviders: string[] }) => Promise<{ run: (feeds: { images: unknown }) => Promise<Record<string, { data?: Float32Array | { buffer: ArrayBuffer, byteOffset: number, byteLength: number } }>> }>
-    }
+type OrtOutput = Readonly<{
+  data?: Float32Array | { buffer: ArrayBuffer, byteOffset: number, byteLength: number }
+}>
+
+type OrtSession = Readonly<{
+  run: (feeds: { images: unknown }) => Promise<Record<string, OrtOutput>>
+}>
+
+type OrtGlobal = Readonly<{
+  env: { wasm: { wasmPaths?: string, numThreads?: number } }
+  Tensor: new (type: 'float32', data: Float32Array, dims: number[]) => unknown
+  InferenceSession: {
+    create: (modelBuffer: ArrayBuffer, options: { executionProviders: string[] }) => Promise<OrtSession>
   }
+}>
+
+type WorkerGlobal = DedicatedWorkerGlobalScope & {
+  ort?: OrtGlobal
 }
 
 type InitMessage = Readonly<{
@@ -32,8 +42,8 @@ type WorkerRequest = InitMessage | DetectMessage
 
 const workerSelf = self as WorkerGlobal
 const runtimeSource = __HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE__
-let sessionPromise: ReturnType<NonNullable<WorkerGlobal['ort']>['InferenceSession']['create']> | null = null
-let session: Awaited<ReturnType<NonNullable<WorkerGlobal['ort']>['InferenceSession']['create']>> | null = null
+let sessionPromise: Promise<OrtSession> | null = null
+let session: OrtSession | null = null
 let preprocessCanvas: OffscreenCanvas | null = null
 let preprocessContext: OffscreenCanvasRenderingContext2D | null = null
 let preprocessSize = 0
@@ -47,7 +57,7 @@ function loadBundledRuntime(): void {
   runtimeLoader(workerSelf)
 }
 
-async function ensureSession(): Promise<Awaited<ReturnType<NonNullable<WorkerGlobal['ort']>['InferenceSession']['create']>>> {
+async function ensureSession(): Promise<OrtSession> {
   if (session) {
     return session
   }

@@ -197,7 +197,7 @@ describe('ModelCache', () => {
     expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^缓存未命中 \d+ms$/) })
   })
 
-  it('reports cache read failures before falling back to download', async () => {
+  it('reports elapsed cache read failures before falling back to download', async () => {
     stubIndexedDb(undefined, new DOMException('读取失败'))
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const panel = createStatusPanel()
@@ -205,7 +205,7 @@ describe('ModelCache', () => {
 
     await expect(cache.getCached()).resolves.toBeNull()
 
-    expect(panel.setStatus).toHaveBeenCalledWith({ model: '缓存读取失败，准备下载' })
+    expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^缓存读取失败 \d+ms，准备下载$/) })
   })
 
   it('reports elapsed time when download completes', async () => {

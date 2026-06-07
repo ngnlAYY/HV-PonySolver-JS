@@ -105,14 +105,15 @@ corepack pnpm install
 
 ### 根目录命令
 
-| 命令             | 说明                                                 |
-| ---------------- | ---------------------------------------------------- |
+| 命令              | 说明                                                             |
+| ----------------- | ---------------------------------------------------------------- |
 | `pnpm install`   | 安装所有 workspace 依赖                              |
 | `pnpm lint`      | 对整个仓库运行 ESLint                                |
 | `pnpm typecheck` | 对所有 workspace 运行 TypeScript 类型检查            |
-| `pnpm test`      | 运行所有 workspace 的 Vitest 测试                    |
-| `pnpm build`     | 运行所有 workspace 的构建检查；userscript 会生成产物 |
-| `pnpm check`     | 依次运行 lint、typecheck、test、build                |
+| `pnpm test`      | 运行所有 workspace 的 Vitest 测试与 node:test 脚本测试 |
+| `pnpm build`     | 运行所有 workspace 的构建检查；userscript 会生成产物   |
+| `pnpm docs:check` | 检查 README/docs 与 source 关键事实是否发生 drift      |
+| `pnpm check`     | 依次运行 lint、typecheck、test、test:coverage、docs:check、build |
 | `pnpm format`    | 用 Prettier 格式化仓库文件                           |
 
 ### Userscript 命令
@@ -122,7 +123,8 @@ corepack pnpm install
 | `corepack pnpm --filter @hv-pony-solver/userscript build`             | 用 esbuild 打包未压缩 userscript，并写入 `apps/userscript/dist/hv-pony-solver.user.js` |
 | `corepack pnpm --filter @hv-pony-solver/userscript build -- --minify` | 用 esbuild 打包压缩 userscript                                                         |
 | `pnpm --filter @hv-pony-solver/userscript typecheck`                  | 类型检查 userscript 源码                                                               |
-| `pnpm --filter @hv-pony-solver/userscript test`                       | 在 jsdom 环境运行 userscript 单元测试                                                  |
+| `pnpm --filter @hv-pony-solver/userscript test`                       | 运行 userscript Vitest/jsdom 单元测试与 node:test 脚本测试                            |
+| `MODEL_FILE=/path/to/yolo26n-640.onnx pnpm --filter @hv-pony-solver/userscript verify-model-integrity` | 校验待发布模型与 shared manifest 的 byteLength / SHA-256 一致性 |
 
 ### Model Worker 命令
 
@@ -405,6 +407,8 @@ pnpm check
 pnpm lint
 pnpm typecheck
 pnpm test
+pnpm test:coverage
+pnpm docs:check
 pnpm build
 ```
 
@@ -429,9 +433,10 @@ pnpm --filter @hv-pony-solver/model-worker test
 6. `pnpm typecheck`。
 7. 使用测试值渲染 Worker Wrangler 配置。
 8. `pnpm test`。
-9. `pnpm build`。
-10. 如果 `bundle_onnx_runtime=true`，额外构建内置 ONNX Runtime Web JS runtime 的 userscript。
-11. 如果 `publish_userscript_artifact=true`，上传 `apps/userscript/dist/hv-pony-solver.user.js` artifact；默认不上传。
+9. `pnpm docs:check`。
+10. `pnpm build`。
+11. 如果 `bundle_onnx_runtime=true`，额外构建内置 ONNX Runtime Web JS runtime 的 userscript。
+12. 如果 `publish_userscript_artifact=true`，上传 `apps/userscript/dist/hv-pony-solver.user.js` artifact；默认不上传。
 
 ### Model Worker 部署 workflow
 
@@ -479,7 +484,7 @@ corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 apps/userscript/dist/hv-pony-solver.user.js
 ```
 
-如果需要访问真实模型，需要确保构建产物中的 `modelConfig.accessKey` 对应 Worker KV 中存在的授权 key。`modelConfig.verifyIntegrity` 默认开启（`true`），会按 `packages/shared/src/model.ts` 中 `MODEL_INTEGRITY` 定义的 `byteLength` 与 `sha256` 对下载及缓存读取进行严格校验；当远端模型字节内容变更时，必须同步更新 `MODEL_INTEGRITY` 与 `MODEL_VERSION`，否则下载会被阻断。
+如果需要访问真实模型，需要确保构建产物中的 `modelConfig.accessKey` 对应 Worker KV 中存在的授权 key。`modelConfig.verifyIntegrity` 默认开启（`true`），会按 `packages/shared/src/model.ts` 中 `MODEL_INTEGRITY` 定义的 `byteLength` 与 `sha256` 对下载及缓存读取进行严格校验；当远端模型字节内容变更时，必须同步更新 `MODEL_INTEGRITY` 与 `MODEL_VERSION`，否则下载会被阻断。发布前应对待发布 ONNX 文件运行 `MODEL_FILE=/path/to/yolo26n-640.onnx corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity`，确保本地模型与 shared manifest 一致。
 
 ### 部署 Model Worker
 

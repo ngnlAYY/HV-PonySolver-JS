@@ -14,12 +14,13 @@
   },
   "scripts": {
     "build": "corepack pnpm -r build",
-    "test": "corepack pnpm -r test",
+    "test": "corepack pnpm -r test && node --test scripts/check-docs-drift.test.mjs",
     "test:coverage": "corepack pnpm -r test:coverage",
     "typecheck": "corepack pnpm -r typecheck",
     "lint": "eslint .",
+    "docs:check": "node scripts/check-docs-drift.mjs",
     "format": "prettier --write .",
-    "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:coverage && corepack pnpm build"
+    "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:coverage && corepack pnpm docs:check && corepack pnpm build"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

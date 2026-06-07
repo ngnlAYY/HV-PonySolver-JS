@@ -45,6 +45,7 @@ Prefer GM storage for userscript settings when available. localStorage fallback 
 - 模型缓存应绑定 `packages/shared` 中的 `MODEL_VERSION`。
 - 模型完整性应使用 `packages/shared` 中的 `MODEL_INTEGRITY.byteLength` + `MODEL_INTEGRITY.sha256` 双重校验。
 - 远端模型更新时，应同步更新 shared manifest 中的 `MODEL_VERSION / MODEL_INTEGRITY`。
+- 发布前对待发布 ONNX 文件运行 `MODEL_FILE=/path/to/yolo26n-640.onnx corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity`，确认本地模型 byteLength 与 SHA-256 和 shared manifest 一致。
 - 默认启用完整性验证，下载模型与缓存模型都应执行一致校验流程。
 
 ## Model download and memory note
@@ -69,6 +70,20 @@ corepack pnpm --filter @hv-pony-solver/userscript build
 
 构建脚本的测试会检查 bundle budget：main bundle 目标小于 80KB，worker bundle 目标小于 20KB。
 
+## 可选浏览器 smoke
+
+`apps/userscript` 另有独立 Playwright smoke，用真实 Chromium 加载本地 mock 页面、mock captcha 图片与 mock detector，验证状态面板创建、captcha DOM 识别、checkbox 点击和提交事件链路。该测试不会访问真实 Hentaiverse，也不使用真实 access key；未并入 root `check` 脚本，避免常规检查依赖浏览器安装。
+
+```bash
+corepack pnpm --filter @hv-pony-solver/userscript test:e2e
+```
+
+首次运行或 Playwright 版本更新后，如提示缺少浏览器，请运行：
+
+```bash
+corepack pnpm --filter @hv-pony-solver/userscript exec playwright install chromium
+```
+
 可选压缩构建：
 
 ```bash
@@ -79,6 +94,9 @@ corepack pnpm --filter @hv-pony-solver/userscript build -- --minify
 
 ```bash
 corepack pnpm check
+corepack pnpm docs:check
 pnpm --filter @hv-pony-solver/userscript typecheck
 pnpm --filter @hv-pony-solver/userscript test
 ```
+
+> `corepack pnpm check` 已覆盖 lint / typecheck / test / test:coverage / docs:check / build。

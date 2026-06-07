@@ -6,14 +6,17 @@
   "scripts": {
     "build": "node scripts/build-userscript.mjs",
     "build:bundled-runtime": "HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1 node scripts/build-userscript.mjs",
-    "test": "vitest run && node --test scripts/build-userscript.test.mjs",
-    "test:coverage": "vitest run --coverage",
+    "verify-model-integrity": "node scripts/verify-model-integrity.mjs",
+    "test": "vitest run && node --test scripts/build-userscript.test.mjs scripts/verify-model-integrity.test.mjs",
+    "test:e2e": "playwright test test/e2e/userscript-smoke.spec.ts --project=chromium",
+    "test:coverage": "vitest run --coverage && node --test --experimental-test-coverage --test-coverage-include=scripts/build-userscript.mjs --test-coverage-include=scripts/verify-model-integrity.mjs scripts/build-userscript.test.mjs scripts/verify-model-integrity.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@hv-pony-solver/shared": "workspace:*"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "esbuild": "^0.27.0",
     "jsdom": "^27.0.0",
     "onnxruntime-web": "1.26.0",

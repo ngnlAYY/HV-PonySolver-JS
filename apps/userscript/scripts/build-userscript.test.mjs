@@ -5,6 +5,15 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import {
+  createMainBuildOptions,
+  createMetafileJson,
+  createUserscriptOutput,
+  createWorkerBuildOptions,
+  parseMinifyFlag,
+  validateUserscriptMetadata,
+  workerRuntimeSourcePlaceholder,
+} from './build-userscript.mjs'
 
 const execFileAsync = promisify(execFile)
 const appDir = resolve(import.meta.dirname, '..')
@@ -14,6 +23,66 @@ const runtimeByteLength = 60
 const runtimeSha256 = '5259978e2c9e098e157db55ce652398eee871f059417927c42742512696bb055'
 const mainBundleBudgetBytes = 80_000
 const workerBundleBudgetBytes = 20_000
+
+test('parseMinifyFlag only enables minification for the last explicit true flag', () => {
+  assert.equal(parseMinifyFlag([]), false)
+  assert.equal(parseMinifyFlag(['--minify']), true)
+  assert.equal(parseMinifyFlag(['--minify=true']), true)
+  assert.equal(parseMinifyFlag(['--minify=false']), false)
+  assert.equal(parseMinifyFlag(['--minify=1']), false)
+  assert.equal(parseMinifyFlag(['--minify=false', '--minify']), true)
+  assert.equal(parseMinifyFlag(['--minify', '--minify=false']), false)
+})
+
+test('validateUserscriptMetadata accepts only complete userscript metadata blocks', () => {
+  const metadata = '// ==UserScript==\n// @name        Test\n// ==/UserScript=='
+
+  assert.equal(validateUserscriptMetadata(metadata), undefined)
+  assert.throws(() => validateUserscriptMetadata('// @name        Test\n// ==/UserScript=='), /must start/)
+  assert.throws(() => validateUserscriptMetadata('// ==UserScript==\n// @name        Test'), /must end/)
+})
+
+test('createUserscriptOutput joins metadata and bundled text with a blank line', () => {
+  assert.equal(createUserscriptOutput('// ==UserScript==\n// ==/UserScript==', '(() => {})();'), '// ==UserScript==\n// ==/UserScript==\n\n(() => {})();')
+})
+
+test('createMetafileJson preserves main and worker esbuild metafiles', () => {
+  const metafileJson = createMetafileJson({ outputs: { 'main.js': { bytes: 1 } } }, { outputs: { 'worker.js': { bytes: 2 } } })
+
+  assert.equal(metafileJson, JSON.stringify({
+    main: { outputs: { 'main.js': { bytes: 1 } } },
+    worker: { outputs: { 'worker.js': { bytes: 2 } } },
+  }, null, 2))
+})
+
+test('createWorkerBuildOptions defines the runtime source placeholder', () => {
+  const options = createWorkerBuildOptions({
+    workerEntryPoint: '/app/src/inference/onnx-worker-entry.ts',
+    shouldMinify: true,
+    shouldWriteMetafile: true,
+  })
+
+  assert.deepEqual(options.entryPoints, ['/app/src/inference/onnx-worker-entry.ts'])
+  assert.equal(options.minify, true)
+  assert.equal(options.metafile, true)
+  assert.equal(options.define.__HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE__, JSON.stringify(workerRuntimeSourcePlaceholder))
+})
+
+test('createMainBuildOptions injects ONNX runtime and worker script sources', () => {
+  const options = createMainBuildOptions({
+    entryPoint: '/app/src/main.ts',
+    shouldMinify: false,
+    shouldWriteMetafile: true,
+    onnxRuntimeSource: 'self.ort = {};',
+    workerScriptText: 'self.onmessage = () => {};',
+  })
+
+  assert.deepEqual(options.entryPoints, ['/app/src/main.ts'])
+  assert.equal(options.minify, false)
+  assert.equal(options.metafile, true)
+  assert.equal(options.define.__HV_PONY_SOLVER_ONNX_RUNTIME_SOURCE__, JSON.stringify('self.ort = {};'))
+  assert.equal(options.define.__HV_PONY_SOLVER_WORKER_SCRIPT__, JSON.stringify('self.onmessage = () => {};'))
+})
 
 test('build-userscript defaults to remote onnxruntime-web runtime', async () => {
   const output = await runBuildInTempDir({ HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '' })

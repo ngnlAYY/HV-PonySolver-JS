@@ -10,7 +10,7 @@ corepack pnpm install
 corepack pnpm check
 ```
 
-> `corepack pnpm check` 会串行执行 lint / typecheck / test / build。
+> `corepack pnpm check` 会串行执行 lint / typecheck / test / test:coverage / docs:check / build。
 
 ---
 
@@ -19,6 +19,7 @@ corepack pnpm check
 ### 1) 构建与验证
 
 - [ ] 运行 `corepack pnpm check`
+- [ ] 运行 `corepack pnpm docs:check`（若只需快速确认 README/docs/source drift）
 - [ ] 运行 `pnpm --filter @hv-pony-solver/userscript typecheck`
 - [ ] 运行 `pnpm --filter @hv-pony-solver/userscript test`
 - [ ] 运行 userscript 构建：
@@ -79,8 +80,15 @@ pnpm --filter @hv-pony-solver/model-worker test
 - [ ] `packages/shared` 中的 `MODEL_VERSION`
 - [ ] `MODEL_INTEGRITY.byteLength`
 - [ ] `MODEL_INTEGRITY.sha256`
+- [ ] 对待发布的真实 ONNX 文件运行 manifest 校验：
 
-建议将上述 3 项与 Worker/R2 实际模型及发布记录一起复核，避免“shared manifest 与 Worker/R2 实际模型不一致”。
+```bash
+MODEL_FILE=/path/to/yolo26n-640.onnx corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity
+```
+
+该命令只读取本地 `MODEL_FILE`，计算 byteLength 与 SHA-256，并与 `packages/shared/src/model.ts` 中的 `MODEL_INTEGRITY` 对比；不连接 R2，也不需要真实凭证。
+
+建议将上述 4 项与 Worker/R2 实际模型及发布记录一起复核，避免“shared manifest 与 Worker/R2 实际模型不一致”。
 
 ### 4) 部署
 

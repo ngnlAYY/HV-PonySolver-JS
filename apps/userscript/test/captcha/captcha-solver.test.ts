@@ -62,6 +62,7 @@ function createSolver(overrides: Partial<Readonly<{
   detector: DetectorService
   imageLoader: ImageLoader
   answerSubmitter: AnswerSubmitter
+  getAbortSignal: () => AbortSignal | undefined
 }>> = {}): Readonly<{
   solver: CaptchaSolver
   panel: StatusPanel
@@ -74,7 +75,7 @@ function createSolver(overrides: Partial<Readonly<{
   const imageLoader = overrides.imageLoader ?? { get: vi.fn(async () => new Blob(['captcha'])) }
   const answerSubmitter = overrides.answerSubmitter ?? createAnswerSubmitter()
   return {
-    solver: new CaptchaSolver(panel, detector, imageLoader, answerSubmitter),
+    solver: new CaptchaSolver(panel, detector, imageLoader, answerSubmitter, overrides.getAbortSignal),
     panel,
     detector,
     imageLoader,
@@ -119,7 +120,7 @@ describe('CaptchaSolver', () => {
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
   })
 
-  it('reports failed detection results as having no answer to submit', async () => {
+  it('reports image loading and detector stages before failed detection results', async () => {
     appendCaptcha()
     const detector = createDetector(vi.fn(async () => emptyDetectionResult(false)))
     const { solver, panel, answerSubmitter } = createSolver({ detector })
@@ -127,8 +128,34 @@ describe('CaptchaSolver', () => {
     const result = await solver.trigger()
 
     expect(result).toEqual({ solved: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(panel.setStatus).toHaveBeenCalledWith({ inference: '获取图片' })
+    expect(panel.setStatus).toHaveBeenCalledWith({ inference: expect.stringMatching(/^图片获取完成 \d+ms$/) })
+    expect(panel.setStatus).toHaveBeenCalledWith({ inference: '推理请求中' })
     expectPanelError(panel, '识别失败: 无可提交答案')
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
+  })
+
+  it('does not report image success after cancellation during image loading', async () => {
+    appendCaptcha()
+    const abortController = new AbortController()
+    const detector = createDetector(vi.fn(async () => emptyDetectionResult(true)))
+    const { solver, panel } = createSolver({
+      detector,
+      getAbortSignal: () => abortController.signal,
+      imageLoader: {
+        get: vi.fn(async () => {
+          abortController.abort()
+          return new Blob(['captcha'])
+        }),
+      },
+    })
+
+    const result = await solver.trigger()
+
+    expect(result).toEqual({ solved: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(panel.setStatus).toHaveBeenCalledWith({ inference: '获取图片' })
+    expect(panel.setStatus).not.toHaveBeenCalledWith({ inference: expect.stringMatching(/^图片获取完成 \d+ms$/) })
+    expect(detector.detect).not.toHaveBeenCalled()
   })
 
   it('reports empty successful detection results as having no answer to submit', async () => {
