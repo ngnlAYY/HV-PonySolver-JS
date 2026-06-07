@@ -83,10 +83,16 @@ async function checkGraphifyCorpus(repoRoot = defaultRepoRoot, options = {}) {
     }
   }
 
-  if (options.report) {
-    await checkGraphReport(resolve(repoRoot, 'graphify-out', 'GRAPH_REPORT.md'))
-    await checkGraphJson(resolve(repoRoot, 'graphify-out', 'graph.json'))
+  const reportPath = resolve(repoRoot, 'graphify-out', 'GRAPH_REPORT.md')
+  const graphPath = resolve(repoRoot, 'graphify-out', 'graph.json')
+  if (options.report || graphOutputExists(reportPath, graphPath)) {
+    await checkGraphReport(reportPath)
+    await checkGraphJson(graphPath)
   }
+}
+
+function graphOutputExists(reportPath, graphPath) {
+  return existsSync(reportPath) && existsSync(graphPath)
 }
 
 async function checkGraphReport(reportPath) {
@@ -107,13 +113,25 @@ async function checkGraphJson(graphPath) {
   }
   const graph = JSON.parse(await readFile(graphPath, 'utf8'))
   for (const node of graph.nodes ?? []) {
-    const sourceFile = String(node.source_file ?? node.sourceFile ?? '')
+    const sourceFile = normalizeGraphPath(node.source_file ?? node.sourceFile ?? '')
     const label = String(node.label ?? '')
     const id = String(node.id ?? '')
-    if (sourceFile.startsWith('.gitnexus/') || id === 'fileHashes' || label === 'fileHashes') {
+    if (isForbiddenGraphNode({ id, label, sourceFile })) {
       throw new Error(`Graphify graph contains generated-artifact node: ${id || label || sourceFile}`)
     }
   }
+}
+
+function normalizeGraphPath(path) {
+  return String(path).replaceAll('\\', '/')
+}
+
+function isForbiddenGraphNode({ id, label, sourceFile }) {
+  return hasPathSegment(sourceFile, '.gitnexus') || id === 'fileHashes' || label === 'fileHashes'
+}
+
+function hasPathSegment(path, segment) {
+  return path.split('/').includes(segment)
 }
 
 export { checkGraphifyCorpus, FORBIDDEN_GRAPH_MARKERS, REQUIRED_IGNORE_ENTRIES }
