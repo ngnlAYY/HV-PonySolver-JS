@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
