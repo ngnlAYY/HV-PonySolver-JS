@@ -40,11 +40,12 @@ function resolveRepoRoot(args) {
 }
 
 async function checkDocsDrift(repoRoot = defaultRepoRoot) {
-  const [rootPackageJson, readme, userscriptDocs, deploymentDocs, inferenceConfigSource, modelSource] = await Promise.all([
+  const [rootPackageJson, readme, userscriptDocs, deploymentDocs, architectureDocs, inferenceConfigSource, modelSource] = await Promise.all([
     readJson(repoRoot, 'package.json'),
     readText(repoRoot, 'README.md'),
     readText(repoRoot, 'docs/userscript.md'),
     readText(repoRoot, 'docs/deployment.md'),
+    readText(repoRoot, 'docs/architecture.md'),
     readText(repoRoot, 'apps/userscript/src/inference/inference-config.ts'),
     readText(repoRoot, 'packages/shared/src/model.ts'),
   ])
@@ -53,6 +54,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     ...checkRootCheckCommand(rootPackageJson, readme, deploymentDocs, userscriptDocs),
     ...checkUserscriptConfigDocs(inferenceConfigSource, readme),
     ...checkModelManifestDocs(modelSource, readme, userscriptDocs, deploymentDocs),
+    ...checkArchitectureDocs(architectureDocs),
   ]
 }
 
@@ -137,6 +139,24 @@ function checkModelManifestDocs(modelSource, readme, userscriptDocs, deploymentD
     }
   }
 
+  return errors
+}
+
+function checkArchitectureDocs(architectureDocs) {
+  const requiredTerms = [
+    '.graphifyignore',
+    'graphify:check',
+    'architecture:check',
+    'inferenceTimeoutConfig',
+    'StatusPanel',
+    'Model Worker Core',
+  ]
+  const errors = []
+  for (const term of requiredTerms) {
+    if (!architectureDocs.includes(term)) {
+      errors.push(`docs/architecture.md graph guardrails section must mention ${term}`)
+    }
+  }
   return errors
 }
 
