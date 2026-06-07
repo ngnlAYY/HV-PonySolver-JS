@@ -15,6 +15,8 @@ describe('StatusPanel', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     history.pushState(null, '', '/')
+    localStorage.clear()
+    vi.unstubAllGlobals()
   })
 
   it('does not reread history for status-only updates', () => {
@@ -40,6 +42,32 @@ describe('StatusPanel', () => {
     expect(document.body.textContent).toContain('模型状态：')
     expect(document.body.textContent).toContain('会话状态：')
     expect(document.body.textContent).toContain('推理状态：')
+  })
+
+  it('hides model, session, and inference rows in compact mode', () => {
+    localStorage.setItem('hvPonySolverPanelCompact', '1')
+    const store = createHistoryStore()
+    const panel = new StatusPanel(store)
+
+    panel.create()
+
+    expect(document.body.textContent).not.toContain('模型状态：')
+    expect(document.body.textContent).not.toContain('会话状态：')
+    expect(document.body.textContent).not.toContain('推理状态：')
+    expect(document.body.textContent).toContain('最近错误：无')
+    expect(document.body.textContent).toContain('最近答题:')
+  })
+
+  it('updates compact mode from async GM storage after creating the panel', async () => {
+    vi.stubGlobal('GM_getValue', vi.fn(async (key: string) => key === 'hvPonySolverPanelCompact' ? '1' : ''))
+    const store = createHistoryStore()
+    const panel = new StatusPanel(store)
+
+    panel.create()
+
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain('模型状态：'))
+    expect(document.body.textContent).not.toContain('会话状态：')
+    expect(document.body.textContent).not.toContain('推理状态：')
   })
 
   it('shows that there is no recent error when history has no errors', () => {

@@ -38,6 +38,8 @@ vi.mock('../../src/model/model-settings', () => ({
 vi.mock('../../src/status-panel/panel-settings', () => ({
   getPanelPosition: vi.fn(async () => ({ top: 150, left: 1240 })),
   getPanelPositionSync: vi.fn(() => ({ top: 150, left: 1240 })),
+  isPanelCompactMode: vi.fn(async () => false),
+  isPanelCompactModeSync: vi.fn(() => false),
   registerPanelSettingsMenu: vi.fn(),
 }))
 

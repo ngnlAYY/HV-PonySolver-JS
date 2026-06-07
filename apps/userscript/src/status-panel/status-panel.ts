@@ -2,7 +2,7 @@ import type { AnswerCode } from '@hv-pony-solver/shared'
 import { HistoryStore } from '../persistence/answer-history-store'
 import type { HistoryRecord, World } from '../persistence/answer-history-types'
 import type { PanelStatus, StatusPanel as StatusPanelContract } from './status-panel-types'
-import { getPanelPosition, getPanelPositionSync } from './panel-settings'
+import { getPanelPosition, getPanelPositionSync, isPanelCompactMode, isPanelCompactModeSync } from './panel-settings'
 import { formatAnswers, renderStatusPanel } from './status-panel-renderer'
 
 function getWorld(): World {
@@ -12,6 +12,7 @@ function getWorld(): World {
 export class StatusPanel implements StatusPanelContract {
   private el: HTMLDivElement | null = null
   private readonly world: World = getWorld()
+  private compactMode = false
   private records: HistoryRecord[] = []
   private status: PanelStatus = {
     model: '未开始',
@@ -26,6 +27,7 @@ export class StatusPanel implements StatusPanelContract {
       return
     }
     this.records = this.history.get(this.world)
+    this.compactMode = isPanelCompactModeSync()
     this.el = document.createElement('div')
     this.el.className = 'ponyLog'
     const syncPosition = getPanelPositionSync()
@@ -34,6 +36,12 @@ export class StatusPanel implements StatusPanelContract {
       if (this.el && (position.top !== syncPosition.top || position.left !== syncPosition.left)) {
         this.el.style.top = `${position.top}px`
         this.el.style.left = `${position.left}px`
+      }
+    })
+    isPanelCompactMode().then((compactMode) => {
+      if (this.el && compactMode !== this.compactMode) {
+        this.compactMode = compactMode
+        this.render()
       }
     })
     document.body.appendChild(this.el)
@@ -86,6 +94,6 @@ export class StatusPanel implements StatusPanelContract {
     if (!this.el) {
       return
     }
-    this.el.innerHTML = renderStatusPanel(this.world, this.status, this.records)
+    this.el.innerHTML = renderStatusPanel(this.world, this.status, this.records, this.compactMode)
   }
 }
