@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { dirname, extname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '..')
@@ -71,7 +72,7 @@ async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot) {
         if (importSpec.typeOnly) {
           continue
         }
-        if (rule.forbiddenImports.some((forbiddenImport) => importSpec.specifier.includes(forbiddenImport))) {
+        if (rule.forbiddenImports.some((forbiddenImport) => matchesForbiddenImport(importSpec.specifier, forbiddenImport))) {
           violations.push(`${rule.name}: ${relative(repoRoot, file)} imports ${importSpec.specifier}`)
         }
       }
@@ -100,39 +101,98 @@ async function collectSourceFiles(dir) {
 }
 
 function extractImportSpecifiers(source) {
+  const sourceFile = ts.createSourceFile('architecture-boundary-source.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
   const specifiers = []
-  const staticImportPattern = /(?:^|\n)\s*(import|export)\s+(type\s+)?(?:([^'";]*?)\s+from(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*|)(['"])([^'"]+)\4/g
-  const dynamicImportPattern = /import\s*\((?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*(['"])([^'"]+)\1/g
-  let match = staticImportPattern.exec(source)
-  while (match) {
-    const clause = match[3] ?? ''
-    const typeOnly = Boolean(match[2]) || isInlineTypeOnlyClause(clause)
-    specifiers.push({ specifier: match[5], typeOnly })
-    match = staticImportPattern.exec(source)
+
+  function visit(node) {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      specifiers.push({ specifier: node.moduleSpecifier.text, typeOnly: isTypeOnlyImportDeclaration(node) })
+    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      specifiers.push({ specifier: node.moduleSpecifier.text, typeOnly: isTypeOnlyExportDeclaration(node) })
+    } else if (isStaticDynamicImport(node)) {
+      specifiers.push({ specifier: node.arguments[0].text, typeOnly: false })
+    }
+    ts.forEachChild(node, visit)
   }
-  match = dynamicImportPattern.exec(source)
-  while (match) {
-    specifiers.push({ specifier: match[2], typeOnly: false })
-    match = dynamicImportPattern.exec(source)
-  }
+
+  visit(sourceFile)
   return specifiers
 }
 
-function isInlineTypeOnlyClause(clause) {
-  const trimmedClause = stripComments(clause).trim()
-  if (!trimmedClause.startsWith('{') || !trimmedClause.endsWith('}')) {
+function isTypeOnlyImportDeclaration(node) {
+  if (!node.importClause) {
     return false
   }
-  const namedSpecifiers = trimmedClause
-    .slice(1, -1)
-    .split(',')
-    .map((specifier) => specifier.trim())
-    .filter(Boolean)
-  return namedSpecifiers.length > 0 && namedSpecifiers.every((specifier) => /^type\b/.test(specifier))
+  if (node.importClause.isTypeOnly) {
+    return true
+  }
+  if (node.importClause.name) {
+    return false
+  }
+  return isTypeOnlyNamedBindings(node.importClause.namedBindings)
 }
 
-function stripComments(source) {
-  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n\r]*/g, ' ')
+function isTypeOnlyExportDeclaration(node) {
+  if (node.isTypeOnly) {
+    return true
+  }
+  if (!node.exportClause || !ts.isNamedExports(node.exportClause)) {
+    return false
+  }
+  return node.exportClause.elements.length > 0 && node.exportClause.elements.every((element) => element.isTypeOnly)
 }
 
-export { BOUNDARY_RULES, checkArchitectureBoundaries, extractImportSpecifiers }
+function isTypeOnlyNamedBindings(namedBindings) {
+  if (!namedBindings || !ts.isNamedImports(namedBindings)) {
+    return false
+  }
+  return namedBindings.elements.length > 0 && namedBindings.elements.every((element) => element.isTypeOnly)
+}
+
+function isStaticDynamicImport(node) {
+  return (
+    ts.isCallExpression(node)
+    && node.expression.kind === ts.SyntaxKind.ImportKeyword
+    && node.arguments.length > 0
+    && ts.isStringLiteral(node.arguments[0])
+  )
+}
+
+function matchesForbiddenImport(specifier, forbiddenImport) {
+  const normalizedSpecifier = normalizeModuleSpecifier(specifier)
+  const normalizedForbidden = normalizeModuleSpecifier(forbiddenImport)
+  if (normalizedSpecifier === normalizedForbidden) {
+    return true
+  }
+  if (isBoundedSegmentMatcher(normalizedForbidden)) {
+    return containsBoundedSegments(normalizedSpecifier, normalizedForbidden)
+  }
+  return normalizedSpecifier.startsWith(`${normalizedForbidden}/`)
+}
+
+function isBoundedSegmentMatcher(pattern) {
+  return pattern.startsWith('/') && pattern.endsWith('/')
+}
+
+function containsBoundedSegments(specifier, pattern) {
+  const specifierSegments = splitPathSegments(specifier)
+  const patternSegments = splitPathSegments(pattern)
+  for (let index = 0; index <= specifierSegments.length - patternSegments.length; index += 1) {
+    const matchesSegments = patternSegments.every((segment, segmentIndex) => specifierSegments[index + segmentIndex] === segment)
+    const hasFollowingSegment = index + patternSegments.length < specifierSegments.length
+    if (matchesSegments && hasFollowingSegment) {
+      return true
+    }
+  }
+  return false
+}
+
+function splitPathSegments(specifier) {
+  return normalizeModuleSpecifier(specifier).split('/').filter(Boolean)
+}
+
+function normalizeModuleSpecifier(specifier) {
+  return specifier.replaceAll('\\', '/').replace(/\/+/g, '/')
+}
+
+export { BOUNDARY_RULES, checkArchitectureBoundaries, extractImportSpecifiers, matchesForbiddenImport }

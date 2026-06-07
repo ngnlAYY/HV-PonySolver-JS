@@ -55,6 +55,17 @@ describe('checkArchitectureBoundaries', () => {
     })
   })
 
+  it('rejects default imports mixed with inline type imports', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import StatusPanel, { type PanelStatus } from '../status-panel/status-panel-types'\n")
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot),
+        /inference layer must not import status panel/,
+      )
+    })
+  })
+
   it('rejects direct inference-to-status-panel imports', async () => {
     await withRepo(async (repoRoot) => {
       await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { StatusPanel } from '../status-panel/status-panel'\n")
@@ -77,6 +88,25 @@ describe('checkArchitectureBoundaries', () => {
     })
   })
 
+  it('rejects commented side-effect imports', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import /* comment */ '../status-panel/status-panel'\n")
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot),
+        /inference layer must not import status panel/,
+      )
+    })
+  })
+
+  it('does not reject paths with partial forbidden path segments', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { StatusPanelOther } from '../status-panel-other/status-panel'\n")
+
+      await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
+    })
+  })
+
   it('rejects commented direct inference-to-status-panel exports', async () => {
     await withRepo(async (repoRoot) => {
       await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "export { StatusPanel } from /* comment */ '../status-panel/status-panel'\n")
@@ -96,6 +126,33 @@ describe('checkArchitectureBoundaries', () => {
         checkArchitectureBoundaries(repoRoot),
         /inference layer must not import status panel/,
       )
+    })
+  })
+
+  it('rejects dynamic imports with comments before the call arguments', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "await import/* comment */('../status-panel/status-panel')\n")
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot),
+        /inference layer must not import status panel/,
+      )
+    })
+  })
+
+  it('does not treat property calls named import as dynamic imports', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "obj.import('../status-panel/status-panel')\n")
+
+      await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
+    })
+  })
+
+  it('does not treat import calls inside template strings as dynamic imports', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "const s = `import('../status-panel/status-panel')`\n")
+
+      await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
     })
   })
 
