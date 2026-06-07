@@ -101,19 +101,38 @@ async function collectSourceFiles(dir) {
 
 function extractImportSpecifiers(source) {
   const specifiers = []
-  const importPattern = /(?:^|\n)\s*(import|export)\s+(type\s+)?(?:[^'";]+\s+from\s+)?['"]([^'"]+)['"]/g
-  const dynamicImportPattern = /import\(\s*['"]([^'"]+)['"]\s*\)/g
-  let match = importPattern.exec(source)
+  const staticImportPattern = /(?:^|\n)\s*(import|export)\s+(type\s+)?(?:([^'";]*?)\s+from(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*|)(['"])([^'"]+)\4/g
+  const dynamicImportPattern = /import\s*\((?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*(['"])([^'"]+)\1/g
+  let match = staticImportPattern.exec(source)
   while (match) {
-    specifiers.push({ specifier: match[3], typeOnly: Boolean(match[2]) })
-    match = importPattern.exec(source)
+    const clause = match[3] ?? ''
+    const typeOnly = Boolean(match[2]) || isInlineTypeOnlyClause(clause)
+    specifiers.push({ specifier: match[5], typeOnly })
+    match = staticImportPattern.exec(source)
   }
   match = dynamicImportPattern.exec(source)
   while (match) {
-    specifiers.push({ specifier: match[1], typeOnly: false })
+    specifiers.push({ specifier: match[2], typeOnly: false })
     match = dynamicImportPattern.exec(source)
   }
   return specifiers
+}
+
+function isInlineTypeOnlyClause(clause) {
+  const trimmedClause = stripComments(clause).trim()
+  if (!trimmedClause.startsWith('{') || !trimmedClause.endsWith('}')) {
+    return false
+  }
+  const namedSpecifiers = trimmedClause
+    .slice(1, -1)
+    .split(',')
+    .map((specifier) => specifier.trim())
+    .filter(Boolean)
+  return namedSpecifiers.length > 0 && namedSpecifiers.every((specifier) => /^type\b/.test(specifier))
+}
+
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n\r]*/g, ' ')
 }
 
 export { BOUNDARY_RULES, checkArchitectureBoundaries, extractImportSpecifiers }
