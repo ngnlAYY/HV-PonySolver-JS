@@ -1,0 +1,21 @@
+# Generated code intelligence and graph outputs
+.gitnexus/
+graphify-out/
+.codegraph/
+.code-review-graph
+
+# Agent planning/work products that should not influence project architecture graphs
+docs/superpowers/
+.claude/
+
+# Dependencies and build outputs
+node_modules/
+**/node_modules/
+**/dist/
+**/coverage/
+.pnpm-store/
+apps/userscript/.tmp/
+
+# Local service/runtime outputs
+worker/.wrangler/
+apps/model-worker/.wrangler/
