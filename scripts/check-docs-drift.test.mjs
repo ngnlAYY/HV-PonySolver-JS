@@ -171,14 +171,27 @@ test('fails clearly when deployment docs omit verify-model-integrity and MODEL_F
   })
 })
 
-test('fails clearly when architecture docs omit graph guardrail terms', async () => {
-  await withFixture(async (fixtureRoot) => {
-    const architectureDocPath = join(fixtureRoot, 'docs/architecture.md')
-    const architectureDoc = await readFile(architectureDocPath, 'utf8')
-    await writeFile(architectureDocPath, architectureDoc.replaceAll('graphify:check', 'graphify check'))
+const architectureGuardrailTerms = [
+  '.graphifyignore',
+  'graphify:check',
+  'architecture:check',
+  'inferenceTimeoutConfig',
+  'StatusPanel',
+  'Model Worker Core',
+]
 
-    const result = await runCheck(fixtureRoot)
-    assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /docs\/architecture\.md.*graphify:check/s)
+for (const requiredTerm of architectureGuardrailTerms) {
+  test(`fails clearly when architecture docs omit ${requiredTerm}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const architectureDocPath = join(fixtureRoot, 'docs/architecture.md')
+      const architectureDoc = await readFile(architectureDocPath, 'utf8')
+      assert.ok(architectureDoc.includes(requiredTerm), `fixture should mention ${requiredTerm}`)
+      await writeFile(architectureDocPath, architectureDoc.replaceAll(requiredTerm, 'omitted architecture guardrail'))
+
+      const escapedTerm = requiredTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      assert.match(result.stderr, new RegExp(`docs\\/architecture\\.md.*${escapedTerm}`, 's'))
+    })
   })
-})
+}
