@@ -31,6 +31,7 @@ async function createFixture() {
     'package.json',
     'docs/userscript.md',
     'docs/deployment.md',
+    'docs/architecture.md',
     'apps/userscript/src/inference/inference-config.ts',
     'packages/shared/src/model.ts',
   ]
@@ -167,5 +168,17 @@ test('fails clearly when deployment docs omit verify-model-integrity and MODEL_F
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /docs\/deployment\.md.*verify-model-integrity/s)
     assert.match(result.stderr, /docs\/deployment\.md.*MODEL_FILE/s)
+  })
+})
+
+test('fails clearly when architecture docs omit graph guardrail terms', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const architectureDocPath = join(fixtureRoot, 'docs/architecture.md')
+    const architectureDoc = await readFile(architectureDocPath, 'utf8')
+    await writeFile(architectureDocPath, architectureDoc.replaceAll('graphify:check', 'graphify check'))
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /docs\/architecture\.md.*graphify:check/s)
   })
 })
