@@ -1,4 +1,4 @@
-import { inferenceConfig } from './inference-config'
+import { inferenceTimeoutConfig } from './inference-config'
 import type { WorkerMessage, WorkerRequest, WorkerResponse } from './inference-types'
 
 type PendingRequest = Readonly<{
@@ -23,8 +23,8 @@ export class WorkerRequestBridge {
     this.nextRequestId += 1
     return new Promise<WorkerMessage>((resolve, reject) => {
       const timeoutMs = message.type === 'init'
-        ? inferenceConfig.workerInitTimeoutMs
-        : inferenceConfig.workerDetectTimeoutMs
+        ? inferenceTimeoutConfig.workerInitTimeoutMs
+        : inferenceTimeoutConfig.workerDetectTimeoutMs
       const timeoutId = setTimeout(() => {
         const error = new Error('ONNX Worker 请求超时')
         this.requests.delete(requestId)

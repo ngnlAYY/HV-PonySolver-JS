@@ -51,7 +51,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
 
   return [
     ...checkRootCheckCommand(rootPackageJson, readme, deploymentDocs, userscriptDocs),
-    ...checkUserscriptConfigDocs(inferenceConfigSource, readme),
+    ...checkUserscriptConfigDocs(inferenceConfigSource, readme, userscriptDocs),
     ...checkModelManifestDocs(modelSource, readme, userscriptDocs, deploymentDocs),
   ]
 }
@@ -89,21 +89,43 @@ function checkRootCheckCommand(rootPackageJson, readme, deploymentDocs, userscri
   return errors
 }
 
-function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
-  const requiredConfigNames = [
+function checkUserscriptConfigDocs(inferenceConfigSource, readme, userscriptDocs) {
+  const docsCorpus = `${readme}\n${userscriptDocs}`
+  const requiredConfigs = [
+    'imagePreprocessConfig',
     'yoloOutputConfig',
+    'onnxRuntimeConfig',
+    'inferenceTimeoutConfig',
+  ]
+  const requiredConfigNames = [
+    'imageSize',
+    'confidenceThreshold',
+    'maxDetections',
+    'maxKinds',
+    'rowSize',
+    'confidenceIndex',
+    'classIndex',
     'workerInitTimeoutMs',
     'workerDetectTimeoutMs',
     'modelDownloadTimeoutMs',
   ]
   const errors = []
-  for (const configName of requiredConfigNames) {
-    if (!inferenceConfigSource.includes(`${configName}:`)) {
-      errors.push(`apps/userscript/src/inference/inference-config.ts is missing expected core config ${configName}`)
+  for (const configName of requiredConfigs) {
+    if (!inferenceConfigSource.includes(`export const ${configName}`)) {
+      errors.push(`apps/userscript/src/inference/inference-config.ts is missing expected config export ${configName}`)
       continue
     }
-    if (!readme.includes(configName)) {
-      errors.push(`README.md userscript inference config section must mention ${configName}`)
+    if (!docsCorpus.includes(configName)) {
+      errors.push(`README.md/docs must mention ${configName}`)
+    }
+  }
+  for (const configName of requiredConfigNames) {
+    if (!inferenceConfigSource.includes(`${configName}:`)) {
+      errors.push(`apps/userscript/src/inference/inference-config.ts is missing expected config ${configName}`)
+      continue
+    }
+    if (!docsCorpus.includes(configName)) {
+      errors.push(`README.md/docs must mention ${configName}`)
     }
   }
   return errors

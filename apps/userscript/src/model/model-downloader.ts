@@ -1,4 +1,4 @@
-import { inferenceConfig } from '../inference/inference-config'
+import { inferenceTimeoutConfig } from '../inference/inference-config'
 import { modelConfig } from './model-config'
 import type { ModelIntegrity } from './model-integrity'
 import { verifyModelIntegrity } from './model-integrity'
@@ -82,7 +82,7 @@ export async function downloadModel(signal?: AbortSignal, options: ModelIntegrit
     throw new Error('模型下载已取消')
   }
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), inferenceConfig.modelDownloadTimeoutMs)
+  const timeoutId = setTimeout(() => controller.abort(), inferenceTimeoutConfig.modelDownloadTimeoutMs)
   const abort = (): void => controller.abort()
   signal?.addEventListener('abort', abort, { once: true })
   try {

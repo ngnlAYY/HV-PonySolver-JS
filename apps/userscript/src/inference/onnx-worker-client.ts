@@ -1,6 +1,6 @@
 import type { DetectorService, WorkerRequest, WorkerResponse, YoloParseResult } from './inference-types'
 import { createBlobWorker } from './blob-worker'
-import { inferenceConfig } from './inference-config'
+import { imagePreprocessConfig, onnxRuntimeConfig } from './inference-config'
 import { ModelCache } from '../model/model-cache'
 import { createOnnxWorkerScript } from './onnx-worker-script'
 import { WorkerRequestBridge } from './worker-request-bridge'
@@ -55,7 +55,7 @@ export class OnnxWorkerClient implements DetectorService {
     const startedAt = Date.now()
     this.panel.setStatus({ inference: '推理中' })
     try {
-      const response = await this.post({ type: 'detect', imageBlob: blob, size: inferenceConfig.imageSize })
+      const response = await this.post({ type: 'detect', imageBlob: blob, size: imagePreprocessConfig.imageSize })
       if (response.type !== 'response' || !response.result) {
         throw new Error('ONNX Worker 返回无效结果')
       }
@@ -148,8 +148,8 @@ export class OnnxWorkerClient implements DetectorService {
       await this.post(
         {
           type: 'init',
-          ...(this.options.bundledRuntimeSource ? {} : { ortScriptUrl: inferenceConfig.ortScriptUrl }),
-          wasmPath: inferenceConfig.ortWasmPath,
+          ...(this.options.bundledRuntimeSource ? {} : { ortScriptUrl: onnxRuntimeConfig.ortScriptUrl }),
+          wasmPath: onnxRuntimeConfig.ortWasmPath,
           modelBuffer,
         },
         [modelBuffer],

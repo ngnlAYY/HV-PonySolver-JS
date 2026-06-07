@@ -221,22 +221,25 @@ apps/userscript/dist/hv-pony-solver.user.js
 
 ### 推理配置
 
-| 配置                     | 当前值                                                                | 说明                                                         |
-| ------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `imageSize`              | `640`                                                                 | 输入图像会 letterbox 到 640x640                              |
-| `confidenceThreshold`    | `0.30`                                                                | YOLO 行置信度阈值                                            |
-| `maxDetections`          | `16`                                                                  | 最多读取 16 个候选框                                         |
-| `maxKinds`               | `3`                                                                   | 识别到 1 到 3 种不同小马才算成功                             |
-| `yoloOutputConfig`       | `{ rowSize: 6, confidenceIndex: 4, classIndex: 5 }`                    | YOLO 输出行长度、confidence 列与 class id 列                  |
-| `ortScriptUrl`           | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js` | 默认构建下 Worker 动态加载 ONNX Runtime Web JS runtime       |
-| `ortWasmPath`            | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/`           | ONNX Runtime Web wasm 资源路径，内置 JS runtime 时仍远程加载 |
-| `workerInitTimeoutMs`    | `60000`                                                               | ONNX Worker 初始化请求超时                                   |
-| `workerDetectTimeoutMs`  | `30000`                                                               | ONNX Worker 单次检测请求超时                                 |
-| `modelDownloadTimeoutMs` | `30000`                                                               | 模型下载超时                                                 |
+| 配置                                           | 当前值                                                                | 说明                                                         |
+| ---------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `imagePreprocessConfig.imageSize`              | `640`                                                                 | 输入图像会 letterbox 到 640x640                              |
+| `yoloOutputConfig.confidenceThreshold`         | `0.30`                                                                | YOLO 行置信度阈值                                            |
+| `yoloOutputConfig.maxDetections`               | `16`                                                                  | 最多读取 16 个候选框                                         |
+| `yoloOutputConfig.maxKinds`                    | `3`                                                                   | 识别到 1 到 3 种不同小马才算成功                             |
+| `yoloOutputConfig.rowSize`                     | `6`                                                                   | YOLO 输出每行 float 数                                       |
+| `yoloOutputConfig.confidenceIndex`             | `4`                                                                   | YOLO 输出 confidence 列                                      |
+| `yoloOutputConfig.classIndex`                  | `5`                                                                   | YOLO 输出 class id 列                                        |
+| `onnxRuntimeConfig.ortScriptUrl`               | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js` | 默认构建下 Worker 动态加载 ONNX Runtime Web JS runtime       |
+| `onnxRuntimeConfig.ortWasmPath`                | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/`           | ONNX Runtime Web wasm 资源路径，内置 JS runtime 时仍远程加载 |
+| `inferenceTimeoutConfig.workerInitTimeoutMs`   | `60000`                                                               | ONNX Worker 初始化请求超时                                   |
+| `inferenceTimeoutConfig.workerDetectTimeoutMs` | `30000`                                                               | ONNX Worker 单次检测请求超时                                 |
+| `inferenceTimeoutConfig.modelDownloadTimeoutMs` | `30000`                                                              | 模型下载超时                                                 |
 
 YOLO 输出解析规则：
 
-- 输出格式假设集中在 `inferenceConfig.yoloOutputConfig`：每行按 6 个 float 读取，第 5 个值是 confidence，第 6 个值是 class id。
+- 输出格式假设集中在 `yoloOutputConfig`：每行按 6 个 float 读取，第 5 个值是 confidence，第 6 个值是 class id。
+- 图片尺寸由 `imagePreprocessConfig.imageSize` 控制；ONNX runtime URL 由 `onnxRuntimeConfig` 控制；worker 和模型下载超时由 `inferenceTimeoutConfig` 控制。
 - data 长度不是完整行倍数时忽略尾部不完整行。
 - 忽略非有限 confidence 和无法映射到答案的 class id；浮点 class id 会先按 `Math.trunc()` 截断。
 - 优先保留 confidence 大于等于 `0.30` 的行。

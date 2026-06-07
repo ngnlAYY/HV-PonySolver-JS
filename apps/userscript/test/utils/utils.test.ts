@@ -4,7 +4,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { captchaSelectors } from '../../src/captcha/captcha-selectors'
 import { solverConfig } from '../../src/captcha/solver-config'
 import { timingConfig } from '../../src/captcha/timing-config'
-import { inferenceConfig } from '../../src/inference/inference-config'
+import {
+  imagePreprocessConfig,
+  inferenceTimeoutConfig,
+  onnxRuntimeConfig,
+  yoloOutputConfig,
+} from '../../src/inference/inference-config'
 import { modelConfig } from '../../src/model/model-config'
 import { randDelay, shuffle, sleep } from '../../src/utils/delay'
 import { formatErrorMessage } from '../../src/utils/errors'
@@ -24,20 +29,24 @@ describe('config defaults', () => {
     expect(timingConfig.submitDelay).toEqual([3000, 5000])
     expect(timingConfig.multiClickDelay).toEqual([1000, 1500])
     expect(solverConfig.randomOnFail).toBe(false)
-    expect(inferenceConfig.imageSize).toBe(640)
-    expect(inferenceConfig.confidenceThreshold).toBe(0.30)
-    expect(inferenceConfig.maxDetections).toBe(16)
-    expect(inferenceConfig.maxKinds).toBe(3)
+    expect(imagePreprocessConfig.imageSize).toBe(640)
+    expect(yoloOutputConfig.confidenceThreshold).toBe(0.30)
+    expect(yoloOutputConfig.maxDetections).toBe(16)
+    expect(yoloOutputConfig.maxKinds).toBe(3)
+    expect(yoloOutputConfig.rowSize).toBe(6)
+    expect(yoloOutputConfig.confidenceIndex).toBe(4)
+    expect(yoloOutputConfig.classIndex).toBe(5)
     expect(modelConfig.accessKey).toBe('')
     expect(modelConfig.urlBase).toBe('https://models.ngnl.host/yolo26n-640.onnx')
     expect(modelConfig.cacheName).toBe('pony-solver-local')
     expect(modelConfig.cacheKey).toBe('yolo26n-640.onnx')
     expect(modelConfig.version).toBe('yolo26n-640-2026-05-14')
     expect(modelConfig.verifyIntegrity).toBe(true)
-    expect(inferenceConfig.ortScriptUrl).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js')
-    expect(inferenceConfig.ortWasmPath).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/')
-    expect(inferenceConfig.workerInitTimeoutMs).toBe(60000)
-    expect(inferenceConfig.workerDetectTimeoutMs).toBe(30000)
+    expect(onnxRuntimeConfig.ortScriptUrl).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js')
+    expect(onnxRuntimeConfig.ortWasmPath).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/')
+    expect(inferenceTimeoutConfig.workerInitTimeoutMs).toBe(60000)
+    expect(inferenceTimeoutConfig.workerDetectTimeoutMs).toBe(30000)
+    expect(inferenceTimeoutConfig.modelDownloadTimeoutMs).toBe(30000)
   })
 })
 

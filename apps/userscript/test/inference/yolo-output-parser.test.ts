@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { inferenceConfig } from '../../src/inference/inference-config'
+import { yoloOutputConfig } from '../../src/inference/inference-config'
 import { parseYoloOutput } from '../../src/inference/yolo-output-parser'
-
-const yoloOutputConfig = inferenceConfig.yoloOutputConfig
 
 function yoloRow(confidence: number, classId: number): number[] {
   const row = Array.from({ length: yoloOutputConfig.rowSize }, () => 0)
@@ -14,7 +12,7 @@ function yoloRow(confidence: number, classId: number): number[] {
 
 describe('parseYoloOutput', () => {
   it('documents the configured YOLO row layout', () => {
-    expect(yoloOutputConfig).toEqual({
+    expect(yoloOutputConfig).toMatchObject({
       rowSize: 6,
       confidenceIndex: 4,
       classIndex: 5,
@@ -23,8 +21,8 @@ describe('parseYoloOutput', () => {
 
   it('returns mapped ponies for rows above the confidence threshold', () => {
     const data = new Float32Array([
-      ...yoloRow(inferenceConfig.confidenceThreshold + 0.1, 0),
-      ...yoloRow(inferenceConfig.confidenceThreshold + 0.2, 2),
+      ...yoloRow(yoloOutputConfig.confidenceThreshold + 0.1, 0),
+      ...yoloRow(yoloOutputConfig.confidenceThreshold + 0.2, 2),
     ])
 
     const result = parseYoloOutput(data)
@@ -131,14 +129,14 @@ describe('parseYoloOutput', () => {
 
   it('keeps only the top detections sorted by confidence', () => {
     const rows: number[] = []
-    for (let i = 0; i < inferenceConfig.maxDetections + 4; i += 1) {
+    for (let i = 0; i < yoloOutputConfig.maxDetections + 4; i += 1) {
       const confidence = i % 2 === 0 ? 0.31 + i / 100 : 0.95 - i / 100
       rows.push(...yoloRow(confidence, i % 6))
     }
 
     const result = parseYoloOutput(new Float32Array(rows))
 
-    expect(result.detections).toHaveLength(inferenceConfig.maxDetections)
+    expect(result.detections).toHaveLength(yoloOutputConfig.maxDetections)
     expect(result.detections.map((detection) => detection.confidence)).toEqual(
       [...result.detections].map((detection) => detection.confidence).sort((left, right) => right - left),
     )
@@ -175,9 +173,9 @@ describe('parseYoloOutput', () => {
 
   it('keeps below-threshold valid rows in candidates without adding them to threshold detections', () => {
     const data = new Float32Array([
-      ...yoloRow(inferenceConfig.confidenceThreshold - 0.05, 0),
-      ...yoloRow(inferenceConfig.confidenceThreshold + 0.1, 1),
-      ...yoloRow(inferenceConfig.confidenceThreshold - 0.01, 2),
+      ...yoloRow(yoloOutputConfig.confidenceThreshold - 0.05, 0),
+      ...yoloRow(yoloOutputConfig.confidenceThreshold + 0.1, 1),
+      ...yoloRow(yoloOutputConfig.confidenceThreshold - 0.01, 2),
     ])
 
     const result = parseYoloOutput(data)
@@ -196,13 +194,13 @@ describe('parseYoloOutput', () => {
       ...yoloRow(Number.POSITIVE_INFINITY, 1),
       ...yoloRow(0.99, 999),
     ]
-    for (let i = 0; i < inferenceConfig.maxDetections + 3; i += 1) {
+    for (let i = 0; i < yoloOutputConfig.maxDetections + 3; i += 1) {
       rows.push(...yoloRow(0.1 + i / 100, i % 6))
     }
 
     const result = parseYoloOutput(new Float32Array(rows))
 
-    expect(result.candidates).toHaveLength(inferenceConfig.maxDetections)
+    expect(result.candidates).toHaveLength(yoloOutputConfig.maxDetections)
     expect(result.candidates.map((detection) => detection.confidence)).toEqual(
       [...result.candidates].map((detection) => detection.confidence).sort((left, right) => right - left),
     )

@@ -129,6 +129,21 @@ test('fails clearly when README omits a core userscript inference config name', 
   })
 })
 
+test('fails clearly when docs omit a focused userscript inference config export', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const userscriptDocPath = join(fixtureRoot, 'docs/userscript.md')
+    const readme = await readFile(readmePath, 'utf8')
+    const userscriptDoc = await readFile(userscriptDocPath, 'utf8')
+    await writeFile(readmePath, readme.replaceAll('imagePreprocessConfig', 'image preprocess config'))
+    await writeFile(userscriptDocPath, userscriptDoc.replaceAll('imagePreprocessConfig', 'image preprocess config'))
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md\/docs.*imagePreprocessConfig/s)
+  })
+})
+
 test('fails clearly when userscript docs omit verify-model-integrity and MODEL_FILE', async () => {
   await withFixture(async (fixtureRoot) => {
     const userscriptDocPath = join(fixtureRoot, 'docs/userscript.md')

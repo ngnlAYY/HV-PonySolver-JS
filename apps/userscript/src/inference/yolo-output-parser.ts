@@ -1,5 +1,5 @@
 import { answerCodeForClassId, type AnswerCode } from '@hv-pony-solver/shared'
-import { inferenceConfig } from './inference-config'
+import { yoloOutputConfig } from './inference-config'
 import type { Detection, YoloParseResult } from './inference-types'
 
 function roundConfidence(value: number): number {
@@ -7,7 +7,7 @@ function roundConfidence(value: number): number {
 }
 
 function readDetection(data: Float32Array, rowIndex: number): Detection | null {
-  const { rowSize, confidenceIndex, classIndex } = inferenceConfig.yoloOutputConfig
+  const { rowSize, confidenceIndex, classIndex } = yoloOutputConfig
   const base = rowIndex * rowSize
   const confidence = Number(data[base + confidenceIndex])
   const classId = Math.trunc(Number(data[base + classIndex]))
@@ -21,7 +21,7 @@ function readDetection(data: Float32Array, rowIndex: number): Detection | null {
 }
 
 function insertTopDetection(detections: Detection[], detection: Detection): void {
-  if (detections.length === inferenceConfig.maxDetections && detection.confidence <= detections[detections.length - 1]!.confidence) {
+  if (detections.length === yoloOutputConfig.maxDetections && detection.confidence <= detections[detections.length - 1]!.confidence) {
     return
   }
   const index = detections.findIndex((candidate) => detection.confidence > candidate.confidence)
@@ -30,7 +30,7 @@ function insertTopDetection(detections: Detection[], detection: Detection): void
   } else {
     detections.splice(index, 0, detection)
   }
-  if (detections.length > inferenceConfig.maxDetections) {
+  if (detections.length > yoloOutputConfig.maxDetections) {
     detections.pop()
   }
 }
@@ -39,7 +39,7 @@ export function parseYoloOutput(data: Float32Array): YoloParseResult {
   const detections: Detection[] = []
   const candidates: Detection[] = []
   let bestDetection: Detection | null = null
-  const { rowSize } = inferenceConfig.yoloOutputConfig
+  const { rowSize } = yoloOutputConfig
   const totalRows = Math.floor(data.length / rowSize)
 
   for (let i = 0; i < totalRows; i += 1) {
@@ -51,7 +51,7 @@ export function parseYoloOutput(data: Float32Array): YoloParseResult {
     if (!bestDetection || detection.confidence > bestDetection.confidence) {
       bestDetection = detection
     }
-    if (detection.confidence >= inferenceConfig.confidenceThreshold) {
+    if (detection.confidence >= yoloOutputConfig.confidenceThreshold) {
       insertTopDetection(detections, detection)
     }
   }
@@ -79,7 +79,7 @@ export function parseYoloOutput(data: Float32Array): YoloParseResult {
   }
 
   return {
-    success: ponies.length >= 1 && ponies.length <= inferenceConfig.maxKinds,
+    success: ponies.length >= 1 && ponies.length <= yoloOutputConfig.maxKinds,
     ponies,
     confidences,
     detections,

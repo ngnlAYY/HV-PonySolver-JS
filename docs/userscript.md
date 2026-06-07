@@ -54,7 +54,9 @@ The current model is about 9.8 MB. The downloader reads streamed chunks and comb
 
 ## YOLO 输出解析
 
-YOLO 输出格式假设集中在 `inferenceConfig.yoloOutputConfig`，当前按每行 6 个 float 读取：第 5 个值是 confidence，第 6 个值是 class id。解析时忽略尾部不完整行、非有限 confidence 和无法映射到答案的 class id；浮点 class id 会先按 `Math.trunc()` 截断。没有任何行达到阈值时，会回退到最高 confidence 的有效行。重复 class 只保留最高 confidence，并返回所有去重后的命中答案；超过 `maxKinds` 时结果为不成功，但不会丢弃超出部分的命中信息。
+YOLO 输出格式假设集中在 `yoloOutputConfig`，当前按每行 6 个 float 读取：第 5 个值是 confidence，第 6 个值是 class id。解析时忽略尾部不完整行、非有限 confidence 和无法映射到答案的 class id；浮点 class id 会先按 `Math.trunc()` 截断。没有任何行达到阈值时，会回退到最高 confidence 的有效行。重复 class 只保留最高 confidence，并返回所有去重后的命中答案；超过 `maxKinds` 时结果为不成功，但不会丢弃超出部分的命中信息。
+
+`imagePreprocessConfig.imageSize` 控制输入图片尺寸，`onnxRuntimeConfig` 控制 ONNX runtime 资源位置，`inferenceTimeoutConfig` 控制 worker 初始化、检测和模型下载超时。
 
 ## 调试日志
 

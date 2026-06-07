@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { inferenceConfig } from '../../src/inference/inference-config'
+import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import { OnnxWorkerClient } from '../../src/inference/onnx-worker-client'
 import type { ModelCache } from '../../src/model/model-cache'
 import { createMockPanel } from '../helpers/mock-panel'
@@ -278,7 +278,7 @@ describe('OnnxWorkerClient', () => {
 
     const preparePromise = client.prepare()
     await vi.waitFor(() => expect(TimeoutThenSuccessfulWorker.messages).toHaveLength(1))
-    vi.advanceTimersByTime(inferenceConfig.workerInitTimeoutMs)
+    vi.advanceTimersByTime(inferenceTimeoutConfig.workerInitTimeoutMs)
 
     await expect(preparePromise).rejects.toThrow('ONNX Worker 请求超时')
     expect(panel.setStatus).toHaveBeenCalledWith({ session: '错误' })

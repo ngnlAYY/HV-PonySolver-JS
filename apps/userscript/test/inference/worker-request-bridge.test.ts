@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { inferenceConfig } from '../../src/inference/inference-config'
+import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import { WorkerRequestBridge } from '../../src/inference/worker-request-bridge'
 
 const detectResult = { success: false, ponies: [], confidences: {}, detections: [], candidates: [] }
@@ -62,7 +62,7 @@ describe('WorkerRequestBridge', () => {
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
     const promise = bridge.post({ type: 'init', wasmPath: '/wasm/', modelBuffer: new ArrayBuffer(1) }, [])
 
-    vi.advanceTimersByTime(inferenceConfig.workerInitTimeoutMs)
+    vi.advanceTimersByTime(inferenceTimeoutConfig.workerInitTimeoutMs)
 
     expect(onFailure).toHaveBeenCalledTimes(1)
     expect(onFailure).toHaveBeenCalledWith(expect.objectContaining({ message: 'ONNX Worker 请求超时' }))
@@ -76,7 +76,7 @@ describe('WorkerRequestBridge', () => {
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
     const promise = bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])
 
-    vi.advanceTimersByTime(inferenceConfig.workerDetectTimeoutMs)
+    vi.advanceTimersByTime(inferenceTimeoutConfig.workerDetectTimeoutMs)
     worker.onmessage?.({ data: { type: 'response', requestId: 1, result: detectResult } } as MessageEvent)
 
     await expect(promise).rejects.toThrow('ONNX Worker 请求超时')
@@ -94,7 +94,7 @@ describe('WorkerRequestBridge', () => {
     bridge.rejectPending(new Error('closed'))
     worker.onmessage?.({ data: { type: 'response', requestId: 1, result: detectResult } } as MessageEvent)
     worker.onmessage?.({ data: { type: 'response', requestId: 2, result: detectResult } } as MessageEvent)
-    vi.advanceTimersByTime(inferenceConfig.workerDetectTimeoutMs)
+    vi.advanceTimersByTime(inferenceTimeoutConfig.workerDetectTimeoutMs)
 
     await expect(firstPromise).rejects.toThrow('closed')
     await expect(secondPromise).rejects.toThrow('closed')
