@@ -14,14 +14,15 @@
   },
   "scripts": {
     "build": "corepack pnpm -r build",
-    "test": "corepack pnpm -r test && node --test scripts/check-docs-drift.test.mjs && node --test scripts/check-graphify-corpus.test.mjs",
+    "test": "corepack pnpm -r test && node --test scripts/check-docs-drift.test.mjs && node --test scripts/check-graphify-corpus.test.mjs && node --test scripts/check-architecture-boundaries.test.mjs",
     "test:coverage": "corepack pnpm -r test:coverage",
     "typecheck": "corepack pnpm -r typecheck",
     "lint": "eslint .",
     "docs:check": "node scripts/check-docs-drift.mjs",
     "graphify:check": "node scripts/check-graphify-corpus.mjs",
+    "architecture:check": "node scripts/check-architecture-boundaries.mjs",
     "format": "prettier --write .",
-    "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:coverage && corepack pnpm docs:check && corepack pnpm graphify:check && corepack pnpm build"
+    "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:coverage && corepack pnpm docs:check && corepack pnpm graphify:check && corepack pnpm architecture:check && corepack pnpm build"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
