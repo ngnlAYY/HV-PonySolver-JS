@@ -86,13 +86,22 @@ async function checkGraphifyCorpus(repoRoot = defaultRepoRoot, options = {}) {
   const reportPath = resolve(repoRoot, 'graphify-out', 'GRAPH_REPORT.md')
   const graphPath = resolve(repoRoot, 'graphify-out', 'graph.json')
   if (options.report || graphOutputExists(reportPath, graphPath)) {
+    ensureCompleteGraphOutput(reportPath, graphPath)
     await checkGraphReport(reportPath)
     await checkGraphJson(graphPath)
   }
 }
 
 function graphOutputExists(reportPath, graphPath) {
-  return existsSync(reportPath) && existsSync(graphPath)
+  return existsSync(reportPath) || existsSync(graphPath)
+}
+
+function ensureCompleteGraphOutput(reportPath, graphPath) {
+  const reportExists = existsSync(reportPath)
+  const graphExists = existsSync(graphPath)
+  if (reportExists !== graphExists) {
+    throw new Error('graphify-out output is incomplete; expected both GRAPH_REPORT.md and graph.json')
+  }
 }
 
 async function checkGraphReport(reportPath) {

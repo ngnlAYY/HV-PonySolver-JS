@@ -179,8 +179,9 @@ function containsBoundedSegments(specifier, pattern) {
   const patternSegments = splitPathSegments(pattern)
   for (let index = 0; index <= specifierSegments.length - patternSegments.length; index += 1) {
     const matchesSegments = patternSegments.every((segment, segmentIndex) => specifierSegments[index + segmentIndex] === segment)
-    const hasFollowingSegment = index + patternSegments.length < specifierSegments.length
-    if (matchesSegments && hasFollowingSegment) {
+    const previousSegment = specifierSegments[index - 1]
+    const startsAtBoundary = index === 0 || previousSegment === '.' || previousSegment === '..'
+    if (matchesSegments && startsAtBoundary) {
       return true
     }
   }

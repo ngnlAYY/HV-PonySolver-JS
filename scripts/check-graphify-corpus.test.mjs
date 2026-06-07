@@ -36,6 +36,16 @@ async function writeGraphifyOutput(repoRoot, report, graph) {
   await writeFile(join(repoRoot, 'graphify-out', 'graph.json'), JSON.stringify(graph))
 }
 
+async function writeGraphifyReport(repoRoot, report) {
+  await mkdir(join(repoRoot, 'graphify-out'))
+  await writeFile(join(repoRoot, 'graphify-out', 'GRAPH_REPORT.md'), report)
+}
+
+async function writeGraphifyJson(repoRoot, graph) {
+  await mkdir(join(repoRoot, 'graphify-out'))
+  await writeFile(join(repoRoot, 'graphify-out', 'graph.json'), JSON.stringify(graph))
+}
+
 describe('checkGraphifyCorpus', () => {
   it('accepts a repo that contains every required graphify ignore entry', async () => {
     const repoRoot = await createRepo()
@@ -73,6 +83,32 @@ describe('checkGraphifyCorpus', () => {
     await assert.rejects(
       checkGraphifyCorpus(repoRoot),
       /Graphify report contains generated-artifact marker: \.gitnexus\//,
+    )
+  })
+
+  it('rejects partial graphify output when only the graph report exists', async () => {
+    const repoRoot = await createRepo()
+    await writeCompleteGraphifyIgnore(repoRoot)
+    await writeGraphifyReport(repoRoot, 'God node: fileHashes from .gitnexus/meta.json\n')
+
+    await assert.rejects(
+      checkGraphifyCorpus(repoRoot),
+      /graphify-out output is incomplete/,
+    )
+  })
+
+  it('rejects partial graphify output when only graph JSON exists', async () => {
+    const repoRoot = await createRepo()
+    await writeCompleteGraphifyIgnore(repoRoot)
+    await writeGraphifyJson(repoRoot, {
+      nodes: [
+        { id: 'fileHashes', label: 'fileHashes', source_file: '.gitnexus/meta.json' },
+      ],
+    })
+
+    await assert.rejects(
+      checkGraphifyCorpus(repoRoot),
+      /graphify-out output is incomplete/,
     )
   })
 

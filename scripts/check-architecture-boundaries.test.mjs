@@ -77,6 +77,28 @@ describe('checkArchitectureBoundaries', () => {
     })
   })
 
+  it('rejects inference imports that target the forbidden directory itself', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { StatusPanel } from '../status-panel'\n")
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot),
+        /inference layer must not import status panel/,
+      )
+    })
+  })
+
+  it('rejects deeper inference imports that target the forbidden directory itself', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/nested/client.ts', "import { StatusPanel } from '../../status-panel'\n")
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot),
+        /inference layer must not import status panel/,
+      )
+    })
+  })
+
   it('rejects commented direct inference-to-status-panel imports', async () => {
     await withRepo(async (repoRoot) => {
       await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { StatusPanel } from /* comment */ '../status-panel/status-panel'\n")
