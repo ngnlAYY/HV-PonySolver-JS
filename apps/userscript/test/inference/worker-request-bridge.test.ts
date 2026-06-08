@@ -34,6 +34,23 @@ describe('WorkerRequestBridge', () => {
     await expect(promise).resolves.toEqual({ type: 'response', requestId: 1 })
   })
 
+  it('calls onFailure when postMessage throws synchronously', async () => {
+    const worker = new ManualWorker()
+    const onFailure = vi.fn()
+    const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
+    const closedWorker = worker
+
+    vi.spyOn(closedWorker, 'postMessage').mockImplementation(() => {
+      throw new Error('postMessage failed')
+    })
+
+    await expect(bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])).rejects.toThrow(
+      'postMessage failed',
+    )
+    expect(onFailure).toHaveBeenCalledTimes(1)
+    expect(onFailure).toHaveBeenCalledWith(expect.objectContaining({ message: 'postMessage failed' }))
+  })
+
   it('rejects error responses', async () => {
     const worker = new ManualWorker()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, () => undefined)

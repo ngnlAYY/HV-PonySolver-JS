@@ -58,6 +58,7 @@ describe('OnnxWorkerClient', () => {
 
     expect(modelCache.download).toHaveBeenCalledTimes(1)
     expect(putCached).toHaveBeenCalledTimes(1)
+    expect(putCached).toHaveBeenCalledWith(modelBuffer, true, true)
     expect(SuccessfulWorker.messages[0]).toMatchObject({
       type: 'init',
       ortScriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js',
@@ -98,7 +99,8 @@ describe('OnnxWorkerClient', () => {
     const result = await client.detect(imageBlob)
 
     const detectMessage = SuccessfulWorker.messages.find((message) => message.type === 'detect')
-    const detectTransfer = SuccessfulWorker.transfers[SuccessfulWorker.messages.findIndex((message) => message.type === 'detect')]
+    const detectTransfer =
+      SuccessfulWorker.transfers[SuccessfulWorker.messages.findIndex((message) => message.type === 'detect')]
     expect(detectMessage?.imageBlob).toBe(imageBlob)
     expect(detectTransfer).toEqual([])
     expect(imageBlob.arrayBuffer).not.toHaveBeenCalled()
@@ -190,10 +192,14 @@ describe('OnnxWorkerClient', () => {
 
     const firstDetect = client.detect({} as Blob)
     const secondDetect = client.detect({} as Blob)
-    await vi.waitFor(() => expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1))
+    await vi.waitFor(() =>
+      expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1),
+    )
     SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[1]?.requestId)
     await firstDetect
-    await vi.waitFor(() => expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(2))
+    await vi.waitFor(() =>
+      expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(2),
+    )
     SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[2]?.requestId)
 
     await secondDetect
@@ -229,9 +235,12 @@ describe('OnnxWorkerClient', () => {
     const modelCache = {
       getCached: vi.fn(async () => null),
       download: vi.fn(async () => modelBuffer),
-      putCached: vi.fn(async () => new Promise<void>((resolve) => {
-        resolveCacheWrite = resolve
-      })),
+      putCached: vi.fn(
+        async () =>
+          new Promise<void>((resolve) => {
+            resolveCacheWrite = resolve
+          }),
+      ),
     } as unknown as ModelCache
     const panel = createMockPanel()
     const client = new OnnxWorkerClient(modelCache, panel)

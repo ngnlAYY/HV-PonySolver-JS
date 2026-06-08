@@ -2,77 +2,108 @@ import { answerCodeForClassId, type AnswerCode } from '@hv-pony-solver/shared'
 import { yoloOutputConfig } from './inference-config'
 import type { Detection, YoloParseResult } from './inference-types'
 
+const { rowSize, confidenceIndex, classIndex, maxDetections, confidenceThreshold } = yoloOutputConfig
+
 function roundConfidence(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000
 }
 
-function readDetection(data: Float32Array, rowIndex: number): Detection | null {
-  const { rowSize, confidenceIndex, classIndex } = yoloOutputConfig
-  const base = rowIndex * rowSize
-  const confidence = Number(data[base + confidenceIndex])
-  const classId = Math.trunc(Number(data[base + classIndex]))
-  if (!Number.isFinite(confidence) || !answerCodeForClassId(classId)) {
-    return null
+function insertTopDetection(classIds: number[], confidences: number[], classId: number, confidence: number): void {
+  if (classIds.length === maxDetections && confidence <= confidences[classIds.length - 1]!) {
+    return
   }
-  return {
-    class_id: classId,
-    confidence: roundConfidence(confidence),
+
+  let index = 0
+  while (index < classIds.length && confidence <= confidences[index]!) {
+    index += 1
+  }
+
+  classIds.splice(index, 0, classId)
+  confidences.splice(index, 0, confidence)
+
+  if (classIds.length > maxDetections) {
+    classIds.pop()
+    confidences.pop()
   }
 }
 
-function insertTopDetection(detections: Detection[], detection: Detection): void {
-  if (detections.length === yoloOutputConfig.maxDetections && detection.confidence <= detections[detections.length - 1]!.confidence) {
-    return
+function buildDetections(classIds: number[], confidences: number[]): Detection[] {
+  const detections: Detection[] = new Array(classIds.length)
+
+  for (let i = 0; i < classIds.length; i += 1) {
+    const classId = classIds[i]
+    const confidence = confidences[i]
+    if (classId === undefined || confidence === undefined) {
+      continue
+    }
+    detections[i] = {
+      class_id: classId,
+      confidence: roundConfidence(confidence),
+    }
   }
-  const index = detections.findIndex((candidate) => detection.confidence > candidate.confidence)
-  if (index === -1) {
-    detections.push(detection)
-  } else {
-    detections.splice(index, 0, detection)
-  }
-  if (detections.length > yoloOutputConfig.maxDetections) {
-    detections.pop()
-  }
+
+  return detections
 }
 
 export function parseYoloOutput(data: Float32Array): YoloParseResult {
-  const detections: Detection[] = []
-  const candidates: Detection[] = []
-  let bestDetection: Detection | null = null
-  const { rowSize } = yoloOutputConfig
+  const detectionClassIds: number[] = []
+  const detectionConfidences: number[] = []
+  const candidateClassIds: number[] = []
+  const candidateConfidences: number[] = []
+
+  let bestClassId = -1
+  let bestConfidence = Number.NEGATIVE_INFINITY
+
   const totalRows = Math.floor(data.length / rowSize)
 
-  for (let i = 0; i < totalRows; i += 1) {
-    const detection = readDetection(data, i)
-    if (!detection) {
+  for (let rowIndex = 0; rowIndex < totalRows; rowIndex += 1) {
+    const base = rowIndex * rowSize
+    const confidence = Number(data[base + confidenceIndex])
+    if (!Number.isFinite(confidence)) {
       continue
     }
-    insertTopDetection(candidates, detection)
-    if (!bestDetection || detection.confidence > bestDetection.confidence) {
-      bestDetection = detection
+
+    const classId = Math.trunc(Number(data[base + classIndex]))
+    if (!answerCodeForClassId(classId)) {
+      continue
     }
-    if (detection.confidence >= yoloOutputConfig.confidenceThreshold) {
-      insertTopDetection(detections, detection)
+
+    insertTopDetection(candidateClassIds, candidateConfidences, classId, confidence)
+
+    if (confidence > bestConfidence) {
+      bestConfidence = confidence
+      bestClassId = classId
+    }
+
+    if (confidence >= confidenceThreshold) {
+      insertTopDetection(detectionClassIds, detectionConfidences, classId, confidence)
     }
   }
 
-  if (!detections.length && bestDetection) {
-    detections.push(bestDetection)
+  if (detectionClassIds.length === 0 && bestConfidence !== Number.NEGATIVE_INFINITY) {
+    detectionClassIds.push(bestClassId)
+    detectionConfidences.push(bestConfidence)
   }
+
+  const detections = buildDetections(detectionClassIds, detectionConfidences)
+  const candidates = buildDetections(candidateClassIds, candidateConfidences)
 
   const ponies: AnswerCode[] = []
   const confidences: Partial<Record<AnswerCode, number>> = {}
+
   for (const detection of detections) {
     const pony = answerCodeForClassId(detection.class_id)
     if (!pony) {
       continue
     }
+
     const currentConfidence = confidences[pony]
     if (currentConfidence === undefined) {
       ponies.push(pony)
       confidences[pony] = detection.confidence
       continue
     }
+
     if (detection.confidence > currentConfidence) {
       confidences[pony] = detection.confidence
     }

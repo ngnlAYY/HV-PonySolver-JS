@@ -33,10 +33,7 @@ describe('parseYoloOutput', () => {
   })
 
   it('falls back to the highest-confidence row when no row passes the threshold', () => {
-    const data = new Float32Array([
-      ...yoloRow(0.1, 1),
-      ...yoloRow(0.2, 3),
-    ])
+    const data = new Float32Array([...yoloRow(0.1, 1), ...yoloRow(0.2, 3)])
 
     const result = parseYoloOutput(data)
 
@@ -54,10 +51,7 @@ describe('parseYoloOutput', () => {
     const partialRow = Array.from({ length: yoloOutputConfig.rowSize - 1 }, (_, index) => {
       return index === yoloOutputConfig.confidenceIndex ? 0.99 : 0
     })
-    const data = new Float32Array([
-      ...yoloRow(0.45, 0),
-      ...partialRow,
-    ])
+    const data = new Float32Array([...yoloRow(0.45, 0), ...partialRow])
 
     const result = parseYoloOutput(data)
 
@@ -83,10 +77,7 @@ describe('parseYoloOutput', () => {
   })
 
   it('keeps the highest confidence for duplicate pony classes', () => {
-    const data = new Float32Array([
-      ...yoloRow(0.31, 0),
-      ...yoloRow(0.45, 0),
-    ])
+    const data = new Float32Array([...yoloRow(0.31, 0), ...yoloRow(0.45, 0)])
 
     const result = parseYoloOutput(data)
 
@@ -96,10 +87,7 @@ describe('parseYoloOutput', () => {
   })
 
   it('truncates floating class ids with Math.trunc before mapping answers', () => {
-    const data = new Float32Array([
-      ...yoloRow(0.6, 2.9),
-      ...yoloRow(0.5, 3.9),
-    ])
+    const data = new Float32Array([...yoloRow(0.6, 2.9), ...yoloRow(0.5, 3.9)])
 
     const result = parseYoloOutput(data)
 
@@ -113,12 +101,7 @@ describe('parseYoloOutput', () => {
   })
 
   it('marks results with too many distinct pony kinds as unsuccessful while preserving all kinds', () => {
-    const data = new Float32Array([
-      ...yoloRow(0.91, 0),
-      ...yoloRow(0.92, 1),
-      ...yoloRow(0.93, 2),
-      ...yoloRow(0.94, 3),
-    ])
+    const data = new Float32Array([...yoloRow(0.91, 0), ...yoloRow(0.92, 1), ...yoloRow(0.93, 2), ...yoloRow(0.94, 3)])
 
     const result = parseYoloOutput(data)
 
@@ -144,10 +127,7 @@ describe('parseYoloOutput', () => {
   })
 
   it('ignores invalid class ids', () => {
-    const data = new Float32Array([
-      ...yoloRow(0.88, 999),
-      ...yoloRow(0.77, 2),
-    ])
+    const data = new Float32Array([...yoloRow(0.88, 999), ...yoloRow(0.77, 2)])
 
     const result = parseYoloOutput(data)
 
@@ -189,11 +169,7 @@ describe('parseYoloOutput', () => {
   })
 
   it('limits candidates to maxDetections and ignores invalid rows', () => {
-    const rows: number[] = [
-      ...yoloRow(Number.NaN, 0),
-      ...yoloRow(Number.POSITIVE_INFINITY, 1),
-      ...yoloRow(0.99, 999),
-    ]
+    const rows: number[] = [...yoloRow(Number.NaN, 0), ...yoloRow(Number.POSITIVE_INFINITY, 1), ...yoloRow(0.99, 999)]
     for (let i = 0; i < yoloOutputConfig.maxDetections + 3; i += 1) {
       rows.push(...yoloRow(0.1 + i / 100, i % 6))
     }
@@ -205,5 +181,28 @@ describe('parseYoloOutput', () => {
       [...result.candidates].map((detection) => detection.confidence).sort((left, right) => right - left),
     )
     expect(result.candidates).not.toContainEqual(expect.objectContaining({ confidence: 0.1 }))
+  })
+
+  it('handles high-volume output without changing ranking semantics', () => {
+    const rows: number[] = []
+    const totalRows = 3_000
+    for (let i = 0; i < totalRows; i += 1) {
+      const classId = i % 6
+      const confidence = (i % 1000) / 1000
+      rows.push(...yoloRow(confidence, classId))
+    }
+
+    const result = parseYoloOutput(new Float32Array(rows))
+
+    expect(result.detections.length <= yoloOutputConfig.maxDetections).toBe(true)
+    expect(result.candidates.length <= yoloOutputConfig.maxDetections).toBe(true)
+
+    const confidences = result.candidates.map((detection) => detection.confidence)
+    for (let i = 1; i < confidences.length; i += 1) {
+      expect(confidences[i - 1]).toBeGreaterThanOrEqual(confidences[i])
+    }
+
+    const uniqueKinds = new Set(result.ponies)
+    expect(uniqueKinds.size).toBe(result.ponies.length)
   })
 })

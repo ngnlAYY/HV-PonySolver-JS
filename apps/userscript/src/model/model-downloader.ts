@@ -10,7 +10,10 @@ export type ModelIntegrityOptions = Readonly<{
   forceVerifyIntegrity?: boolean
 }>
 
-function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): { integrity: ModelIntegrity, verifyIntegrity: boolean } {
+function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): {
+  integrity: ModelIntegrity
+  verifyIntegrity: boolean
+} {
   return {
     integrity: options.integrity ?? modelConfig.integrity,
     verifyIntegrity: options.forceVerifyIntegrity ? true : (options.verifyIntegrity ?? modelConfig.verifyIntegrity),
@@ -31,18 +34,25 @@ async function getModelUrl(): Promise<string> {
   return `${modelConfig.urlBase}?key=${encodeURIComponent(accessKey)}`
 }
 
-async function readModelResponse(response: Response, expectedByteLength: number | null): Promise<ArrayBuffer> {
+async function readModelResponse(
+  response: Response,
+  expectedByteLength: number | null,
+  maxByteLength: number,
+): Promise<ArrayBuffer> {
   const contentLength = response.headers.get('content-length')
   if (expectedByteLength !== null && contentLength && Number(contentLength) > expectedByteLength) {
     await response.body?.cancel()
     throw new Error(`下载模型大小校验失败: ${contentLength} != ${expectedByteLength}`)
   }
+  if (contentLength && Number(contentLength) > maxByteLength) {
+    await response.body?.cancel()
+    throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxByteLength}`)
+  }
   if (!response.body) {
     return response.arrayBuffer()
   }
-  const expectedContentLength = expectedByteLength !== null && contentLength === String(expectedByteLength)
-    ? expectedByteLength
-    : null
+  const expectedContentLength =
+    expectedByteLength !== null && contentLength === String(expectedByteLength) ? expectedByteLength : null
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
   const bytes = expectedContentLength === null ? null : new Uint8Array(expectedContentLength)
@@ -56,6 +66,10 @@ async function readModelResponse(response: Response, expectedByteLength: number 
     if (expectedByteLength !== null && nextTotalBytes > expectedByteLength) {
       await reader.cancel()
       throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedByteLength}`)
+    }
+    if (nextTotalBytes > maxByteLength) {
+      await reader.cancel()
+      throw new Error(`下载模型大小校验失败: ${nextTotalBytes} > ${maxByteLength}`)
     }
     if (bytes) {
       bytes.set(value, totalBytes)
@@ -90,7 +104,11 @@ export async function downloadModel(signal?: AbortSignal, options: ModelIntegrit
     if (!response.ok) {
       throw new Error(`模型下载失败: HTTP ${response.status}`)
     }
-    const buffer = await readModelResponse(response, verifyIntegrity ? integrity.byteLength : null)
+    const buffer = await readModelResponse(
+      response,
+      verifyIntegrity ? integrity.byteLength : null,
+      integrity.byteLength,
+    )
     if (verifyIntegrity) {
       await verifyModelIntegrity(buffer, integrity, '下载模型')
     }

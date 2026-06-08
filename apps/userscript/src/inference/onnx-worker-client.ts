@@ -4,7 +4,7 @@ import { imagePreprocessConfig, onnxRuntimeConfig } from './inference-config'
 import { ModelCache } from '../model/model-cache'
 import { createOnnxWorkerScript } from './onnx-worker-script'
 import { WorkerRequestBridge } from './worker-request-bridge'
-import type { StatusPanel } from '../status-panel/status-panel-types'
+import type { InferenceStatusSink } from '../status-panel/status-panel-types'
 
 type OnnxWorkerClientOptions = Readonly<{
   bundledRuntimeSource?: string
@@ -21,7 +21,7 @@ export class OnnxWorkerClient implements DetectorService {
 
   constructor(
     private readonly modelCache: ModelCache,
-    private readonly panel: StatusPanel,
+    private readonly panel: InferenceStatusSink,
     private readonly options: OnnxWorkerClientOptions = {},
   ) {}
 
@@ -46,7 +46,10 @@ export class OnnxWorkerClient implements DetectorService {
 
   detect(blob: Blob): Promise<YoloParseResult> {
     const detectPromise = this.detectQueue.then(() => this.runDetect(blob))
-    this.detectQueue = detectPromise.then(() => undefined, () => undefined)
+    this.detectQueue = detectPromise.then(
+      () => undefined,
+      () => undefined,
+    )
     return detectPromise
   }
 
@@ -96,7 +99,7 @@ export class OnnxWorkerClient implements DetectorService {
       await this.initWorkerSession(worker, abortController, modelBuffer)
       this.checkAbort(abortController)
       if (cacheBuffer) {
-        await this.modelCache.putCached(cacheBuffer)
+        await this.modelCache.putCached(cacheBuffer, true, true)
       }
       this.checkAbort(abortController)
       this.ready = true
@@ -124,9 +127,11 @@ export class OnnxWorkerClient implements DetectorService {
     }
   }
 
-  private async loadModelBuffer(abortController: AbortController): Promise<{ modelBuffer: ArrayBuffer, cacheBuffer: ArrayBuffer | null }> {
+  private async loadModelBuffer(
+    abortController: AbortController,
+  ): Promise<{ modelBuffer: ArrayBuffer; cacheBuffer: ArrayBuffer | null }> {
     const cachedModel = await this.modelCache.getCached()
-    const modelBuffer = cachedModel ?? await this.modelCache.download(abortController.signal)
+    const modelBuffer = cachedModel ?? (await this.modelCache.download(abortController.signal))
     return {
       modelBuffer,
       cacheBuffer: cachedModel ? null : modelBuffer.slice(0),
@@ -142,7 +147,11 @@ export class OnnxWorkerClient implements DetectorService {
     return worker
   }
 
-  private async initWorkerSession(worker: Worker, abortController: AbortController, modelBuffer: ArrayBuffer): Promise<void> {
+  private async initWorkerSession(
+    worker: Worker,
+    abortController: AbortController,
+    modelBuffer: ArrayBuffer,
+  ): Promise<void> {
     try {
       this.checkAbort(abortController)
       await this.post(

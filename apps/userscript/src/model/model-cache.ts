@@ -1,4 +1,4 @@
-import type { StatusPanel } from '../status-panel/status-panel-types'
+import type { CacheStatusSink } from '../status-panel/status-panel-types'
 import { formatErrorMessage } from '../utils/errors'
 import { isRecordObject } from '../utils/guards'
 import { warn } from '../utils/logger'
@@ -14,7 +14,10 @@ function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): Required<
   }
 }
 
-export async function createCachedModelRow(buffer: ArrayBuffer, options: ModelIntegrityOptions = {}): Promise<Record<string, unknown>> {
+export async function createCachedModelRow(
+  buffer: ArrayBuffer,
+  options: ModelIntegrityOptions = {},
+): Promise<Record<string, unknown>> {
   const { integrity, verifyIntegrity } = resolveIntegrityOptions(options)
   if (verifyIntegrity) {
     await verifyModelIntegrity(buffer, integrity, '缓存写入模型')
@@ -29,7 +32,10 @@ export async function createCachedModelRow(buffer: ArrayBuffer, options: ModelIn
   }
 }
 
-export async function readCachedModelBuffer(row: unknown, options: ModelIntegrityOptions = {}): Promise<ArrayBuffer | null> {
+export async function readCachedModelBuffer(
+  row: unknown,
+  options: ModelIntegrityOptions = {},
+): Promise<ArrayBuffer | null> {
   const { integrity, verifyIntegrity } = resolveIntegrityOptions(options)
   if (!isRecordObject(row) || row.version !== modelConfig.version || !(row.buffer instanceof ArrayBuffer)) {
     return null
@@ -51,23 +57,24 @@ export async function readCachedModelBuffer(row: unknown, options: ModelIntegrit
 export class ModelCache {
   private db: IDBDatabase | null = null
   private openPromise: Promise<IDBDatabase> | null = null
+  private openRequestId = 0
 
-  constructor(private readonly panel: StatusPanel) {}
+  constructor(private readonly statusSink: CacheStatusSink) {}
 
   async getCached(): Promise<ArrayBuffer | null> {
     const startedAt = Date.now()
-    this.panel.setStatus({ model: '确认缓存中' })
+    this.statusSink.setStatus({ model: '确认缓存中' })
     try {
       const cached = await this.readCached()
       const elapsed = Date.now() - startedAt
       if (cached) {
-        this.panel.setStatus({ model: `缓存命中 ${elapsed}ms` })
+        this.statusSink.setStatus({ model: `缓存命中 ${elapsed}ms` })
         return cached
       }
-      this.panel.setStatus({ model: `缓存未命中 ${elapsed}ms` })
+      this.statusSink.setStatus({ model: `缓存未命中 ${elapsed}ms` })
     } catch (error) {
       const elapsed = Date.now() - startedAt
-      this.panel.setStatus({ model: `缓存读取失败 ${elapsed}ms，准备下载` })
+      this.statusSink.setStatus({ model: `缓存读取失败 ${elapsed}ms，准备下载` })
       warn('读取模型缓存失败，改为下载模型:', formatErrorMessage(error))
     }
     return null
@@ -75,17 +82,21 @@ export class ModelCache {
 
   async download(signal?: AbortSignal, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<ArrayBuffer> {
     const startedAt = Date.now()
-    this.panel.setStatus({ model: '下载中' })
+    this.statusSink.setStatus({ model: '下载中' })
     const buffer = await downloadModel(signal, { verifyIntegrity })
-    this.panel.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
+    this.statusSink.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
     return buffer
   }
 
-  async putCached(buffer: ArrayBuffer, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<void> {
+  async putCached(
+    buffer: ArrayBuffer,
+    verifyIntegrity: boolean = modelConfig.verifyIntegrity,
+    skipIntegrityVerification: boolean = false,
+  ): Promise<void> {
     const startedAt = Date.now()
     try {
-      await this.writeCached(buffer, verifyIntegrity)
-      this.panel.setStatus({ model: `已缓存 ${Date.now() - startedAt}ms` })
+      await this.writeCached(buffer, verifyIntegrity, skipIntegrityVerification)
+      this.statusSink.setStatus({ model: `已缓存 ${Date.now() - startedAt}ms` })
     } catch (error) {
       warn('写入模型缓存失败，继续使用已下载模型:', formatErrorMessage(error))
       if (verifyIntegrity) {
@@ -95,6 +106,7 @@ export class ModelCache {
   }
 
   close(): void {
+    this.openRequestId += 1
     this.db?.close()
     this.db = null
     this.openPromise = null
@@ -107,12 +119,18 @@ export class ModelCache {
     if (this.openPromise) {
       return this.openPromise
     }
-    this.openPromise = new Promise((resolve, reject) => {
+    const requestId = this.openRequestId
+    const openPromise = new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(modelConfig.cacheName, 1)
       request.onupgradeneeded = () => {
         request.result.createObjectStore('models', { keyPath: 'key' })
       }
       request.onsuccess = () => {
+        if (this.openRequestId !== requestId) {
+          request.result.close()
+          reject(new Error('模型缓存已关闭'))
+          return
+        }
         this.db = request.result
         this.db.onversionchange = () => this.close()
         this.openPromise = null
@@ -123,7 +141,8 @@ export class ModelCache {
         reject(request.error || new Error('IndexedDB 打开失败'))
       }
     })
-    return this.openPromise
+    this.openPromise = openPromise
+    return openPromise
   }
 
   private async readCached(): Promise<ArrayBuffer | null> {
@@ -140,9 +159,15 @@ export class ModelCache {
     })
   }
 
-  private async writeCached(buffer: ArrayBuffer, verifyIntegrity: boolean): Promise<void> {
+  private async writeCached(
+    buffer: ArrayBuffer,
+    verifyIntegrity: boolean,
+    skipIntegrityVerification: boolean,
+  ): Promise<void> {
     const db = await this.open()
-    const row = await createCachedModelRow(buffer, { verifyIntegrity })
+    const row = await createCachedModelRow(buffer, {
+      verifyIntegrity: skipIntegrityVerification ? false : verifyIntegrity,
+    })
     return new Promise((resolve, reject) => {
       const tx = db.transaction('models', 'readwrite')
       tx.objectStore('models').put(row)

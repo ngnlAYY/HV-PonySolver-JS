@@ -6,7 +6,16 @@ export type PanelStatus = Readonly<{
   inference: string
 }>
 
-export interface StatusPanel {
+export interface CacheStatusSink {
+  setStatus(changes: Pick<Partial<PanelStatus>, 'model'>): void
+}
+
+export interface InferenceStatusSink {
+  setStatus(changes: Partial<PanelStatus>): void
+  setSessionReady(elapsed: number): void
+}
+
+export interface StatusPanel extends InferenceStatusSink {
   setStatus(changes: Partial<PanelStatus>): void
   setSessionReady(elapsed: number): void
   addSuccess(ponies: AnswerCode[], confidences: Partial<Record<AnswerCode, number>>, elapsed: number): void

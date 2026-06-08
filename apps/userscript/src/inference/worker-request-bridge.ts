@@ -22,9 +22,10 @@ export class WorkerRequestBridge {
     const requestId = this.nextRequestId
     this.nextRequestId += 1
     return new Promise<WorkerMessage>((resolve, reject) => {
-      const timeoutMs = message.type === 'init'
-        ? inferenceTimeoutConfig.workerInitTimeoutMs
-        : inferenceTimeoutConfig.workerDetectTimeoutMs
+      const timeoutMs =
+        message.type === 'init'
+          ? inferenceTimeoutConfig.workerInitTimeoutMs
+          : inferenceTimeoutConfig.workerDetectTimeoutMs
       const timeoutId = setTimeout(() => {
         const error = new Error('ONNX Worker 请求超时')
         this.requests.delete(requestId)
@@ -37,6 +38,7 @@ export class WorkerRequestBridge {
       } catch (error) {
         clearTimeout(timeoutId)
         this.requests.delete(requestId)
+        this.onFailure(error)
         reject(error)
       }
     }).then((response) => {
