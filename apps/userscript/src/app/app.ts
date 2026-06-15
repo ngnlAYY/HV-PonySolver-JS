@@ -1,8 +1,6 @@
 import { captchaSelectors } from '../captcha/captcha-selectors'
 import { findCaptchaTarget } from '../captcha/captcha-target'
-import { registerModelSettingsMenu } from '../model/model-settings'
-import { registerPanelSettingsMenu } from '../status-panel/panel-settings'
-import { registerDebugSettingsMenu } from '../userscript/debug-settings'
+import { registerSettingsMenu } from '../userscript/settings-menu'
 import { formatErrorMessage } from '../utils/errors'
 import { log, warn } from '../utils/logger'
 import { createAppDependencies, type AppDependencies } from './app-dependencies'
@@ -17,7 +15,7 @@ export class App {
   private scheduledScan = false
   private lastCaptchaKey: string | null = null
   private destroyed = false
-  private modelSettingsMenuRegistered = false
+  private settingsMenuRegistered = false
   private solveAbortController: AbortController | null = null
 
   constructor(dependencies?: AppDependencies) {
@@ -32,11 +30,9 @@ export class App {
     this.destroyed = false
     this.solveAbortController = new AbortController()
     this.panel.create()
-    if (!this.modelSettingsMenuRegistered) {
-      registerModelSettingsMenu(() => this.verifyConfiguredModelKey())
-      registerPanelSettingsMenu()
-      registerDebugSettingsMenu()
-      this.modelSettingsMenuRegistered = true
+    if (!this.settingsMenuRegistered) {
+      registerSettingsMenu({ onVerifyModelAccessKey: () => this.verifyConfiguredModelKey() })
+      this.settingsMenuRegistered = true
     }
     if (document.querySelector(captchaSelectors.master)) {
       setTimeout(() => this.scheduleSolve(), 100)

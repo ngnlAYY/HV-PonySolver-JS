@@ -6,7 +6,9 @@ const prepare = vi.fn(async () => ({} as Worker))
 const detect = vi.fn()
 const destroyDetector = vi.fn()
 const getImageBlob = vi.fn()
+const registerSettingsMenu = vi.fn()
 const registerModelSettingsMenu = vi.fn()
+const registerPanelSettingsMenu = vi.fn()
 const registerDebugSettingsMenu = vi.fn()
 const modelDownload = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
 const modelPutCached = vi.fn(async () => undefined)
@@ -35,12 +37,18 @@ vi.mock('../../src/model/model-settings', () => ({
   registerModelSettingsMenu,
 }))
 
+vi.mock('../../src/userscript/settings-menu', () => ({
+  registerSettingsMenu,
+}))
+
 vi.mock('../../src/status-panel/panel-settings', () => ({
+  getPanelHistoryLimit: vi.fn(async () => 5),
+  getPanelHistoryLimitSync: vi.fn(() => 5),
   getPanelPosition: vi.fn(async () => ({ top: 150, left: 1240 })),
   getPanelPositionSync: vi.fn(() => ({ top: 150, left: 1240 })),
   isPanelCompactMode: vi.fn(async () => false),
   isPanelCompactModeSync: vi.fn(() => false),
-  registerPanelSettingsMenu: vi.fn(),
+  registerPanelSettingsMenu,
 }))
 
 vi.mock('../../src/userscript/debug-settings', () => ({
@@ -90,18 +98,19 @@ describe('App', () => {
     expect(prepare).not.toHaveBeenCalled()
   })
 
-  it('registers model settings and debug settings menus during init', async () => {
+  it('registers the unified settings menu during init', async () => {
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
 
     app.init()
 
-    expect(registerModelSettingsMenu).toHaveBeenCalledWith(expect.any(Function))
-    expect(registerDebugSettingsMenu).toHaveBeenCalledTimes(1)
+    expect(registerSettingsMenu).toHaveBeenCalledWith(expect.objectContaining({
+      onVerifyModelAccessKey: expect.any(Function),
+    }))
   })
 
-  it('does not register duplicate model settings menus when init is called twice', async () => {
+  it('does not register duplicate settings menus when init is called twice', async () => {
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
@@ -109,8 +118,7 @@ describe('App', () => {
     app.init()
     app.init()
 
-    expect(registerModelSettingsMenu).toHaveBeenCalledTimes(1)
-    expect(registerDebugSettingsMenu).toHaveBeenCalledTimes(1)
+    expect(registerSettingsMenu).toHaveBeenCalledTimes(1)
   })
 
   it('verifies and caches the model from the settings menu callback', async () => {
@@ -119,7 +127,7 @@ describe('App', () => {
     apps.push(app)
 
     app.init()
-    const verify = registerModelSettingsMenu.mock.calls[0][0]
+    const verify = registerSettingsMenu.mock.calls[0][0].onVerifyModelAccessKey
     await verify()
 
     expect(modelDownload).toHaveBeenCalledWith(undefined, true)

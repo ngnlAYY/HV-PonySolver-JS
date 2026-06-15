@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const STORAGE_KEY = 'hvPonySolverPanelPosition'
 const COMPACT_STORAGE_KEY = 'hvPonySolverPanelCompact'
+const HISTORY_LIMIT_STORAGE_KEY = 'hvPonySolverHistoryLimit'
 
 describe('panel settings', () => {
   beforeEach(() => {
@@ -140,10 +141,33 @@ describe('panel settings', () => {
     await expect(getPanelPosition()).resolves.toEqual({ top: 150, left: 1240 })
   })
 
-  it('registers no menu commands when the userscript menu API is unavailable', async () => {
-    const { registerPanelSettingsMenu } = await import('../../src/status-panel/panel-settings')
+  it('reads the default history limit when no value is saved', async () => {
+    const { getPanelHistoryLimit, getPanelHistoryLimitSync } = await import('../../src/status-panel/panel-settings')
 
-    expect(() => registerPanelSettingsMenu()).not.toThrow()
+    expect(getPanelHistoryLimitSync()).toBe(5)
+    await expect(getPanelHistoryLimit()).resolves.toBe(5)
+  })
+
+  it('persists and clears the history limit through localStorage fallback', async () => {
+    const { clearPanelHistoryLimit, getPanelHistoryLimit, setPanelHistoryLimit } = await import('../../src/status-panel/panel-settings')
+
+    await setPanelHistoryLimit('3')
+    expect(localStorage.getItem(HISTORY_LIMIT_STORAGE_KEY)).toBe('3')
+    await expect(getPanelHistoryLimit()).resolves.toBe(3)
+
+    await clearPanelHistoryLimit()
+    expect(localStorage.getItem(HISTORY_LIMIT_STORAGE_KEY)).toBeNull()
+    await expect(getPanelHistoryLimit()).resolves.toBe(5)
+  })
+
+  it('rejects invalid history limit input', async () => {
+    const { setPanelHistoryLimit } = await import('../../src/status-panel/panel-settings')
+
+    await expect(setPanelHistoryLimit('0')).rejects.toThrow('答题记录条数无效，请输入 1 到 50 之间的整数')
+    await expect(setPanelHistoryLimit('abc')).rejects.toThrow('答题记录条数无效，请输入 1 到 50 之间的整数')
+    await expect(setPanelHistoryLimit('1e1')).rejects.toThrow('答题记录条数无效，请输入 1 到 50 之间的整数')
+    await expect(setPanelHistoryLimit('0x10')).rejects.toThrow('答题记录条数无效，请输入 1 到 50 之间的整数')
+    expect(localStorage.getItem(HISTORY_LIMIT_STORAGE_KEY)).toBeNull()
   })
 
   it('registers set and reset menu commands when available', async () => {
@@ -153,11 +177,29 @@ describe('panel settings', () => {
 
     registerPanelSettingsMenu()
 
-    expect(registerMenuCommand).toHaveBeenCalledTimes(4)
+    expect(registerMenuCommand).toHaveBeenCalledTimes(5)
     expect(registerMenuCommand).toHaveBeenNthCalledWith(1, '设置面板位置', expect.any(Function))
     expect(registerMenuCommand).toHaveBeenNthCalledWith(2, '重置面板位置', expect.any(Function))
     expect(registerMenuCommand).toHaveBeenNthCalledWith(3, '开启精简版', expect.any(Function))
     expect(registerMenuCommand).toHaveBeenNthCalledWith(4, '关闭精简版', expect.any(Function))
+    expect(registerMenuCommand).toHaveBeenNthCalledWith(5, '设置答题记录显示条数', expect.any(Function))
+  })
+
+  it('sets the history display limit from the menu command', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn(() => '4')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { getPanelHistoryLimit, registerPanelSettingsMenu } = await import('../../src/status-panel/panel-settings')
+
+    registerPanelSettingsMenu()
+    await registerMenuCommand.mock.calls[4][1]()
+
+    expect(prompt).toHaveBeenCalledWith('请输入答题记录显示条数，1 到 50', '5')
+    await expect(getPanelHistoryLimit()).resolves.toBe(4)
+    expect(alert).toHaveBeenCalledWith('答题记录显示条数已保存，刷新页面后生效')
   })
 
   it('keeps the existing position when the prompt is cancelled', async () => {

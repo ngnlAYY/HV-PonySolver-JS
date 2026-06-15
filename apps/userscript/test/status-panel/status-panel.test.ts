@@ -11,6 +11,15 @@ function createHistoryStore(records: HistoryRecord[] = []): HistoryStore {
   } as unknown as HistoryStore
 }
 
+function createSuccessRecords(count: number): HistoryRecord[] {
+  return Array.from({ length: count }, (_, index) => ({
+    type: 'success',
+    answers: `P${index + 1}`,
+    elapsed: index + 1,
+    time: `00:00:0${index + 1}`,
+  }))
+}
+
 describe('StatusPanel', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
@@ -68,6 +77,29 @@ describe('StatusPanel', () => {
     await vi.waitFor(() => expect(document.body.textContent).not.toContain('模型状态：'))
     expect(document.body.textContent).not.toContain('会话状态：')
     expect(document.body.textContent).not.toContain('推理状态：')
+  })
+
+  it('shows only five answer records by default', () => {
+    const store = createHistoryStore(createSuccessRecords(6))
+    const panel = new StatusPanel(store)
+
+    panel.create()
+
+    expect(document.body.textContent).toContain('P1')
+    expect(document.body.textContent).toContain('P5')
+    expect(document.body.textContent).not.toContain('P6')
+  })
+
+  it('uses the configured answer record display limit', () => {
+    localStorage.setItem('hvPonySolverHistoryLimit', '3')
+    const store = createHistoryStore(createSuccessRecords(5))
+    const panel = new StatusPanel(store)
+
+    panel.create()
+
+    expect(document.body.textContent).toContain('P1')
+    expect(document.body.textContent).toContain('P3')
+    expect(document.body.textContent).not.toContain('P4')
   })
 
   it('shows that there is no recent error when history has no errors', () => {

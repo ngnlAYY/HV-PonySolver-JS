@@ -27,9 +27,10 @@ export function formatRecord(record: HistoryRecord): string {
   return `${time} ${escapeHtml(record.message || '未知错误')} ${Number(record.elapsed) || 0}ms`
 }
 
-export function renderStatusPanel(world: World, status: PanelStatus, records: HistoryRecord[], compactMode = false): string {
+export function renderStatusPanel(world: World, status: PanelStatus, records: HistoryRecord[], compactMode: boolean, historyLimit: number): string {
   const worldName = WORLD_NAMES[world] || '未知'
-  const rows = records.length ? records.map((record) => formatRecord(record)).join('<br>') : '暂无记录'
+  const visibleRecords = records.slice(0, historyLimit)
+  const rows = visibleRecords.length ? visibleRecords.map((record) => formatRecord(record)).join('<br>') : '暂无记录'
   const recentError = records.find((record) => record.type === 'error')?.message || '无'
   const statusRows = compactMode ? [] : [
     `模型状态：${escapeHtml(status.model)}`,

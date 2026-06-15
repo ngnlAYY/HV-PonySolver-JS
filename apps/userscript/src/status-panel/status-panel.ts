@@ -2,7 +2,7 @@ import type { AnswerCode } from '@hv-pony-solver/shared'
 import { HistoryStore } from '../persistence/answer-history-store'
 import type { HistoryRecord, World } from '../persistence/answer-history-types'
 import type { PanelStatus, StatusPanel as StatusPanelContract } from './status-panel-types'
-import { getPanelPosition, getPanelPositionSync, isPanelCompactMode, isPanelCompactModeSync } from './panel-settings'
+import { getPanelHistoryLimit, getPanelHistoryLimitSync, getPanelPosition, getPanelPositionSync, isPanelCompactMode, isPanelCompactModeSync } from './panel-settings'
 import { formatAnswers, renderStatusPanel } from './status-panel-renderer'
 
 function getWorld(): World {
@@ -14,6 +14,7 @@ export class StatusPanel implements StatusPanelContract {
   private readonly world: World = getWorld()
   private compactMode = false
   private records: HistoryRecord[] = []
+  private historyLimit = getPanelHistoryLimitSync()
   private status: PanelStatus = {
     model: '未开始',
     session: '未开始',
@@ -41,6 +42,12 @@ export class StatusPanel implements StatusPanelContract {
     isPanelCompactMode().then((compactMode) => {
       if (this.el && compactMode !== this.compactMode) {
         this.compactMode = compactMode
+        this.render()
+      }
+    })
+    getPanelHistoryLimit().then((historyLimit) => {
+      if (this.el && historyLimit !== this.historyLimit) {
+        this.historyLimit = historyLimit
         this.render()
       }
     })
@@ -94,6 +101,6 @@ export class StatusPanel implements StatusPanelContract {
     if (!this.el) {
       return
     }
-    this.el.innerHTML = renderStatusPanel(this.world, this.status, this.records, this.compactMode)
+    this.el.innerHTML = renderStatusPanel(this.world, this.status, this.records, this.compactMode, this.historyLimit)
   }
 }

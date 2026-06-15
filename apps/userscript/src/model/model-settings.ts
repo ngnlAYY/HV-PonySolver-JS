@@ -3,7 +3,7 @@ import { alertUser, deleteGmValue, getGmValue, promptUser, registerGmMenu, runMe
 
 const MODEL_ACCESS_KEY_STORAGE_KEY = 'hvPonySolverModelAccessKey'
 
-type VerifyModelAccessKey = () => Promise<void>
+export type VerifyModelAccessKey = () => Promise<void>
 
 export async function getModelAccessKey(): Promise<string> {
   return getGmValue(MODEL_ACCESS_KEY_STORAGE_KEY)
@@ -22,9 +22,8 @@ export function registerModelSettingsMenu(onVerify?: VerifyModelAccessKey): void
   registerGmMenu('清除模型下载 Key', () => runMenuAction(clearSavedModelAccessKey, '模型下载 Key 设置失败'))
 }
 
-async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKey): Promise<void> {
-  const currentKey = await getModelAccessKey()
-  const input = promptUser('请输入模型下载 Key', currentKey)
+export async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKey): Promise<void> {
+  const input = promptUser('请输入模型下载 Key（已设置时不会回填原值；留空会清除）', '')
   if (input === null) {
     return
   }
@@ -48,7 +47,7 @@ async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKey): Pro
   }
 }
 
-async function clearSavedModelAccessKey(): Promise<void> {
+export async function clearSavedModelAccessKey(): Promise<void> {
   await clearModelAccessKey()
   alertUser('模型下载 Key 已清除')
 }

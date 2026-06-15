@@ -14,7 +14,8 @@ userscript 当前涉及以下本地键：
 | ---------------------------- | ------------------------------------------------------- |
 | `hvPonySolverModelAccessKey` | 存储模型下载访问 key（优先 GM 存储，回退 localStorage） |
 | `hvPonySolverPanelPosition`  | 状态面板位置持久化（用于恢复面板布局）                  |
-| `local_answer_history_v2`    | 最近答题记录（主世界/异世界）                           |
+| `hvPonySolverHistoryLimit`   | 状态面板答题记录显示条数（默认 5，范围 1-50）           |
+| `local_answer_history_v2`    | 最近答题记录（主世界/异世界，最多保留 50 条）           |
 | `hvPonySolverDebug`          | 调试日志开关（`1` 时输出调试日志）                      |
 
 ## Local data classification
@@ -23,6 +24,7 @@ userscript 当前涉及以下本地键：
 | ---------------------------- | --------------------------------- | ------------------------- | -------------------------------------------------------------------------- |
 | `hvPonySolverModelAccessKey` | GM storage, localStorage fallback | User-visible access token | Not a server-side secret; rotate if shared accidentally.                   |
 | `hvPonySolverPanelPosition`  | GM storage, localStorage fallback | Low                       | UI preference only.                                                        |
+| `hvPonySolverHistoryLimit`   | GM storage, localStorage fallback | Low                       | UI preference; controls how many recent records the panel renders.         |
 | `local_answer_history_v2`    | localStorage                      | Medium                    | Reveals recent answer activity; can be cleared by browser storage cleanup. |
 | `hvPonySolverDebug`          | localStorage                      | Low                       | Enables debug logging.                                                     |
 
@@ -60,9 +62,9 @@ YOLO 输出格式假设集中在 `yoloOutputConfig`，当前按每行 6 个 floa
 
 ## 调试日志
 
-userscript 菜单提供 `开启调试日志` 与 `关闭调试日志`。开启后，脚本会在浏览器 console 输出带 `[PonySolverLocal]` 前缀的调试日志。默认关闭，不会输出普通调试日志；警告和错误仍会输出，便于排障。
+userscript 通过单个 `HV-PonySolver 设置` GM 菜单入口管理模型 Key、状态面板位置、答题记录显示条数、精简版和调试日志。调试日志开启后，脚本会在浏览器 console 输出带 `[PonySolverLocal]` 前缀的调试日志。默认关闭，不会输出普通调试日志；警告和错误仍会输出，便于排障。
 
-调试开关存储在 `hvPonySolverDebug`，优先使用 GM storage，回退到 localStorage。不要在调试日志、截图或支持消息中粘贴完整模型 access key 或带 `?key=` 的模型 URL。
+调试开关存储在 `hvPonySolverDebug`，优先使用 GM storage，回退到 localStorage。模型 Key 设置 prompt 不会回填已保存值；不要在调试日志、截图或支持消息中粘贴完整模型 access key 或带 `?key=` 的模型 URL。
 
 ## 构建
 

@@ -6,12 +6,12 @@ export function isDebugEnabled(): boolean {
   return getGmValueSync(DEBUG_STORAGE_KEY) === '1'
 }
 
-async function enableDebugLogging(): Promise<void> {
+export async function enableDebugLogging(): Promise<void> {
   await setGmValue(DEBUG_STORAGE_KEY, '1')
   alertUser('调试日志已开启')
 }
 
-async function disableDebugLogging(): Promise<void> {
+export async function disableDebugLogging(): Promise<void> {
   await deleteGmValue(DEBUG_STORAGE_KEY)
   alertUser('调试日志已关闭')
 }

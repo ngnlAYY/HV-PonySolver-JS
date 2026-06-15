@@ -71,21 +71,23 @@ describe('model settings', () => {
     expect(registerMenuCommand).toHaveBeenNthCalledWith(2, '清除模型下载 Key', expect.any(Function))
   })
 
-  it('reports settings menu storage read failures without rejecting', async () => {
+  it('reports settings menu storage write failures without rejecting', async () => {
     const registerMenuCommand = vi.fn()
-    const getValue = vi.fn(async () => {
-      throw new Error('read failed')
+    const setValue = vi.fn(async () => {
+      throw new Error('write failed')
     })
+    const prompt = vi.fn(() => 'new-key')
     const alert = vi.fn()
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
-    vi.stubGlobal('GM_getValue', getValue)
+    vi.stubGlobal('GM_setValue', setValue)
+    vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
     const { registerModelSettingsMenu } = await import('../../src/model/model-settings')
 
     registerModelSettingsMenu()
     await expect(registerMenuCommand.mock.calls[0][1]()).resolves.toBeUndefined()
 
-    expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: read failed')
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: write failed')
   })
 
   it('reports clear menu storage failures without rejecting', async () => {
@@ -105,7 +107,7 @@ describe('model settings', () => {
     expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: delete failed')
   })
 
-  it('keeps the existing key when the prompt is cancelled', async () => {
+  it('keeps the existing key when the prompt is cancelled without revealing it as the default', async () => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn(() => null)
     const alert = vi.fn()
@@ -118,7 +120,7 @@ describe('model settings', () => {
     registerModelSettingsMenu()
     await registerMenuCommand.mock.calls[0][1]()
 
-    expect(prompt).toHaveBeenCalledWith('请输入模型下载 Key', 'old-key')
+    expect(prompt).toHaveBeenCalledWith('请输入模型下载 Key（已设置时不会回填原值；留空会清除）', '')
     await expect(getModelAccessKey()).resolves.toBe('old-key')
     expect(alert).not.toHaveBeenCalled()
   })

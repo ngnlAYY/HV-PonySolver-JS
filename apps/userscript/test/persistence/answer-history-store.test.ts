@@ -48,6 +48,23 @@ describe('HistoryStore', () => {
     expect(records).toEqual([])
   })
 
+  it('keeps up to fifty records when adding answers', () => {
+    const store = new HistoryStore()
+    for (let index = 0; index < 51; index += 1) {
+      store.add('main', {
+        type: 'success',
+        answers: `P${index}`,
+        elapsed: index,
+      })
+    }
+
+    const records = store.get('main')
+
+    expect(records).toHaveLength(50)
+    expect(records[0]).toMatchObject({ answers: 'P50' })
+    expect(records[49]).toMatchObject({ answers: 'P1' })
+  })
+
   it('drops invalid existing records when adding a new record', () => {
     localStorage.setItem(HISTORY_KEY, JSON.stringify({
       main: [
