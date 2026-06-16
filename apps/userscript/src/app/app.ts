@@ -2,7 +2,7 @@ import { captchaSelectors } from '../captcha/captcha-selectors'
 import { findCaptchaTarget } from '../captcha/captcha-target'
 import { registerSettingsMenu } from '../userscript/settings-menu'
 import { formatErrorMessage } from '../utils/errors'
-import { log, warn } from '../utils/logger'
+import { warn } from '../utils/logger'
 import { createAppDependencies, type AppDependencies } from './app-dependencies'
 
 export class App {
@@ -120,7 +120,6 @@ export class App {
       if (this.destroyed || this.solver.isBusy || !captchaKey || captchaKey === this.lastCaptchaKey) {
         return
       }
-      log('检测到验证码')
       await this.detector.prepare()
       if (this.destroyed) {
         return

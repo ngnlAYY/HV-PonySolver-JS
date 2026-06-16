@@ -2,14 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { appendCaptcha } from '../helpers/captcha-fixture'
 
-const prepare = vi.fn(async () => ({} as Worker))
+const prepare = vi.fn(async () => ({}) as Worker)
 const detect = vi.fn()
 const destroyDetector = vi.fn()
 const getImageBlob = vi.fn()
 const registerSettingsMenu = vi.fn()
 const registerModelSettingsMenu = vi.fn()
 const registerPanelSettingsMenu = vi.fn()
-const registerDebugSettingsMenu = vi.fn()
 const modelDownload = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
 const modelPutCached = vi.fn(async () => undefined)
 const modelClose = vi.fn()
@@ -49,11 +48,6 @@ vi.mock('../../src/status-panel/panel-settings', () => ({
   isPanelCompactMode: vi.fn(async () => false),
   isPanelCompactModeSync: vi.fn(() => false),
   registerPanelSettingsMenu,
-}))
-
-vi.mock('../../src/userscript/debug-settings', () => ({
-  isDebugEnabled: vi.fn(() => false),
-  registerDebugSettingsMenu,
 }))
 
 vi.mock('../../src/model/model-cache', () => ({
@@ -105,9 +99,11 @@ describe('App', () => {
 
     app.init()
 
-    expect(registerSettingsMenu).toHaveBeenCalledWith(expect.objectContaining({
-      onVerifyModelAccessKey: expect.any(Function),
-    }))
+    expect(registerSettingsMenu).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onVerifyModelAccessKey: expect.any(Function),
+      }),
+    )
   })
 
   it('does not register duplicate settings menus when init is called twice', async () => {
@@ -191,7 +187,13 @@ describe('App', () => {
   })
 
   it('ignores unrelated DOM mutations when a captcha is already handled', async () => {
-    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }], candidates: [{ class_id: 0, confidence: 0.9 }] })
+    detect.mockResolvedValueOnce({
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.9 },
+      detections: [{ class_id: 0, confidence: 0.9 }],
+      candidates: [{ class_id: 0, confidence: 0.9 }],
+    })
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
@@ -229,7 +231,13 @@ describe('App', () => {
   })
 
   it('submits the form inside the captcha container when matching selectors exist outside it', async () => {
-    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }], candidates: [{ class_id: 0, confidence: 0.9 }] })
+    detect.mockResolvedValueOnce({
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.9 },
+      detections: [{ class_id: 0, confidence: 0.9 }],
+      candidates: [{ class_id: 0, confidence: 0.9 }],
+    })
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
@@ -268,10 +276,18 @@ describe('App', () => {
 
   it('marks the captcha solved by the solver when content changes during prepare', async () => {
     let resolvePrepare: (() => void) | undefined
-    prepare.mockReturnValueOnce(new Promise<Worker>((resolve) => {
-      resolvePrepare = () => resolve({} as Worker)
-    }))
-    detect.mockResolvedValueOnce({ success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [{ class_id: 0, confidence: 0.9 }], candidates: [{ class_id: 0, confidence: 0.9 }] })
+    prepare.mockReturnValueOnce(
+      new Promise<Worker>((resolve) => {
+        resolvePrepare = () => resolve({} as Worker)
+      }),
+    )
+    detect.mockResolvedValueOnce({
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.9 },
+      detections: [{ class_id: 0, confidence: 0.9 }],
+      candidates: [{ class_id: 0, confidence: 0.9 }],
+    })
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)

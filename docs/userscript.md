@@ -10,13 +10,12 @@ apps/userscript/dist/hv-pony-solver.user.js
 
 userscript 当前涉及以下本地键：
 
-| Key                          | 用途                                                    |
-| ---------------------------- | ------------------------------------------------------- |
-| `hvPonySolverModelAccessKey` | 存储模型下载访问 key（优先 GM 存储，回退 localStorage） |
-| `hvPonySolverPanelPosition`  | 状态面板位置持久化（用于恢复面板布局）                  |
-| `hvPonySolverHistoryLimit`   | 状态面板答题记录显示条数（默认 5，范围 1-50）           |
-| `local_answer_history_v2`    | 最近答题记录（主世界/异世界，最多保留 50 条）           |
-| `hvPonySolverDebug`          | 调试日志开关（`1` 时输出调试日志）                      |
+| Key                          | 用途                                                        |
+| ---------------------------- | ----------------------------------------------------------- |
+| `hvPonySolverModelAccessKey` | 存储模型下载访问 key（优先 GM 存储，回退 localStorage）     |
+| `hvPonySolverPanelPosition`  | 状态面板位置持久化（优先 GM 存储，用于恢复面板布局）        |
+| `hvPonySolverHistoryLimit`   | 状态面板答题记录显示条数（默认 5，范围 1-50；优先 GM 存储） |
+| `local_answer_history_v2`    | 最近答题记录（主世界/异世界，最多保留 50 条）               |
 
 ## Local data classification
 
@@ -26,7 +25,6 @@ userscript 当前涉及以下本地键：
 | `hvPonySolverPanelPosition`  | GM storage, localStorage fallback | Low                       | UI preference only.                                                        |
 | `hvPonySolverHistoryLimit`   | GM storage, localStorage fallback | Low                       | UI preference; controls how many recent records the panel renders.         |
 | `local_answer_history_v2`    | localStorage                      | Medium                    | Reveals recent answer activity; can be cleared by browser storage cleanup. |
-| `hvPonySolverDebug`          | localStorage                      | Low                       | Enables debug logging.                                                     |
 
 Prefer GM storage for userscript settings when available. localStorage fallback exists for compatibility and should not be treated as confidential storage.
 
@@ -60,11 +58,9 @@ YOLO 输出格式假设集中在 `yoloOutputConfig`，当前按每行 6 个 floa
 
 `imagePreprocessConfig.imageSize` 控制输入图片尺寸，`onnxRuntimeConfig` 控制 ONNX runtime 资源位置，`inferenceTimeoutConfig` 控制 worker 初始化、检测和模型下载超时。
 
-## 调试日志
+## 默认打包范围
 
-userscript 通过单个 `HV-PonySolver 设置` GM 菜单入口管理模型 Key、状态面板位置、答题记录显示条数、精简版和调试日志。调试日志开启后，脚本会在浏览器 console 输出带 `[PonySolverLocal]` 前缀的调试日志。默认关闭，不会输出普通调试日志；警告和错误仍会输出，便于排障。
-
-调试开关存储在 `hvPonySolverDebug`，优先使用 GM storage，回退到 localStorage。模型 Key 设置 prompt 不会回填已保存值；不要在调试日志、截图或支持消息中粘贴完整模型 access key 或带 `?key=` 的模型 URL。
+默认 userscript bundle 只包含验证码识别、模型下载/缓存、状态面板、答题记录和必要设置菜单。调试日志开关及其菜单动作不进入默认构建；运行时仍保留警告和错误输出，便于排障。
 
 ## 构建
 

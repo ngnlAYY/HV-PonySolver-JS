@@ -19,6 +19,18 @@ describe('settings menu', () => {
     expect(registerMenuCommand).toHaveBeenCalledWith('HV-PonySolver 设置', expect.any(Function))
   })
 
+  it('does not include debug actions in the default settings menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn(() => null)
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(prompt).toHaveBeenCalledWith(expect.not.stringContaining('调试日志'), '1')
+  })
   it('rejects non-decimal top-level menu choices', async () => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn(() => '0x3')
@@ -37,9 +49,7 @@ describe('settings menu', () => {
 
   it('sets the answer record display limit through the top-level settings menu', async () => {
     const registerMenuCommand = vi.fn()
-    const prompt = vi.fn()
-      .mockReturnValueOnce('3')
-      .mockReturnValueOnce('4')
+    const prompt = vi.fn().mockReturnValueOnce('3').mockReturnValueOnce('4')
     const alert = vi.fn()
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
     vi.stubGlobal('prompt', prompt)

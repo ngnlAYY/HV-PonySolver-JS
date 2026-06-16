@@ -107,24 +107,24 @@ corepack pnpm install
 
 | 命令              | 说明                                                             |
 | ----------------- | ---------------------------------------------------------------- |
-| `pnpm install`   | 安装所有 workspace 依赖                              |
-| `pnpm lint`      | 对整个仓库运行 ESLint                                |
-| `pnpm typecheck` | 对所有 workspace 运行 TypeScript 类型检查            |
-| `pnpm test`      | 运行所有 workspace 的 Vitest 测试与 node:test 脚本测试 |
-| `pnpm build`     | 运行所有 workspace 的构建检查；userscript 会生成产物   |
-| `pnpm docs:check` | 检查 README/docs 与 source 关键事实是否发生 drift      |
-| `pnpm check`     | 依次运行 lint、typecheck、test、test:coverage、docs:check、build |
-| `pnpm format`    | 用 Prettier 格式化仓库文件                           |
+| `pnpm install`    | 安装所有 workspace 依赖                                          |
+| `pnpm lint`       | 对整个仓库运行 ESLint                                            |
+| `pnpm typecheck`  | 对所有 workspace 运行 TypeScript 类型检查                        |
+| `pnpm test`       | 运行所有 workspace 的 Vitest 测试与 node:test 脚本测试           |
+| `pnpm build`      | 运行所有 workspace 的构建检查；userscript 会生成产物             |
+| `pnpm docs:check` | 检查 README/docs 与 source 关键事实是否发生 drift                |
+| `pnpm check`      | 依次运行 lint、typecheck、test、test:coverage、docs:check、build |
+| `pnpm format`     | 用 Prettier 格式化仓库文件                                       |
 
 ### Userscript 命令
 
-| 命令                                                                  | 说明                                                                                   |
-| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `corepack pnpm --filter @hv-pony-solver/userscript build`             | 用 esbuild 打包未压缩 userscript，并写入 `apps/userscript/dist/hv-pony-solver.user.js` |
-| `corepack pnpm --filter @hv-pony-solver/userscript build -- --minify` | 用 esbuild 打包压缩 userscript                                                         |
-| `pnpm --filter @hv-pony-solver/userscript typecheck`                  | 类型检查 userscript 源码                                                               |
-| `pnpm --filter @hv-pony-solver/userscript test`                       | 运行 userscript Vitest/jsdom 单元测试与 node:test 脚本测试                            |
-| `MODEL_FILE=/path/to/yolo26n-640.onnx pnpm --filter @hv-pony-solver/userscript verify-model-integrity` | 校验待发布模型与 shared manifest 的 byteLength / SHA-256 一致性 |
+| 命令                                                                                                   | 说明                                                                                   |
+| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `corepack pnpm --filter @hv-pony-solver/userscript build`                                              | 用 esbuild 打包未压缩 userscript，并写入 `apps/userscript/dist/hv-pony-solver.user.js` |
+| `corepack pnpm --filter @hv-pony-solver/userscript build -- --minify`                                  | 用 esbuild 打包压缩 userscript                                                         |
+| `pnpm --filter @hv-pony-solver/userscript typecheck`                                                   | 类型检查 userscript 源码                                                               |
+| `pnpm --filter @hv-pony-solver/userscript test`                                                        | 运行 userscript Vitest/jsdom 单元测试与 node:test 脚本测试                             |
+| `MODEL_FILE=/path/to/yolo26n-640.onnx pnpm --filter @hv-pony-solver/userscript verify-model-integrity` | 校验待发布模型与 shared manifest 的 byteLength / SHA-256 一致性                        |
 
 ### Model Worker 命令
 
@@ -221,20 +221,20 @@ apps/userscript/dist/hv-pony-solver.user.js
 
 ### 推理配置
 
-| 配置                                           | 当前值                                                                | 说明                                                         |
-| ---------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `imagePreprocessConfig.imageSize`              | `640`                                                                 | 输入图像会 letterbox 到 640x640                              |
-| `yoloOutputConfig.confidenceThreshold`         | `0.30`                                                                | YOLO 行置信度阈值                                            |
-| `yoloOutputConfig.maxDetections`               | `16`                                                                  | 最多读取 16 个候选框                                         |
-| `yoloOutputConfig.maxKinds`                    | `3`                                                                   | 识别到 1 到 3 种不同小马才算成功                             |
-| `yoloOutputConfig.rowSize`                     | `6`                                                                   | YOLO 输出每行 float 数                                       |
-| `yoloOutputConfig.confidenceIndex`             | `4`                                                                   | YOLO 输出 confidence 列                                      |
-| `yoloOutputConfig.classIndex`                  | `5`                                                                   | YOLO 输出 class id 列                                        |
-| `onnxRuntimeConfig.ortScriptUrl`               | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js` | 默认构建下 Worker 动态加载 ONNX Runtime Web JS runtime       |
-| `onnxRuntimeConfig.ortWasmPath`                | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/`           | ONNX Runtime Web wasm 资源路径，内置 JS runtime 时仍远程加载 |
-| `inferenceTimeoutConfig.workerInitTimeoutMs`   | `60000`                                                               | ONNX Worker 初始化请求超时                                   |
-| `inferenceTimeoutConfig.workerDetectTimeoutMs` | `30000`                                                               | ONNX Worker 单次检测请求超时                                 |
-| `inferenceTimeoutConfig.modelDownloadTimeoutMs` | `30000`                                                              | 模型下载超时                                                 |
+| 配置                                            | 当前值                                                                | 说明                                                         |
+| ----------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `imagePreprocessConfig.imageSize`               | `640`                                                                 | 输入图像会 letterbox 到 640x640                              |
+| `yoloOutputConfig.confidenceThreshold`          | `0.30`                                                                | YOLO 行置信度阈值                                            |
+| `yoloOutputConfig.maxDetections`                | `16`                                                                  | 最多读取 16 个候选框                                         |
+| `yoloOutputConfig.maxKinds`                     | `3`                                                                   | 识别到 1 到 3 种不同小马才算成功                             |
+| `yoloOutputConfig.rowSize`                      | `6`                                                                   | YOLO 输出每行 float 数                                       |
+| `yoloOutputConfig.confidenceIndex`              | `4`                                                                   | YOLO 输出 confidence 列                                      |
+| `yoloOutputConfig.classIndex`                   | `5`                                                                   | YOLO 输出 class id 列                                        |
+| `onnxRuntimeConfig.ortScriptUrl`                | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js` | 默认构建下 Worker 动态加载 ONNX Runtime Web JS runtime       |
+| `onnxRuntimeConfig.ortWasmPath`                 | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/`           | ONNX Runtime Web wasm 资源路径，内置 JS runtime 时仍远程加载 |
+| `inferenceTimeoutConfig.workerInitTimeoutMs`    | `60000`                                                               | ONNX Worker 初始化请求超时                                   |
+| `inferenceTimeoutConfig.workerDetectTimeoutMs`  | `30000`                                                               | ONNX Worker 单次检测请求超时                                 |
+| `inferenceTimeoutConfig.modelDownloadTimeoutMs` | `30000`                                                               | 模型下载超时                                                 |
 
 YOLO 输出解析规则：
 
@@ -279,9 +279,9 @@ YOLO 输出解析规则：
 
 状态面板显示：模型状态、ONNX Session 状态、推理状态、当前世界和最近答题记录。渲染历史记录时会转义 HTML 敏感字符。
 
-### 调试日志
+### 默认打包范围
 
-userscript 菜单提供 `开启调试日志` 与 `关闭调试日志`。开启后，脚本会在浏览器 console 输出带 `[PonySolverLocal]` 前缀的调试日志。默认关闭，不会输出普通调试日志；警告和错误仍会输出，便于排障。
+默认 userscript bundle 只包含验证码识别、模型下载/缓存、状态面板、答题记录和必要设置菜单。调试日志开关及其菜单动作不进入默认构建；运行时仍保留警告和错误输出，便于排障。
 
 ## Model Worker 详细说明
 

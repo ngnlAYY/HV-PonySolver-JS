@@ -50,7 +50,6 @@ export class CaptchaSolver {
     const signal: AbortSignal | undefined = this.getAbortSignal?.()
     const submitOptions = signal ? { signal } : undefined
 
-    // 进入 try 前检查 abort
     if (signal?.aborted) {
       return result(false)
     }
@@ -72,7 +71,6 @@ export class CaptchaSolver {
         return result(false)
       }
 
-      // imageLoader.get 之后检查 abort
       if (signal?.aborted) {
         return result(false)
       }
@@ -87,17 +85,22 @@ export class CaptchaSolver {
         return result(false)
       }
 
-      // detector.detect 之后检查 abort
       if (signal?.aborted) {
         return result(false)
       }
 
       if (detectionResult.success && detectionResult.ponies.length) {
         let submitted = false
-        await this.answerSubmitter.submit(target.form, detectionResult.ponies, failSubmit, () => {
-          submitted = true
-          this.panel.addSuccess(detectionResult.ponies, detectionResult.confidences, elapsed())
-        }, submitOptions)
+        await this.answerSubmitter.submit(
+          target.form,
+          detectionResult.ponies,
+          failSubmit,
+          () => {
+            submitted = true
+            this.panel.addSuccess(detectionResult.ponies, detectionResult.confidences, elapsed())
+          },
+          submitOptions,
+        )
         return result(submitted)
       }
 
@@ -112,10 +115,16 @@ export class CaptchaSolver {
         return result(false)
       }
       let submitted = false
-      await this.answerSubmitter.submit(target.form, [pony], failSubmit, () => {
-        submitted = true
-        this.panel.addRandomFailure(pony, elapsed())
-      }, submitOptions)
+      await this.answerSubmitter.submit(
+        target.form,
+        [pony],
+        failSubmit,
+        () => {
+          submitted = true
+          this.panel.addRandomFailure(pony, elapsed())
+        },
+        submitOptions,
+      )
       return result(submitted)
     } catch (error) {
       const message = `答题异常: ${formatErrorMessage(error)}`

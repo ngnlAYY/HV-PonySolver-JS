@@ -1,6 +1,5 @@
 import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared'
 import { randDelay, shuffle, sleep } from '../utils/delay'
-import { log } from '../utils/logger'
 import { captchaSelectors } from './captcha-selectors'
 import { timingConfig } from './timing-config'
 
@@ -74,6 +73,5 @@ export class AnswerSubmitter {
 
     button.click()
     onSubmitted()
-    log('已提交:', ponies.join(','))
   }
 }

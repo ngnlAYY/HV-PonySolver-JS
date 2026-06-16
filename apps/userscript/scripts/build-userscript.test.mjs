@@ -43,16 +43,29 @@ test('validateUserscriptMetadata accepts only complete userscript metadata block
 })
 
 test('createUserscriptOutput joins metadata and bundled text with a blank line', () => {
-  assert.equal(createUserscriptOutput('// ==UserScript==\n// ==/UserScript==', '(() => {})();'), '// ==UserScript==\n// ==/UserScript==\n\n(() => {})();')
+  assert.equal(
+    createUserscriptOutput('// ==UserScript==\n// ==/UserScript==', '(() => {})();'),
+    '// ==UserScript==\n// ==/UserScript==\n\n(() => {})();',
+  )
 })
 
 test('createMetafileJson preserves main and worker esbuild metafiles', () => {
-  const metafileJson = createMetafileJson({ outputs: { 'main.js': { bytes: 1 } } }, { outputs: { 'worker.js': { bytes: 2 } } })
+  const metafileJson = createMetafileJson(
+    { outputs: { 'main.js': { bytes: 1 } } },
+    { outputs: { 'worker.js': { bytes: 2 } } },
+  )
 
-  assert.equal(metafileJson, JSON.stringify({
-    main: { outputs: { 'main.js': { bytes: 1 } } },
-    worker: { outputs: { 'worker.js': { bytes: 2 } } },
-  }, null, 2))
+  assert.equal(
+    metafileJson,
+    JSON.stringify(
+      {
+        main: { outputs: { 'main.js': { bytes: 1 } } },
+        worker: { outputs: { 'worker.js': { bytes: 2 } } },
+      },
+      null,
+      2,
+    ),
+  )
 })
 
 test('createWorkerBuildOptions defines the runtime source placeholder', () => {
@@ -89,6 +102,8 @@ test('build-userscript defaults to remote onnxruntime-web runtime', async () => 
 
   assert.equal(output.includes('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js'), true)
   assert.equal(output.includes(runtimeMarker), false)
+  assert.equal(output.includes('hvPonySolverDebug'), false)
+  assert.equal(output.includes('调试日志'), false)
   assert.equal(output.includes('// @grant       GM_registerMenuCommand'), true)
   assert.equal(output.includes('// @grant       GM_getValue'), true)
   assert.equal(output.includes('// @grant       GM_setValue'), true)
@@ -190,8 +205,14 @@ test('build-userscript writes an esbuild metafile when requested', async () => {
   assert.equal(metafile.includes('src/inference/onnx-worker-entry.ts'), true)
   const mainOutput = Object.values(parsedMetafile.main.outputs)[0]
   const workerOutput = Object.values(parsedMetafile.worker.outputs)[0]
-  assert.ok(mainOutput.bytes < mainBundleBudgetBytes, `main bundle ${mainOutput.bytes} bytes exceeds ${mainBundleBudgetBytes}`)
-  assert.ok(workerOutput.bytes < workerBundleBudgetBytes, `worker bundle ${workerOutput.bytes} bytes exceeds ${workerBundleBudgetBytes}`)
+  assert.ok(
+    mainOutput.bytes < mainBundleBudgetBytes,
+    `main bundle ${mainOutput.bytes} bytes exceeds ${mainBundleBudgetBytes}`,
+  )
+  assert.ok(
+    workerOutput.bytes < workerBundleBudgetBytes,
+    `worker bundle ${workerOutput.bytes} bytes exceeds ${workerBundleBudgetBytes}`,
+  )
 })
 
 async function runBuildInTempDir({ args = [], runtimeSource, runtimeByteLength, runtimeSha256, withMetafile, ...env }) {
