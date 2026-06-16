@@ -10,21 +10,25 @@ apps/userscript/dist/hv-pony-solver.user.js
 
 userscript 当前涉及以下本地键：
 
-| Key                          | 用途                                                        |
-| ---------------------------- | ----------------------------------------------------------- |
-| `hvPonySolverModelAccessKey` | 存储模型下载访问 key（优先 GM 存储，回退 localStorage）     |
-| `hvPonySolverPanelPosition`  | 状态面板位置持久化（优先 GM 存储，用于恢复面板布局）        |
-| `hvPonySolverHistoryLimit`   | 状态面板答题记录显示条数（默认 5，范围 1-50；优先 GM 存储） |
-| `local_answer_history_v2`    | 最近答题记录（主世界/异世界，最多保留 50 条）               |
+| Key                           | 用途                                                        |
+| ----------------------------- | ----------------------------------------------------------- |
+| `hvPonySolverModelAccessKey`  | 存储模型下载访问 key（优先 GM 存储，回退 localStorage）     |
+| `hvPonySolverPanelPosition`   | 状态面板位置持久化（优先 GM 存储，用于恢复面板布局）        |
+| `hvPonySolverHistoryLimit`    | 状态面板答题记录显示条数（默认 5，范围 1-50；优先 GM 存储） |
+| `hvPonySolverSubmitDelay`     | 提交前等待时间，支持固定毫秒数或 `min-max` 范围             |
+| `hvPonySolverMultiClickDelay` | 多选答题点击间隔，支持固定毫秒数或 `min-max` 范围           |
+| `local_answer_history_v2`     | 最近答题记录（主世界/异世界，最多保留 50 条）               |
 
 ## Local data classification
 
-| Key                          | Storage                           | Sensitivity               | Notes                                                                      |
-| ---------------------------- | --------------------------------- | ------------------------- | -------------------------------------------------------------------------- |
-| `hvPonySolverModelAccessKey` | GM storage, localStorage fallback | User-visible access token | Not a server-side secret; rotate if shared accidentally.                   |
-| `hvPonySolverPanelPosition`  | GM storage, localStorage fallback | Low                       | UI preference only.                                                        |
-| `hvPonySolverHistoryLimit`   | GM storage, localStorage fallback | Low                       | UI preference; controls how many recent records the panel renders.         |
-| `local_answer_history_v2`    | localStorage                      | Medium                    | Reveals recent answer activity; can be cleared by browser storage cleanup. |
+| Key                           | Storage                           | Sensitivity               | Notes                                                                      |
+| ----------------------------- | --------------------------------- | ------------------------- | -------------------------------------------------------------------------- |
+| `hvPonySolverModelAccessKey`  | GM storage, localStorage fallback | User-visible access token | Not a server-side secret; rotate if shared accidentally.                   |
+| `hvPonySolverPanelPosition`   | GM storage, localStorage fallback | Low                       | UI preference only.                                                        |
+| `hvPonySolverHistoryLimit`    | GM storage, localStorage fallback | Low                       | UI preference; controls how many recent records the panel renders.         |
+| `hvPonySolverSubmitDelay`     | GM storage, localStorage fallback | Low                       | UI preference; controls wait time before submitting answers.               |
+| `hvPonySolverMultiClickDelay` | GM storage, localStorage fallback | Low                       | UI preference; controls delay between multiple answer clicks.              |
+| `local_answer_history_v2`     | localStorage                      | Medium                    | Reveals recent answer activity; can be cleared by browser storage cleanup. |
 
 Prefer GM storage for userscript settings when available. localStorage fallback exists for compatibility and should not be treated as confidential storage.
 

@@ -103,6 +103,62 @@ describe('AnswerSubmitter', () => {
       expect(vi.getTimerCount()).toBe(0)
     })
 
+    it('uses saved submit and multi-click timing ranges', async () => {
+      localStorage.setItem('hvPonySolverSubmitDelay', '2500')
+      localStorage.setItem('hvPonySolverMultiClickDelay', '700')
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) {
+        checkbox.checked = false
+      }
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onSubmitted = vi.fn()
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+
+      const submitPromise = new AnswerSubmitter().submit(form, ['TS', 'RA'], vi.fn(), onSubmitted)
+      await flushMicrotasks()
+
+      expect(setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 700)
+      await vi.runOnlyPendingTimersAsync()
+      await flushMicrotasks()
+      expect(setTimeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 2500)
+      await vi.runOnlyPendingTimersAsync()
+      await submitPromise
+
+      expect(button.click).toHaveBeenCalledTimes(1)
+      expect(onSubmitted).toHaveBeenCalledTimes(1)
+    })
+
+    it('uses asynchronous GM timing settings when available', async () => {
+      const testGlobal = globalThis as typeof globalThis & {
+        GM_getValue?: (key: string, defaultValue: string) => Promise<string>
+      }
+      testGlobal.GM_getValue = vi.fn(async (key: string) => (key === 'hvPonySolverSubmitDelay' ? '2600' : '800'))
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) {
+        checkbox.checked = false
+      }
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+
+      const submitPromise = new AnswerSubmitter().submit(form, ['TS', 'RA'], vi.fn(), vi.fn())
+      try {
+        await vi.waitFor(() => expect(setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 800))
+        await vi.runOnlyPendingTimersAsync()
+        await flushMicrotasks()
+        expect(setTimeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 2600)
+        await vi.runOnlyPendingTimersAsync()
+        await submitPromise
+
+        expect(button.click).toHaveBeenCalledTimes(1)
+      } finally {
+        delete testGlobal.GM_getValue
+      }
+    })
+
     it('does not click submit when signal is aborted during submit delay', async () => {
       const form = createForm(true)
       const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!

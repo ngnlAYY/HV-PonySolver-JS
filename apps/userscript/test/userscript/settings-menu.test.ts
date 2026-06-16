@@ -64,4 +64,40 @@ describe('settings menu', () => {
     expect(localStorage.getItem('hvPonySolverHistoryLimit')).toBe('4')
     expect(alert).toHaveBeenCalledWith('答题记录显示条数已保存，刷新页面后生效')
   })
+
+  it('sets the submit delay through the top-level settings menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('4').mockReturnValueOnce('2000-4500')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(prompt).toHaveBeenNthCalledWith(1, expect.stringContaining('4. 设置提交前等待时间'), '1')
+    expect(prompt).toHaveBeenNthCalledWith(2, '请输入提交前等待毫秒数，或 min-max 范围', '3000-5000')
+    expect(localStorage.getItem('hvPonySolverSubmitDelay')).toBe('2000-4500')
+    expect(alert).toHaveBeenCalledWith('提交前等待时间已保存')
+  })
+
+  it('sets the answer interval through the top-level settings menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('5').mockReturnValueOnce('750')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(prompt).toHaveBeenNthCalledWith(1, expect.stringContaining('5. 设置答题间隔'), '1')
+    expect(prompt).toHaveBeenNthCalledWith(2, '请输入多选点击间隔毫秒数，或 min-max 范围', '1000-1500')
+    expect(localStorage.getItem('hvPonySolverMultiClickDelay')).toBe('750')
+    expect(alert).toHaveBeenCalledWith('答题间隔已保存')
+  })
 })

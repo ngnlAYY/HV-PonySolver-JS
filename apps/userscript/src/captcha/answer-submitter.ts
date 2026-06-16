@@ -1,7 +1,7 @@
 import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared'
 import { randDelay, shuffle, sleep } from '../utils/delay'
 import { captchaSelectors } from './captcha-selectors'
-import { timingConfig } from './timing-config'
+import { getMultiClickDelayRange, getSubmitDelayRange } from './timing-settings'
 
 export type SubmitErrorHandler = (message: string) => void
 
@@ -48,6 +48,8 @@ export class AnswerSubmitter {
       }
     }
 
+    const [submitDelay, multiClickDelay] = await Promise.all([getSubmitDelayRange(), getMultiClickDelayRange()])
+
     const order = shuffle(indices)
     for (let i = 0; i < order.length; i += 1) {
       const index = order[i]
@@ -59,14 +61,14 @@ export class AnswerSubmitter {
         checkbox.click()
       }
       if (i < order.length - 1) {
-        await sleep(randDelay(timingConfig.multiClickDelay), signal)
+        await sleep(randDelay(multiClickDelay), signal)
         if (signal?.aborted) {
           return
         }
       }
     }
 
-    await sleep(randDelay(timingConfig.submitDelay), signal)
+    await sleep(randDelay(submitDelay), signal)
     if (signal?.aborted) {
       return
     }

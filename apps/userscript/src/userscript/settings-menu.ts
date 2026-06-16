@@ -1,3 +1,4 @@
+import { setMultiClickDelayRangeFromPrompt, setSubmitDelayRangeFromPrompt } from '../captcha/timing-settings'
 import {
   clearSavedModelAccessKey,
   setModelAccessKeyFromPrompt,
@@ -35,6 +36,8 @@ async function chooseSettingsAction(options: SettingsMenuOptions): Promise<void>
     },
     { label: '清除模型下载 Key', errorPrefix: '模型下载 Key 设置失败', run: clearSavedModelAccessKey },
     { label: '设置答题记录显示条数', errorPrefix: '答题记录显示条数设置失败', run: setPanelHistoryLimitFromPrompt },
+    { label: '设置提交前等待时间', errorPrefix: '提交前等待时间设置失败', run: setSubmitDelayRangeFromPrompt },
+    { label: '设置答题间隔', errorPrefix: '答题间隔设置失败', run: setMultiClickDelayRangeFromPrompt },
     { label: '设置面板位置', errorPrefix: '面板位置设置失败', run: setPanelPositionFromPrompt },
     { label: '重置面板位置', errorPrefix: '面板位置设置失败', run: clearSavedPanelPosition },
     { label: '开启精简版', errorPrefix: '精简版设置失败', run: enablePanelCompactMode },
