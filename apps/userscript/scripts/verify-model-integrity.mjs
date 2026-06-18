@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readModelManifest } from '../../../scripts/model-manifest.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '../../..')
@@ -79,27 +80,11 @@ async function readModelStats(modelFile) {
 
 export { modelIntegrityMatches, readExpectedIntegrity, readModelStats }
 
-function parseByteLength(value) {
-  if (!/^[0-9]+(?:_[0-9]+)*$/.test(value)) {
-    throw new Error(`Invalid MODEL_INTEGRITY.byteLength: ${value}`)
-  }
-  return Number(value.replaceAll('_', ''))
-}
-
 async function readExpectedIntegrity(repoRoot = defaultRepoRoot) {
-  const sharedModelPath = resolve(repoRoot, 'packages/shared/src/model.ts')
-  const source = await readFile(sharedModelPath, 'utf8')
-  const byteLengthMatch = source.match(/MODEL_INTEGRITY\s*=\s*{[\s\S]*?['"]?byteLength['"]?\s*:\s*([0-9][0-9_]*)/)
-  const sha256Match = source.match(/MODEL_INTEGRITY\s*=\s*{[\s\S]*?['"]?sha256['"]?\s*:\s*['"]([a-fA-F0-9]{64})['"]/)
-  if (!byteLengthMatch?.[1]) {
-    throw new Error(`Unable to read MODEL_INTEGRITY.byteLength from ${sharedModelPath}`)
-  }
-  if (!sha256Match?.[1]) {
-    throw new Error(`Unable to read MODEL_INTEGRITY.sha256 from ${sharedModelPath}`)
-  }
+  const manifest = await readModelManifest(repoRoot, { requireVersion: false })
   return {
-    byteLength: parseByteLength(byteLengthMatch[1]),
-    sha256: sha256Match[1].toLowerCase(),
+    byteLength: manifest.byteLength,
+    sha256: manifest.sha256,
   }
 }
 

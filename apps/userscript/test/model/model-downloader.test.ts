@@ -262,6 +262,47 @@ describe('downloadModel', () => {
     ).rejects.toThrow('下载模型大小校验失败')
   })
 
+  it('accepts fallback arrayBuffer responses at the max size when streams are unavailable', async () => {
+    const arrayBuffer = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
+    const response = {
+      ok: true,
+      headers: new Headers(),
+      body: null,
+      arrayBuffer,
+    } as unknown as Response
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
+
+    expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3])
+    expect(arrayBuffer).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects oversized fallback arrayBuffer responses when streams are unavailable', async () => {
+    const arrayBuffer = vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer)
+    const response = {
+      ok: true,
+      headers: new Headers(),
+      body: null,
+      arrayBuffer,
+    } as unknown as Response
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(
+      downloadModel(undefined, {
+        integrity: TEST_INTEGRITY,
+        verifyIntegrity: false,
+      }),
+    ).rejects.toThrow('下载模型大小校验失败: 4 > 3')
+    expect(arrayBuffer).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects downloads exceeding integrity max size even when verifyIntegrity is false', async () => {
     const response = new Response(
       new ReadableStream<Uint8Array>({

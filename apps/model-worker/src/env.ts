@@ -2,7 +2,13 @@ import { DEFAULT_PUBLIC_MODEL_PATH } from '@hv-pony-solver/shared'
 import type { Env, InvalidKeyMode, NormalizedEnv } from './worker-types'
 
 function normalizeInvalidKeyMode(value: string | undefined): InvalidKeyMode {
-  return value === 'error' ? 'error' : 'decoy'
+  if (value === undefined || value === 'decoy') {
+    return 'decoy'
+  }
+  if (value === 'error') {
+    return 'error'
+  }
+  throw new Error('INVALID_KEY_MODE must be one of: decoy, error')
 }
 
 function requireText(value: string | undefined, name: string): string {

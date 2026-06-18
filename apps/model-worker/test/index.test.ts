@@ -349,6 +349,18 @@ describe('model worker', () => {
     expect(await response.text()).toBe('Internal Server Error')
   })
 
+  it('returns 500 instead of silently falling back when INVALID_KEY_MODE is unsupported', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey),
+      createEnv(fixture, { invalidKeyMode: 'allow' }),
+    )
+
+    expect(response.status).toBe(500)
+    expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(await response.text()).toBe('Internal Server Error')
+  })
+
   it('returns 500 with CORS when required environment config is missing', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {

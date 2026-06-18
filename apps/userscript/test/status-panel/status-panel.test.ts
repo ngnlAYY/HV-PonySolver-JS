@@ -28,7 +28,7 @@ describe('StatusPanel', () => {
     vi.unstubAllGlobals()
   })
 
-  it('does not reread history for status-only updates', () => {
+  it('queues status-only updates without rereading history', async () => {
     const store = createHistoryStore()
     const panel = new StatusPanel(store)
 
@@ -37,9 +37,12 @@ describe('StatusPanel', () => {
     panel.setStatus({ inference: '推理中' })
 
     expect(store.get).toHaveBeenCalledTimes(1)
+    expect(document.body.textContent).not.toContain('确认中')
+    await vi.waitFor(() => expect(document.body.textContent).toContain('确认中'))
+    expect(document.body.textContent).toContain('推理中')
   })
 
-  it('uses the records returned by add when appending success history', () => {
+  it('uses the records returned by add when appending success history', async () => {
     const store = createHistoryStore()
     const panel = new StatusPanel(store)
 
@@ -47,7 +50,7 @@ describe('StatusPanel', () => {
     panel.addSuccess(['TS'], { TS: 0.99 }, 12)
 
     expect(store.add).toHaveBeenCalledTimes(1)
-    expect(document.body.textContent).toContain('TS(99.0)')
+    await vi.waitFor(() => expect(document.body.textContent).toContain('TS(99.0)'))
     expect(document.body.textContent).toContain('模型状态：')
     expect(document.body.textContent).toContain('会话状态：')
     expect(document.body.textContent).toContain('推理状态：')
@@ -111,25 +114,55 @@ describe('StatusPanel', () => {
     expect(document.body.textContent).toContain('最近错误：无')
   })
 
-  it('shows the latest error message and elapsed time', () => {
+  it('shows the latest error message and elapsed time', async () => {
     const store = createHistoryStore()
     const panel = new StatusPanel(store)
 
     panel.create()
     panel.addError('模型加载失败', 34)
 
-    expect(document.body.textContent).toContain('最近错误：模型加载失败')
+    await vi.waitFor(() => expect(document.body.textContent).toContain('最近错误：模型加载失败'))
     expect(document.body.textContent).toContain('模型加载失败 34ms')
   })
 
-  it('escapes error messages before rendering them', () => {
+  it('escapes error messages before rendering them', async () => {
     const store = createHistoryStore()
     const panel = new StatusPanel(store)
 
     panel.create()
     panel.addError('<img src=x onerror=alert(1)>', 12)
 
-    expect(document.body.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    await vi.waitFor(() => expect(document.body.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;'))
     expect(document.body.innerHTML).not.toContain('<img src=x onerror=alert(1)>')
+  })
+
+  it('coalesces repeated status changes into one rendered update', async () => {
+    const store = createHistoryStore()
+    const panel = new StatusPanel(store)
+
+    panel.create()
+    const element = document.querySelector('.ponyLog') as HTMLDivElement
+    const firstRender = element.innerHTML
+
+    panel.setStatus({ model: '下载中' })
+    panel.setStatus({ model: '下载中' })
+    panel.setStatus({ session: '初始化中' })
+
+    expect(element.innerHTML).toBe(firstRender)
+    await vi.waitFor(() => expect(element.textContent).toContain('下载中'))
+    expect(element.textContent).toContain('初始化中')
+  })
+
+  it('ignores queued renders after destroy', async () => {
+    const store = createHistoryStore()
+    const panel = new StatusPanel(store)
+
+    panel.create()
+    panel.setStatus({ model: '下载中' })
+    panel.destroy()
+    await Promise.resolve()
+
+    expect(document.querySelector('.ponyLog')).toBeNull()
+    expect(document.body.textContent).not.toContain('下载中')
   })
 })

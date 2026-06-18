@@ -15,6 +15,8 @@ export class StatusPanel implements StatusPanelContract {
   private compactMode = false
   private records: HistoryRecord[] = []
   private historyLimit = getPanelHistoryLimitSync()
+  private renderQueued = false
+  private lastHtml = ''
   private status: PanelStatus = {
     model: '未开始',
     session: '未开始',
@@ -42,13 +44,13 @@ export class StatusPanel implements StatusPanelContract {
     isPanelCompactMode().then((compactMode) => {
       if (this.el && compactMode !== this.compactMode) {
         this.compactMode = compactMode
-        this.render()
+        this.scheduleRender()
       }
     })
     getPanelHistoryLimit().then((historyLimit) => {
       if (this.el && historyLimit !== this.historyLimit) {
         this.historyLimit = historyLimit
-        this.render()
+        this.scheduleRender()
       }
     })
     document.body.appendChild(this.el)
@@ -57,7 +59,7 @@ export class StatusPanel implements StatusPanelContract {
 
   setStatus(changes: Partial<PanelStatus>): void {
     this.status = { ...this.status, ...changes }
-    this.render()
+    this.scheduleRender()
   }
 
   setSessionReady(elapsed: number): void {
@@ -70,7 +72,7 @@ export class StatusPanel implements StatusPanelContract {
       answers: formatAnswers(ponies, confidences),
       elapsed,
     })
-    this.render()
+    this.scheduleRender()
   }
 
   addRandomFailure(pony: AnswerCode, elapsed: number): void {
@@ -80,7 +82,7 @@ export class StatusPanel implements StatusPanelContract {
       elapsed,
       message: `识别失败，随机选择 ${pony}`,
     })
-    this.render()
+    this.scheduleRender()
   }
 
   addError(message: string, elapsed = 0): void {
@@ -89,18 +91,38 @@ export class StatusPanel implements StatusPanelContract {
       elapsed,
       message,
     })
-    this.render()
+    this.scheduleRender()
   }
 
   destroy(): void {
+    this.renderQueued = false
+    this.lastHtml = ''
     this.el?.remove()
     this.el = null
+  }
+
+  private scheduleRender(): void {
+    if (!this.el || this.renderQueued) {
+      return
+    }
+    this.renderQueued = true
+    queueMicrotask(() => this.flushRender())
+  }
+
+  private flushRender(): void {
+    this.renderQueued = false
+    this.render()
   }
 
   private render(): void {
     if (!this.el) {
       return
     }
-    this.el.innerHTML = renderStatusPanel(this.world, this.status, this.records, this.compactMode, this.historyLimit)
+    const html = renderStatusPanel(this.world, this.status, this.records, this.compactMode, this.historyLimit)
+    if (html === this.lastHtml) {
+      return
+    }
+    this.lastHtml = html
+    this.el.innerHTML = html
   }
 }

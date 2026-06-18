@@ -34,6 +34,15 @@ async function getModelUrl(): Promise<string> {
   return `${modelConfig.urlBase}?key=${encodeURIComponent(accessKey)}`
 }
 
+function assertModelByteLength(buffer: ArrayBuffer, expectedByteLength: number | null, maxByteLength: number): void {
+  if (expectedByteLength !== null && buffer.byteLength > expectedByteLength) {
+    throw new Error(`下载模型大小校验失败: ${buffer.byteLength} != ${expectedByteLength}`)
+  }
+  if (buffer.byteLength > maxByteLength) {
+    throw new Error(`下载模型大小校验失败: ${buffer.byteLength} > ${maxByteLength}`)
+  }
+}
+
 async function readModelResponse(
   response: Response,
   expectedByteLength: number | null,
@@ -49,7 +58,9 @@ async function readModelResponse(
     throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxByteLength}`)
   }
   if (!response.body) {
-    return response.arrayBuffer()
+    const buffer = await response.arrayBuffer()
+    assertModelByteLength(buffer, expectedByteLength, maxByteLength)
+    return buffer
   }
   const expectedContentLength =
     expectedByteLength !== null && contentLength === String(expectedByteLength) ? expectedByteLength : null

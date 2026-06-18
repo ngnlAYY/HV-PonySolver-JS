@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseModelManifest } from './model-manifest.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '..')
@@ -70,12 +71,23 @@ function checkRootCheckCommand(rootPackageJson, readme) {
   }
 
   const errors = []
-  for (const commandName of ['test:coverage', 'docs:check', 'graphify:check', 'architecture:check']) {
-    if (!checkCommand.includes(commandName)) {
-      continue
-    }
-    if (!sectionMentions(readme, 'pnpm check', commandName)) {
+  for (const commandName of ['check:quick', 'test:coverage', 'build']) {
+    if (checkCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check', commandName)) {
       errors.push(`README.md pnpm check description must mention ${commandName} because package.json scripts.check runs it`)
+    }
+  }
+
+  const quickCheckCommand = rootPackageJson.scripts?.['check:quick']
+  if (checkCommand.includes('check:quick') && typeof quickCheckCommand !== 'string') {
+    errors.push('package.json scripts.check:quick is missing because package.json scripts.check runs it')
+    return errors
+  }
+  if (typeof quickCheckCommand !== 'string') {
+    return errors
+  }
+  for (const commandName of ['lint', 'typecheck', 'test', 'docs:check', 'graphify:check', 'architecture:check']) {
+    if (quickCheckCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check:quick', commandName)) {
+      errors.push(`README.md pnpm check:quick description must mention ${commandName} because package.json scripts.check:quick runs it`)
     }
   }
   return errors
@@ -159,36 +171,11 @@ function checkArchitectureGuardrails(readme) {
   return errors
 }
 
-function sectionMentions(text, anchor, required) {
-  const anchorIndex = text.indexOf(anchor)
-  if (anchorIndex === -1) {
-    return false
-  }
-  const nextHeadingIndex = text.indexOf('\n##', anchorIndex)
-  const section = nextHeadingIndex === -1 ? text.slice(anchorIndex) : text.slice(anchorIndex, nextHeadingIndex)
-  return section.includes(required)
-}
-
-function parseModelManifest(modelSource) {
-  const versionMatch = modelSource.match(/MODEL_VERSION\s*=\s*['"]([^'"]+)['"]/)
-  const byteLengthMatch = modelSource.match(/MODEL_INTEGRITY\s*=\s*{[\s\S]*?['"]?byteLength['"]?\s*:\s*([0-9][0-9_]*)/)
-  const sha256Match = modelSource.match(/MODEL_INTEGRITY\s*=\s*{[\s\S]*?['"]?sha256['"]?\s*:\s*['"]([a-fA-F0-9]{64})['"]/)
-
-  if (!versionMatch?.[1]) {
-    throw new Error('Unable to read MODEL_VERSION from packages/shared/src/model.ts')
-  }
-  if (!byteLengthMatch?.[1]) {
-    throw new Error('Unable to read MODEL_INTEGRITY.byteLength from packages/shared/src/model.ts')
-  }
-  if (!sha256Match?.[1]) {
-    throw new Error('Unable to read MODEL_INTEGRITY.sha256 from packages/shared/src/model.ts')
-  }
-
-  return {
-    version: versionMatch[1],
-    byteLength: Number(byteLengthMatch[1].replaceAll('_', '')),
-    sha256: sha256Match[1].toLowerCase(),
-  }
+function commandDescriptionMentions(readme, command, required) {
+  const escapedCommand = command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const commandRowPattern = new RegExp(`^\\|\\s*\`${escapedCommand}\`\\s*\\|(?<description>.*)\\|\\s*$`, 'm')
+  const description = commandRowPattern.exec(readme)?.groups?.description
+  return description?.includes(required) ?? false
 }
 
 export { checkDocsDrift, parseModelManifest, resolveRepoRoot }

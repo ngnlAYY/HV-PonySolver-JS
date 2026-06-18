@@ -62,6 +62,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Guardrail checks
+        run: pnpm docs:check && pnpm graphify:check && pnpm architecture:check
+
       - name: Coverage
         run: pnpm test:coverage
 

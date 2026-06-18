@@ -125,7 +125,8 @@ corepack pnpm install
 | `pnpm docs:check` | 检查 README.md 与 source 关键事实是否发生 drift                 |
 | `pnpm graphify:check` | 检查 Graphify 语料排除规则与可选图谱报告                    |
 | `pnpm architecture:check` | 检查 userscript、model-worker 与 shared 的架构边界       |
-| `pnpm check`      | 依次运行 lint、typecheck、test、test:coverage、docs:check、graphify:check、architecture:check、build |
+| `pnpm check:quick` | 依次运行 lint、typecheck、test、docs:check、graphify:check、architecture:check |
+| `pnpm check`      | 先运行 check:quick，再运行 test:coverage 与 build              |
 | `pnpm format`     | 用 Prettier 格式化仓库文件                                       |
 
 ### Userscript 命令

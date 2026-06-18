@@ -55,7 +55,7 @@ test('current repository README is in sync with source facts', async () => {
   assert.match(result.stdout, /Docs drift check passed/)
 })
 
-const rootCheckCommandNames = ['test:coverage', 'docs:check', 'graphify:check', 'architecture:check']
+const rootCheckCommandNames = ['check:quick', 'test:coverage', 'build', 'docs:check', 'graphify:check', 'architecture:check']
 
 for (const commandName of rootCheckCommandNames) {
   test(`fails clearly when README omits ${commandName} from pnpm check description`, async () => {
@@ -72,6 +72,19 @@ for (const commandName of rootCheckCommandNames) {
     })
   })
 }
+
+test('fails clearly when pnpm check references a missing check:quick script', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const packageJsonPath = join(fixtureRoot, 'package.json')
+    const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'))
+    delete packageJson.scripts['check:quick']
+    await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /package\.json scripts\.check:quick is missing/s)
+  })
+})
 
 test('fails clearly when README omits a core userscript inference config name', async () => {
   await withFixture(async (fixtureRoot) => {
