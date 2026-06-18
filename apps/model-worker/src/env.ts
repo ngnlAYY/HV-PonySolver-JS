@@ -2,10 +2,11 @@ import { DEFAULT_PUBLIC_MODEL_PATH } from '@hv-pony-solver/shared'
 import type { Env, InvalidKeyMode, NormalizedEnv } from './worker-types'
 
 function normalizeInvalidKeyMode(value: string | undefined): InvalidKeyMode {
-  if (value === undefined || value === 'decoy') {
+  const mode = value?.trim().toLowerCase()
+  if (mode === undefined || mode === '' || mode === 'decoy') {
     return 'decoy'
   }
-  if (value === 'error') {
+  if (mode === 'error') {
     return 'error'
   }
   throw new Error('INVALID_KEY_MODE must be one of: decoy, error')

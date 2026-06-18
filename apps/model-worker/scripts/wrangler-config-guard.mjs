@@ -62,13 +62,22 @@ function validateConfigValue(name, value, { allowTestPlaceholders = false } = {}
   return value
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function readTomlStringAssignment(content, assignment, sourceName) {
-  const assignmentLine = content.split('\n').find((line) => line.trimStart().startsWith(`${assignment} =`))
-  if (!assignmentLine) {
+  const escapedAssignment = escapeRegExp(assignment)
+  const assignmentPattern = new RegExp(`^\\s*${escapedAssignment}\\s*=`)
+  const assignmentLines = content.split('\n').filter((line) => assignmentPattern.test(line))
+  if (assignmentLines.length === 0) {
     throw new Error(`${sourceName} must contain ${assignment}`)
   }
+  if (assignmentLines.length > 1) {
+    throw new Error(`${sourceName} must contain exactly one ${assignment}`)
+  }
 
-  const match = assignmentLine.match(new RegExp(`^\\s*${assignment}\\s*=\\s*"([^"]*)"\\s*$`))
+  const match = assignmentLines[0].match(new RegExp(`^\\s*${escapedAssignment}\\s*=\\s*"([^"]*)"\\s*$`))
   if (!match?.[1]) {
     throw new Error(`${sourceName} ${assignment} must be a quoted TOML string without extra content`)
   }

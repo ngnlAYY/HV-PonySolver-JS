@@ -169,3 +169,31 @@ test('validate-wrangler-config rejects malformed TOML assignments before deploy'
     /wrangler\.toml id must be a quoted TOML string without extra content/,
   )
 })
+
+test('validate-wrangler-config rejects duplicate KV namespace assignments before deploy', async () => {
+  await assert.rejects(
+    runValidate(`id = "${validKvNamespaceId}"\nid = "fedcba9876543210fedcba9876543210"\nbucket_name = "${validBucketName}"\n`),
+    /wrangler\.toml must contain exactly one id/,
+  )
+})
+
+test('validate-wrangler-config rejects duplicate bucket assignments before deploy', async () => {
+  await assert.rejects(
+    runValidate(`id = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\nbucket_name = "other-bucket"\n`),
+    /wrangler\.toml must contain exactly one bucket_name/,
+  )
+})
+
+test('validate-wrangler-config rejects duplicate KV namespace assignments without required spaces', async () => {
+  await assert.rejects(
+    runValidate(`id="${validKvNamespaceId}"\nid = "fedcba9876543210fedcba9876543210"\nbucket_name = "${validBucketName}"\n`),
+    /wrangler\.toml must contain exactly one id/,
+  )
+})
+
+test('validate-wrangler-config rejects duplicate bucket assignments with tab spacing', async () => {
+  await assert.rejects(
+    runValidate(`id = "${validKvNamespaceId}"\nbucket_name\t= "${validBucketName}"\nbucket_name = "other-bucket"\n`),
+    /wrangler\.toml must contain exactly one bucket_name/,
+  )
+})

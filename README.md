@@ -351,7 +351,7 @@ MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> pnpm --filter
 | `PUBLIC_MODEL_PATH`      | var        | 否   | 公开下载路径；缺省使用共享常量 `/yolo26n-640.onnx` |
 | `REAL_MODEL_OBJECT_KEY`  | var        | 是   | 真实模型在 R2 中的 object key                      |
 | `DECOY_MODEL_OBJECT_KEY` | var        | 是   | decoy 模型在 R2 中的 object key                    |
-| `INVALID_KEY_MODE`       | var        | 否   | `decoy` 或 `error`；非 `error` 时按 `decoy` 处理   |
+| `INVALID_KEY_MODE`       | var        | 否   | `decoy` 或 `error`；会归一化大小写与首尾空白，其他值触发配置错误 |
 
 ### HTTP 行为
 
@@ -388,16 +388,16 @@ userscript 仍会按 `packages/shared/src/model.ts` 中的 `MODEL_INTEGRITY` 校
 
 `packages/shared` 只包含跨应用共享且稳定的契约：
 
-| 导出                            | 说明                                   |
-| ------------------------------- | -------------------------------------- | ------- | ------------ |
-| `ANSWER_CODES`                  | `['TS', 'RA', 'FS', 'RD', 'PP', 'AJ']` |
-| `AnswerCode`                    | 上述答案编码的联合类型                 |
-| `answerCodeForClassId(classId)` | 按 class id 返回对应答案编码           |
-| `MODEL_FILENAME`                | `yolo26n-640.onnx`                     |
-| `DEFAULT_PUBLIC_MODEL_PATH`     | `/yolo26n-640.onnx`                    |
-| `ModelAccessDecision`           | `'real'                                | 'decoy' | 'forbidden'` |
-| `MODEL_ACCESS_TOKEN_PATTERN`    | 64 位十六进制 token 正则               |
-| `isModelAccessToken(value)`     | token 类型守卫                         |
+| 导出                            | 说明                                             |
+| ------------------------------- | ------------------------------------------------ |
+| `ANSWER_CODES`                  | `['TS', 'RA', 'FS', 'RD', 'PP', 'AJ']`           |
+| `AnswerCode`                    | 上述答案编码的联合类型                           |
+| `answerCodeForClassId(classId)` | 按 class id 返回对应答案编码                     |
+| `MODEL_FILENAME`                | `yolo26n-640.onnx`                               |
+| `DEFAULT_PUBLIC_MODEL_PATH`     | `/yolo26n-640.onnx`                              |
+| `ModelAccessDecision`           | `'real' \| 'decoy' \| 'forbidden'`             |
+| `MODEL_ACCESS_TOKEN_PATTERN`    | 64 位十六进制 token 正则                         |
+| `isModelAccessToken(value)`     | token 类型守卫                                   |
 
 应用之间不互相 import；跨应用共享内容应放在 `packages/shared`。
 
@@ -441,20 +441,22 @@ pnpm --filter @hv-pony-solver/model-worker test
 
 ### CI workflow
 
-`.github/workflows/verify-monorepo.yml` 默认手动触发，用于按需运行仓库校验：
+`.github/workflows/verify-monorepo.yml` 会在 `pull_request`、推送到 `main` 和 `workflow_dispatch` 时运行仓库校验；手动触发时可额外选择是否构建内置 ONNX Runtime Web JS runtime 的 userscript 以及是否发布 artifact：
 
 1. Checkout。
-2. 设置 Node.js 22。
-3. 设置 pnpm。
-4. `pnpm install --frozen-lockfile`。
-5. `pnpm lint`。
-6. `pnpm typecheck`。
-7. 使用测试值渲染 Worker Wrangler 配置。
-8. `pnpm test`。
-9. `pnpm test:coverage`。
-10. `pnpm build`。
-11. 如果 `bundle_onnx_runtime=true`，额外构建内置 ONNX Runtime Web JS runtime 的 userscript。
-12. 如果 `publish_userscript_artifact=true`，上传 `apps/userscript/dist/hv-pony-solver.user.js` artifact；默认不上传。
+2. 若手动触发且 `publish_userscript_artifact=true`，先要求 `bundle_onnx_runtime=true`，否则直接失败，避免发布依赖远程 JS runtime 的 userscript artifact。
+3. 设置 Node.js 22。
+4. 设置 pnpm。
+5. `pnpm install --frozen-lockfile`。
+6. `pnpm lint`。
+7. `pnpm typecheck`。
+8. 使用测试值渲染 Worker Wrangler 配置。
+9. `pnpm test`。
+10. 运行 Guardrail checks：`pnpm docs:check && pnpm graphify:check && pnpm architecture:check`。
+11. `pnpm test:coverage`。
+12. `pnpm build`。
+13. 如果 `bundle_onnx_runtime=true`，额外构建内置 ONNX Runtime Web JS runtime 的 userscript。
+14. 如果 `publish_userscript_artifact=true`，上传 `apps/userscript/dist/hv-pony-solver.user.js` artifact；默认不上传，且必须同时设置 `bundle_onnx_runtime=true`。
 
 ### Model Worker 部署 workflow
 

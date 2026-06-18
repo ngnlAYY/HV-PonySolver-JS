@@ -122,6 +122,57 @@ describe('downloadModel', () => {
     expect(arrayBuffer).not.toHaveBeenCalled()
   })
 
+  it('rejects invalid declared content lengths before reading the body', async () => {
+    const arrayBuffer = vi.fn()
+    const cancel = vi.fn()
+    const getReader = vi.fn()
+    const response = {
+      ok: true,
+      headers: new Headers({ 'content-length': 'abc' }),
+      arrayBuffer,
+      body: { cancel, getReader },
+    } as unknown as Response
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(
+      downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
+    ).rejects.toThrow('下载模型大小校验失败: abc')
+
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(getReader).not.toHaveBeenCalled()
+    expect(arrayBuffer).not.toHaveBeenCalled()
+  })
+
+  it.each(['', '0x3', '1e3', '+3', '-0'])(
+    'rejects non-decimal declared content length "%s" before reading the body',
+    async (contentLength) => {
+      const arrayBuffer = vi.fn()
+      const cancel = vi.fn()
+      const getReader = vi.fn()
+      const response = {
+        ok: true,
+        headers: new Headers({ 'content-length': contentLength }),
+        arrayBuffer,
+        body: { cancel, getReader },
+      } as unknown as Response
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => response),
+      )
+
+      await expect(
+        downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
+      ).rejects.toThrow('下载模型大小校验失败:')
+
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(getReader).not.toHaveBeenCalled()
+      expect(arrayBuffer).not.toHaveBeenCalled()
+    },
+  )
+
   it('rejects downloaded models with unexpected integrity by default', async () => {
     const response = new Response(new Uint8Array([1, 2, 3]))
     vi.stubGlobal(
@@ -151,6 +202,50 @@ describe('downloadModel', () => {
     const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
 
     expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3])
+  })
+
+  it('rejects streamed short reads when content-length is declared and integrity verification is disabled', async () => {
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(new Uint8Array([1, 2]))
+          controller.close()
+        },
+      }),
+      {
+        headers: { 'content-length': '3' },
+      },
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+      '下载模型大小校验失败: 2 != 3',
+    )
+  })
+
+  it('rejects streamed over-reads when content-length is smaller than the body', async () => {
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3]))
+          controller.close()
+        },
+      }),
+      {
+        headers: { 'content-length': '2' },
+      },
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+      '下载模型大小校验失败: 3 != 2',
+    )
   })
 
   it('does not harden download without integrity configured, and reads streamed data', async () => {
@@ -278,6 +373,25 @@ describe('downloadModel', () => {
     const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
 
     expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3])
+    expect(arrayBuffer).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects fallback arrayBuffer short reads when content-length is declared', async () => {
+    const arrayBuffer = vi.fn(async () => new Uint8Array([1, 2]).buffer)
+    const response = {
+      ok: true,
+      headers: new Headers({ 'content-length': '3' }),
+      body: null,
+      arrayBuffer,
+    } as unknown as Response
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+      '下载模型大小校验失败: 2 != 3',
+    )
     expect(arrayBuffer).toHaveBeenCalledTimes(1)
   })
 

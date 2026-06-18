@@ -14,13 +14,13 @@ function addSecurityHeaders(headers: Headers): Headers {
 
 export function addCorsHeaders(headers: Headers, request: Request): Headers {
   const origin = request.headers.get('origin')
+  appendVaryOrigin(headers)
 
   if (origin === null) {
     headers.set('access-control-allow-origin', CORS_ALLOW_ORIGIN)
     return headers
   }
 
-  appendVaryOrigin(headers)
   if (ALLOWED_ORIGINS.has(origin)) {
     headers.set('access-control-allow-origin', origin)
   }
