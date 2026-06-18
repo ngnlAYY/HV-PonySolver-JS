@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseModelManifest } from './model-manifest.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '..')
@@ -40,21 +41,18 @@ function resolveRepoRoot(args) {
 }
 
 async function checkDocsDrift(repoRoot = defaultRepoRoot) {
-  const [rootPackageJson, readme, userscriptDocs, deploymentDocs, architectureDocs, inferenceConfigSource, modelSource] = await Promise.all([
+  const [rootPackageJson, readme, inferenceConfigSource, modelSource] = await Promise.all([
     readJson(repoRoot, 'package.json'),
     readText(repoRoot, 'README.md'),
-    readText(repoRoot, 'docs/userscript.md'),
-    readText(repoRoot, 'docs/deployment.md'),
-    readText(repoRoot, 'docs/architecture.md'),
     readText(repoRoot, 'apps/userscript/src/inference/inference-config.ts'),
     readText(repoRoot, 'packages/shared/src/model.ts'),
   ])
 
   return [
-    ...checkRootCheckCommand(rootPackageJson, readme, deploymentDocs, userscriptDocs),
-    ...checkUserscriptConfigDocs(inferenceConfigSource, readme, userscriptDocs),
-    ...checkModelManifestDocs(modelSource, readme, userscriptDocs, deploymentDocs),
-    ...checkArchitectureDocs(architectureDocs),
+    ...checkRootCheckCommand(rootPackageJson, readme),
+    ...checkUserscriptConfigDocs(inferenceConfigSource, readme),
+    ...checkModelManifestDocs(modelSource, readme),
+    ...checkArchitectureGuardrails(readme),
   ]
 }
 
@@ -66,39 +64,37 @@ async function readText(repoRoot, relativePath) {
   return readFile(resolve(repoRoot, relativePath), 'utf8')
 }
 
-function checkRootCheckCommand(rootPackageJson, readme, deploymentDocs, userscriptDocs) {
+function checkRootCheckCommand(rootPackageJson, readme) {
   const checkCommand = rootPackageJson.scripts?.check
   if (typeof checkCommand !== 'string') {
     return ['package.json scripts.check is missing']
   }
 
-  const filesToCheck = [
-    { path: 'README.md', text: readme, commandLabel: 'pnpm check' },
-    { path: 'docs/deployment.md', text: deploymentDocs, commandLabel: 'corepack pnpm check' },
-    { path: 'docs/userscript.md', text: userscriptDocs, commandLabel: 'corepack pnpm check' },
-  ]
   const errors = []
-  for (const commandName of ['test:coverage', 'docs:check']) {
-    if (!checkCommand.includes(commandName)) {
-      continue
+  for (const commandName of ['check:quick', 'test:coverage', 'build']) {
+    if (checkCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check', commandName)) {
+      errors.push(`README.md pnpm check description must mention ${commandName} because package.json scripts.check runs it`)
     }
-    for (const file of filesToCheck) {
-      if (!sectionMentions(file.text, file.commandLabel, commandName)) {
-        errors.push(`${file.path} ${file.commandLabel} description must mention ${commandName} because package.json scripts.check runs it`)
-      }
+  }
+
+  const quickCheckCommand = rootPackageJson.scripts?.['check:quick']
+  if (checkCommand.includes('check:quick') && typeof quickCheckCommand !== 'string') {
+    errors.push('package.json scripts.check:quick is missing because package.json scripts.check runs it')
+    return errors
+  }
+  if (typeof quickCheckCommand !== 'string') {
+    return errors
+  }
+  for (const commandName of ['lint', 'typecheck', 'test', 'docs:check', 'graphify:check', 'architecture:check']) {
+    if (quickCheckCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check:quick', commandName)) {
+      errors.push(`README.md pnpm check:quick description must mention ${commandName} because package.json scripts.check:quick runs it`)
     }
   }
   return errors
 }
 
-function checkUserscriptConfigDocs(inferenceConfigSource, readme, userscriptDocs) {
-  const docsCorpus = `${readme}\n${userscriptDocs}`
-  const requiredConfigs = [
-    'imagePreprocessConfig',
-    'yoloOutputConfig',
-    'onnxRuntimeConfig',
-    'inferenceTimeoutConfig',
-  ]
+function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
+  const requiredConfigs = ['imagePreprocessConfig', 'yoloOutputConfig', 'onnxRuntimeConfig', 'inferenceTimeoutConfig']
   const requiredConfigNames = [
     'imageSize',
     'confidenceThreshold',
@@ -117,8 +113,8 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme, userscriptDocs
       errors.push(`apps/userscript/src/inference/inference-config.ts is missing expected config export ${configName}`)
       continue
     }
-    if (!docsCorpus.includes(configName)) {
-      errors.push(`README.md/docs must mention ${configName}`)
+    if (!readme.includes(configName)) {
+      errors.push(`README.md must mention ${configName}`)
     }
   }
   for (const configName of requiredConfigNames) {
@@ -126,45 +122,38 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme, userscriptDocs
       errors.push(`apps/userscript/src/inference/inference-config.ts is missing expected config ${configName}`)
       continue
     }
-    if (!docsCorpus.includes(configName)) {
-      errors.push(`README.md/docs must mention ${configName}`)
+    if (!readme.includes(configName)) {
+      errors.push(`README.md must mention ${configName}`)
     }
   }
   return errors
 }
 
-function checkModelManifestDocs(modelSource, readme, userscriptDocs, deploymentDocs) {
-  const docsCorpus = `${readme}\n${userscriptDocs}\n${deploymentDocs}`
+function checkModelManifestDocs(modelSource, readme) {
   const expectedModel = parseModelManifest(modelSource)
   const errors = []
 
-  if (!docsCorpus.includes(expectedModel.version)) {
-    errors.push(`README.md/docs must mention MODEL_VERSION value ${expectedModel.version}`)
+  if (!readme.includes(expectedModel.version)) {
+    errors.push(`README.md must mention MODEL_VERSION value ${expectedModel.version}`)
   }
 
   const manifestTerms = ['MODEL_VERSION', 'MODEL_INTEGRITY.byteLength', 'MODEL_INTEGRITY.sha256']
   for (const term of manifestTerms) {
-    if (!docsCorpus.includes(term)) {
-      errors.push(`README.md/docs must mention ${term} from packages/shared/src/model.ts`)
+    if (!readme.includes(term)) {
+      errors.push(`README.md must mention ${term} from packages/shared/src/model.ts`)
     }
   }
 
-  const modelDocs = [
-    { path: 'docs/userscript.md', text: userscriptDocs },
-    { path: 'docs/deployment.md', text: deploymentDocs },
-  ]
-  for (const doc of modelDocs) {
-    for (const term of ['verify-model-integrity', 'MODEL_FILE']) {
-      if (!doc.text.includes(term)) {
-        errors.push(`${doc.path} model manifest check must mention ${term}`)
-      }
+  for (const term of ['verify-model-integrity', 'MODEL_FILE']) {
+    if (!readme.includes(term)) {
+      errors.push(`README.md model manifest check must mention ${term}`)
     }
   }
 
   return errors
 }
 
-function checkArchitectureDocs(architectureDocs) {
+function checkArchitectureGuardrails(readme) {
   const requiredTerms = [
     '.graphifyignore',
     'graphify:check',
@@ -175,43 +164,18 @@ function checkArchitectureDocs(architectureDocs) {
   ]
   const errors = []
   for (const term of requiredTerms) {
-    if (!architectureDocs.includes(term)) {
-      errors.push(`docs/architecture.md graph guardrails section must mention ${term}`)
+    if (!readme.includes(term)) {
+      errors.push(`README.md graph guardrails section must mention ${term}`)
     }
   }
   return errors
 }
 
-function sectionMentions(text, anchor, required) {
-  const anchorIndex = text.indexOf(anchor)
-  if (anchorIndex === -1) {
-    return false
-  }
-  const nextHeadingIndex = text.indexOf('\n##', anchorIndex)
-  const section = nextHeadingIndex === -1 ? text.slice(anchorIndex) : text.slice(anchorIndex, nextHeadingIndex)
-  return section.includes(required)
-}
-
-function parseModelManifest(modelSource) {
-  const versionMatch = modelSource.match(/MODEL_VERSION\s*=\s*['"]([^'"]+)['"]/)
-  const byteLengthMatch = modelSource.match(/MODEL_INTEGRITY\s*=\s*{[\s\S]*?['"]?byteLength['"]?\s*:\s*([0-9][0-9_]*)/)
-  const sha256Match = modelSource.match(/MODEL_INTEGRITY\s*=\s*{[\s\S]*?['"]?sha256['"]?\s*:\s*['"]([a-fA-F0-9]{64})['"]/)
-
-  if (!versionMatch?.[1]) {
-    throw new Error('Unable to read MODEL_VERSION from packages/shared/src/model.ts')
-  }
-  if (!byteLengthMatch?.[1]) {
-    throw new Error('Unable to read MODEL_INTEGRITY.byteLength from packages/shared/src/model.ts')
-  }
-  if (!sha256Match?.[1]) {
-    throw new Error('Unable to read MODEL_INTEGRITY.sha256 from packages/shared/src/model.ts')
-  }
-
-  return {
-    version: versionMatch[1],
-    byteLength: Number(byteLengthMatch[1].replaceAll('_', '')),
-    sha256: sha256Match[1].toLowerCase(),
-  }
+function commandDescriptionMentions(readme, command, required) {
+  const escapedCommand = command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const commandRowPattern = new RegExp(`^\\|\\s*\`${escapedCommand}\`\\s*\\|(?<description>.*)\\|\\s*$`, 'm')
+  const description = commandRowPattern.exec(readme)?.groups?.description
+  return description?.includes(required) ?? false
 }
 
 export { checkDocsDrift, parseModelManifest, resolveRepoRoot }

@@ -34,25 +34,65 @@ async function getModelUrl(): Promise<string> {
   return `${modelConfig.urlBase}?key=${encodeURIComponent(accessKey)}`
 }
 
+const contentLengthPattern = /^[0-9]+$/
+
+function parseDeclaredByteLength(contentLength: string | null): number | null {
+  if (contentLength === null) {
+    return null
+  }
+  if (!contentLengthPattern.test(contentLength)) {
+    throw new Error(`下载模型大小校验失败: ${contentLength}`)
+  }
+  const byteLength = Number(contentLength)
+  if (!Number.isSafeInteger(byteLength)) {
+    throw new Error(`下载模型大小校验失败: ${contentLength}`)
+  }
+  return byteLength
+}
+
+function assertDeclaredByteLength(actualByteLength: number, declaredByteLength: number | null): void {
+  if (declaredByteLength !== null && actualByteLength !== declaredByteLength) {
+    throw new Error(`下载模型大小校验失败: ${actualByteLength} != ${declaredByteLength}`)
+  }
+}
+
+function assertModelByteLength(buffer: ArrayBuffer, expectedByteLength: number | null, maxByteLength: number): void {
+  if (expectedByteLength !== null && buffer.byteLength > expectedByteLength) {
+    throw new Error(`下载模型大小校验失败: ${buffer.byteLength} != ${expectedByteLength}`)
+  }
+  if (buffer.byteLength > maxByteLength) {
+    throw new Error(`下载模型大小校验失败: ${buffer.byteLength} > ${maxByteLength}`)
+  }
+}
+
 async function readModelResponse(
   response: Response,
   expectedByteLength: number | null,
   maxByteLength: number,
 ): Promise<ArrayBuffer> {
   const contentLength = response.headers.get('content-length')
-  if (expectedByteLength !== null && contentLength && Number(contentLength) > expectedByteLength) {
+  let declaredByteLength: number | null
+  try {
+    declaredByteLength = parseDeclaredByteLength(contentLength)
+  } catch (error) {
+    await response.body?.cancel()
+    throw error
+  }
+  if (expectedByteLength !== null && declaredByteLength !== null && declaredByteLength > expectedByteLength) {
     await response.body?.cancel()
     throw new Error(`下载模型大小校验失败: ${contentLength} != ${expectedByteLength}`)
   }
-  if (contentLength && Number(contentLength) > maxByteLength) {
+  if (declaredByteLength !== null && declaredByteLength > maxByteLength) {
     await response.body?.cancel()
     throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxByteLength}`)
   }
   if (!response.body) {
-    return response.arrayBuffer()
+    const buffer = await response.arrayBuffer()
+    assertDeclaredByteLength(buffer.byteLength, declaredByteLength)
+    assertModelByteLength(buffer, expectedByteLength, maxByteLength)
+    return buffer
   }
-  const expectedContentLength =
-    expectedByteLength !== null && contentLength === String(expectedByteLength) ? expectedByteLength : null
+  const expectedContentLength = declaredByteLength === null ? expectedByteLength : declaredByteLength
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
   const bytes = expectedContentLength === null ? null : new Uint8Array(expectedContentLength)
@@ -63,6 +103,10 @@ async function readModelResponse(
       break
     }
     const nextTotalBytes = totalBytes + value.byteLength
+    if (expectedContentLength !== null && nextTotalBytes > expectedContentLength) {
+      await reader.cancel()
+      throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedContentLength}`)
+    }
     if (expectedByteLength !== null && nextTotalBytes > expectedByteLength) {
       await reader.cancel()
       throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedByteLength}`)
@@ -79,6 +123,9 @@ async function readModelResponse(
     totalBytes = nextTotalBytes
   }
   if (bytes) {
+    if (totalBytes !== expectedContentLength) {
+      throw new Error(`下载模型大小校验失败: ${totalBytes} != ${expectedContentLength}`)
+    }
     return bytes.buffer
   }
   const mergedBytes = new Uint8Array(totalBytes)

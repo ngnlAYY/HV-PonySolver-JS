@@ -16,6 +16,16 @@ import {
 const HENTAIVERSE_ORIGIN = 'https://hentaiverse.org'
 const ALT_HENTAIVERSE_ORIGIN = 'https://alt.hentaiverse.org'
 
+function expectVaryOrigin(headers: Headers): void {
+  const varyTokens = headers
+    .get('vary')
+    ?.split(',')
+    .map((token) => token.trim().toLowerCase())
+    .filter((token) => token.length > 0)
+
+  expect(varyTokens).toContain('origin')
+}
+
 describe('model worker', () => {
   it('returns the real model for GET when authorized key exists in KV', async () => {
     const fixture = createModelFixture()
@@ -58,6 +68,7 @@ describe('model worker', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expectVaryOrigin(response.headers)
   })
 
   it('allows model downloads from hentaiverse origins', async () => {
@@ -100,14 +111,10 @@ describe('model worker', () => {
       modelRequest(fixture, 'GET', fixture.validKey, { origin: 'https://attacker.example' }),
       env,
     )
-    const varyTokens = response.headers.get('vary')
-      ?.split(',')
-      .map((token) => token.trim().toLowerCase())
-      .filter((token) => token.length > 0)
 
     expect(response.status).toBe(200)
     expect(response.headers.get('access-control-allow-origin')).toBeNull()
-    expect(varyTokens).toContain('origin')
+    expectVaryOrigin(response.headers)
   })
 
   it('appends Origin to an existing Vary header for CORS text responses', async () => {
@@ -122,6 +129,14 @@ describe('model worker', () => {
 
     expect(response.status).toBe(404)
     expect(response.headers.get('vary')).toBe('Accept-Encoding, Origin')
+  })
+
+  it('sets Vary: Origin for text responses without an Origin header', async () => {
+    const response = textResponse(new Request('https://models.example/yolo26n-640.onnx'), 'Not Found', 404)
+
+    expect(response.status).toBe(404)
+    expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expectVaryOrigin(response.headers)
   })
 
   it('does not append duplicate Origin to an existing Vary: Origin header', () => {
@@ -269,20 +284,38 @@ describe('model worker', () => {
     expect(await response.text()).toBe('Forbidden')
   })
 
+  it('normalizes INVALID_KEY_MODE before selecting the error behavior', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey),
+      createEnv(fixture, { invalidKeyMode: ' ERROR ' }),
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.text()).toBe('Forbidden')
+  })
+
+  it('normalizes INVALID_KEY_MODE before selecting the decoy behavior', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey),
+      createEnv(fixture, { invalidKeyMode: ' DeCoY ' }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+  })
+
   it('returns 403 without ACAO for untrusted origins when INVALID_KEY_MODE is error', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
       modelRequest(fixture, 'GET', fixture.validKey, { origin: 'https://attacker.example' }),
       createEnv(fixture, { invalidKeyMode: 'error' }),
     )
-    const varyTokens = response.headers.get('vary')
-      ?.split(',')
-      .map((token) => token.trim().toLowerCase())
-      .filter((token) => token.length > 0)
 
     expect(response.status).toBe(403)
     expect(response.headers.get('access-control-allow-origin')).toBeNull()
-    expect(varyTokens).toContain('origin')
+    expectVaryOrigin(response.headers)
     expect(await response.text()).toBe('Forbidden')
   })
 
@@ -346,6 +379,18 @@ describe('model worker', () => {
     expect(response.status).toBe(500)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(await response.text()).toBe('Internal Server Error')
+  })
+
+  it('returns 500 instead of silently falling back when INVALID_KEY_MODE is unsupported', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey),
+      createEnv(fixture, { invalidKeyMode: 'allow' }),
+    )
+
+    expect(response.status).toBe(500)
+    expect(response.headers.get('access-control-allow-origin')).toBe('*')
     expect(await response.text()).toBe('Internal Server Error')
   })
 

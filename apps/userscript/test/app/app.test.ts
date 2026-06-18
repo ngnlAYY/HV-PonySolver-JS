@@ -274,6 +274,75 @@ describe('App', () => {
     expect(externalSubmit.click).not.toHaveBeenCalled()
   })
 
+  it('keeps a pending scan when captcha changes while solving is in flight', async () => {
+    let resolveFirstDetect: (() => void) | undefined
+    detect
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirstDetect = () => resolve({
+            success: true,
+            ponies: ['TS'],
+            confidences: { TS: 0.9 },
+            detections: [{ class_id: 0, confidence: 0.9 }],
+            candidates: [{ class_id: 0, confidence: 0.9 }],
+          })
+        }),
+      )
+      .mockResolvedValue({
+        success: true,
+        ponies: ['TS'],
+        confidences: { TS: 0.9 },
+        detections: [{ class_id: 0, confidence: 0.9 }],
+        candidates: [{ class_id: 0, confidence: 0.9 }],
+      })
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    const captcha = appendCaptcha('/captcha-a.png')
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+    await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(1))
+
+    captcha.querySelector('img')!.src = '/captcha-b.png'
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+    resolveFirstDetect?.()
+    await vi.runAllTimersAsync()
+
+    await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(2))
+    expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'))
+  })
+
+  it('rescans captcha when the image src changes after a solved captcha', async () => {
+    detect.mockResolvedValue({
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.9 },
+      detections: [{ class_id: 0, confidence: 0.9 }],
+      candidates: [{ class_id: 0, confidence: 0.9 }],
+    })
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    const captcha = appendCaptcha('/captcha-a.png')
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+    await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(1))
+    await vi.runAllTimersAsync()
+    await Promise.resolve()
+
+    captcha.querySelector('img')!.src = '/captcha-b.png'
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+
+    await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(2))
+    expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'))
+  })
+
   it('marks the captcha solved by the solver when content changes during prepare', async () => {
     let resolvePrepare: (() => void) | undefined
     prepare.mockReturnValueOnce(

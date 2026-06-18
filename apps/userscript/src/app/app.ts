@@ -13,6 +13,7 @@ export class App {
   private observer: MutationObserver | null = null
   private observerTimeoutId: ReturnType<typeof setTimeout> | null = null
   private scheduledScan = false
+  private pendingScan = false
   private lastCaptchaKey: string | null = null
   private destroyed = false
   private settingsMenuRegistered = false
@@ -51,6 +52,7 @@ export class App {
       this.observerTimeoutId = null
     }
     this.scheduledScan = false
+    this.pendingScan = false
     this.lastCaptchaKey = null
     this.detector.destroy()
     this.modelCache.close()
@@ -96,7 +98,7 @@ export class App {
     })
     const target = document.body || document.documentElement
     if (target) {
-      this.observer.observe(target, { childList: true, subtree: true })
+      this.observer.observe(target, { attributes: true, attributeFilter: ['src'], childList: true, subtree: true })
     }
   }
 
@@ -105,7 +107,11 @@ export class App {
   }
 
   private scheduleSolve(): void {
-    if (this.destroyed || this.scheduledScan || this.solver.isBusy) {
+    if (this.destroyed) {
+      return
+    }
+    if (this.scheduledScan || this.solver.isBusy) {
+      this.pendingScan = true
       return
     }
     this.scheduledScan = true
@@ -134,6 +140,10 @@ export class App {
       }
     } finally {
       this.scheduledScan = false
+      if (this.pendingScan && !this.destroyed) {
+        this.pendingScan = false
+        this.scheduleSolve()
+      }
     }
   }
 }

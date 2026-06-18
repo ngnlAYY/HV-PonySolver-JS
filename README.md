@@ -32,7 +32,7 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 │   └── model-worker/        # Cloudflare Worker 模型分发服务
 ├── packages/
 │   └── shared/              # 跨应用共享的类型与常量
-├── docs/                    # 架构、部署、应用说明
+├── scripts/                 # 校验、构建辅助与 CI 检查脚本
 ├── .github/workflows/       # CI 与 Worker 部署 workflow
 ├── package.json             # 根命令、Node/pnpm 版本约束
 ├── pnpm-workspace.yaml      # workspace 包范围
@@ -79,6 +79,16 @@ AnswerSubmitter 勾选并延迟提交
 StatusPanel 记录结果、置信度与耗时
 ```
 
+## 架构与图谱 guardrails
+
+`.graphifyignore` 用于把生成索引、依赖目录和临时产物排除在 Graphify 语料之外；`graphify:check` 会校验这些排除规则，并可用 `node scripts/check-graphify-corpus.mjs --report` 校验重新生成的 `graphify-out/GRAPH_REPORT.md`。
+
+`architecture:check` 固化当前最强的边界结论：推理层不应 import `StatusPanel`，`StatusPanel` 不应 import 推理层，`apps/userscript` 与 `apps/model-worker` 只能通过 `packages/shared` 共享稳定契约。
+
+推理配置已拆成聚焦导出：`imagePreprocessConfig` 负责输入尺寸，`yoloOutputConfig` 负责 YOLO 解析假设，`onnxRuntimeConfig` 负责运行时资源位置，`inferenceTimeoutConfig` 负责 worker、检测与模型下载超时。
+
+`Model Worker Core` 不应仅因为图谱社区低内聚就拆分；只有源码职责已经自然分离为环境归一化、请求路由、模型访问选择和响应创建时，才应继续拆分。
+
 ## 环境要求
 
 | 依赖            | 要求                                                                      |
@@ -112,8 +122,11 @@ corepack pnpm install
 | `pnpm typecheck`  | 对所有 workspace 运行 TypeScript 类型检查                        |
 | `pnpm test`       | 运行所有 workspace 的 Vitest 测试与 node:test 脚本测试           |
 | `pnpm build`      | 运行所有 workspace 的构建检查；userscript 会生成产物             |
-| `pnpm docs:check` | 检查 README/docs 与 source 关键事实是否发生 drift                |
-| `pnpm check`      | 依次运行 lint、typecheck、test、test:coverage、docs:check、build |
+| `pnpm docs:check` | 检查 README.md 与 source 关键事实是否发生 drift                 |
+| `pnpm graphify:check` | 检查 Graphify 语料排除规则与可选图谱报告                    |
+| `pnpm architecture:check` | 检查 userscript、model-worker 与 shared 的架构边界       |
+| `pnpm check:quick` | 依次运行 lint、typecheck、test、docs:check、graphify:check、architecture:check |
+| `pnpm check`      | 先运行 check:quick，再运行 test:coverage 与 build              |
 | `pnpm format`     | 用 Prettier 格式化仓库文件                                       |
 
 ### Userscript 命令
@@ -338,7 +351,7 @@ MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> pnpm --filter
 | `PUBLIC_MODEL_PATH`      | var        | 否   | 公开下载路径；缺省使用共享常量 `/yolo26n-640.onnx` |
 | `REAL_MODEL_OBJECT_KEY`  | var        | 是   | 真实模型在 R2 中的 object key                      |
 | `DECOY_MODEL_OBJECT_KEY` | var        | 是   | decoy 模型在 R2 中的 object key                    |
-| `INVALID_KEY_MODE`       | var        | 否   | `decoy` 或 `error`；非 `error` 时按 `decoy` 处理   |
+| `INVALID_KEY_MODE`       | var        | 否   | `decoy` 或 `error`；会归一化大小写与首尾空白，其他值触发配置错误 |
 
 ### HTTP 行为
 
@@ -375,16 +388,16 @@ userscript 仍会按 `packages/shared/src/model.ts` 中的 `MODEL_INTEGRITY` 校
 
 `packages/shared` 只包含跨应用共享且稳定的契约：
 
-| 导出                            | 说明                                   |
-| ------------------------------- | -------------------------------------- | ------- | ------------ |
-| `ANSWER_CODES`                  | `['TS', 'RA', 'FS', 'RD', 'PP', 'AJ']` |
-| `AnswerCode`                    | 上述答案编码的联合类型                 |
-| `answerCodeForClassId(classId)` | 按 class id 返回对应答案编码           |
-| `MODEL_FILENAME`                | `yolo26n-640.onnx`                     |
-| `DEFAULT_PUBLIC_MODEL_PATH`     | `/yolo26n-640.onnx`                    |
-| `ModelAccessDecision`           | `'real'                                | 'decoy' | 'forbidden'` |
-| `MODEL_ACCESS_TOKEN_PATTERN`    | 64 位十六进制 token 正则               |
-| `isModelAccessToken(value)`     | token 类型守卫                         |
+| 导出                            | 说明                                             |
+| ------------------------------- | ------------------------------------------------ |
+| `ANSWER_CODES`                  | `['TS', 'RA', 'FS', 'RD', 'PP', 'AJ']`           |
+| `AnswerCode`                    | 上述答案编码的联合类型                           |
+| `answerCodeForClassId(classId)` | 按 class id 返回对应答案编码                     |
+| `MODEL_FILENAME`                | `yolo26n-640.onnx`                               |
+| `DEFAULT_PUBLIC_MODEL_PATH`     | `/yolo26n-640.onnx`                              |
+| `ModelAccessDecision`           | `'real' \| 'decoy' \| 'forbidden'`             |
+| `MODEL_ACCESS_TOKEN_PATTERN`    | 64 位十六进制 token 正则                         |
+| `isModelAccessToken(value)`     | token 类型守卫                                   |
 
 应用之间不互相 import；跨应用共享内容应放在 `packages/shared`。
 
@@ -412,6 +425,8 @@ pnpm typecheck
 pnpm test
 pnpm test:coverage
 pnpm docs:check
+pnpm graphify:check
+pnpm architecture:check
 pnpm build
 ```
 
@@ -426,20 +441,22 @@ pnpm --filter @hv-pony-solver/model-worker test
 
 ### CI workflow
 
-`.github/workflows/verify-monorepo.yml` 默认手动触发，用于按需运行仓库校验：
+`.github/workflows/verify-monorepo.yml` 会在 `pull_request`、推送到 `main` 和 `workflow_dispatch` 时运行仓库校验；手动触发时可额外选择是否构建内置 ONNX Runtime Web JS runtime 的 userscript 以及是否发布 artifact：
 
 1. Checkout。
-2. 设置 Node.js 22。
-3. 设置 pnpm。
-4. `pnpm install --frozen-lockfile`。
-5. `pnpm lint`。
-6. `pnpm typecheck`。
-7. 使用测试值渲染 Worker Wrangler 配置。
-8. `pnpm test`。
-9. `pnpm docs:check`。
-10. `pnpm build`。
-11. 如果 `bundle_onnx_runtime=true`，额外构建内置 ONNX Runtime Web JS runtime 的 userscript。
-12. 如果 `publish_userscript_artifact=true`，上传 `apps/userscript/dist/hv-pony-solver.user.js` artifact；默认不上传。
+2. 若手动触发且 `publish_userscript_artifact=true`，先要求 `bundle_onnx_runtime=true`，否则直接失败，避免发布依赖远程 JS runtime 的 userscript artifact。
+3. 设置 Node.js 22。
+4. 设置 pnpm。
+5. `pnpm install --frozen-lockfile`。
+6. `pnpm lint`。
+7. `pnpm typecheck`。
+8. 使用测试值渲染 Worker Wrangler 配置。
+9. `pnpm test`。
+10. 运行 Guardrail checks：`pnpm docs:check && pnpm graphify:check && pnpm architecture:check`。
+11. `pnpm test:coverage`。
+12. `pnpm build`。
+13. 如果 `bundle_onnx_runtime=true`，额外构建内置 ONNX Runtime Web JS runtime 的 userscript。
+14. 如果 `publish_userscript_artifact=true`，上传 `apps/userscript/dist/hv-pony-solver.user.js` artifact；默认不上传，且必须同时设置 `bundle_onnx_runtime=true`。
 
 ### Model Worker 部署 workflow
 
@@ -487,7 +504,7 @@ corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 apps/userscript/dist/hv-pony-solver.user.js
 ```
 
-如果需要访问真实模型，需要确保构建产物中的 `modelConfig.accessKey` 对应 Worker KV 中存在的授权 key。`modelConfig.verifyIntegrity` 默认开启（`true`），会按 `packages/shared/src/model.ts` 中 `MODEL_INTEGRITY` 定义的 `byteLength` 与 `sha256` 对下载及缓存读取进行严格校验；当远端模型字节内容变更时，必须同步更新 `MODEL_INTEGRITY` 与 `MODEL_VERSION`，否则下载会被阻断。发布前应对待发布 ONNX 文件运行 `MODEL_FILE=/path/to/yolo26n-640.onnx corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity`，确保本地模型与 shared manifest 一致。
+如果需要访问真实模型，需要确保构建产物中的 `modelConfig.accessKey` 对应 Worker KV 中存在的授权 key。`modelConfig.verifyIntegrity` 默认开启（`true`），会按 `packages/shared/src/model.ts` 中 `MODEL_INTEGRITY.byteLength` 与 `MODEL_INTEGRITY.sha256` 定义的字节长度和 SHA-256 对下载及缓存读取进行严格校验；当远端模型字节内容变更时，必须同步更新 `MODEL_INTEGRITY` 与 `MODEL_VERSION`，否则下载会被阻断。发布前应对待发布 ONNX 文件运行 `MODEL_FILE=/path/to/yolo26n-640.onnx corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity`，确保本地模型与 shared manifest 一致。
 
 ### 部署 Model Worker
 
