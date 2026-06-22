@@ -55,11 +55,11 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 ### Model Worker 模型分发流程
 
 1. Worker 只处理配置的 `PUBLIC_MODEL_PATH`，默认是 `/yolo26n-640.onnx`。
-2. 只允许 `GET` 和 `HEAD`；其他路径返回 `404`，其他方法返回 `405` 并带 `Allow: GET, HEAD`。
-3. `key` query 参数必须是 64 位十六进制字符串。
-4. 通过 `MODEL_KEYS` KV 查询授权 key：存在则返回真实 R2 模型，否则按 `INVALID_KEY_MODE` 返回 decoy 或 `403`。
+2. 允许 `GET`、`HEAD` 和 `OPTIONS`；其他路径返回 `404`，其他方法返回 `405` 并带 `Allow: GET, HEAD, OPTIONS`。
+3. `Authorization: Bearer <token>` 中的 token 必须是 64 位十六进制字符串。
+4. 通过 `MODEL_KEYS` KV 查询授权 token：命中则返回真实 R2 模型，否则按 `INVALID_KEY_MODE` 返回 decoy 或 `403`；query string 不授权真实模型。
 5. 真实模型对象键默认 `real/yolo26n-640.onnx`，decoy 模型对象键默认 `decoy/yolo26n-640.onnx`。
-6. 成功响应使用 `application/octet-stream`，`Content-Disposition: inline; filename="yolo26n-640.onnx"`，`Cache-Control: public, max-age=86400`。无 `Origin` 请求允许直接下载；Hentaiverse 白名单 Origin 会被回显；未知 Origin 不授予 CORS。
+6. 成功响应使用 `application/octet-stream`，`Content-Disposition: inline; filename="yolo26n-640.onnx"`，`Cache-Control: no-store`。无 `Origin` 请求允许直接下载；Hentaiverse 白名单 Origin 会被回显；未知 Origin 不授予 CORS。
 
 ## 端到端数据流
 
@@ -67,9 +67,9 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 Hentaiverse 页面验证码
   ↓ DOM MutationObserver 检测 #riddlemaster
 userscript App
-  ↓ ?key=<model access key>
+  ↓ Authorization: Bearer <model access key>
 Cloudflare model-worker
-  ↓ KV 判断 key 是否授权
+  ↓ KV 判断 token 是否授权
 R2 real/decoy ONNX 模型
   ↓ IndexedDB 缓存 + SHA-256 校验
 浏览器 Web Worker + ONNX Runtime Web
@@ -138,6 +138,7 @@ corepack pnpm install
 | `pnpm --filter @hv-pony-solver/userscript typecheck`                                                   | 类型检查 userscript 源码                                                               |
 | `pnpm --filter @hv-pony-solver/userscript test`                                                        | 运行 userscript Vitest/jsdom 单元测试与 node:test 脚本测试                             |
 | `MODEL_FILE=/path/to/yolo26n-640.onnx pnpm --filter @hv-pony-solver/userscript verify-model-integrity` | 校验待发布模型与 shared manifest 的 byteLength / SHA-256 一致性                        |
+| `corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-assets`                         | 校验本地 ONNX Runtime asset manifest 与已安装 `onnxruntime-web` JS runtime 一致性       |
 
 ### Model Worker 命令
 
@@ -193,6 +194,18 @@ apps/userscript/dist/hv-pony-solver.user.js
 ### Bundle budget
 
 `apps/userscript/scripts/build-userscript.test.mjs` 会在生成 metafile 时检查 bundle 大小：main bundle 目标小于 80KB，worker bundle 目标小于 20KB。该检查用于防止 userscript 产物无意膨胀。
+
+### ONNX Runtime asset manifest
+
+`apps/userscript/src/inference/onnx-runtime-assets.ts` 中的 `ONNX_RUNTIME_ASSETS` 是 ONNX Runtime Web JS runtime 资产的唯一来源。当前 package 为 `onnxruntime-web@1.26.0`，本地校验目标是已安装依赖中的 `dist/ort.min.js` / `ort.min.js`；manifest 记录 `scriptAsset.byteLength`、`scriptAsset.sha256` 和 `scriptAsset.maxByteLength`，并通过 `cdn.scriptUrl`、`cdn.wasmPath` 派生 `onnxRuntimeConfig` 的远程资源位置。
+
+发布前可运行：
+
+```bash
+corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-assets
+```
+
+该命令只校验本地安装的 `onnxruntime-web` JS runtime asset 与 manifest 中 byteLength / SHA-256 是否一致，不会联网校验 CDN，也不会校验 WASM 文件。内置 JS runtime 构建仍通过 `ortWasmPath` 远程加载 WASM。
 
 ### Userscript metadata
 
@@ -274,7 +287,7 @@ YOLO 输出解析规则：
 
 1. 先从 IndexedDB `pony-solver-local` 的 `models` object store 读取缓存。
 2. 缓存记录必须匹配当前 `version`，且包含 `ArrayBuffer`。
-3. 未命中或读取失败时，从 `${urlBase}?key=${encodeURIComponent(accessKey)}` 下载。
+3. 未命中或读取失败时，从 `urlBase` 下载；如果 `accessKey` 非空，下载请求会发送 `Authorization: Bearer <accessKey>`。
 4. 下载成功后写回 IndexedDB；写入失败不会阻止本次使用已下载模型。
 
 注意：当前源码默认 `accessKey` 为空。如果要访问真实模型，需要为构建产物提供授权 key。userscript 里的 key 对安装者可见，不应被视作真正保密的服务端密钥。
@@ -357,14 +370,16 @@ MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> pnpm --filter
 
 | 场景                                                           | 响应                                         |
 | -------------------------------------------------------------- | -------------------------------------------- |
-| `GET /yolo26n-640.onnx?key=<authorized-64-hex>` 且 KV 命中     | `200` 真实模型                               |
-| `HEAD /yolo26n-640.onnx?key=<authorized-64-hex>` 且 KV 命中    | `200` 无 body，保留模型 headers              |
-| 缺少 key、key 格式错误、KV 未命中，且 `INVALID_KEY_MODE=decoy` | `200` decoy 模型                             |
-| 缺少 key、key 格式错误、KV 未命中，且 `INVALID_KEY_MODE=error` | `403 Forbidden`                              |
-| 非模型路径                                                     | `404 Not Found`                              |
-| 非 `GET` / `HEAD` 方法                                         | `405 Method Not Allowed`，`Allow: GET, HEAD` |
-| 选中的 R2 object 缺失                                          | `500 Model object is not configured`         |
-| 必填运行时变量缺失                                             | `500 Internal Server Error`                  |
+| `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中  | `200` 真实模型，模型响应使用 `Cache-Control: no-store` |
+| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200` 无 body，保留模型 headers                       |
+| `OPTIONS /yolo26n-640.onnx`                                    | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization` |
+| 缺少 Bearer token、token 格式错误、KV 未命中，且 `INVALID_KEY_MODE=decoy` | `200` decoy 模型                                      |
+| 缺少 Bearer token、token 格式错误、KV 未命中，且 `INVALID_KEY_MODE=error` | `403 Forbidden`                                       |
+| 只提供 query string key                                         | 不授权真实模型；按缺少 Bearer token 处理               |
+| 非模型路径                                                     | `404 Not Found`                                       |
+| 非 `GET` / `HEAD` / `OPTIONS` 方法                              | `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS` |
+| 选中的 R2 object 缺失                                          | `500 Internal Server Error`                           |
+| 必填运行时变量缺失                                             | `500 Internal Server Error`                           |
 
 ### 授权 key 规则
 
@@ -374,7 +389,7 @@ MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> pnpm --filter
 /^[0-9a-fA-F]{64}$/
 ```
 
-Worker 通过 `MODEL_KEYS.get(key)` 判断授权。只要 KV 返回值不是 `null`，就视为授权。测试中使用的 marker 值是 `1`。
+Worker 通过 `Authorization: Bearer <token>` 读取请求 token，再用 `MODEL_KEYS.get(token)` 判断授权。只要 KV 返回值不是 `null`，就视为授权。测试中使用的 marker 值是 `1`。
 
 ### Decoy 模型策略
 
@@ -496,7 +511,7 @@ corepack pnpm --filter @hv-pony-solver/userscript build
 corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 ```
 
-默认构建不内置 JS runtime；两种构建都仍通过 `ortWasmPath` 加载 WASM 资源。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
+默认构建不内置 JS runtime；`HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1` 或 `build:bundled-runtime` 会先按 `ONNX_RUNTIME_ASSETS.scriptAsset.byteLength` 与 `ONNX_RUNTIME_ASSETS.scriptAsset.sha256` 校验本地 `onnxruntime-web@1.26.0/dist/ort.min.js`，再把 JS runtime 内置进 userscript。两种构建都仍通过 `ortWasmPath` 加载 WASM 资源。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
 
 将生成的文件安装到 userscript 管理器：
 

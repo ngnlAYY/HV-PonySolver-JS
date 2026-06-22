@@ -32,7 +32,7 @@ export class App {
     this.solveAbortController = new AbortController()
     this.panel.create()
     if (!this.settingsMenuRegistered) {
-      registerSettingsMenu({ onVerifyModelAccessKey: () => this.verifyConfiguredModelKey() })
+      registerSettingsMenu({ onVerifyModelAccessKey: (candidateKey) => this.verifyConfiguredModelKey(candidateKey) })
       this.settingsMenuRegistered = true
     }
     if (document.querySelector(captchaSelectors.master)) {
@@ -59,8 +59,8 @@ export class App {
     this.panel.destroy()
   }
 
-  private async verifyConfiguredModelKey(): Promise<void> {
-    const modelBuffer = await this.modelCache.download(undefined, true)
+  private async verifyConfiguredModelKey(candidateKey: string): Promise<void> {
+    const modelBuffer = await this.modelCache.download(undefined, true, candidateKey)
     await this.modelCache.putCached(modelBuffer, true)
   }
 

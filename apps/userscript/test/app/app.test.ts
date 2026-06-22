@@ -117,16 +117,16 @@ describe('App', () => {
     expect(registerSettingsMenu).toHaveBeenCalledTimes(1)
   })
 
-  it('verifies and caches the model from the settings menu callback', async () => {
+  it('verifies and caches the model from the settings menu callback with the candidate key', async () => {
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
 
     app.init()
     const verify = registerSettingsMenu.mock.calls[0][0].onVerifyModelAccessKey
-    await verify()
+    await verify('candidate-key')
 
-    expect(modelDownload).toHaveBeenCalledWith(undefined, true)
+    expect(modelDownload).toHaveBeenCalledWith(undefined, true, 'candidate-key')
     expect(modelPutCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true)
   })
 

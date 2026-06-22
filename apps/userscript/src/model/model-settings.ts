@@ -3,7 +3,7 @@ import { alertUser, deleteGmValue, getGmValue, promptUser, registerGmMenu, runMe
 
 const MODEL_ACCESS_KEY_STORAGE_KEY = 'hvPonySolverModelAccessKey'
 
-export type VerifyModelAccessKey = () => Promise<void>
+export type VerifyModelAccessKey = (candidateKey: string) => Promise<void>
 
 export async function getModelAccessKey(): Promise<string> {
   return getGmValue(MODEL_ACCESS_KEY_STORAGE_KEY)
@@ -33,14 +33,15 @@ export async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKe
     alertUser('模型下载 Key 已清除')
     return
   }
-  await setModelAccessKey(accessKey)
   if (!onVerify) {
+    await setModelAccessKey(accessKey)
     alertUser('模型下载 Key 已保存')
     return
   }
   alertUser('正在验证模型下载 Key，请稍候')
   try {
-    await onVerify()
+    await onVerify(accessKey)
+    await setModelAccessKey(accessKey)
     alertUser('模型下载和校验成功，Key 可用')
   } catch (error) {
     alertUser(`模型下载 Key 验证失败: ${formatErrorMessage(error)}`)

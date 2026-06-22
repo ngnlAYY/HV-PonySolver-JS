@@ -6,7 +6,7 @@ import { modelConfig } from './model-config'
 import { downloadModel, type ModelIntegrityOptions } from './model-downloader'
 import { verifyModelIntegrity } from './model-integrity'
 
-function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): Required<ModelIntegrityOptions> {
+function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): Required<Omit<ModelIntegrityOptions, 'accessKeyOverride'>> {
   return {
     integrity: options.integrity ?? modelConfig.integrity,
     verifyIntegrity: options.forceVerifyIntegrity ? true : (options.verifyIntegrity ?? modelConfig.verifyIntegrity),
@@ -80,10 +80,17 @@ export class ModelCache {
     return null
   }
 
-  async download(signal?: AbortSignal, verifyIntegrity: boolean = modelConfig.verifyIntegrity): Promise<ArrayBuffer> {
+  async download(
+    signal?: AbortSignal,
+    verifyIntegrity: boolean = modelConfig.verifyIntegrity,
+    accessKeyOverride?: string,
+  ): Promise<ArrayBuffer> {
     const startedAt = Date.now()
     this.statusSink.setStatus({ model: '下载中' })
-    const buffer = await downloadModel(signal, { verifyIntegrity })
+    const options: ModelIntegrityOptions = accessKeyOverride === undefined
+      ? { verifyIntegrity }
+      : { accessKeyOverride, verifyIntegrity }
+    const buffer = await downloadModel(signal, options)
     this.statusSink.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
     return buffer
   }

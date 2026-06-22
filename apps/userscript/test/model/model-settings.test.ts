@@ -125,26 +125,50 @@ describe('model settings', () => {
     expect(alert).not.toHaveBeenCalled()
   })
 
-  it('saves a non-empty prompted key and runs verification', async () => {
+  it('saves a non-empty prompted key only after verification succeeds', async () => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn(() => '  new-key  ')
     const alert = vi.fn()
-    const verify = vi.fn(async () => undefined)
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
-    const { getModelAccessKey, registerModelSettingsMenu } = await import('../../src/model/model-settings')
+    const { getModelAccessKey, registerModelSettingsMenu, setModelAccessKey } = await import('../../src/model/model-settings')
+    const verify = vi.fn(async () => {
+      await expect(getModelAccessKey()).resolves.toBe('old-key')
+    })
 
+    await setModelAccessKey('old-key')
     registerModelSettingsMenu(verify)
     await registerMenuCommand.mock.calls[0][1]()
 
+    expect(verify).toHaveBeenCalledWith('new-key')
     await expect(getModelAccessKey()).resolves.toBe('new-key')
-    expect(verify).toHaveBeenCalledTimes(1)
     expect(alert).toHaveBeenCalledWith('正在验证模型下载 Key，请稍候')
     expect(alert).toHaveBeenCalledWith('模型下载和校验成功，Key 可用')
   })
 
-  it('keeps a saved key and reports verification failure', async () => {
+  it('keeps the existing key when verification fails', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn(() => 'bad-key')
+    const alert = vi.fn()
+    const verify = vi.fn(async () => {
+      throw new Error('HTTP 403')
+    })
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { getModelAccessKey, registerModelSettingsMenu, setModelAccessKey } = await import('../../src/model/model-settings')
+
+    await setModelAccessKey('old-key')
+    registerModelSettingsMenu(verify)
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(verify).toHaveBeenCalledWith('bad-key')
+    await expect(getModelAccessKey()).resolves.toBe('old-key')
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
+  })
+
+  it('does not save a first-time key when verification fails', async () => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn(() => 'bad-key')
     const alert = vi.fn()
@@ -159,7 +183,8 @@ describe('model settings', () => {
     registerModelSettingsMenu(verify)
     await registerMenuCommand.mock.calls[0][1]()
 
-    await expect(getModelAccessKey()).resolves.toBe('bad-key')
+    expect(verify).toHaveBeenCalledWith('bad-key')
+    await expect(getModelAccessKey()).resolves.toBe('')
     expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
   })
 

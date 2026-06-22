@@ -12,6 +12,7 @@ vi.mock('../../src/model/model-integrity', async (importOriginal) => {
 })
 
 import { createCachedModelRow, ModelCache, readCachedModelBuffer } from '../../src/model/model-cache'
+import { downloadModel } from '../../src/model/model-downloader'
 import { verifyModelIntegrity } from '../../src/model/model-integrity'
 import { modelConfig } from '../../src/model/model-config'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
@@ -233,6 +234,21 @@ describe('ModelCache', () => {
     expect(buffer.byteLength).toBeGreaterThan(0)
     expect(panel.setStatus).toHaveBeenCalledWith({ model: '下载中' })
     expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^下载完成 \d+ms$/) })
+  })
+
+  it('forwards access key overrides to model downloads', async () => {
+    const panel = createStatusPanel()
+    const cache = new ModelCache(panel)
+    const signal = new AbortController().signal
+    vi.mocked(downloadModel).mockClear()
+
+    await cache.download(signal, false, ' candidate-token ')
+
+    expect(downloadModel).toHaveBeenCalledTimes(1)
+    expect(downloadModel).toHaveBeenCalledWith(signal, {
+      accessKeyOverride: ' candidate-token ',
+      verifyIntegrity: false,
+    })
   })
 
   it('reports elapsed time when cache write completes', async () => {

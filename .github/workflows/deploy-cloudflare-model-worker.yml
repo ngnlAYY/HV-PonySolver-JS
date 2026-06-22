@@ -36,6 +36,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Security audit
+        run: pnpm audit:high
+
       - name: Render Wrangler config
         env:
           MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}

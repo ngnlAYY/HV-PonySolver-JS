@@ -1,10 +1,12 @@
 import { MODEL_FILENAME, type ModelAccessDecision } from '@hv-pony-solver/shared'
 import type { NormalizedEnv } from './worker-types'
 
-const CACHE_CONTROL = 'public, max-age=86400'
+const CACHE_CONTROL = 'no-store'
 const MODEL_CONTENT_TYPE = 'application/octet-stream'
 const INTERNAL_ERROR_MESSAGE = 'Internal Server Error'
 const CORS_ALLOW_ORIGIN = '*'
+const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'
+const CORS_ALLOW_HEADERS = 'Authorization'
 const ALLOWED_ORIGINS = new Set<string>(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
 
 function addSecurityHeaders(headers: Headers): Headers {
@@ -41,9 +43,27 @@ function appendVaryOrigin(headers: Headers): void {
 }
 
 export function textResponse(request: Request, body: string, status: number, headers: HeadersInit = {}): Response {
+  const responseHeaders = addSecurityHeaders(new Headers(headers))
+  if (!responseHeaders.has('cache-control')) {
+    responseHeaders.set('cache-control', CACHE_CONTROL)
+  }
+
   return new Response(body, {
     status,
-    headers: addCorsHeaders(addSecurityHeaders(new Headers(headers)), request),
+    headers: addCorsHeaders(responseHeaders, request),
+  })
+}
+
+export function preflightResponse(request: Request): Response {
+  const headers = addSecurityHeaders(new Headers({
+    'access-control-allow-headers': CORS_ALLOW_HEADERS,
+    'access-control-allow-methods': CORS_ALLOW_METHODS,
+    'cache-control': CACHE_CONTROL,
+  }))
+
+  return new Response(null, {
+    status: 204,
+    headers: addCorsHeaders(headers, request),
   })
 }
 

@@ -5,6 +5,7 @@ import { verifyModelIntegrity } from './model-integrity'
 import { getModelAccessKey } from './model-settings'
 
 export type ModelIntegrityOptions = Readonly<{
+  accessKeyOverride?: string
   integrity?: ModelIntegrity
   verifyIntegrity?: boolean
   forceVerifyIntegrity?: boolean
@@ -20,18 +21,30 @@ function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): {
   }
 }
 
-async function getModelUrl(): Promise<string> {
+function getModelUrl(): string {
   if (!modelConfig.urlBase) {
     throw new Error('模型下载地址未配置')
   }
+  return modelConfig.urlBase
+}
+
+async function getRequestAccessKey(accessKeyOverride?: string): Promise<string> {
   let storedAccessKey = ''
   try {
     storedAccessKey = await getModelAccessKey()
   } catch {
     storedAccessKey = ''
   }
-  const accessKey = storedAccessKey || modelConfig.accessKey
-  return `${modelConfig.urlBase}?key=${encodeURIComponent(accessKey)}`
+  const candidateAccessKey = accessKeyOverride?.trim()
+  return candidateAccessKey || storedAccessKey.trim() || modelConfig.accessKey.trim()
+}
+
+function createModelFetchInit(signal: AbortSignal, accessKey: string): RequestInit {
+  const init: RequestInit = { cache: 'no-store', signal }
+  if (accessKey) {
+    init.headers = { authorization: `Bearer ${accessKey}` }
+  }
+  return init
 }
 
 const contentLengthPattern = /^[0-9]+$/
@@ -147,7 +160,8 @@ export async function downloadModel(signal?: AbortSignal, options: ModelIntegrit
   const abort = (): void => controller.abort()
   signal?.addEventListener('abort', abort, { once: true })
   try {
-    const response = await fetch(await getModelUrl(), { cache: 'no-store', signal: controller.signal })
+    const accessKey = await getRequestAccessKey(options.accessKeyOverride)
+    const response = await fetch(getModelUrl(), createModelFetchInit(controller.signal, accessKey))
     if (!response.ok) {
       throw new Error(`模型下载失败: HTTP ${response.status}`)
     }
