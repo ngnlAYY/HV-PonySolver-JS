@@ -99,7 +99,11 @@ export class OnnxWorkerClient implements DetectorService {
       await this.initWorkerSession(worker, abortController, modelBuffer)
       this.checkAbort(abortController)
       if (cacheBuffer) {
-        await this.modelCache.putCached(cacheBuffer, true, true)
+        try {
+          await this.modelCache.putCached(cacheBuffer, true, true)
+        } catch {
+          // 缓存写入失败不应阻止已初始化的 Worker 继续服务本次会话。
+        }
       }
       this.checkAbort(abortController)
       this.ready = true
@@ -141,9 +145,10 @@ export class OnnxWorkerClient implements DetectorService {
   private spawnWorker(): Worker {
     const workerScript = createOnnxWorkerScript(this.options.bundledRuntimeSource)
     const worker = createBlobWorker(workerScript)
-    this.requestBridge = new WorkerRequestBridge(worker, (error) => this.failWorker(error))
-    worker.onerror = (event) => this.failWorker(event.error || new Error(event.message || 'Worker 运行错误'))
-    worker.onmessageerror = () => this.failWorker(new Error('Worker message 解析失败'))
+    const requestBridge = new WorkerRequestBridge(worker, (error) => this.failWorker(error, worker, requestBridge))
+    this.requestBridge = requestBridge
+    worker.onerror = (event) => this.failWorker(event.error || new Error(event.message || 'Worker 运行错误'), worker, requestBridge)
+    worker.onmessageerror = () => this.failWorker(new Error('Worker message 解析失败'), worker, requestBridge)
     return worker
   }
 
@@ -186,7 +191,10 @@ export class OnnxWorkerClient implements DetectorService {
     return this.requestBridge.post(message, transfer)
   }
 
-  private failWorker(error: unknown): void {
+  private failWorker(error: unknown, sourceWorker: Worker, sourceBridge: WorkerRequestBridge): void {
+    if (sourceWorker !== this.worker || sourceBridge !== this.requestBridge) {
+      return
+    }
     this.rejectPending(error)
     if (this.worker) {
       this.worker.terminate()

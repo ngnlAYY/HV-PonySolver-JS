@@ -90,6 +90,28 @@ describe('model settings', () => {
     expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: write failed')
   })
 
+  it('reports storage write failures after successful verification as settings failures', async () => {
+    const registerMenuCommand = vi.fn()
+    const setValue = vi.fn(async () => {
+      throw new Error('write failed')
+    })
+    const prompt = vi.fn(() => 'new-key')
+    const alert = vi.fn()
+    const verify = vi.fn(async (_candidateKey: string) => undefined)
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('GM_setValue', setValue)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerModelSettingsMenu } = await import('../../src/model/model-settings')
+
+    registerModelSettingsMenu(verify)
+    await expect(registerMenuCommand.mock.calls[0][1]()).resolves.toBeUndefined()
+
+    expect(verify).toHaveBeenCalledWith('new-key')
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: write failed')
+    expect(alert).not.toHaveBeenCalledWith(expect.stringContaining('模型下载 Key 验证失败'))
+  })
+
   it('reports clear menu storage failures without rejecting', async () => {
     const registerMenuCommand = vi.fn()
     const deleteValue = vi.fn(async () => {
@@ -125,11 +147,11 @@ describe('model settings', () => {
     expect(alert).not.toHaveBeenCalled()
   })
 
-  it('saves a non-empty prompted key and runs verification', async () => {
+  it('saves a non-empty prompted key after verification succeeds', async () => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn(() => '  new-key  ')
     const alert = vi.fn()
-    const verify = vi.fn(async () => undefined)
+    const verify = vi.fn(async (_candidateKey: string) => undefined)
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
@@ -139,7 +161,7 @@ describe('model settings', () => {
     await registerMenuCommand.mock.calls[0][1]()
 
     await expect(getModelAccessKey()).resolves.toBe('new-key')
-    expect(verify).toHaveBeenCalledTimes(1)
+    expect(verify).toHaveBeenCalledWith('new-key')
     expect(alert).toHaveBeenCalledWith('正在验证模型下载 Key，请稍候')
     expect(alert).toHaveBeenCalledWith('模型下载和校验成功，Key 可用')
   })
@@ -148,18 +170,20 @@ describe('model settings', () => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn(() => 'bad-key')
     const alert = vi.fn()
-    const verify = vi.fn(async () => {
+    const verify = vi.fn(async (_candidateKey: string) => {
       throw new Error('HTTP 403')
     })
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
-    const { getModelAccessKey, registerModelSettingsMenu } = await import('../../src/model/model-settings')
+    const { getModelAccessKey, registerModelSettingsMenu, setModelAccessKey } = await import('../../src/model/model-settings')
 
+    await setModelAccessKey('old-key')
     registerModelSettingsMenu(verify)
     await registerMenuCommand.mock.calls[0][1]()
 
-    await expect(getModelAccessKey()).resolves.toBe('bad-key')
+    await expect(getModelAccessKey()).resolves.toBe('old-key')
+    expect(verify).toHaveBeenCalledWith('bad-key')
     expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
   })
 

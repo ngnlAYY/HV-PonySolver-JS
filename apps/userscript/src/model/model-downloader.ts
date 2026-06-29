@@ -8,6 +8,7 @@ export type ModelIntegrityOptions = Readonly<{
   integrity?: ModelIntegrity
   verifyIntegrity?: boolean
   forceVerifyIntegrity?: boolean
+  accessKeyOverride?: string
 }>
 
 function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): {
@@ -20,9 +21,10 @@ function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): {
   }
 }
 
-async function getModelUrl(): Promise<string> {
-  if (!modelConfig.urlBase) {
-    throw new Error('模型下载地址未配置')
+async function getRequestAccessKey(accessKeyOverride?: string): Promise<string> {
+  const candidateAccessKey = accessKeyOverride?.trim()
+  if (candidateAccessKey) {
+    return candidateAccessKey
   }
   let storedAccessKey = ''
   try {
@@ -30,7 +32,14 @@ async function getModelUrl(): Promise<string> {
   } catch {
     storedAccessKey = ''
   }
-  const accessKey = storedAccessKey || modelConfig.accessKey
+  return storedAccessKey.trim() || modelConfig.accessKey.trim()
+}
+
+async function getModelUrl(accessKeyOverride?: string): Promise<string> {
+  if (!modelConfig.urlBase) {
+    throw new Error('模型下载地址未配置')
+  }
+  const accessKey = await getRequestAccessKey(accessKeyOverride)
   return `${modelConfig.urlBase}?key=${encodeURIComponent(accessKey)}`
 }
 
@@ -147,7 +156,7 @@ export async function downloadModel(signal?: AbortSignal, options: ModelIntegrit
   const abort = (): void => controller.abort()
   signal?.addEventListener('abort', abort, { once: true })
   try {
-    const response = await fetch(await getModelUrl(), { cache: 'no-store', signal: controller.signal })
+    const response = await fetch(await getModelUrl(options.accessKeyOverride), { cache: 'no-store', signal: controller.signal })
     if (!response.ok) {
       throw new Error(`模型下载失败: HTTP ${response.status}`)
     }

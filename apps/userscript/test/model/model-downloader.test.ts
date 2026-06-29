@@ -50,6 +50,36 @@ describe('downloadModel', () => {
     )
   })
 
+  it('uses a candidate model access key before saving settings', async () => {
+    getModelAccessKey.mockResolvedValue('old-key')
+    const response = new Response(new Uint8Array([1, 2, 3]))
+    const fetchMock = vi.fn(async () => response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await downloadModel(undefined, { integrity: TEST_INTEGRITY, accessKeyOverride: '  candidate key  ' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://models.ngnl.host/yolo26n-640.onnx?key=candidate%20key',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+  })
+
+  it('uses a candidate model access key without waiting for saved key storage', async () => {
+    getModelAccessKey.mockReturnValue(new Promise<string>(() => {}))
+    const response = new Response(new Uint8Array([1, 2, 3]))
+    const fetchMock = vi.fn(async () => response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const downloadPromise = downloadModel(undefined, { integrity: TEST_INTEGRITY, accessKeyOverride: 'candidate-key' })
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await expect(downloadPromise).resolves.toBeInstanceOf(ArrayBuffer)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://models.ngnl.host/yolo26n-640.onnx?key=candidate-key',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+  })
+
   it('does not fetch when the caller signal is already aborted', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

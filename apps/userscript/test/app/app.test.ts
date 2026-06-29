@@ -124,9 +124,23 @@ describe('App', () => {
 
     app.init()
     const verify = registerSettingsMenu.mock.calls[0][0].onVerifyModelAccessKey
-    await verify()
+    await verify('settings-key')
 
-    expect(modelDownload).toHaveBeenCalledWith(undefined, true)
+    expect(modelDownload).toHaveBeenCalledWith(undefined, true, 'settings-key')
+    expect(modelPutCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true)
+  })
+
+  it('keeps settings model key verification successful when caching the verified model fails', async () => {
+    modelPutCached.mockRejectedValueOnce(new Error('cache failed'))
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    const verify = registerSettingsMenu.mock.calls[0][0].onVerifyModelAccessKey
+
+    await expect(verify('settings-key')).resolves.toBeUndefined()
+    expect(modelDownload).toHaveBeenCalledWith(undefined, true, 'settings-key')
     expect(modelPutCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true)
   })
 

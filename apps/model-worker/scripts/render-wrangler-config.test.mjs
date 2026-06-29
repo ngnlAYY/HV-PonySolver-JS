@@ -56,6 +56,52 @@ async function runValidate(wranglerConfig) {
   })
 }
 
+async function runModelWorkerVitest(env) {
+  return execFileAsync('corepack', ['pnpm', 'exec', 'vitest', 'run', 'test/env.test.ts'], {
+    cwd: workerDir,
+    env: {
+      ...process.env,
+      ...env,
+    },
+  })
+}
+
+test('renderWranglerConfigFile writes generated test config from the template', async () => {
+  const { renderWranglerConfigFile, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+
+  await withTempWorker(async (tempWorkerDir) => {
+    const outputPath = join(tempWorkerDir, '.wrangler/vitest/wrangler.toml')
+    const rendered = await renderWranglerConfigFile({
+      templatePath: join(tempWorkerDir, 'wrangler.template.toml'),
+      outputPath,
+      values: testWranglerConfigEnv,
+      outputName: 'apps/model-worker/.wrangler/vitest/wrangler.toml',
+    })
+
+    assert.equal(rendered, await readFile(outputPath, 'utf8'))
+    assert.match(rendered, /main = "src\/index\.ts"/)
+    assert.match(rendered, /INVALID_KEY_MODE = "decoy"/)
+    assert.match(rendered, /id = "test-kv"/)
+    assert.match(rendered, /bucket_name = "test-bucket"/)
+  })
+})
+
+test('renderWranglerConfigFile escapes custom main paths as TOML strings', async () => {
+  const { renderWranglerConfigFile, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+
+  await withTempWorker(async (tempWorkerDir) => {
+    const outputPath = join(tempWorkerDir, '.wrangler/vitest/wrangler.toml')
+    const rendered = await renderWranglerConfigFile({
+      templatePath: join(tempWorkerDir, 'wrangler.template.toml'),
+      outputPath,
+      values: testWranglerConfigEnv,
+      mainPath: 'C:\\worker\\src\\index.ts',
+    })
+
+    assert.match(rendered, /main = "C:\\\\worker\\\\src\\\\index\.ts"/)
+  })
+})
+
 test('render-wrangler-config renders test placeholders outside production mode', async () => {
   const result = await runRender({
     MODEL_KEYS_KV_NAMESPACE_ID: 'test-kv',
@@ -64,6 +110,13 @@ test('render-wrangler-config renders test placeholders outside production mode',
 
   assert.match(result.wrangler, /id = "test-kv"/)
   assert.match(result.wrangler, /bucket_name = "test-bucket"/)
+})
+
+test('model-worker vitest config keeps test placeholders isolated from deploy render mode', async () => {
+  const result = await runModelWorkerVitest({ HV_PONY_SOLVER_RENDER_ENV: 'deploy' })
+
+  assert.match(result.stdout, /Test Files\s+1 passed/)
+  assert.match(result.stdout, /Tests\s+5 passed/)
 })
 
 test('render-wrangler-config requires MODEL_KEYS_KV_NAMESPACE_ID', async () => {
@@ -139,7 +192,9 @@ test('render-wrangler-config rejects unresolved placeholders after rendering', a
 })
 
 test('validate-wrangler-config accepts valid rendered config before deploy', async () => {
-  await runValidate(`id = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\n`)
+  await runValidate(
+    `[[kv_namespaces]]\nbinding = "MODEL_KEYS"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_BUCKET"\nbucket_name = "${validBucketName}"\n`,
+  )
 })
 
 test('validate-wrangler-config rejects stale test placeholders before deploy', async () => {
@@ -160,6 +215,34 @@ test('validate-wrangler-config rejects invalid rendered values before deploy', a
   await assert.rejects(
     runValidate(`id = "${validKvNamespaceId}"\nbucket_name = "Bucket-Prod"\n`),
     /MODEL_BUCKET_NAME must be 3-63 位小写字母、数字或连字符，且首尾为字母或数字/,
+  )
+})
+
+test('validate-wrangler-config rejects wrong MODEL_KEYS binding names before deploy', async () => {
+  await assert.rejects(
+    runValidate(`[[kv_namespaces]]\nbinding = "MODEL_KEY"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_BUCKET"\nbucket_name = "${validBucketName}"\n`),
+    /wrangler\.toml kv_namespaces must contain binding = "MODEL_KEYS" with id/,
+  )
+})
+
+test('validate-wrangler-config rejects swapped KV and bucket binding sections before deploy', async () => {
+  await assert.rejects(
+    runValidate(`[[kv_namespaces]]\nbinding = "MODEL_BUCKET"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_KEYS"\nbucket_name = "${validBucketName}"\n`),
+    /wrangler\.toml kv_namespaces must contain binding = "MODEL_KEYS" with id/,
+  )
+})
+
+test('validate-wrangler-config rejects bindings declared outside resource sections before deploy', async () => {
+  await assert.rejects(
+    runValidate(`id = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\n[[unsafe.metadata]]\nbinding = "MODEL_KEYS"\nbinding = "MODEL_BUCKET"\n`),
+    /wrangler\.toml kv_namespaces must contain binding = "MODEL_KEYS" with id/,
+  )
+})
+
+test('validate-wrangler-config rejects unsupported INVALID_KEY_MODE values before deploy', async () => {
+  await assert.rejects(
+    runValidate(`INVALID_KEY_MODE = "allow"\nid = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\nbinding = "MODEL_KEYS"\nbinding = "MODEL_BUCKET"\n`),
+    /wrangler\.toml INVALID_KEY_MODE must be one of: decoy, error/,
   )
 })
 

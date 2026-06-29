@@ -19,6 +19,11 @@ const renderedAssignments = [
   ['MODEL_KEYS_KV_NAMESPACE_ID', 'id'],
   ['MODEL_BUCKET_NAME', 'bucket_name'],
 ]
+const renderedResources = [
+  ['kv_namespaces', 'MODEL_KEYS', 'id'],
+  ['r2_buckets', 'MODEL_BUCKET', 'bucket_name'],
+]
+const invalidKeyModes = new Set(['decoy', 'error'])
 
 function isProductionMode(renderMode) {
   return productionModes.has(renderMode)
@@ -66,28 +71,93 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function readTomlStringAssignment(content, assignment, sourceName) {
+function readTomlStringAssignmentValues(content, assignment, sourceName) {
   const escapedAssignment = escapeRegExp(assignment)
   const assignmentPattern = new RegExp(`^\\s*${escapedAssignment}\\s*=`)
-  const assignmentLines = content.split('\n').filter((line) => assignmentPattern.test(line))
-  if (assignmentLines.length === 0) {
-    throw new Error(`${sourceName} must contain ${assignment}`)
-  }
-  if (assignmentLines.length > 1) {
-    throw new Error(`${sourceName} must contain exactly one ${assignment}`)
-  }
-
-  const match = assignmentLines[0].match(new RegExp(`^\\s*${escapedAssignment}\\s*=\\s*"([^"]*)"\\s*$`))
-  if (!match?.[1]) {
-    throw new Error(`${sourceName} ${assignment} must be a quoted TOML string without extra content`)
-  }
-  return match[1]
+  return content
+    .split('\n')
+    .filter((line) => assignmentPattern.test(line))
+    .map((line) => {
+      const match = line.match(new RegExp(`^\\s*${escapedAssignment}\\s*=\\s*"([^"]*)"\\s*$`))
+      if (!match?.[1]) {
+        throw new Error(`${sourceName} ${assignment} must be a quoted TOML string without extra content`)
+      }
+      return match[1]
+    })
 }
 
-function validateRenderedWranglerConfig(content, sourceName = 'wrangler.toml') {
+function readTomlStringAssignment(content, assignment, sourceName) {
+  const values = readTomlStringAssignmentValues(content, assignment, sourceName)
+  if (values.length === 0) {
+    throw new Error(`${sourceName} must contain ${assignment}`)
+  }
+  if (values.length > 1) {
+    throw new Error(`${sourceName} must contain exactly one ${assignment}`)
+  }
+  return values[0]
+}
+
+function readTomlArrayTableBlocks(content, tableName) {
+  const escapedTableName = escapeRegExp(tableName)
+  const tableHeaderPattern = new RegExp(`^\\s*\\[\\[\\s*${escapedTableName}\\s*\\]\\]\\s*$`)
+  const anyTableHeaderPattern = /^\s*\[/
+  const blocks = []
+  let currentBlock = null
+
+  for (const line of content.split('\n')) {
+    if (tableHeaderPattern.test(line)) {
+      if (currentBlock) {
+        blocks.push(currentBlock.join('\n'))
+      }
+      currentBlock = [line]
+      continue
+    }
+    if (currentBlock && anyTableHeaderPattern.test(line)) {
+      blocks.push(currentBlock.join('\n'))
+      currentBlock = null
+      continue
+    }
+    currentBlock?.push(line)
+  }
+
+  if (currentBlock) {
+    blocks.push(currentBlock.join('\n'))
+  }
+  return blocks
+}
+
+function validateRenderedResource(content, tableName, binding, assignment, sourceName) {
+  const blocks = readTomlArrayTableBlocks(content, tableName)
+  for (const block of blocks) {
+    if (readTomlStringAssignmentValues(block, 'binding', sourceName).includes(binding)) {
+      readTomlStringAssignment(block, assignment, sourceName)
+      return
+    }
+  }
+  throw new Error(`${sourceName} ${tableName} must contain binding = "${binding}" with ${assignment}`)
+}
+
+function validateRenderedInvalidKeyMode(content, sourceName) {
+  const values = readTomlStringAssignmentValues(content, 'INVALID_KEY_MODE', sourceName)
+  if (values.length === 0) {
+    return
+  }
+  if (values.length > 1) {
+    throw new Error(`${sourceName} must contain at most one INVALID_KEY_MODE`)
+  }
+  if (!invalidKeyModes.has(values[0].trim().toLowerCase())) {
+    throw new Error(`${sourceName} INVALID_KEY_MODE must be one of: decoy, error`)
+  }
+}
+
+function validateRenderedWranglerConfig(content, sourceName = 'wrangler.toml', { allowTestPlaceholders = false } = {}) {
   assertNoUnresolvedPlaceholders(content, sourceName)
   for (const [name, assignment] of renderedAssignments) {
-    validateConfigValue(name, readTomlStringAssignment(content, assignment, sourceName))
+    validateConfigValue(name, readTomlStringAssignment(content, assignment, sourceName), { allowTestPlaceholders })
+  }
+  validateRenderedInvalidKeyMode(content, sourceName)
+  for (const [tableName, binding, assignment] of renderedResources) {
+    validateRenderedResource(content, tableName, binding, assignment, sourceName)
   }
 }
 

@@ -255,7 +255,7 @@ describe('OnnxWorkerClient', () => {
     expect(SuccessfulWorker.terminateCount).toBeGreaterThanOrEqual(1)
   })
 
-  it('terminates the initialized worker when caching the downloaded model fails', async () => {
+  it('keeps initialized worker usable when caching the downloaded model fails', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
     const modelCache = {
@@ -268,10 +268,16 @@ describe('OnnxWorkerClient', () => {
     const panel = createMockPanel()
     const client = new OnnxWorkerClient(modelCache, panel)
 
-    await expect(client.prepare()).rejects.toThrow('cache failed')
+    const worker = await client.prepare()
 
-    expect(panel.setSessionReady).not.toHaveBeenCalled()
-    expect(SuccessfulWorker.terminateCount).toBeGreaterThanOrEqual(1)
+    expect(worker).toBe(SuccessfulWorker.instances[0])
+    expect(panel.setSessionReady).toHaveBeenCalledWith(expect.any(Number))
+    expect(SuccessfulWorker.terminateCount).toBe(0)
+    expect(modelCache.putCached).toHaveBeenCalledTimes(1)
+
+    await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true, ponies: ['TS'] })
+    expect(SuccessfulWorker.messages.filter((message) => message.type === 'init')).toHaveLength(1)
+    expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1)
   })
 
   it('marks session error, rejects pending init, and creates a new worker on next prepare after timeout', async () => {
@@ -298,5 +304,36 @@ describe('OnnxWorkerClient', () => {
 
     await expect(nextPreparePromise).resolves.toBe(SuccessfulWorker.instances[0])
     expect(TimeoutThenSuccessfulWorker.constructedCount).toBe(2)
+  })
+
+  it('ignores stale worker error events after a timed-out prepare is replaced', async () => {
+    vi.useFakeTimers()
+    stubWorker(TimeoutThenSuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelCache = {
+      getCached: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      download: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(modelCache, panel)
+
+    const stalePreparePromise = client.prepare()
+    await vi.waitFor(() => expect(TimeoutThenSuccessfulWorker.messages).toHaveLength(1))
+    vi.advanceTimersByTime(inferenceTimeoutConfig.workerInitTimeoutMs)
+
+    await expect(stalePreparePromise).rejects.toThrow('ONNX Worker 请求超时')
+
+    const replacementPreparePromise = client.prepare()
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+
+    await expect(replacementPreparePromise).resolves.toBe(SuccessfulWorker.instances[0])
+    TimeoutThenSuccessfulWorker.instances[0]?.onerror?.({ error: new Error('stale worker failure') } as ErrorEvent)
+
+    await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true, ponies: ['TS'] })
+    expect(TimeoutThenSuccessfulWorker.constructedCount).toBe(2)
+    expect(SuccessfulWorker.terminateCount).toBe(0)
+    expect(SuccessfulWorker.messages.filter((message) => message.type === 'init')).toHaveLength(1)
+    expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1)
   })
 })

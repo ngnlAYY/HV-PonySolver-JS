@@ -32,7 +32,7 @@ export class App {
     this.solveAbortController = new AbortController()
     this.panel.create()
     if (!this.settingsMenuRegistered) {
-      registerSettingsMenu({ onVerifyModelAccessKey: () => this.verifyConfiguredModelKey() })
+      registerSettingsMenu({ onVerifyModelAccessKey: (candidateKey) => this.verifyConfiguredModelKey(candidateKey) })
       this.settingsMenuRegistered = true
     }
     if (document.querySelector(captchaSelectors.master)) {
@@ -59,9 +59,13 @@ export class App {
     this.panel.destroy()
   }
 
-  private async verifyConfiguredModelKey(): Promise<void> {
-    const modelBuffer = await this.modelCache.download(undefined, true)
-    await this.modelCache.putCached(modelBuffer, true)
+  private async verifyConfiguredModelKey(candidateKey: string): Promise<void> {
+    const modelBuffer = await this.modelCache.download(undefined, true, candidateKey)
+    try {
+      await this.modelCache.putCached(modelBuffer, true)
+    } catch {
+      // 验证只要求候选 Key 能完成模型下载；缓存写入失败不应误判 Key 无效。
+    }
   }
 
   private isCaptchaRelatedMutation(records: MutationRecord[]): boolean {

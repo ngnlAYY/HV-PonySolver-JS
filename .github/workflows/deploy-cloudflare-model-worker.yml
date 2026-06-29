@@ -36,8 +36,31 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Render Wrangler config
+      - name: Check Cloudflare deployment secrets
+        id: cloudflare_secrets
         env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
+          MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
+        run: |
+          if [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$MODEL_KEYS_KV_NAMESPACE_ID" ] && [ -n "$MODEL_BUCKET_NAME" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare deployment secrets are incomplete; skipping Wrangler dry-run and deploy."
+          fi
+
+      - name: Require Cloudflare secrets for deployment
+        if: ${{ inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready != 'true' }}
+        run: |
+          echo "Publishing Model Worker requires complete Cloudflare deployment secrets." >&2
+          exit 1
+
+      - name: Render Wrangler config
+        if: ${{ steps.cloudflare_secrets.outputs.ready == 'true' }}
+        env:
+          HV_PONY_SOLVER_RENDER_ENV: deploy
           MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
         run: pnpm --filter @hv-pony-solver/model-worker render-config
@@ -48,8 +71,19 @@ jobs:
       - name: Test
         run: pnpm --filter @hv-pony-solver/model-worker test
 
+      - name: Wrangler dry-run
+        if: ${{ steps.cloudflare_secrets.outputs.ready == 'true' }}
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
+          MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
+        run: |
+          pnpm --filter @hv-pony-solver/model-worker exec node scripts/validate-wrangler-config.mjs
+          pnpm --filter @hv-pony-solver/model-worker exec wrangler deploy --dry-run
+
       - name: Deploy Worker
-        if: ${{ inputs.publish_model_worker }}
+        if: ${{ inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready == 'true' }}
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
