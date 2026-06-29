@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { captchaSelectors } from '../../src/captcha/captcha-selectors'
 import { solverConfig } from '../../src/captcha/solver-config'
 import { timingConfig } from '../../src/captcha/timing-config'
+import { ONNX_RUNTIME_ASSETS } from '../../src/inference/onnx-runtime-assets'
 import {
   imagePreprocessConfig,
   inferenceTimeoutConfig,
@@ -42,8 +43,8 @@ describe('config defaults', () => {
     expect(modelConfig.cacheKey).toBe('yolo26n-640.onnx')
     expect(modelConfig.version).toBe('yolo26n-640-2026-05-14')
     expect(modelConfig.verifyIntegrity).toBe(true)
-    expect(onnxRuntimeConfig.ortScriptUrl).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js')
-    expect(onnxRuntimeConfig.ortWasmPath).toBe('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/')
+    expect(onnxRuntimeConfig.ortScriptUrl).toBe(ONNX_RUNTIME_ASSETS.cdn.scriptUrl)
+    expect(onnxRuntimeConfig.ortWasmPath).toBe(ONNX_RUNTIME_ASSETS.cdn.wasmPath)
     expect(inferenceTimeoutConfig.workerInitTimeoutMs).toBe(60000)
     expect(inferenceTimeoutConfig.workerDetectTimeoutMs).toBe(30000)
     expect(inferenceTimeoutConfig.modelDownloadTimeoutMs).toBe(30000)

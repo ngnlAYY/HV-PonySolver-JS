@@ -1,18 +1,19 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
-import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import {
+  readFirstExistingOnnxRuntimeAssetStats,
+  readOnnxRuntimeAssetsManifest,
+  resolveInstalledOnnxRuntimeAssetPathCandidates,
+  sha256Hex,
+} from './onnx-runtime-assets.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(scriptDir, '..')
 const entryPoint = resolve(appDir, 'src/main.ts')
 const workerEntryPoint = resolve(appDir, 'src/inference/onnx-worker-entry.ts')
 const metadataPath = resolve(appDir, 'src/userscript/metadata.ts')
-const MAX_ONNX_RUNTIME_BYTES = 2 * 1024 * 1024
-const defaultOnnxRuntimeByteLength = 360388
-const defaultOnnxRuntimeSha256 = 'ba5e52f4a87f823a700fa5eb916fd5946b970999e8e0518334b116f7b03bd53d'
 
 export const workerRuntimeSourcePlaceholder = '__HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE_PLACEHOLDER__'
 
@@ -96,30 +97,30 @@ async function buildWorkerScript({ workerEntryPoint, shouldMinify, shouldWriteMe
   return { text: outputFile.text, metafile: result.metafile }
 }
 
-async function readOnnxRuntimeSource({ runtimePath, expectedByteLength, expectedSha256 }) {
-  const resolvedRuntimePath = runtimePath || resolveOnnxRuntimePath()
-  if (basename(resolvedRuntimePath) !== 'ort.min.js') {
-    throw new Error('ONNX runtime source must be named ort.min.js')
+async function readOnnxRuntimeSource({ runtimePath, manifest }) {
+  const resolvedRuntimePath = runtimePath || await resolveOnnxRuntimePath(manifest)
+  const { scriptAsset } = manifest
+  if (basename(resolvedRuntimePath) !== scriptAsset.filename) {
+    throw new Error(`ONNX runtime source must be named ${scriptAsset.filename}`)
   }
-  const stats = await stat(resolvedRuntimePath)
-  if (stats.size === 0 || stats.size > MAX_ONNX_RUNTIME_BYTES) {
-    throw new Error(`ONNX runtime source size must be between 1 and ${MAX_ONNX_RUNTIME_BYTES} bytes`)
+
+  const bytes = await readFile(resolvedRuntimePath)
+  if (bytes.byteLength === 0 || bytes.byteLength > scriptAsset.maxByteLength) {
+    throw new Error(`ONNX runtime source size must be between 1 and ${scriptAsset.maxByteLength} bytes`)
   }
-  if (stats.size !== expectedByteLength) {
-    throw new Error(`ONNX runtime source size must be ${expectedByteLength} bytes`)
+  if (bytes.byteLength !== scriptAsset.byteLength) {
+    throw new Error(`ONNX runtime source size must be ${scriptAsset.byteLength} bytes`)
   }
-  const source = await readFile(resolvedRuntimePath, 'utf8')
-  const sha256 = createHash('sha256').update(source).digest('hex')
-  if (sha256 !== expectedSha256) {
+  if (sha256Hex(bytes) !== scriptAsset.sha256) {
     throw new Error('ONNX runtime source SHA-256 mismatch')
   }
-  return source
+  return bytes.toString('utf8')
 }
 
-function resolveOnnxRuntimePath() {
-  const require = createRequire(import.meta.url)
-  const entryPath = require.resolve('onnxruntime-web')
-  return resolve(dirname(entryPath), 'ort.min.js')
+async function resolveOnnxRuntimePath(manifest) {
+  const assetPaths = resolveInstalledOnnxRuntimeAssetPathCandidates(manifest, resolve(appDir, '../..'))
+  const { filePath } = await readFirstExistingOnnxRuntimeAssetStats(assetPaths)
+  return filePath
 }
 
 async function buildUserscript({ args = process.argv.slice(2), env = process.env } = {}) {
@@ -127,11 +128,11 @@ async function buildUserscript({ args = process.argv.slice(2), env = process.env
   const outputPath = env.HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH || resolve(appDir, 'dist/hv-pony-solver.user.js')
   const metafilePath = env.HV_PONY_SOLVER_METAFILE_PATH
   const shouldWriteMetafile = Boolean(metafilePath)
+  const onnxRuntimeManifest = await readOnnxRuntimeAssetsManifest()
   const onnxRuntimeSource = env.HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME === '1'
     ? await readOnnxRuntimeSource({
         runtimePath: env.HV_PONY_SOLVER_ONNX_RUNTIME_PATH,
-        expectedByteLength: Number(env.HV_PONY_SOLVER_ONNX_RUNTIME_BYTE_LENGTH || defaultOnnxRuntimeByteLength),
-        expectedSha256: env.HV_PONY_SOLVER_ONNX_RUNTIME_SHA256 || defaultOnnxRuntimeSha256,
+        manifest: onnxRuntimeManifest,
       })
     : ''
   const workerBuild = await buildWorkerScript({ workerEntryPoint, shouldMinify, shouldWriteMetafile })

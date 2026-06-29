@@ -1,17 +1,35 @@
-import { isModelAccessToken, type ModelAccessDecision } from '@hv-pony-solver/shared'
+import { getModelAccessTokenLookupKeys, type ModelAccessDecision } from '@hv-pony-solver/shared'
 import type { NormalizedEnv } from './worker-types'
 
+const BEARER_AUTHORIZATION_PATTERN = /^Bearer\s+([^\s]+)$/i
+
+function invalidAccessDecision(env: NormalizedEnv): ModelAccessDecision {
+  return env.invalidKeyMode === 'error' ? 'forbidden' : 'decoy'
+}
+
+function getRequestAccessToken(request: Request): string | null {
+  const authorization = request.headers.get('authorization')
+  if (authorization === null) {
+    return null
+  }
+
+  const match = BEARER_AUTHORIZATION_PATTERN.exec(authorization.trim())
+  return match?.[1] ?? null
+}
+
 export async function selectModelAccess(request: Request, env: NormalizedEnv): Promise<ModelAccessDecision> {
-  const key = new URL(request.url).searchParams.get('key')
+  const lookupKeys = getModelAccessTokenLookupKeys(getRequestAccessToken(request))
 
-  if (!isModelAccessToken(key)) {
-    return env.invalidKeyMode === 'error' ? 'forbidden' : 'decoy'
+  if (lookupKeys.length === 0) {
+    return invalidAccessDecision(env)
   }
 
-  const authorizationMarker = await env.modelKeys.get(key)
-  if (authorizationMarker === null) {
-    return env.invalidKeyMode === 'error' ? 'forbidden' : 'decoy'
+  for (const lookupKey of lookupKeys) {
+    const authorizationMarker = await env.modelKeys.get(lookupKey)
+    if (authorizationMarker !== null) {
+      return 'real'
+    }
   }
 
-  return 'real'
+  return invalidAccessDecision(env)
 }

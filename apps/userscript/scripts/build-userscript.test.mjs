@@ -14,13 +14,16 @@ import {
   validateUserscriptMetadata,
   workerRuntimeSourcePlaceholder,
 } from './build-userscript.mjs'
+import {
+  readFirstExistingOnnxRuntimeAssetStats,
+  readOnnxRuntimeAssetsManifest,
+  resolveInstalledOnnxRuntimeAssetPathCandidates,
+} from './onnx-runtime-assets.mjs'
 
 const execFileAsync = promisify(execFile)
 const appDir = resolve(import.meta.dirname, '..')
-const runtimeMarker = 'HV_PONY_SOLVER_TEST_RUNTIME_MARKER'
-const runtimeSource = `self.ort = { marker: ${JSON.stringify(runtimeMarker)} };`
-const runtimeByteLength = 60
-const runtimeSha256 = '5259978e2c9e098e157db55ce652398eee871f059417927c42742512696bb055'
+const runtimeMarker = 'Microsoft Corporation'
+const runtimeSource = await readInstalledRuntimeSource()
 const mainBundleBudgetBytes = 80_000
 const workerBundleBudgetBytes = 20_000
 
@@ -114,8 +117,17 @@ test('build-userscript embeds onnxruntime-web runtime when enabled', async () =>
   const output = await runBuildInTempDir({
     HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '1',
     runtimeSource,
-    runtimeByteLength,
-    runtimeSha256,
+  })
+
+  assert.equal(output.includes(runtimeMarker), true)
+})
+
+test('build-userscript ignores ONNX runtime integrity environment overrides', async () => {
+  const output = await runBuildInTempDir({
+    HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '1',
+    HV_PONY_SOLVER_ONNX_RUNTIME_BYTE_LENGTH: '1',
+    HV_PONY_SOLVER_ONNX_RUNTIME_SHA256: '0000000000000000000000000000000000000000000000000000000000000000',
+    runtimeSource,
   })
 
   assert.equal(output.includes(runtimeMarker), true)
@@ -125,11 +137,9 @@ test('build-userscript rejects bundled runtime sources with unexpected byte leng
   await assert.rejects(
     runBuildInTempDir({
       HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '1',
-      runtimeSource,
-      runtimeByteLength: 1,
-      runtimeSha256,
+      runtimeSource: `${runtimeSource}\n`,
     }),
-    /ONNX runtime source size must be 1 bytes/,
+    /ONNX runtime source size must be 360388 bytes/,
   )
 })
 
@@ -137,9 +147,7 @@ test('build-userscript rejects bundled runtime sources with unexpected SHA-256',
   await assert.rejects(
     runBuildInTempDir({
       HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '1',
-      runtimeSource,
-      runtimeByteLength,
-      runtimeSha256: '0000000000000000000000000000000000000000000000000000000000000000',
+      runtimeSource: runtimeSource.replace('ONNX Runtime Web', 'ONNX Runtime web'),
     }),
     /ONNX runtime source SHA-256 mismatch/,
   )
@@ -215,7 +223,7 @@ test('build-userscript writes an esbuild metafile when requested', async () => {
   )
 })
 
-async function runBuildInTempDir({ args = [], runtimeSource, runtimeByteLength, runtimeSha256, withMetafile, ...env }) {
+async function runBuildInTempDir({ args = [], runtimeSource, withMetafile, ...env }) {
   const outputDir = await mkdtemp(join(tmpdir(), 'hv-pony-userscript-'))
   try {
     const runtimePath = runtimeSource ? join(outputDir, 'ort.min.js') : undefined
@@ -231,8 +239,6 @@ async function runBuildInTempDir({ args = [], runtimeSource, runtimeByteLength, 
         ...env,
         ...(runtimePath ? { HV_PONY_SOLVER_ONNX_RUNTIME_PATH: runtimePath } : {}),
         ...(metafilePath ? { HV_PONY_SOLVER_METAFILE_PATH: metafilePath } : {}),
-        ...(runtimeByteLength ? { HV_PONY_SOLVER_ONNX_RUNTIME_BYTE_LENGTH: String(runtimeByteLength) } : {}),
-        ...(runtimeSha256 ? { HV_PONY_SOLVER_ONNX_RUNTIME_SHA256: runtimeSha256 } : {}),
         HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH: outputPath,
       },
     })
@@ -244,4 +250,12 @@ async function runBuildInTempDir({ args = [], runtimeSource, runtimeByteLength, 
   } finally {
     await rm(outputDir, { recursive: true, force: true })
   }
+}
+
+async function readInstalledRuntimeSource() {
+  const repoRoot = resolve(appDir, '../..')
+  const manifest = await readOnnxRuntimeAssetsManifest(repoRoot)
+  const candidates = resolveInstalledOnnxRuntimeAssetPathCandidates(manifest, repoRoot)
+  const { filePath } = await readFirstExistingOnnxRuntimeAssetStats(candidates)
+  return readFile(filePath, 'utf8')
 }

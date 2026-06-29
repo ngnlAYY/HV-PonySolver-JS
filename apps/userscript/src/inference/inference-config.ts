@@ -1,3 +1,5 @@
+import { ONNX_RUNTIME_ASSETS } from './onnx-runtime-assets'
+
 export const imagePreprocessConfig = {
   imageSize: 640,
 } as const
@@ -12,8 +14,8 @@ export const yoloOutputConfig = {
 } as const
 
 export const onnxRuntimeConfig = {
-  ortScriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js',
-  ortWasmPath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/',
+  ortScriptUrl: ONNX_RUNTIME_ASSETS.cdn.scriptUrl,
+  ortWasmPath: ONNX_RUNTIME_ASSETS.cdn.wasmPath,
 } as const
 
 export const inferenceTimeoutConfig = {

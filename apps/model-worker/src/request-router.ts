@@ -1,8 +1,8 @@
 import { selectModelAccess } from './model-access'
-import { createModelResponse, textResponse } from './model-response'
+import { createModelResponse, preflightResponse, textResponse } from './model-response'
 import type { NormalizedEnv } from './worker-types'
 
-const ALLOWED_METHODS = 'GET, HEAD'
+const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'
 
 function isModelMethod(method: string): boolean {
   return method === 'GET' || method === 'HEAD'
@@ -13,6 +13,10 @@ export async function handleRequest(request: Request, env: NormalizedEnv): Promi
 
   if (url.pathname !== env.publicModelPath) {
     return textResponse(request, 'Not Found', 404)
+  }
+
+  if (request.method === 'OPTIONS') {
+    return preflightResponse(request)
   }
 
   if (!isModelMethod(request.method)) {

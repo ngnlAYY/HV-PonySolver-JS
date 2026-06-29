@@ -91,10 +91,10 @@ export class ModelCache {
   ): Promise<ArrayBuffer> {
     const startedAt = Date.now()
     this.statusSink.setStatus({ model: '下载中' })
-    const buffer = await downloadModel(
-      signal,
-      accessKeyOverride === undefined ? { verifyIntegrity } : { verifyIntegrity, accessKeyOverride },
-    )
+    const options: ModelIntegrityOptions = accessKeyOverride === undefined
+      ? { verifyIntegrity }
+      : { accessKeyOverride, verifyIntegrity }
+    const buffer = await downloadModel(signal, options)
     this.statusSink.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
     return buffer
   }

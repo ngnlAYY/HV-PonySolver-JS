@@ -15,6 +15,9 @@ import {
 
 const HENTAIVERSE_ORIGIN = 'https://hentaiverse.org'
 const ALT_HENTAIVERSE_ORIGIN = 'https://alt.hentaiverse.org'
+const CANONICAL_ACCESS_TOKEN = '0123456789abcdef'.repeat(4)
+const UPPERCASE_ACCESS_TOKEN = CANONICAL_ACCESS_TOKEN.toUpperCase()
+const MIXED_CASE_ACCESS_TOKEN = '0123456789abcdefABCDEF0123456789'.repeat(2)
 
 function expectVaryOrigin(headers: Headers): void {
   const varyTokens = headers
@@ -26,8 +29,20 @@ function expectVaryOrigin(headers: Headers): void {
   expect(varyTokens).toContain('origin')
 }
 
+function authorizedModelRequest(
+  fixture: ReturnType<typeof createModelFixture>,
+  method: string,
+  token: string = fixture.validKey,
+  headers: Record<string, string> = {},
+): Request {
+  return modelRequest(fixture, method, undefined, {
+    ...headers,
+    authorization: `Bearer ${token}`,
+  })
+}
+
 describe('model worker', () => {
-  it('returns the real model for GET when authorized key exists in KV', async () => {
+  it('returns the decoy model for GET when a valid key is supplied only as query', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {
       keyValues: new Map<string, string>([[fixture.validKey, '1']]),
@@ -36,13 +51,167 @@ describe('model worker', () => {
     const response = await fetchWorker(modelRequest(fixture, 'GET', fixture.validKey), env)
 
     expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+    expect(response.headers.get('content-type')).toBe('application/octet-stream')
+    expect(response.headers.get('content-disposition')).toBe('inline; filename="yolo26n-640.onnx"')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('etag')).toBe(fixture.decoyEtag)
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(response.headers.get('x-hv-model-access')).toBeNull()
+  })
+
+  it('allows canonical lowercase tokens to read uppercase historical KV keys', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[UPPERCASE_ACCESS_TOKEN, '1']]),
+    })
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', CANONICAL_ACCESS_TOKEN), env)
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.realBody)
+  })
+
+  it('allows uppercase tokens to read lowercase canonical KV keys', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[CANONICAL_ACCESS_TOKEN, '1']]),
+    })
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', UPPERCASE_ACCESS_TOKEN), env)
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.realBody)
+  })
+
+  it('allows mixed-case tokens to read matching historical mixed-case KV keys', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[MIXED_CASE_ACCESS_TOKEN, '1']]),
+    })
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', MIXED_CASE_ACCESS_TOKEN), env)
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.realBody)
+  })
+
+  it('returns the real model for GET when Authorization Bearer token is valid', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+    })
+
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', undefined, { authorization: `Bearer ${fixture.validKey}` }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.realBody)
     expect(response.headers.get('content-type')).toBe('application/octet-stream')
     expect(response.headers.get('content-disposition')).toBe('inline; filename="yolo26n-640.onnx"')
-    expect(response.headers.get('cache-control')).toBe('public, max-age=86400')
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('etag')).toBe(fixture.realEtag)
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('x-hv-model-access')).toBeNull()
+  })
+
+  it('allows Authorization Bearer tokens to read historical uppercase KV keys', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[UPPERCASE_ACCESS_TOKEN, '1']]),
+    })
+
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', undefined, { authorization: `Bearer ${CANONICAL_ACCESS_TOKEN}` }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.realBody)
+  })
+
+  it('allows uppercase Authorization Bearer tokens to read lowercase canonical KV keys', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[CANONICAL_ACCESS_TOKEN, '1']]),
+    })
+
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', undefined, { authorization: `bearer ${UPPERCASE_ACCESS_TOKEN}` }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.realBody)
+  })
+
+  it('prefers Authorization Bearer token over query key when both are present', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+    })
+
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.mismatchedKey, { authorization: `Bearer ${fixture.validKey}` }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.realBody)
+  })
+
+  it('does not fall back to query key when Authorization header is invalid', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+    })
+
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey, { authorization: `Token ${fixture.validKey}` }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('etag')).toBe(fixture.decoyEtag)
+    expect(response.headers.get('x-hv-model-access')).toBeNull()
+  })
+
+  it('does not fall back to query key when Authorization Bearer KV key is missing', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+    })
+
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey, { authorization: `Bearer ${fixture.mismatchedKey}` }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('etag')).toBe(fixture.decoyEtag)
+    expect(response.headers.get('x-hv-model-access')).toBeNull()
+  })
+
+  it('returns 403 for invalid Authorization when INVALID_KEY_MODE is error', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      invalidKeyMode: 'error',
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+    })
+
+    const response = await fetchWorker(
+      modelRequest(fixture, 'GET', fixture.validKey, { authorization: `Token ${fixture.validKey}` }),
+      env,
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.text()).toBe('Forbidden')
   })
 
   it('returns the real model for HEAD when authorized key exists in KV', async () => {
@@ -51,10 +220,11 @@ describe('model worker', () => {
       keyValues: new Map<string, string>([[fixture.validKey, '1']]),
     })
 
-    const response = await fetchWorker(modelRequest(fixture, 'HEAD', fixture.validKey), env)
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'HEAD'), env)
 
     expect(response.status).toBe(200)
     expect(await response.text()).toBe('')
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('etag')).toBe(fixture.realEtag)
   })
 
@@ -64,7 +234,7 @@ describe('model worker', () => {
       keyValues: new Map<string, string>([[fixture.validKey, '1']]),
     })
 
-    const response = await fetchWorker(modelRequest(fixture, 'GET', fixture.validKey), env)
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
 
     expect(response.status).toBe(200)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
@@ -78,7 +248,7 @@ describe('model worker', () => {
     })
 
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey, { origin: HENTAIVERSE_ORIGIN }),
+      authorizedModelRequest(fixture, 'GET', fixture.validKey, { origin: HENTAIVERSE_ORIGIN }),
       env,
     )
 
@@ -93,7 +263,7 @@ describe('model worker', () => {
     })
 
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey, { origin: ALT_HENTAIVERSE_ORIGIN }),
+      authorizedModelRequest(fixture, 'GET', fixture.validKey, { origin: ALT_HENTAIVERSE_ORIGIN }),
       env,
     )
 
@@ -108,7 +278,7 @@ describe('model worker', () => {
     })
 
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey, { origin: 'https://attacker.example' }),
+      authorizedModelRequest(fixture, 'GET', fixture.validKey, { origin: 'https://attacker.example' }),
       env,
     )
 
@@ -136,6 +306,44 @@ describe('model worker', () => {
 
     expect(response.status).toBe(404)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expectVaryOrigin(response.headers)
+  })
+
+  it('returns CORS preflight headers for Authorization requests from allowed origins', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      modelRequest(fixture, 'OPTIONS', undefined, {
+        origin: HENTAIVERSE_ORIGIN,
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization',
+      }),
+      createEnv(fixture),
+    )
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get('access-control-allow-origin')).toBe(HENTAIVERSE_ORIGIN)
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.text()).toBe('')
+    expectVaryOrigin(response.headers)
+  })
+
+  it('returns preflight headers without ACAO for unknown origins', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      modelRequest(fixture, 'OPTIONS', undefined, {
+        origin: 'https://attacker.example',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization',
+      }),
+      createEnv(fixture),
+    )
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get('access-control-allow-origin')).toBeNull()
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization')
     expectVaryOrigin(response.headers)
   })
 
@@ -182,7 +390,12 @@ describe('model worker', () => {
     })
     delete env.PUBLIC_MODEL_PATH
 
-    const response = await fetchWorker(new Request(`https://models.example/yolo26n-640.onnx?key=${fixture.validKey}`), env)
+    const response = await fetchWorker(
+      new Request('https://models.example/yolo26n-640.onnx', {
+        headers: { authorization: `Bearer ${fixture.validKey}` },
+      }),
+      env,
+    )
 
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.realBody)
@@ -200,8 +413,8 @@ describe('model worker', () => {
       ]),
     })
 
-    const getResponse = await fetchWorker(modelRequest(fixture, 'GET', fixture.validKey), env)
-    const headResponse = await fetchWorker(modelRequest(fixture, 'HEAD', fixture.validKey), env)
+    const getResponse = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+    const headResponse = await fetchWorker(authorizedModelRequest(fixture, 'HEAD'), env)
 
     expect(getResponse.status).toBe(200)
     expect(getResponse.headers.get('etag')).toBe(httpEtag)
@@ -215,7 +428,7 @@ describe('model worker', () => {
   it('omits ETag when the R2 object has no httpEtag', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey),
+      authorizedModelRequest(fixture, 'GET'),
       createEnv(fixture, {
         keyValues: new Map<string, string>([[fixture.validKey, '1']]),
         objects: new Map<string, StoredObject>([
@@ -236,6 +449,7 @@ describe('model worker', () => {
 
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('etag')).toBe(fixture.decoyEtag)
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('x-hv-model-access')).toBeNull()
@@ -259,6 +473,17 @@ describe('model worker', () => {
     expect(await readResponseBody(response)).toBe(fixture.decoyBody)
   })
 
+  it('returns the decoy model when Authorization Bearer KV key is missing', async () => {
+    const fixture = createModelFixture()
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', fixture.validKey), createEnv(fixture))
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+    expect(response.headers.get('etag')).toBe(fixture.decoyEtag)
+    expect(response.headers.get('x-hv-model-access')).toBeNull()
+  })
+
   it('returns the decoy model when requested key is not authorized', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
@@ -270,15 +495,19 @@ describe('model worker', () => {
     expect(await readResponseBody(response)).toBe(fixture.decoyBody)
   })
 
-  it('returns 403 with CORS when authorized KV key is missing and INVALID_KEY_MODE is error', async () => {
+  it('returns 403 with CORS when a valid key is supplied only as query and INVALID_KEY_MODE is error', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
       modelRequest(fixture, 'GET', fixture.validKey),
-      createEnv(fixture, { invalidKeyMode: 'error' }),
+      createEnv(fixture, {
+        invalidKeyMode: 'error',
+        keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+      }),
     )
 
     expect(response.status).toBe(403)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('x-hv-model-access')).toBeNull()
     expect(await response.text()).toBe('Forbidden')
@@ -287,7 +516,7 @@ describe('model worker', () => {
   it('normalizes INVALID_KEY_MODE before selecting the error behavior', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey),
+      modelRequest(fixture, 'GET'),
       createEnv(fixture, { invalidKeyMode: ' ERROR ' }),
     )
 
@@ -298,7 +527,7 @@ describe('model worker', () => {
   it('normalizes INVALID_KEY_MODE before selecting the decoy behavior', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey),
+      modelRequest(fixture, 'GET'),
       createEnv(fixture, { invalidKeyMode: ' DeCoY ' }),
     )
 
@@ -309,20 +538,21 @@ describe('model worker', () => {
   it('returns 403 without ACAO for untrusted origins when INVALID_KEY_MODE is error', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey, { origin: 'https://attacker.example' }),
+      modelRequest(fixture, 'GET', undefined, { origin: 'https://attacker.example' }),
       createEnv(fixture, { invalidKeyMode: 'error' }),
     )
 
     expect(response.status).toBe(403)
     expect(response.headers.get('access-control-allow-origin')).toBeNull()
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expectVaryOrigin(response.headers)
     expect(await response.text()).toBe('Forbidden')
   })
 
-  it('returns 403 when key format is invalid and INVALID_KEY_MODE is error', async () => {
+  it('returns 403 when Authorization token format is invalid and INVALID_KEY_MODE is error', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.invalidKey),
+      authorizedModelRequest(fixture, 'GET', fixture.invalidKey),
       createEnv(fixture, { invalidKeyMode: 'error' }),
     )
 
@@ -330,10 +560,10 @@ describe('model worker', () => {
     expect(await response.text()).toBe('Forbidden')
   })
 
-  it('returns 403 for unauthorized key when INVALID_KEY_MODE is error', async () => {
+  it('returns 403 for unauthorized Authorization token when INVALID_KEY_MODE is error', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.mismatchedKey),
+      authorizedModelRequest(fixture, 'GET', fixture.mismatchedKey),
       createEnv(fixture, {
         invalidKeyMode: 'error',
         keyValues: new Map<string, string>([[fixture.validKey, '1']]),
@@ -361,13 +591,13 @@ describe('model worker', () => {
 
     expect(response.status).toBe(405)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
-    expect(response.headers.get('allow')).toBe('GET, HEAD')
+    expect(response.headers.get('allow')).toBe('GET, HEAD, OPTIONS')
   })
 
   it('returns 500 text when the selected R2 object is missing', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey),
+      authorizedModelRequest(fixture, 'GET'),
       createEnv(fixture, {
         keyValues: new Map<string, string>([[fixture.validKey, '1']]),
         objects: new Map<string, StoredObject>([
@@ -385,7 +615,7 @@ describe('model worker', () => {
   it('returns 500 instead of silently falling back when INVALID_KEY_MODE is unsupported', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.validKey),
+      modelRequest(fixture, 'GET'),
       createEnv(fixture, { invalidKeyMode: 'allow' }),
     )
 
@@ -401,7 +631,7 @@ describe('model worker', () => {
     })
     env.REAL_MODEL_OBJECT_KEY = ''
 
-    const response = await fetchWorker(modelRequest(fixture, 'GET', fixture.validKey), env)
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
 
     expect(response.status).toBe(500)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')

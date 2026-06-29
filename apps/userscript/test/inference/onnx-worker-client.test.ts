@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
+import { ONNX_RUNTIME_ASSETS } from '../../src/inference/onnx-runtime-assets'
 import { OnnxWorkerClient } from '../../src/inference/onnx-worker-client'
 import type { ModelCache } from '../../src/model/model-cache'
 import { createMockPanel } from '../helpers/mock-panel'
@@ -61,8 +62,8 @@ describe('OnnxWorkerClient', () => {
     expect(putCached).toHaveBeenCalledWith(modelBuffer, true, true)
     expect(SuccessfulWorker.messages[0]).toMatchObject({
       type: 'init',
-      ortScriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js',
-      wasmPath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/',
+      ortScriptUrl: ONNX_RUNTIME_ASSETS.cdn.scriptUrl,
+      wasmPath: ONNX_RUNTIME_ASSETS.cdn.wasmPath,
     })
   })
 
@@ -80,7 +81,7 @@ describe('OnnxWorkerClient', () => {
 
     expect(SuccessfulWorker.messages[0]).toMatchObject({
       type: 'init',
-      wasmPath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/',
+      wasmPath: ONNX_RUNTIME_ASSETS.cdn.wasmPath,
     })
     expect(SuccessfulWorker.messages[0]?.ortScriptUrl).toBeUndefined()
   })

@@ -22,6 +22,7 @@
     "test:coverage": "corepack pnpm -r test:coverage",
     "typecheck": "corepack pnpm -r typecheck",
     "lint": "eslint .",
+    "audit:high": "pnpm audit --audit-level high",
     "docs:check": "node scripts/check-docs-drift.mjs",
     "graphify:check": "node scripts/check-graphify-corpus.mjs",
     "architecture:check": "node scripts/check-architecture-boundaries.mjs",

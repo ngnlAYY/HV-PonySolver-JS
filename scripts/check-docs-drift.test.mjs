@@ -29,7 +29,12 @@ async function createFixture() {
   const files = [
     'README.md',
     'package.json',
+    'apps/userscript/package.json',
     'apps/userscript/src/inference/inference-config.ts',
+    'apps/userscript/src/inference/onnx-runtime-assets.ts',
+    'apps/model-worker/src/request-router.ts',
+    'apps/model-worker/src/model-access.ts',
+    'apps/model-worker/src/model-response.ts',
     'packages/shared/src/model.ts',
   ]
 
@@ -138,6 +143,911 @@ test('fails clearly when README omits verify-model-integrity and MODEL_FILE', as
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /README.md.*verify-model-integrity/s)
     assert.match(result.stderr, /README.md.*MODEL_FILE/s)
+  })
+})
+
+test('fails clearly when README omits ONNX Runtime asset manifest field names', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(
+      readmePath,
+      readme
+        .replaceAll('ONNX_RUNTIME_ASSETS', 'ONNX Runtime assets')
+        .replaceAll('scriptAsset.byteLength', 'script asset byte length')
+        .replaceAll('scriptAsset.sha256', 'script asset sha256')
+        .replaceAll('scriptAsset.maxByteLength', 'script asset max byte length'),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*ONNX_RUNTIME_ASSETS/s)
+    assert.match(result.stderr, /README.md.*scriptAsset\.byteLength/s)
+    assert.match(result.stderr, /README.md.*scriptAsset\.sha256/s)
+    assert.match(result.stderr, /README.md.*scriptAsset\.maxByteLength/s)
+  })
+})
+
+test('fails clearly when README omits ONNX Runtime asset package facts', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(
+      readmePath,
+      readme
+        .replaceAll('onnxruntime-web', 'onnx runtime web')
+        .replaceAll('1.26.0', '1.x')
+        .replaceAll('dist/ort.min.js', 'dist runtime')
+        .replaceAll('ort.min.js', 'ort min js'),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*onnxruntime-web/s)
+    assert.match(result.stderr, /README.md.*1\.26\.0/s)
+    assert.match(result.stderr, /README.md.*dist\/ort\.min\.js/s)
+    assert.match(result.stderr, /README.md.*ort\.min\.js/s)
+  })
+})
+
+test('fails clearly when README omits ONNX Runtime asset verification command and behavior', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(
+      readmePath,
+      readme
+        .replaceAll('verify-onnx-runtime-assets', 'verify onnx runtime assets')
+        .replaceAll('cdn.scriptUrl', 'cdn script url')
+        .replaceAll('cdn.wasmPath', 'cdn wasm path')
+        .replaceAll('HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME', 'BUNDLE_ONNX_RUNTIME'),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*verify-onnx-runtime-assets/s)
+    assert.match(result.stderr, /README.md.*cdn\.scriptUrl/s)
+    assert.match(result.stderr, /README.md.*cdn\.wasmPath/s)
+    assert.match(result.stderr, /README.md.*HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME/s)
+  })
+})
+
+test('fails clearly when README authorized model row omits Bearer auth', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中'))
+    await writeFile(
+      readmePath,
+      readme.replace(
+        '携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中',
+        '携带 authorized header 且 KV 命中',
+      ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*authorized real-model row must mention Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when README authorized model row omits cache-control', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('`200` 真实模型，模型响应使用 `Cache-Control: no-store`'))
+    await writeFile(
+      readmePath,
+      readme.replace(
+        '`200` 真实模型，模型响应使用 `Cache-Control: no-store`',
+        '`200` 真实模型，模型响应使用 cache-control header',
+      ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*authorized real-model row must mention Cache-Control: no-store/s)
+  })
+})
+
+test('fails clearly when README authorized HEAD row omits Bearer auth', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中'))
+    await writeFile(
+      readmePath,
+      readme.replace(
+        '| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中',
+        '| `HEAD /yolo26n-640.onnx` 携带 authorized header 且 KV 命中',
+      ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*authorized HEAD row must mention Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when README authorized GET row cache-control is masked by explanatory text', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('`200` 真实模型，模型响应使用 `Cache-Control: no-store`'))
+    await writeFile(
+      readmePath,
+      `${readme.replace(
+        '`200` 真实模型，模型响应使用 `Cache-Control: no-store`',
+        '`200` 真实模型，模型响应使用 cache-control header',
+      )}\n附注：KV 命中后返回真实模型时仍会发送 \`Cache-Control: no-store\`。\n`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*authorized real-model row must mention Cache-Control: no-store/s)
+  })
+})
+
+test('fails clearly when README authorized GET row Bearer auth is masked by explanatory text', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中'))
+    await writeFile(
+      readmePath,
+      `${readme.replace(
+        '携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中',
+        '携带 authorized header 且 KV 命中',
+      )}\n附注：KV 命中后返回真实模型时仍会发送 \`Authorization: Bearer <authorized-64-hex>\`。\n`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*authorized real-model row must mention Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when README OPTIONS row headers are masked by explanatory text', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`'))
+    await writeFile(
+      readmePath,
+      `${readme.replace(
+        '`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`',
+        '`204` preflight，preflight headers documented elsewhere',
+      )}\n附注：preflight 会发送 \`Access-Control-Allow-Methods: GET, HEAD, OPTIONS\` 和 \`Access-Control-Allow-Headers: Authorization\`。\n`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*OPTIONS docs must mention Access-Control-Allow-Methods/s)
+    assert.match(result.stderr, /README.md.*OPTIONS docs must mention Access-Control-Allow-Headers/s)
+  })
+})
+
+test('fails clearly when README 405 row Allow header is masked by explanatory text', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('`405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`'))
+    await writeFile(
+      readmePath,
+      readme
+        .replace('### HTTP 行为\n\n', '### HTTP 行为\n\n附注：405 Method Not Allowed 响应会发送 `Allow: GET, HEAD, OPTIONS`。\n')
+        .replace(
+          '`405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`',
+          '`405 Method Not Allowed`，Allow header documented elsewhere',
+        ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*405 docs must mention Allow: GET, HEAD, OPTIONS/s)
+  })
+})
+
+test('fails clearly when README selected R2 missing row is masked by explanatory text', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.match(readme, /\| 选中的 R2 object 缺失\s+\| `500 Internal Server Error`/)
+    await writeFile(
+      readmePath,
+      readme
+        .replace('### HTTP 行为\n\n', '### HTTP 行为\n\n附注：selected R2 object missing 会返回 `500 Internal Server Error`。\n')
+        .replace(
+          /\| 选中的 R2 object 缺失\s+\| `500 Internal Server Error`\s+\|/,
+          '| R2 对象缺失                                                   | 内部错误，状态码见附注                         |',
+        ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 500 Internal Server Error/s)
+  })
+})
+
+test('fails clearly when Model Worker source allowed methods drift from README', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const routerSource = await readFile(routerPath, 'utf8')
+    const responseSource = await readFile(responsePath, 'utf8')
+    assert.ok(routerSource.includes("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'"))
+    assert.ok(responseSource.includes("const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'"))
+    await writeFile(routerPath, routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'"))
+    await writeFile(responsePath, responseSource.replace("const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'", "const CORS_ALLOW_METHODS = 'GET, HEAD'"))
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*405 docs must mention Allow: GET, HEAD/s)
+    assert.match(result.stderr, /README.md.*OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
+  })
+})
+
+test('fails clearly when Model Worker source auth and response facts drift from README', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    const responseSource = await readFile(responsePath, 'utf8')
+    assert.ok(accessSource.includes("request.headers.get('authorization')"))
+    assert.ok(accessSource.includes('^Bearer\\s+'))
+    assert.ok(responseSource.includes("const CACHE_CONTROL = 'no-store'"))
+    assert.ok(responseSource.includes('textResponse(request, INTERNAL_ERROR_MESSAGE, 500'))
+    await writeFile(
+      accessPath,
+      accessSource
+        .replace("request.headers.get('authorization')", "request.headers.get('x-model-token')")
+        .replace('^Bearer\\s+', '^Token\\s+'),
+    )
+    await writeFile(
+      responsePath,
+      responseSource
+        .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'private, no-cache'")
+        .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404'),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+    assert.match(result.stderr, /README.md.*authorized real-model row must mention Cache-Control: private, no-cache/s)
+    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 404 Internal Server Error/s)
+  })
+})
+
+test('fails clearly when Model Worker source string facts drift is masked by regex literals', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const routerSource = await readFile(routerPath, 'utf8')
+    const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      routerPath,
+      `/const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'/
+${routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'")}`,
+    )
+    await writeFile(
+      responsePath,
+      `/const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'/
+/const CACHE_CONTROL = 'no-store'/
+/if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) }/
+${responseSource
+  .replace("const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'", "const CORS_ALLOW_METHODS = 'GET, HEAD'")
+  .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'private, no-cache'")
+  .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404')}`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*405 docs must mention Allow: GET, HEAD/s)
+    assert.match(result.stderr, /README.md.*OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
+    assert.match(result.stderr, /README.md.*authorized real-model row must mention Cache-Control: private, no-cache/s)
+    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 404 Internal Server Error/s)
+  })
+})
+
+test('fails clearly when Model Worker string facts use runtime expressions', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      responsePath,
+      responseSource
+        .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'no-store' + ', max-age=86400'")
+        .replace("const CORS_ALLOW_HEADERS = 'Authorization'", "const CORS_ALLOW_HEADERS = 'Authorization'.toLowerCase()"),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CACHE_CONTROL.*string literal/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_HEADERS.*string literal/s)
+  })
+})
+
+test('accepts Model Worker string facts with TypeScript-only annotations', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const routerSource = await readFile(routerPath, 'utf8')
+    const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      routerPath,
+      routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS: string = 'GET, HEAD, OPTIONS' as const"),
+    )
+    await writeFile(
+      responsePath,
+      responseSource
+        .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL: string = 'no-store' as const")
+        .replace("const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'", "const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS' satisfies string"),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.equal(result.exitCode, 0, result.stderr)
+  })
+})
+
+test('accepts Model Worker string facts with combined TypeScript-only suffixes', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const routerSource = await readFile(routerPath, 'utf8')
+    const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      routerPath,
+      routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS' as const satisfies string"),
+    )
+    await writeFile(
+      responsePath,
+      responseSource.replace("const CORS_ALLOW_HEADERS = 'Authorization'", "const CORS_ALLOW_HEADERS = 'Authorization' as const satisfies string"),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.equal(result.exitCode, 0, result.stderr)
+  })
+})
+
+test('fails clearly when Model Worker response header use-sites bypass source facts', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      responsePath,
+      responseSource
+        .replace("'access-control-allow-headers': CORS_ALLOW_HEADERS", "'access-control-allow-headers': 'X-Model-Token'")
+        .replace("'access-control-allow-methods': CORS_ALLOW_METHODS", "'access-control-allow-methods': 'GET, HEAD'")
+        .replace("    'cache-control': CACHE_CONTROL,\n  })\n\n  if (object.httpEtag)", "    'cache-control': 'private, no-cache',\n  })\n\n  if (object.httpEtag)"),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_HEADERS/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_METHODS/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CACHE_CONTROL/s)
+  })
+})
+
+test('fails clearly when Model Worker response header use-site drift is masked by regex decoys', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      responsePath,
+      responseSource
+        .replace("'access-control-allow-headers': CORS_ALLOW_HEADERS", "'access-control-allow-headers': 'X-Model-Token'")
+        .replace("'access-control-allow-methods': CORS_ALLOW_METHODS", "'access-control-allow-methods': 'GET, HEAD'")
+        .replace(
+          'export function preflightResponse(request: Request): Response {\n  const headers',
+          `export function preflightResponse(request: Request): Response {\n  /['access-control-allow-headers': CORS_ALLOW_HEADERS]/\n  /['access-control-allow-methods': CORS_ALLOW_METHODS]/\n  const headers`,
+        ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_HEADERS/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_METHODS/s)
+  })
+})
+
+test('fails clearly when selected R2 miss status is masked by an earlier decoy branch', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      responsePath,
+      responseSource
+        .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404')
+        .replace(
+          'export async function createModelResponse',
+          `function decoySelectedObjectMissingStatus(object: unknown, request: Request): Response | null {
+  if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) }
+  return null
+}
+
+export async function createModelResponse`,
+        ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 404 Internal Server Error/s)
+  })
+})
+
+test('accepts selected R2 miss status with equivalent null-guard shape', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      responsePath,
+      responseSource.replace(
+        `if (object === null) {
+    return textResponse(request, INTERNAL_ERROR_MESSAGE, 500, { 'content-type': 'text/plain;charset=UTF-8' })
+  }`,
+        `if (null === object) return textResponse(
+    request,
+    INTERNAL_ERROR_MESSAGE,
+    500,
+    { 'content-type': 'text/plain;charset=UTF-8' },
+  )`,
+      ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.equal(result.exitCode, 0, result.stderr)
+  })
+})
+
+test('fails clearly when selected R2 miss status is masked by nested dead decoy after bucket get', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      responsePath,
+      responseSource
+        .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404')
+        .replace('const object = await env.modelBucket.get(objectKey)', 'const object = await env.modelBucket.get(objectKey)\n  if (false) { if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) } }'),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 404 Internal Server Error/s)
+  })
+})
+
+test('fails clearly when Model Worker source auth drift is masked by comments', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `${accessSource
+        .replace("request.headers.get('authorization')", "request.headers.get('x-model-token')")
+        .replace('^Bearer\\s+', '^Token\\s+')}
+// decoy: request.headers.get('authorization') and /^Bearer\\s+/
+`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when Model Worker source auth drift is masked by strings', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `${accessSource
+        .replace("request.headers.get('authorization')", "request.headers.get('x-model-token')")
+        .replace('^Bearer\\s+', '^Token\\s+')}
+const decoy = "request.headers.get('authorization') /^Bearer\\\\s+/"
+const templateDecoy = \`request.headers.get('authorization') /^Bearer\\\\s+/\`
+`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when Model Worker source auth drift is masked by regex literals', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `${accessSource
+        .replace("request.headers.get('authorization')", "request.headers.get('x-model-token')")
+        .replace('^Bearer\\s+', '^Token\\s+')}
+/request.headers.get('authorization')/
+/^Bearer\\s+/
+`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when Bearer authorization pattern has no token capture group', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(accessPath, accessSource.replace('([^\\s]+)', '(?:[^\\s]+)'))
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when Authorization header read is only a dead-code decoy', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `${accessSource.replace("request.headers.get('authorization')", "request.headers.get('x-model-token')")}
+if (false) {
+  request.headers.get('authorization')
+}
+`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when Bearer exec is only a dead-code decoy', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `${accessSource.replace('BEARER_AUTHORIZATION_PATTERN.exec(authorization.trim())', '/^Token\\s+([^\\s]+)$/i.exec(authorization.trim())')}
+if (false) {
+  BEARER_AUTHORIZATION_PATTERN.exec('Bearer decoy')
+}
+`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when stale top-level Bearer pattern is unused by token parser', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `${accessSource
+        .replace("const BEARER_AUTHORIZATION_PATTERN = /^Bearer\\s+([^\\s]+)$/i", "const BEARER_AUTHORIZATION_PATTERN = /^Bearer\\s+([^\\s]+)$/i\nconst TOKEN_AUTHORIZATION_PATTERN = /^Token\\s+([^\\s]+)$/i")
+        .replace('BEARER_AUTHORIZATION_PATTERN.exec(authorization.trim())', 'TOKEN_AUTHORIZATION_PATTERN.exec(authorization.trim())')}
+if (false) {
+  BEARER_AUTHORIZATION_PATTERN.exec('Bearer decoy')
+}
+`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when Bearer token parser is unused by model access selection', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      accessSource.replace(
+        'const lookupKeys = getModelAccessTokenLookupKeys(getRequestAccessToken(request))',
+        'const lookupKeys = getModelAccessTokenLookupKeys(request.headers.get(\'x-model-token\'))',
+      ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when Bearer authorization pattern drift is masked by regex literal const decoy', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `/[const BEARER_AUTHORIZATION_PATTERN = /^Bearer\\s+]/
+${accessSource.replace('^Bearer\\s+', '^Token\\s+')}`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when Bearer authorization pattern drift is masked by inner const decoy', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `${accessSource.replace('^Bearer\\s+', '^Token\\s+')}
+if (false) {
+  const BEARER_AUTHORIZATION_PATTERN = /^Bearer\\s+([^\\s]+)$/i
+  BEARER_AUTHORIZATION_PATTERN.exec('Bearer decoy')
+}
+`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('accepts Model Worker source auth with comment and string decoys', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `${accessSource}
+// decoy: request.headers.get('x-model-token') and /^Token\\s+/
+const decoy = "request.headers.get('x-model-token') /^Token\\\\s+/"
+const templateDecoy = \`request.headers.get('x-model-token') /^Token\\\\s+/\`
+`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.equal(result.exitCode, 0, result.stderr)
+  })
+})
+
+test('fails clearly when README documents query-string model key authorization', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(readmePath, `${readme}\nGET /yolo26n-640.onnx?key=<authorized-64-hex> returns real model.\n`)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*query-string key authorization or real model access/s)
+  })
+})
+
+test('fails clearly when README documents query-string model key authorization on any model path', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(readmePath, `${readme}\nGET /models/custom.onnx?key=<authorized-64-hex> returns real model.\n`)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*query-string key authorization or real model access/s)
+  })
+})
+
+test('fails clearly when README says query-string key returns the real model in Chinese', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(readmePath, `${readme}\nquery string key 返回真实模型。\n`)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*query-string key authorization or real model access/s)
+  })
+})
+
+test('fails clearly when README URL query key returns the real model in Chinese', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(readmePath, `${readme}\nGET /yolo26n-640.onnx?key=<authorized-64-hex> 返回真实模型。\n`)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*query-string key authorization or real model access/s)
+  })
+})
+
+for (const queryKeyWording of [
+  'search param key returns real model.',
+  'query parameter key returns the real model.',
+  'URL parameter key authorizes real model.',
+  'query-string key returns the real model.',
+  'key query string returns the real model.',
+  'query string key authorizes access to the real model.',
+  'query string key returns a real model.',
+  'query string key returns `200` real model.',
+  'query string key returns 200, real model.',
+]) {
+  test(`fails clearly when README documents ${queryKeyWording}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const readmePath = join(fixtureRoot, 'README.md')
+      const readme = await readFile(readmePath, 'utf8')
+      await writeFile(readmePath, `${readme}\n${queryKeyWording}\n`)
+
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      assert.match(result.stderr, /README.md.*query-string key authorization or real model access/s)
+    })
+  })
+}
+
+test('does not reject query-string key denial wording as real model access', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(readmePath, `${readme}\n只提供 query string key，不返回真实模型；按缺少 Bearer token 处理。\n`)
+
+    const result = await runCheck(fixtureRoot)
+    assert.equal(result.exitCode, 0, result.stderr)
+  })
+})
+
+test('does not reject query-string key English denial wording as real model access', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(readmePath, `${readme}\nquery string key cannot return the real model; treat it as missing Bearer token.\n`)
+
+    const result = await runCheck(fixtureRoot)
+    assert.equal(result.exitCode, 0, result.stderr)
+  })
+})
+
+for (const queryKeyDenialWording of [
+  'must not return the real model; treat it as missing Bearer token.',
+  'should not authorize the real model; treat it as missing Bearer token.',
+  'never grants access to the real model; treat it as missing Bearer token.',
+  'cannot grant access to the real model; treat it as missing Bearer token.',
+  '不会授权真实模型；按缺少 Bearer token 处理',
+  '不能返回真实模型；按缺少 Bearer token 处理',
+  'can not authorize access to a real model; treat it as missing Bearer token.',
+  'does not authorize access to a real model; treat it as missing Bearer token.',
+]) {
+  test(`accepts query-string key denial wording: ${queryKeyDenialWording}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const readmePath = join(fixtureRoot, 'README.md')
+      const readme = await readFile(readmePath, 'utf8')
+      assert.ok(readme.includes('不授权真实模型；按缺少 Bearer token 处理'))
+      await writeFile(
+        readmePath,
+        readme.replace('不授权真实模型；按缺少 Bearer token 处理', queryKeyDenialWording),
+      )
+
+      const result = await runCheck(fixtureRoot)
+      assert.equal(result.exitCode, 0, result.stderr)
+    })
+  })
+}
+
+for (const positiveGrantAccessWording of [
+  'query string key grants access to the real model.',
+  'query string key can grant access to the real model.',
+  'query string key should grant access to the real model.',
+]) {
+  test(`fails clearly when README says ${positiveGrantAccessWording}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const readmePath = join(fixtureRoot, 'README.md')
+      const readme = await readFile(readmePath, 'utf8')
+      await writeFile(readmePath, `${readme}\n${positiveGrantAccessWording}\n`)
+
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      assert.match(result.stderr, /README.md.*query-string key authorization or real model access/s)
+    })
+  })
+}
+
+test('fails when query-string key denial line also contains positive grant access claim', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(
+      readmePath,
+      `${readme}\nquery string key cannot grant access to the real model, but a debug ?key grants access to the real model.\n`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*query-string key authorization or real model access/s)
+  })
+})
+
+for (const bearerContrastWording of [
+  'query string key does not authorize the real model; Authorization: Bearer returns the real model.',
+  'query string key does not authorize access to a real model, while Bearer token authorizes access to the real model.',
+  'query string key does not authorize access to a real model, Authorization: Bearer returns the real model.',
+]) {
+  test(`accepts Bearer contrast wording: ${bearerContrastWording}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const readmePath = join(fixtureRoot, 'README.md')
+      const readme = await readFile(readmePath, 'utf8')
+      await writeFile(readmePath, `${readme}\n${bearerContrastWording}\n`)
+
+      const result = await runCheck(fixtureRoot)
+      assert.equal(result.exitCode, 0, result.stderr)
+    })
+  })
+}
+
+test('fails clearly when README says query-string key authorizes the real model', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('不授权真实模型；按缺少 Bearer token 处理'))
+    await writeFile(
+      readmePath,
+      readme.replace('不授权真实模型；按缺少 Bearer token 处理', '授权真实模型；返回 200 真实模型'),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*query-string key does not authorize the real model/s)
+    assert.match(result.stderr, /README.md.*query-string key authorization or real model access/s)
+  })
+})
+
+test('fails clearly when README 405 docs omit OPTIONS from the Allow header row', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('`405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`'))
+    await writeFile(
+      readmePath,
+      readme.replace('`405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`', '`405 Method Not Allowed`，`Allow: GET, HEAD`'),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*405 docs must mention Allow: GET, HEAD, OPTIONS/s)
+    assert.match(result.stderr, /README.md.*stale Allow: GET, HEAD semantics/s)
+  })
+})
+
+test('fails clearly when README documents stale Model Worker cache-control semantics', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    await writeFile(readmePath, `${readme}\nStale example: Cache-Control: public, max-age=86400.\n`)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*Cache-Control: public, max-age=86400/s)
+  })
+})
+
+test('fails clearly when README selected R2 miss row omits Internal Server Error', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('| 选中的 R2 object 缺失'))
+    await writeFile(
+      readmePath,
+      readme.replace('| 选中的 R2 object 缺失                                          | `500 Internal Server Error`', '| 选中的 R2 object 缺失                                          | `404 Not Found`'),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 500 Internal Server Error/s)
   })
 })
 

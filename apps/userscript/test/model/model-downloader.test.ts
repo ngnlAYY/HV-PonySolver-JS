@@ -12,6 +12,12 @@ const TEST_INTEGRITY = {
   byteLength: 3,
   sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
 } as const
+const MODEL_URL = 'https://models.ngnl.host/yolo26n-640.onnx'
+
+function getFetchCall(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit] {
+  const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+  return [url, init]
+}
 
 describe('downloadModel', () => {
   beforeEach(() => {
@@ -19,7 +25,7 @@ describe('downloadModel', () => {
     getModelAccessKey.mockResolvedValue('')
   })
 
-  it('passes abort signal to fetch', async () => {
+  it('passes abort signal to fetch without token query or empty Authorization', async () => {
     const response = new Response(new Uint8Array([1, 2, 3]))
     const fetchMock = vi.fn(async () => response)
     vi.stubGlobal('fetch', fetchMock)
@@ -27,27 +33,75 @@ describe('downloadModel', () => {
 
     await downloadModel(controller.signal, { integrity: TEST_INTEGRITY })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://models.ngnl.host/yolo26n-640.onnx?key=',
-      expect.objectContaining({
-        cache: 'no-store',
-        signal: expect.any(AbortSignal),
-      }),
-    )
+    const [url, init] = getFetchCall(fetchMock)
+    expect(url).toBe(MODEL_URL)
+    expect(url).not.toContain('?key=')
+    expect(new Headers(init.headers).get('authorization')).toBeNull()
+    expect(init).toEqual(expect.objectContaining({
+      cache: 'no-store',
+      signal: expect.any(AbortSignal),
+    }))
   })
 
-  it('uses the saved model access key when downloading', async () => {
-    getModelAccessKey.mockResolvedValue('key with spaces & symbols')
+  it('uses the saved model access key as Authorization when downloading', async () => {
+    getModelAccessKey.mockResolvedValue('saved-token')
     const response = new Response(new Uint8Array([1, 2, 3]))
     const fetchMock = vi.fn(async () => response)
     vi.stubGlobal('fetch', fetchMock)
 
     await downloadModel(undefined, { integrity: TEST_INTEGRITY })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://models.ngnl.host/yolo26n-640.onnx?key=key%20with%20spaces%20%26%20symbols',
-      expect.objectContaining({ cache: 'no-store' }),
-    )
+    const [url, init] = getFetchCall(fetchMock)
+    expect(url).toBe(MODEL_URL)
+    expect(url).not.toContain('saved-token')
+    expect(url).not.toContain('?key=')
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer saved-token')
+    expect(init).toEqual(expect.objectContaining({ cache: 'no-store' }))
+  })
+
+  it('uses the candidate model access key override as trimmed Authorization', async () => {
+    getModelAccessKey.mockResolvedValue('old-key')
+    const response = new Response(new Uint8Array([1, 2, 3]))
+    const fetchMock = vi.fn(async () => response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await downloadModel(undefined, {
+      accessKeyOverride: ' candidate-token ',
+      integrity: TEST_INTEGRITY,
+    })
+
+    const [url, init] = getFetchCall(fetchMock)
+    expect(url).toBe(MODEL_URL)
+    expect(url).not.toContain('candidate-token')
+    expect(url).not.toContain('?key=')
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer candidate-token')
+  })
+
+  it('does not include access keys or tokenized URLs in HTTP errors', async () => {
+    getModelAccessKey.mockResolvedValue('secret-token')
+    const fetchMock = vi.fn(async () => new Response(null, { status: 403 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('模型下载失败: HTTP 403')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('secret-token')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('?key=')
+  })
+
+  it('omits Authorization for whitespace-only saved and override keys', async () => {
+    getModelAccessKey.mockResolvedValue('   ')
+    const response = new Response(new Uint8Array([1, 2, 3]))
+    const fetchMock = vi.fn(async () => response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await downloadModel(undefined, {
+      accessKeyOverride: '  ',
+      integrity: TEST_INTEGRITY,
+    })
+
+    const [url, init] = getFetchCall(fetchMock)
+    expect(url).toBe(MODEL_URL)
+    expect(url).not.toContain('?key=')
+    expect(new Headers(init.headers).get('authorization')).toBeNull()
   })
 
   it('uses a candidate model access key before saving settings', async () => {
@@ -58,10 +112,11 @@ describe('downloadModel', () => {
 
     await downloadModel(undefined, { integrity: TEST_INTEGRITY, accessKeyOverride: '  candidate key  ' })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://models.ngnl.host/yolo26n-640.onnx?key=candidate%20key',
-      expect.objectContaining({ cache: 'no-store' }),
-    )
+    const [url, init] = getFetchCall(fetchMock)
+    expect(url).toBe(MODEL_URL)
+    expect(url).not.toContain('?key=')
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer candidate key')
+    expect(init).toEqual(expect.objectContaining({ cache: 'no-store' }))
   })
 
   it('uses a candidate model access key without waiting for saved key storage', async () => {
@@ -74,10 +129,11 @@ describe('downloadModel', () => {
 
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     await expect(downloadPromise).resolves.toBeInstanceOf(ArrayBuffer)
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://models.ngnl.host/yolo26n-640.onnx?key=candidate-key',
-      expect.objectContaining({ cache: 'no-store' }),
-    )
+    const [url, init] = getFetchCall(fetchMock)
+    expect(url).toBe(MODEL_URL)
+    expect(url).not.toContain('?key=')
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer candidate-key')
+    expect(init).toEqual(expect.objectContaining({ cache: 'no-store' }))
   })
 
   it('does not fetch when the caller signal is already aborted', async () => {
