@@ -66,6 +66,14 @@ async function runModelWorkerVitest(env) {
   })
 }
 
+function stripAnsi(value) {
+  const escape = String.fromCharCode(27)
+  return value
+    .split(escape)
+    .map((segment, index) => (index === 0 ? segment : segment.replace(/^\[[0-?]*[ -/]*[@-~]/u, '')))
+    .join('')
+}
+
 test('renderWranglerConfigFile writes generated test config from the template', async () => {
   const { renderWranglerConfigFile, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
 
@@ -156,9 +164,10 @@ test('render-wrangler-config renders INVALID_KEY_MODE error from env', async () 
 
 test('model-worker vitest config keeps test placeholders isolated from deploy render mode', async () => {
   const result = await runModelWorkerVitest({ HV_PONY_SOLVER_RENDER_ENV: 'deploy' })
+  const stdout = stripAnsi(result.stdout)
 
-  assert.match(result.stdout, /Test Files\s+1 passed/)
-  assert.match(result.stdout, /Tests\s+5 passed/)
+  assert.match(stdout, /Test Files\s+1 passed/)
+  assert.match(stdout, /Tests\s+5 passed/)
 })
 
 test('render-wrangler-config requires MODEL_KEYS_KV_NAMESPACE_ID', async () => {
