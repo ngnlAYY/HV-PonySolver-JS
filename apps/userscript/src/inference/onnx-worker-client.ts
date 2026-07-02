@@ -1,7 +1,7 @@
 import type { DetectorService, WorkerRequest, WorkerResponse, YoloParseResult } from './inference-types'
 import { createBlobWorker } from './blob-worker'
 import { imagePreprocessConfig, onnxRuntimeConfig } from './inference-config'
-import { ModelCache } from '../model/model-cache'
+import type { ModelCache } from '../model/model-cache'
 import { createOnnxWorkerScript } from './onnx-worker-script'
 import { WorkerRequestBridge } from './worker-request-bridge'
 import type { InferenceStatusSink } from '../status-panel/status-panel-types'
@@ -147,7 +147,8 @@ export class OnnxWorkerClient implements DetectorService {
     const worker = createBlobWorker(workerScript)
     const requestBridge = new WorkerRequestBridge(worker, (error) => this.failWorker(error, worker, requestBridge))
     this.requestBridge = requestBridge
-    worker.onerror = (event) => this.failWorker(event.error || new Error(event.message || 'Worker 运行错误'), worker, requestBridge)
+    worker.onerror = (event) =>
+      this.failWorker(event.error || new Error(event.message || 'Worker 运行错误'), worker, requestBridge)
     worker.onmessageerror = () => this.failWorker(new Error('Worker message 解析失败'), worker, requestBridge)
     return worker
   }

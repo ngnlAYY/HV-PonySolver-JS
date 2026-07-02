@@ -199,4 +199,68 @@ describe('checkArchitectureBoundaries', () => {
       )
     })
   })
+
+  it('rejects explicit repo roots without boundary source directories', async () => {
+    await withRepo(async (repoRoot) => {
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot, { requireSourceDirs: true }),
+        /architecture boundary source directories are missing/,
+      )
+    })
+  })
+
+  it('rejects explicit repo roots with partial boundary source directories', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', '')
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot, { requireSourceDirs: true }),
+        /architecture boundary source directories are missing/,
+      )
+    })
+  })
+
+  it('rejects shared imports from application code', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'packages/shared/src/model.ts', "import { App } from '../../apps/userscript/src/app/app'\n")
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot),
+        /shared package must not import apps/,
+      )
+    })
+  })
+
+  it('rejects nested shared imports from application code', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'packages/shared/src/nested/model.ts', "import { App } from '../../../apps/userscript/src/app/app'\n")
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot),
+        /shared package must not import apps/,
+      )
+    })
+  })
+
+  it('rejects inference runtime imports from userscript storage bridge', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { getGmValue } from '../userscript/gm-bridge'\n")
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot),
+        /inference layer must not import userscript storage bridge/,
+      )
+    })
+  })
+
+  it('rejects nested inference runtime imports from userscript storage bridge', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/userscript/src/inference/nested/client.ts', "import { getGmValue } from '../../userscript/gm-bridge'\n")
+
+      await assert.rejects(
+        checkArchitectureBoundaries(repoRoot),
+        /inference layer must not import userscript storage bridge/,
+      )
+    })
+  })
 })

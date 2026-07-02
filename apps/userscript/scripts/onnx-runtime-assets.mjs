@@ -10,21 +10,18 @@ function parseOnnxRuntimeAssetsManifest(source, options = {}) {
   const manifestSource = extractOnnxRuntimeAssetsObjectSource(source, sourcePath)
   const scriptAssetSource = parseObjectProperty(manifestSource, 'scriptAsset', 'scriptAsset', sourcePath)
   const cdnSource = parseObjectProperty(manifestSource, 'cdn', 'cdn', sourcePath)
-  const sha256 = parseStringProperty(scriptAssetSource, 'sha256', 'scriptAsset.sha256', sourcePath)
-  if (!/^[0-9a-f]{64}$/.test(sha256)) {
-    throw new Error(`Invalid ONNX_RUNTIME_ASSETS.scriptAsset.sha256 in ${sourcePath}: ${sha256}`)
+  const scriptAsset = {
+    ...parseAssetObject(scriptAssetSource, 'scriptAsset', sourcePath),
+    maxByteLength: parseNumberProperty(scriptAssetSource, 'maxByteLength', 'scriptAsset.maxByteLength', sourcePath),
   }
+  const wasmAssetsSource = parseArrayProperty(manifestSource, 'wasmAssets', 'wasmAssets', sourcePath)
+  const wasmAssets = parseAssetArray(wasmAssetsSource, 'wasmAssets', sourcePath)
 
   const manifest = {
     packageName: parseStringProperty(manifestSource, 'packageName', 'packageName', sourcePath),
     packageVersion: parseStringProperty(manifestSource, 'packageVersion', 'packageVersion', sourcePath),
-    scriptAsset: {
-      path: parseStringProperty(scriptAssetSource, 'path', 'scriptAsset.path', sourcePath),
-      filename: parseStringProperty(scriptAssetSource, 'filename', 'scriptAsset.filename', sourcePath),
-      byteLength: parseNumberProperty(scriptAssetSource, 'byteLength', 'scriptAsset.byteLength', sourcePath),
-      sha256,
-      maxByteLength: parseNumberProperty(scriptAssetSource, 'maxByteLength', 'scriptAsset.maxByteLength', sourcePath),
-    },
+    scriptAsset,
+    wasmAssets,
     cdn: {
       scriptUrl: parseStringProperty(cdnSource, 'scriptUrl', 'cdn.scriptUrl', sourcePath),
       wasmPath: parseStringProperty(cdnSource, 'wasmPath', 'cdn.wasmPath', sourcePath),
@@ -46,9 +43,13 @@ function resolveInstalledOnnxRuntimeAssetPath(manifest, repoRoot = defaultRepoRo
 }
 
 function resolveInstalledOnnxRuntimeAssetPathCandidates(manifest, repoRoot = defaultRepoRoot) {
+  return resolveInstalledOnnxRuntimePackageAssetPathCandidates(manifest, manifest.scriptAsset, repoRoot)
+}
+
+function resolveInstalledOnnxRuntimePackageAssetPathCandidates(manifest, asset, repoRoot = defaultRepoRoot) {
   return [
-    resolve(repoRoot, 'node_modules', manifest.packageName, manifest.scriptAsset.path),
-    resolve(repoRoot, 'apps/userscript/node_modules', manifest.packageName, manifest.scriptAsset.path),
+    resolve(repoRoot, 'node_modules', manifest.packageName, asset.path),
+    resolve(repoRoot, 'apps/userscript/node_modules', manifest.packageName, asset.path),
   ]
 }
 
@@ -173,6 +174,88 @@ function parseObjectProperty(source, propertyName, displayName, sourcePath) {
   }
   assertPropertyValueTerminator(source, objectEnd + 1, displayName, sourcePath)
   return source.slice(objectStart, objectEnd + 1)
+}
+
+function parseArrayProperty(source, propertyName, displayName, sourcePath) {
+  const match = readSinglePropertyMatch(source, propertyName, displayName, sourcePath)
+  const arrayStart = match.valueStart
+  if (source[arrayStart] !== '[') {
+    throw new Error(`Unable to read ONNX_RUNTIME_ASSETS.${displayName} from ${sourcePath}`)
+  }
+
+  const arrayEnd = findMatchingBracket(source, arrayStart)
+  if (arrayEnd === -1) {
+    throw new Error(`Unable to read ONNX_RUNTIME_ASSETS.${displayName} from ${sourcePath}`)
+  }
+  assertPropertyValueTerminator(source, arrayEnd + 1, displayName, sourcePath)
+  return source.slice(arrayStart, arrayEnd + 1)
+}
+
+function parseAssetArray(source, displayName, sourcePath) {
+  const assets = []
+  for (let index = 1; index < source.length - 1; index += 1) {
+    const skipped = skipIgnoredSyntax(source, index)
+    if (skipped !== index) {
+      index = skipped - 1
+      continue
+    }
+    if (/\s|,/.test(source[index])) {
+      continue
+    }
+    if (source[index] !== '{') {
+      throw new Error(`Invalid ONNX_RUNTIME_ASSETS.${displayName} in ${sourcePath}: unexpected array item`)
+    }
+
+    const objectEnd = findMatchingBrace(source, index)
+    if (objectEnd === -1) {
+      throw new Error(`Unable to read ONNX_RUNTIME_ASSETS.${displayName} from ${sourcePath}`)
+    }
+    assets.push(parseAssetObject(source.slice(index, objectEnd + 1), `${displayName}[${assets.length}]`, sourcePath))
+    index = objectEnd
+  }
+
+  if (assets.length === 0) {
+    throw new Error(`ONNX_RUNTIME_ASSETS.${displayName} must include at least one asset`)
+  }
+  return assets
+}
+
+function parseAssetObject(assetSource, displayName, sourcePath) {
+  const sha256 = parseStringProperty(assetSource, 'sha256', `${displayName}.sha256`, sourcePath)
+  if (!/^[0-9a-f]{64}$/.test(sha256)) {
+    throw new Error(`Invalid ONNX_RUNTIME_ASSETS.${displayName}.sha256 in ${sourcePath}: ${sha256}`)
+  }
+
+  return {
+    path: parseStringProperty(assetSource, 'path', `${displayName}.path`, sourcePath),
+    filename: parseStringProperty(assetSource, 'filename', `${displayName}.filename`, sourcePath),
+    byteLength: parseNumberProperty(assetSource, 'byteLength', `${displayName}.byteLength`, sourcePath),
+    sha256,
+  }
+}
+
+function findMatchingBracket(source, arrayStart) {
+  let depth = 0
+  for (let index = arrayStart; index < source.length; index += 1) {
+    const skipped = skipIgnoredSyntax(source, index)
+    if (skipped !== index) {
+      index = skipped - 1
+      continue
+    }
+
+    if (source[index] === '[') {
+      depth += 1
+      continue
+    }
+    if (source[index] === ']') {
+      depth -= 1
+      if (depth === 0) {
+        return index
+      }
+    }
+  }
+
+  return -1
 }
 
 function validateOnnxRuntimeCdn(manifest, sourcePath) {
@@ -413,5 +496,6 @@ export {
   readOnnxRuntimeAssetStats,
   resolveInstalledOnnxRuntimeAssetPath,
   resolveInstalledOnnxRuntimeAssetPathCandidates,
+  resolveInstalledOnnxRuntimePackageAssetPathCandidates,
   sha256Hex,
 }

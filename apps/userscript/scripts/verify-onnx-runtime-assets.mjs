@@ -3,7 +3,7 @@ import {
   onnxRuntimeAssetIntegrityMatches,
   readFirstExistingOnnxRuntimeAssetStats,
   readOnnxRuntimeAssetsManifest,
-  resolveInstalledOnnxRuntimeAssetPathCandidates,
+  resolveInstalledOnnxRuntimePackageAssetPathCandidates,
 } from './onnx-runtime-assets.mjs'
 
 if (isDirectRun()) {
@@ -17,21 +17,21 @@ if (isDirectRun()) {
 
 async function runCli(repoRoot) {
   const manifest = await readOnnxRuntimeAssetsManifest(repoRoot)
-  const assetPaths = resolveInstalledOnnxRuntimeAssetPathCandidates(manifest, repoRoot)
-  const { stats: actual } = await readFirstExistingOnnxRuntimeAssetStats(assetPaths)
-  const expected = manifest.scriptAsset
-
-  if (!onnxRuntimeAssetIntegrityMatches(actual, expected)) {
-    writeError('ONNX Runtime asset integrity mismatch')
-    writeError(`Expected: byteLength: ${expected.byteLength}, sha256: ${expected.sha256}`)
-    writeError(`Actual: byteLength: ${actual.byteLength}, sha256: ${actual.sha256}`)
-    process.exitCode = 1
-    return
+  const verifiedAssets = []
+  for (const asset of [manifest.scriptAsset, ...manifest.wasmAssets]) {
+    const assetPaths = resolveInstalledOnnxRuntimePackageAssetPathCandidates(manifest, asset, repoRoot)
+    const { stats: actual } = await readFirstExistingOnnxRuntimeAssetStats(assetPaths)
+    if (!onnxRuntimeAssetIntegrityMatches(actual, asset)) {
+      writeError(`ONNX Runtime asset integrity mismatch: ${asset.filename}`)
+      writeError(`Expected: byteLength: ${asset.byteLength}, sha256: ${asset.sha256}`)
+      writeError(`Actual: byteLength: ${actual.byteLength}, sha256: ${actual.sha256}`)
+      process.exitCode = 1
+      return
+    }
+    verifiedAssets.push(`${asset.filename} byteLength=${actual.byteLength}, sha256=${actual.sha256}`)
   }
 
-  writeOutput(
-    `ONNX Runtime assets verified: ${expected.filename} byteLength=${actual.byteLength}, sha256=${actual.sha256}`,
-  )
+  writeOutput(`ONNX Runtime assets verified: ${verifiedAssets.join('; ')}`)
 }
 
 function isDirectRun() {

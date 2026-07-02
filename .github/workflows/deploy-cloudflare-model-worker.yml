@@ -8,6 +8,14 @@ on:
         type: boolean
         required: true
         default: false
+      invalid_key_mode:
+        description: 'Invalid token behavior'
+        type: choice
+        required: true
+        default: decoy
+        options:
+          - decoy
+          - error
 
 permissions:
   contents: read
@@ -23,15 +31,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
           run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -66,6 +75,7 @@ jobs:
           HV_PONY_SOLVER_RENDER_ENV: deploy
           MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
+          INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
         run: pnpm --filter @hv-pony-solver/model-worker render-config
 
       - name: Typecheck
@@ -81,6 +91,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
+          INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
         run: |
           pnpm --filter @hv-pony-solver/model-worker exec node scripts/validate-wrangler-config.mjs
           pnpm --filter @hv-pony-solver/model-worker exec wrangler deploy --dry-run
@@ -92,4 +103,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
+          INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
         run: pnpm --filter @hv-pony-solver/model-worker run deploy

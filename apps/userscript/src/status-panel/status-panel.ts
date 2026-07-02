@@ -1,8 +1,15 @@
 import type { AnswerCode } from '@hv-pony-solver/shared'
-import { HistoryStore } from '../persistence/answer-history-store'
+import type { HistoryStore } from '../persistence/answer-history-store'
 import type { HistoryRecord, World } from '../persistence/answer-history-types'
 import type { PanelStatus, StatusPanel as StatusPanelContract } from './status-panel-types'
-import { getPanelHistoryLimit, getPanelHistoryLimitSync, getPanelPosition, getPanelPositionSync, isPanelCompactMode, isPanelCompactModeSync } from './panel-settings'
+import {
+  getPanelHistoryLimit,
+  getPanelHistoryLimitSync,
+  getPanelPosition,
+  getPanelPositionSync,
+  isPanelCompactMode,
+  isPanelCompactModeSync,
+} from './panel-settings'
 import { formatAnswers, renderStatusPanel } from './status-panel-renderer'
 
 function getWorld(): World {

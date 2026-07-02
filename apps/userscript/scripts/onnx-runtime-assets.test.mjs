@@ -13,6 +13,7 @@ import {
   readOnnxRuntimeAssetsManifest,
   resolveInstalledOnnxRuntimeAssetPathCandidates,
 } from './onnx-runtime-assets.mjs'
+import { verifyOnnxRuntimeCdn, verifyRemoteAsset } from './verify-onnx-runtime-cdn.mjs'
 
 const appDir = resolve(import.meta.dirname, '..')
 const verifyScriptPath = resolve(appDir, 'scripts/verify-onnx-runtime-assets.mjs')
@@ -30,6 +31,11 @@ test('parseOnnxRuntimeAssetsManifest reads canonical runtime asset fields', () =
   assert.equal(manifest.scriptAsset.byteLength, 3)
   assert.equal(manifest.scriptAsset.sha256, sha256(bytes))
   assert.equal(manifest.scriptAsset.maxByteLength, 2_097_152)
+  assert.equal(manifest.wasmAssets.length, 1)
+  assert.equal(manifest.wasmAssets[0].path, 'dist/ort-wasm-simd-threaded.wasm')
+  assert.equal(manifest.wasmAssets[0].filename, 'ort-wasm-simd-threaded.wasm')
+  assert.equal(manifest.wasmAssets[0].byteLength, 2)
+  assert.equal(manifest.wasmAssets[0].sha256, sha256(Buffer.from([9, 8])))
   assert.equal(manifest.cdn.scriptUrl, 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js')
   assert.equal(manifest.cdn.wasmPath, 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/')
 })
@@ -206,12 +212,150 @@ test('readOnnxRuntimeAssetsManifest reads manifests from repo root', async () =>
   }
 })
 
+test('parseOnnxRuntimeAssetsManifest rejects invalid wasm asset sha256', () => {
+  const sourcePath = 'fixture/onnx-runtime-assets.ts'
+  const source = createManifestSource(Buffer.from([1, 2, 3])).replace(
+    /sha256: '[0-9a-f]{64}',\n {4}},\n {2}],/,
+    `sha256: '${'A'.repeat(64)}',\n    },\n  ],`,
+  )
+
+  assert.throws(
+    () => parseOnnxRuntimeAssetsManifest(source, { sourcePath }),
+    new RegExp(`Invalid ONNX_RUNTIME_ASSETS\\.wasmAssets\\[0\\]\\.sha256 in ${sourcePath}`),
+  )
+})
+
+test('verify-onnx-runtime-assets CLI exits 0 for matching local JS and WASM assets', async () => {
+  const fixture = await createCliFixture()
+  try {
+    const bytes = Buffer.from([1, 2, 3])
+    const wasmBytes = Buffer.from([9, 8])
+    await writeCanonicalManifest(fixture.root, bytes)
+    await writeRuntimeAsset(fixture.root, bytes)
+    await writeWasmAsset(fixture.root, wasmBytes)
+
+    const result = await runCli(['--repo-root', fixture.root])
+
+    assert.equal(result.code, 0)
+    assert.match(result.stdout, /ONNX Runtime assets verified/)
+    assert.match(result.stdout, /ort\.min\.js/)
+    assert.match(result.stdout, /ort-wasm-simd-threaded\.wasm/)
+    assert.match(result.stdout, /byteLength=3/)
+    assert.match(result.stdout, /byteLength=2/)
+    assert.equal(result.stderr, '')
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true })
+  }
+})
+
+test('verify-onnx-runtime-assets CLI exits 1 for mismatched local WASM asset', async () => {
+  const fixture = await createCliFixture()
+  try {
+    await writeCanonicalManifest(fixture.root, Buffer.from([1, 2, 3]))
+    await writeRuntimeAsset(fixture.root, Buffer.from([1, 2, 3]))
+    await writeWasmAsset(fixture.root, Buffer.from([7]))
+
+    const result = await runCli(['--repo-root', fixture.root])
+
+    assert.equal(result.code, 1)
+    assert.match(result.stderr, /ONNX Runtime asset integrity mismatch: ort-wasm-simd-threaded\.wasm/)
+    assert.match(result.stderr, /Expected: byteLength: 2/)
+    assert.match(result.stderr, /Actual: byteLength: 1/)
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true })
+  }
+})
+
+test('verifyOnnxRuntimeCdn verifies JS runtime and WASM assets through manifest URLs', async () => {
+  const fixture = await createCliFixture()
+  try {
+    const bytes = Buffer.from([1, 2, 3])
+    const wasmBytes = Buffer.from([9, 8])
+    const responses = new Map([
+      ['https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js', bytes],
+      ['https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort-wasm-simd-threaded.wasm', wasmBytes],
+    ])
+    const requested = []
+    await writeCanonicalManifest(fixture.root, bytes)
+
+    await verifyOnnxRuntimeCdn({
+      repoRoot: fixture.root,
+      fetchImpl: async (url, init) => {
+        requested.push([url, init])
+        const body = responses.get(url)
+        return {
+          ok: Boolean(body),
+          status: body ? 200 : 404,
+          arrayBuffer: async () => body,
+        }
+      },
+    })
+
+    assert.deepEqual(requested, [
+      ['https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js', { cache: 'no-store' }],
+      ['https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort-wasm-simd-threaded.wasm', { cache: 'no-store' }],
+    ])
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true })
+  }
+})
+
+test('verifyRemoteAsset rejects CDN HTTP failures', async () => {
+  await assert.rejects(
+    verifyRemoteAsset('https://cdn.example.invalid/ort.min.js', {
+      byteLength: 3,
+      sha256: sha256(Buffer.from([1, 2, 3])),
+    }, async () => ({
+      ok: false,
+      status: 404,
+      arrayBuffer: async () => Buffer.from([]),
+    })),
+    /ONNX Runtime CDN asset failed: https:\/\/cdn\.example\.invalid\/ort\.min\.js HTTP 404/,
+  )
+})
+
+test('verifyRemoteAsset rejects CDN asset byteLength mismatch', async () => {
+  await assert.rejects(
+    verifyRemoteAsset('https://cdn.example.invalid/ort.min.js', {
+      byteLength: 3,
+      sha256: sha256(Buffer.from([1, 2, 3])),
+    }, async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => Buffer.from([1, 2]),
+    })),
+    /ONNX Runtime CDN asset size mismatch: https:\/\/cdn\.example\.invalid\/ort\.min\.js/,
+  )
+})
+
+test('verifyOnnxRuntimeCdn rejects CDN asset SHA-256 mismatch', async () => {
+  const fixture = await createCliFixture()
+  try {
+    await writeCanonicalManifest(fixture.root, Buffer.from([1, 2, 3]))
+
+    await assert.rejects(
+      verifyOnnxRuntimeCdn({
+        repoRoot: fixture.root,
+        fetchImpl: async () => ({
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => Buffer.from([4, 5, 6]),
+        }),
+      }),
+      /ONNX Runtime CDN asset SHA-256 mismatch/,
+    )
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true })
+  }
+})
+
 test('verify-onnx-runtime-assets CLI exits 0 for a matching local runtime asset and canonical manifest', async () => {
   const fixture = await createCliFixture()
   try {
     const bytes = Buffer.from([1, 2, 3])
     await writeCanonicalManifest(fixture.root, bytes)
     await writeRuntimeAsset(fixture.root, bytes)
+    await writeWasmAsset(fixture.root, Buffer.from([9, 8]))
 
     const result = await runCli(['--repo-root', fixture.root])
 
@@ -232,6 +376,7 @@ test('verify-onnx-runtime-assets CLI exits 0 for a matching hoisted runtime asse
     const bytes = Buffer.from([1, 2, 3])
     await writeCanonicalManifest(fixture.root, bytes)
     await writeHoistedRuntimeAsset(fixture.root, bytes)
+    await writeHoistedWasmAsset(fixture.root, Buffer.from([9, 8]))
 
     const result = await runCli(['--repo-root', fixture.root])
 
@@ -323,7 +468,19 @@ async function writeHoistedRuntimeAsset(root, bytes) {
   await writeFile(assetPath, bytes)
 }
 
-function createManifestSource(bytes) {
+async function writeWasmAsset(root, bytes) {
+  const assetPath = join(root, 'apps/userscript/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm')
+  await mkdir(dirname(assetPath), { recursive: true })
+  await writeFile(assetPath, bytes)
+}
+
+async function writeHoistedWasmAsset(root, bytes) {
+  const assetPath = join(root, 'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm')
+  await mkdir(dirname(assetPath), { recursive: true })
+  await writeFile(assetPath, bytes)
+}
+
+function createManifestSource(bytes, wasmBytes = Buffer.from([9, 8])) {
   return `export const ONNX_RUNTIME_ASSETS = {
   packageName: 'onnxruntime-web',
   packageVersion: '1.26.0',
@@ -334,6 +491,14 @@ function createManifestSource(bytes) {
     sha256: '${sha256(bytes)}',
     maxByteLength: 2_097_152,
   },
+  wasmAssets: [
+    {
+      path: 'dist/ort-wasm-simd-threaded.wasm',
+      filename: 'ort-wasm-simd-threaded.wasm',
+      byteLength: ${wasmBytes.byteLength},
+      sha256: '${sha256(wasmBytes)}',
+    },
+  ],
   cdn: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js',
     wasmPath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/',

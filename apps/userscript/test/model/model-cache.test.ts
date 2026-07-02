@@ -1,10 +1,11 @@
+import type * as ModelIntegrityModule from '../../src/model/model-integrity'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../src/model/model-downloader', () => ({
   downloadModel: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
 }))
 vi.mock('../../src/model/model-integrity', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/model/model-integrity')>()
+  const actual = await importOriginal<typeof ModelIntegrityModule>()
   return {
     ...actual,
     verifyModelIntegrity: vi.fn(actual.verifyModelIntegrity),
@@ -56,7 +57,18 @@ function createStatusPanel(): StatusPanel {
   }
 }
 
-function stubIndexedDb(cachedRow?: Record<string, unknown>, readError?: DOMException): void {
+function stubIndexedDb(
+  options: Readonly<{
+    cachedRow?: Record<string, unknown>
+    readError?: DOMException
+    openError?: DOMException
+    deferOpenSuccess?: boolean
+  }> = {},
+): Readonly<{
+  request: TestOpenRequest
+  database: TestDatabase
+}> {
+  const { cachedRow, readError, openError, deferOpenSuccess = false } = options
   const readRequest: TestRequest = {
     onerror: null,
     onsuccess: null,
@@ -97,19 +109,27 @@ function stubIndexedDb(cachedRow?: Record<string, unknown>, readError?: DOMExcep
     onsuccess: null,
     onupgradeneeded: null,
     result: database as IDBDatabase,
-    error: null,
+    error: openError ?? null,
   }
   const indexedDb = {
     open: vi.fn(() => {
-      queueMicrotask(() => {
+      const completeOpen = (): void => {
+        if (openError) {
+          request.onerror?.(new Event('error'))
+          return
+        }
         request.onupgradeneeded?.(new Event('upgradeneeded') as IDBVersionChangeEvent)
         request.onsuccess?.(new Event('success'))
-      })
+      }
+      if (!deferOpenSuccess) {
+        queueMicrotask(completeOpen)
+      }
       return request as unknown as IDBOpenDBRequest
     }),
   }
 
   vi.stubGlobal('indexedDB', indexedDb)
+  return { request, database }
 }
 
 afterEach(() => {
@@ -188,11 +208,13 @@ describe('ModelCache', () => {
     const buffer = bufferFromBytes([9, 9, 9])
     vi.mocked(verifyModelIntegrity).mockResolvedValueOnce(undefined)
     stubIndexedDb({
-      key: modelConfig.cacheKey,
-      version: modelConfig.version,
-      byteLength: modelConfig.integrity.byteLength,
-      sha256: modelConfig.integrity.sha256,
-      buffer,
+      cachedRow: {
+        key: modelConfig.cacheKey,
+        version: modelConfig.version,
+        byteLength: modelConfig.integrity.byteLength,
+        sha256: modelConfig.integrity.sha256,
+        buffer,
+      },
     })
     const panel = createStatusPanel()
     const cache = new ModelCache(panel)
@@ -215,7 +237,7 @@ describe('ModelCache', () => {
   })
 
   it('reports elapsed cache read failures before falling back to download', async () => {
-    stubIndexedDb(undefined, new DOMException('读取失败'))
+    stubIndexedDb({ readError: new DOMException('读取失败') })
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const panel = createStatusPanel()
     const cache = new ModelCache(panel)
@@ -223,6 +245,42 @@ describe('ModelCache', () => {
     await expect(cache.getCached()).resolves.toBeNull()
 
     expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^缓存读取失败 \d+ms，准备下载$/) })
+  })
+
+  it('falls back to download when IndexedDB open fails', async () => {
+    stubIndexedDb({ openError: new DOMException('打开失败') })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const panel = createStatusPanel()
+    const cache = new ModelCache(panel)
+
+    await expect(cache.getCached()).resolves.toBeNull()
+
+    expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^缓存读取失败 \d+ms，准备下载$/) })
+  })
+
+  it('rejects stale open requests after close', async () => {
+    const { request, database } = stubIndexedDb({ deferOpenSuccess: true })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const panel = createStatusPanel()
+    const cache = new ModelCache(panel)
+    const promise = cache.getCached()
+
+    cache.close()
+    request.onsuccess?.(new Event('success'))
+
+    await expect(promise).resolves.toBeNull()
+    expect(database.close).toHaveBeenCalledTimes(1)
+    expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^缓存读取失败 \d+ms，准备下载$/) })
+  })
+
+  it('closes the cached database on versionchange', async () => {
+    const { database } = stubIndexedDb()
+    const cache = new ModelCache(createStatusPanel())
+
+    await cache.getCached()
+    database.onversionchange?.(new Event('versionchange'))
+
+    expect(database.close).toHaveBeenCalledTimes(1)
   })
 
   it('reports elapsed time when download completes', async () => {

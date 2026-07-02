@@ -82,6 +82,43 @@ describe('StatusPanel', () => {
     expect(document.body.textContent).not.toContain('推理状态：')
   })
 
+  it('updates panel position from async GM storage after creating the panel', async () => {
+    vi.stubGlobal('GM_getValue', vi.fn(async (key: string) => {
+      if (key === 'hvPonySolverPanelPosition') {
+        return '12,34'
+      }
+      return ''
+    }))
+    const panel = new StatusPanel(createHistoryStore())
+
+    panel.create()
+    const element = document.querySelector('.ponyLog') as HTMLDivElement
+
+    expect(element.style.top).toBe('150px')
+    expect(element.style.left).toBe('1240px')
+    await vi.waitFor(() => expect(element.style.top).toBe('12px'))
+    expect(element.style.left).toBe('34px')
+  })
+
+  it('updates history limit from async GM storage after creating the panel', async () => {
+    vi.stubGlobal('GM_getValue', vi.fn(async (key: string) => {
+      if (key === 'hvPonySolverHistoryLimit') {
+        return '2'
+      }
+      return ''
+    }))
+    const panel = new StatusPanel(createHistoryStore(createSuccessRecords(6)))
+
+    panel.create()
+
+    expect(document.body.textContent).toContain('P5')
+    expect(document.body.textContent).not.toContain('P6')
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain('P3'))
+    expect(document.body.textContent).toContain('P1')
+    expect(document.body.textContent).toContain('P2')
+    expect(document.body.textContent).not.toContain('P5')
+  })
+
   it('shows only five answer records by default', () => {
     const store = createHistoryStore(createSuccessRecords(6))
     const panel = new StatusPanel(store)

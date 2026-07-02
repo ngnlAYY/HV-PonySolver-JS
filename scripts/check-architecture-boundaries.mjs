@@ -22,19 +22,29 @@ const BOUNDARY_RULES = [
   {
     name: 'model worker must not import userscript',
     fromDir: 'apps/model-worker/src',
-    forbiddenImports: ['apps/userscript', '../userscript', '../../userscript', '@hv-pony-solver/userscript'],
+    forbiddenImports: ['apps/userscript', '/userscript/', '@hv-pony-solver/userscript'],
   },
   {
     name: 'userscript must not import model worker',
     fromDir: 'apps/userscript/src',
-    forbiddenImports: ['apps/model-worker', '../model-worker', '../../model-worker', '@hv-pony-solver/model-worker'],
+    forbiddenImports: ['apps/model-worker', '/model-worker/', '@hv-pony-solver/model-worker'],
+  },
+  {
+    name: 'shared package must not import apps',
+    fromDir: 'packages/shared/src',
+    forbiddenImports: ['/apps/', '@hv-pony-solver/userscript', '@hv-pony-solver/model-worker'],
+  },
+  {
+    name: 'inference layer must not import userscript storage bridge',
+    fromDir: 'apps/userscript/src/inference',
+    forbiddenImports: ['/userscript/gm-bridge/', 'src/userscript/gm-bridge'],
   },
 ]
 
 if (isDirectRun()) {
   try {
-    const repoRoot = parseArgs(process.argv.slice(2))
-    await checkArchitectureBoundaries(repoRoot)
+    const { repoRoot, explicitRepoRoot } = parseArgs(process.argv.slice(2))
+    await checkArchitectureBoundaries(repoRoot, { requireSourceDirs: explicitRepoRoot })
     process.stdout.write('Architecture boundary check passed\n')
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
@@ -49,20 +59,22 @@ function isDirectRun() {
 function parseArgs(args) {
   const repoRootIndex = args.indexOf('--repo-root')
   if (repoRootIndex === -1) {
-    return defaultRepoRoot
+    return { repoRoot: defaultRepoRoot, explicitRepoRoot: false }
   }
   const repoRoot = args[repoRootIndex + 1]
   if (!repoRoot) {
     throw new Error('--repo-root requires a path')
   }
-  return resolve(repoRoot)
+  return { repoRoot: resolve(repoRoot), explicitRepoRoot: true }
 }
 
-async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot) {
+async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot, { requireSourceDirs = false } = {}) {
   const violations = []
+  const missingSourceDirs = []
   for (const rule of BOUNDARY_RULES) {
     const absoluteDir = resolve(repoRoot, rule.fromDir)
     if (!existsSync(absoluteDir)) {
+      missingSourceDirs.push(rule.fromDir)
       continue
     }
     const files = await collectSourceFiles(absoluteDir)
@@ -77,6 +89,10 @@ async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot) {
         }
       }
     }
+  }
+
+  if (requireSourceDirs && missingSourceDirs.length > 0) {
+    throw new Error(`architecture boundary source directories are missing: ${missingSourceDirs.join(', ')}`)
   }
 
   if (violations.length > 0) {

@@ -3,7 +3,7 @@ import type { DetectorService, YoloParseResult } from '../inference/inference-ty
 import type { StatusPanel } from '../status-panel/status-panel-types'
 import { formatErrorMessage } from '../utils/errors'
 import { logError } from '../utils/logger'
-import { AnswerSubmitter } from './answer-submitter'
+import type { AnswerSubmitter } from './answer-submitter'
 import { findCaptchaTarget } from './captcha-target'
 import type { ImageLoader } from './captcha-types'
 import { solverConfig } from './solver-config'

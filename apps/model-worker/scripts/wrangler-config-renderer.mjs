@@ -20,6 +20,14 @@ function readRequiredValue(name, values, renderMode = '') {
   return validateConfigValue(name, value, { allowTestPlaceholders: !isProductionMode(renderMode) })
 }
 
+function readOptionalInvalidKeyMode(values) {
+  const mode = (values.INVALID_KEY_MODE ?? 'decoy').trim().toLowerCase() || 'decoy'
+  if (mode !== 'decoy' && mode !== 'error') {
+    throw new Error('INVALID_KEY_MODE must be one of: decoy, error')
+  }
+  return mode
+}
+
 function escapeTomlString(value) {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
@@ -37,7 +45,7 @@ function renderWranglerConfig(
 ) {
   const rendered = requiredVariables.reduce((content, name) => {
     return content.replaceAll('${' + name + '}', readRequiredValue(name, values, renderMode))
-  }, template)
+  }, template).replaceAll('${INVALID_KEY_MODE}', readOptionalInvalidKeyMode(values))
   return replaceMainPath(rendered, mainPath)
 }
 

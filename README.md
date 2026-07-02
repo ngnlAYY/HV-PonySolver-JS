@@ -59,7 +59,7 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 3. `Authorization: Bearer <token>` 中的 token 必须是 64 位十六进制字符串。
 4. 通过 `MODEL_KEYS` KV 查询授权 token：命中则返回真实 R2 模型，否则按 `INVALID_KEY_MODE` 返回 decoy 或 `403`；query string 不授权真实模型。
 5. 真实模型对象键默认 `real/yolo26n-640.onnx`，decoy 模型对象键默认 `decoy/yolo26n-640.onnx`。
-6. 成功响应使用 `application/octet-stream`，`Content-Disposition: inline; filename="yolo26n-640.onnx"`，`Cache-Control: no-store`。无 `Origin` 请求允许直接下载；Hentaiverse 白名单 Origin 会被回显；未知 Origin 不授予 CORS。
+6. 成功响应使用 `application/octet-stream`，`Content-Disposition: inline; filename="yolo26n-640.onnx"`，`Cache-Control: no-store`。模型响应当前保持 `Cache-Control: no-store`；缓存策略和未来 versioned URL 前置条件见 [docs/model-cache-strategy.md](docs/model-cache-strategy.md)。无 `Origin` 请求允许直接下载；Hentaiverse 白名单 Origin 会被回显；未知 Origin 不授予 CORS。
 
 ## 端到端数据流
 
@@ -83,7 +83,7 @@ StatusPanel 记录结果、置信度与耗时
 
 `.graphifyignore` 用于把生成索引、依赖目录和临时产物排除在 Graphify 语料之外；`graphify:check` 会校验这些排除规则，并可用 `node scripts/check-graphify-corpus.mjs --report` 校验重新生成的 `graphify-out/GRAPH_REPORT.md`。
 
-`architecture:check` 固化当前最强的边界结论：推理层不应 import `StatusPanel`，`StatusPanel` 不应 import 推理层，`apps/userscript` 与 `apps/model-worker` 只能通过 `packages/shared` 共享稳定契约。
+`architecture:check` 固化当前最强的边界结论：推理层不应 import `StatusPanel`，`StatusPanel` 不应 import 推理层，`apps/userscript` 与 `apps/model-worker` 只能通过 `packages/shared` 共享稳定契约，`packages/shared` 不应反向 import 应用代码，推理层不应直接 import userscript storage bridge。`browser-sinks:check` 固化浏览器危险点审计范围：只允许 `StatusPanel` 的已审计 `innerHTML` 渲染点，以及 ONNX worker 入口中加载内置 runtime 所需的 `new Function` / `importScripts`。
 
 推理配置已拆成聚焦导出：`imagePreprocessConfig` 负责输入尺寸，`yoloOutputConfig` 负责 YOLO 解析假设，`onnxRuntimeConfig` 负责运行时资源位置，`inferenceTimeoutConfig` 负责 worker、检测与模型下载超时。
 
@@ -105,6 +105,8 @@ corepack enable
 pnpm install
 ```
 
+协作流程、分包快速检查命令和 commit 风格见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 如果本机没有裸 `pnpm` 命令，也可以使用：
 
 ```bash
@@ -125,7 +127,15 @@ corepack pnpm install
 | `pnpm docs:check` | 检查 README.md 与 source 关键事实是否发生 drift                 |
 | `pnpm graphify:check` | 检查 Graphify 语料排除规则与可选图谱报告                    |
 | `pnpm architecture:check` | 检查 userscript、model-worker 与 shared 的架构边界       |
-| `pnpm check:quick` | 依次运行 lint、typecheck、test、docs:check、graphify:check、architecture:check |
+| `pnpm browser-sinks:check` | 检查 userscript 中 `innerHTML`、`new Function` 与 `importScripts` 是否只出现在已审计位置 |
+| `pnpm benchmark:inference` | 运行 userscript 推理纯函数本地 micro benchmark |
+| `pnpm release:notes` | 根据 shared model manifest 生成模型发布说明 |
+| `pnpm test:e2e:userscript` | 运行 userscript Playwright 本地 fixture smoke 测试       |
+| `pnpm check:e2e` | 运行当前 E2E gate                                              |
+| `pnpm check:userscript` | 依次运行 userscript 的 typecheck、test 与 build |
+| `pnpm check:model-worker` | 依次运行 Model Worker 的 typecheck、test 与 build |
+| `pnpm check:shared` | 依次运行 shared 包的 typecheck、test 与 build |
+| `pnpm check:quick` | 依次运行 lint、typecheck、test、docs:check、graphify:check、architecture:check、browser-sinks:check |
 | `pnpm check`      | 先运行 check:quick，再运行 test:coverage 与 build              |
 | `pnpm format`     | 用 Prettier 格式化仓库文件                                       |
 
@@ -138,7 +148,9 @@ corepack pnpm install
 | `pnpm --filter @hv-pony-solver/userscript typecheck`                                                   | 类型检查 userscript 源码                                                               |
 | `pnpm --filter @hv-pony-solver/userscript test`                                                        | 运行 userscript Vitest/jsdom 单元测试与 node:test 脚本测试                             |
 | `MODEL_FILE=/path/to/yolo26n-640.onnx pnpm --filter @hv-pony-solver/userscript verify-model-integrity` | 校验待发布模型与 shared manifest 的 byteLength / SHA-256 一致性                        |
-| `corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-assets`                         | 校验本地 ONNX Runtime asset manifest 与已安装 `onnxruntime-web` JS runtime 一致性       |
+| `corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-assets`                         | 校验本地 ONNX Runtime asset manifest 与已安装 `onnxruntime-web` JS runtime / WASM assets 一致性 |
+| `corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-cdn`                            | 发布前手动联网校验 CDN 上的 ONNX Runtime JS runtime / WASM assets 一致性                         |
+| `corepack pnpm --filter @hv-pony-solver/userscript benchmark:inference`                               | 运行推理纯函数本地 micro benchmark，输出预处理与 YOLO parser 的 `ms/op`                         |
 
 ### Model Worker 命令
 
@@ -183,6 +195,16 @@ corepack pnpm --filter @hv-pony-solver/userscript build -- --minify=false
 apps/userscript/dist/hv-pony-solver.user.js
 ```
 
+发布用构建可通过环境变量额外写出产物校验文件：
+
+| 环境变量                                      | 输出内容                              |
+| --------------------------------------------- | ------------------------------------- |
+| `HV_PONY_SOLVER_ARTIFACT_SHA256_PATH`         | 最终 `.user.js` 产物的 SHA-256 文本   |
+| `HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH`       | 产物路径、byteLength、SHA-256、压缩状态、runtime 打包状态和 metafile 路径 |
+| `HV_PONY_SOLVER_METAFILE_PATH`                | esbuild main / worker metafile JSON   |
+
+手动发布 userscript artifact 时，CI 会使用 `build:bundled-runtime -- --minify`，并同时上传 `.user.js`、`.sha256`、artifact manifest 与 esbuild metafile。
+
 构建脚本会：
 
 1. 以 `apps/userscript/src/main.ts` 为入口。
@@ -197,15 +219,31 @@ apps/userscript/dist/hv-pony-solver.user.js
 
 ### ONNX Runtime asset manifest
 
-`apps/userscript/src/inference/onnx-runtime-assets.ts` 中的 `ONNX_RUNTIME_ASSETS` 是 ONNX Runtime Web JS runtime 资产的唯一来源。当前 package 为 `onnxruntime-web@1.26.0`，本地校验目标是已安装依赖中的 `dist/ort.min.js` / `ort.min.js`；manifest 记录 `scriptAsset.byteLength`、`scriptAsset.sha256` 和 `scriptAsset.maxByteLength`，并通过 `cdn.scriptUrl`、`cdn.wasmPath` 派生 `onnxRuntimeConfig` 的远程资源位置。
+`apps/userscript/src/inference/onnx-runtime-assets.ts` 中的 `ONNX_RUNTIME_ASSETS` 是 ONNX Runtime Web JS runtime 与 WASM assets 的唯一来源。当前 package 为 `onnxruntime-web@1.26.0`，本地校验目标是已安装依赖中的 `dist/ort.min.js` / `ort.min.js`，以及 `wasmAssets` 中记录的 `dist/ort-wasm-simd-threaded.asyncify.wasm`、`dist/ort-wasm-simd-threaded.jsep.wasm`、`dist/ort-wasm-simd-threaded.jspi.wasm` 和 `dist/ort-wasm-simd-threaded.wasm`；manifest 记录 `scriptAsset.byteLength`、`scriptAsset.sha256`、`scriptAsset.maxByteLength`、`wasmAssets.byteLength` 和 `wasmAssets.sha256`，并通过 `cdn.scriptUrl`、`cdn.wasmPath` 派生 `onnxRuntimeConfig` 的远程资源位置。
 
-发布前可运行：
+发布前可运行本地 asset 校验：
 
 ```bash
 corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-assets
 ```
 
-该命令只校验本地安装的 `onnxruntime-web` JS runtime asset 与 manifest 中 byteLength / SHA-256 是否一致，不会联网校验 CDN，也不会校验 WASM 文件。内置 JS runtime 构建仍通过 `ortWasmPath` 远程加载 WASM。
+该命令校验本地安装的 `onnxruntime-web` JS runtime asset 与 WASM assets 是否与 manifest 中 byteLength / SHA-256 一致，不会联网校验 CDN。内置 JS runtime 构建仍通过 `ortWasmPath` 远程加载 WASM。
+
+发布前如需确认 CDN 内容未漂移，可手动运行 release-only 联网校验：
+
+```bash
+corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-cdn
+```
+
+`verify-onnx-runtime-cdn` 会联网校验 `cdn.scriptUrl` 指向的 JS runtime，以及由 `cdn.wasmPath` 与 `wasmAssets` 文件名组成的 WASM assets；该命令不接入默认 CI。
+
+推理性能基准用于比较同一台机器上改动前后的纯函数耗时，不作为 CI gate。运行：
+
+```bash
+corepack pnpm benchmark:inference
+```
+
+输出包含 `copyRgbaToChwFloat32` 与 `parseYoloOutput` 的 `ms/op`；不同机器、负载和 Node.js 版本下的绝对数值不可直接比较。
 
 ### Userscript metadata
 
@@ -325,7 +363,7 @@ apps/model-worker/wrangler.template.toml
 apps/model-worker/wrangler.toml
 ```
 
-`wrangler.toml` 由 `render-config` 生成，并被 `.gitignore` 忽略。`render-config` 在 `HV_PONY_SOLVER_RENDER_ENV=production` 或 `deploy` 时会拒绝 `test-kv` / `test-bucket` 占位值；`pnpm --filter @hv-pony-solver/model-worker run deploy` 会自动以 `deploy` 模式渲染配置，并在部署前校验生成的 `wrangler.toml` 不含测试占位值。
+`wrangler.toml` 由 `render-config` 生成，并被 `.gitignore` 忽略。`render-config` 在 `HV_PONY_SOLVER_RENDER_ENV=production` 或 `deploy` 时会拒绝 `test-kv` / `test-bucket` 占位值；未提供 `INVALID_KEY_MODE` 时默认渲染为 `decoy`，提供时只接受 `decoy` 或 `error`。`pnpm --filter @hv-pony-solver/model-worker run deploy` 会自动以 `deploy` 模式渲染配置，并在部署前校验生成的 `wrangler.toml` 不含测试占位值。
 
 当前模板配置：
 
@@ -348,11 +386,18 @@ apps/model-worker/wrangler.toml
 | ---------------------------- | ---- | --------------------------- | ---------------------------------- |
 | `MODEL_KEYS_KV_NAMESPACE_ID` | 是   | 替换 Worker KV namespace id | `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
 | `MODEL_BUCKET_NAME`          | 是   | 替换 Worker R2 bucket 名称  | `hv-pony-models`                   |
+| `INVALID_KEY_MODE`           | 否   | 控制无效 token 响应；默认 `decoy`，可选 `decoy` / `error` | `decoy` |
 
 示例：
 
 ```bash
 MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> pnpm --filter @hv-pony-solver/model-worker render-config
+```
+
+如需临时把无效 token 改为直接返回 `403 Forbidden`，可显式设置：
+
+```bash
+MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> INVALID_KEY_MODE=error pnpm --filter @hv-pony-solver/model-worker render-config
 ```
 
 ### Worker 运行时绑定与变量
@@ -456,26 +501,23 @@ pnpm --filter @hv-pony-solver/model-worker test
 
 ### CI workflow
 
-`.github/workflows/verify-monorepo.yml` 会在 `pull_request`、推送到 `main` 和 `workflow_dispatch` 时运行仓库校验；手动触发时可额外选择是否构建内置 ONNX Runtime Web JS runtime 的 userscript 以及是否发布 artifact：
+`.github/workflows/verify-monorepo.yml` 会在 `pull_request`、推送到 `main` 和 `workflow_dispatch` 时运行仓库校验；手动触发时可额外选择是否构建内置 ONNX Runtime Web JS runtime 的 userscript、是否运行 userscript Playwright smoke 测试，以及是否发布 artifact。workflow 使用 `actions/setup-node` 的 pnpm cache，并把 guardrails、测试、coverage/build 拆成并行 jobs。
 
-1. Checkout。
-2. 若手动触发且 `publish_userscript_artifact=true`，先要求 `bundle_onnx_runtime=true`，否则直接失败，避免发布依赖远程 JS runtime 的 userscript artifact。
-3. 设置 Node.js 22。
-4. 设置 pnpm。
-5. `pnpm install --frozen-lockfile`。
-6. `pnpm lint`。
-7. `pnpm typecheck`。
-8. 使用测试值渲染 Worker Wrangler 配置。
-9. `pnpm test`。
-10. 运行 Guardrail checks：`pnpm docs:check && pnpm graphify:check && pnpm architecture:check`。
-11. `pnpm test:coverage`。
-12. `pnpm build`。
-13. 如果 `bundle_onnx_runtime=true`，额外构建内置 ONNX Runtime Web JS runtime 的 userscript。
-14. 如果 `publish_userscript_artifact=true`，上传 `apps/userscript/dist/hv-pony-solver.user.js` artifact；默认不上传，且必须同时设置 `bundle_onnx_runtime=true`。
+userscript E2E 仅在 `workflow_dispatch` 且 `run_userscript_e2e=true` 时执行；它使用仓库内本地 fixture 页面进行 smoke 验证，不会访问真实 Hentaiverse 站点。
+
+`Security Scan` workflow 使用 CodeQL 扫描 TypeScript/JavaScript，并在 PR 上运行 dependency review；根命令 `pnpm audit:high` 仍在主验证 workflow 的 `guardrails` job 中执行。
+
+1. `validate-inputs` 先检查手动发布 artifact 时是否同时启用 `bundle_onnx_runtime=true`，否则直接失败，避免发布依赖远程 JS runtime 的 userscript artifact。
+2. `guardrails` job 设置 Node.js 22、启用 pnpm cache、安装依赖，然后运行 `pnpm audit:high`、`pnpm lint`、`pnpm typecheck`、测试值 Wrangler 配置渲染、`pnpm docs:check`、`pnpm graphify:check`、`pnpm architecture:check` 和 `pnpm browser-sinks:check`。
+3. `test` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test`。
+4. `coverage-build` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test:coverage` 和 `pnpm build`。
+5. `userscript-e2e` job 仅在 `workflow_dispatch` 且 `run_userscript_e2e=true` 时运行；它安装 Playwright Chromium 依赖，再运行 `pnpm test:e2e:userscript`。
+6. `bundled-userscript` job 依赖 guardrails、test、coverage-build 和可选 E2E 成功后运行；当 `bundle_onnx_runtime=true` 时以 `--minify` 构建内置 ONNX Runtime Web JS runtime 的 userscript，并生成 `.sha256`、artifact manifest 与 esbuild metafile。
+7. 如果 `publish_userscript_artifact=true`，`bundled-userscript` job 上传 `apps/userscript/dist/hv-pony-solver.user.js`、`.sha256`、artifact manifest 与 esbuild metafile；默认不上传，且必须同时设置 `bundle_onnx_runtime=true`。
 
 ### Model Worker 部署 workflow
 
-`.github/workflows/deploy-cloudflare-model-worker.yml` 默认手动触发，用于按需验证 Model Worker；只有 `publish_model_worker=true` 时才部署，默认不部署。
+`.github/workflows/deploy-cloudflare-model-worker.yml` 默认手动触发，用于按需验证 Model Worker；只有 `publish_model_worker=true` 时才部署，默认不部署。手动触发时可通过 `invalid_key_mode` 选择无效 token 行为，默认 `decoy`，可选 `decoy` 或 `error`。workflow 同样使用 `actions/setup-node` 的 pnpm cache。
 
 验证与部署步骤：
 
@@ -483,10 +525,11 @@ pnpm --filter @hv-pony-solver/model-worker test
 2. 设置 Node.js 22。
 3. 设置 pnpm。
 4. `pnpm install --frozen-lockfile`。
-5. 使用 GitHub Secrets 渲染 Wrangler 配置。
+5. 使用 GitHub Secrets 与 `invalid_key_mode` 输入渲染 Wrangler 配置。
 6. 类型检查 Worker。
 7. 运行 Worker 测试。
-8. 如果 `publish_model_worker=true`，执行 `pnpm --filter @hv-pony-solver/model-worker run deploy`；默认跳过部署。
+8. 如果 Cloudflare secrets 完整，运行 Wrangler dry-run。
+9. 如果 `publish_model_worker=true`，执行 `pnpm --filter @hv-pony-solver/model-worker run deploy`；默认跳过部署。
 
 需要配置的 GitHub Secrets：
 
@@ -496,6 +539,12 @@ pnpm --filter @hv-pony-solver/model-worker test
 | `MODEL_BUCKET_NAME`          | 渲染 Worker R2 bucket 名称  |
 | `CLOUDFLARE_ACCOUNT_ID`      | Wrangler 部署认证           |
 | `CLOUDFLARE_API_TOKEN`       | Wrangler 部署认证           |
+
+### Model Worker invalid key 运维
+
+`INVALID_KEY_MODE=decoy` 是默认策略：缺少 Bearer token、token 格式错误或 KV 未命中的请求会收到 decoy 模型，用于降低通过 HTTP 状态探测 key 有效性的信号。`INVALID_KEY_MODE=error` 会返回 `403 Forbidden`，适合异常流量、成本控制或排障时临时启用。
+
+详细操作步骤、Cloudflare rate limit 建议和回滚方式记录在 `docs/model-worker-ops.md`。
 
 ## 部署与发布
 
@@ -511,7 +560,7 @@ corepack pnpm --filter @hv-pony-solver/userscript build
 corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 ```
 
-默认构建不内置 JS runtime；`HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1` 或 `build:bundled-runtime` 会先按 `ONNX_RUNTIME_ASSETS.scriptAsset.byteLength` 与 `ONNX_RUNTIME_ASSETS.scriptAsset.sha256` 校验本地 `onnxruntime-web@1.26.0/dist/ort.min.js`，再把 JS runtime 内置进 userscript。两种构建都仍通过 `ortWasmPath` 加载 WASM 资源。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
+默认构建不内置 JS runtime；`HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1` 或 `build:bundled-runtime` 会先按 `ONNX_RUNTIME_ASSETS.scriptAsset.byteLength` 与 `ONNX_RUNTIME_ASSETS.scriptAsset.sha256` 校验本地 `onnxruntime-web@1.26.0/dist/ort.min.js`，再把 JS runtime 内置进 userscript。两种构建都仍通过 `ortWasmPath` 加载 WASM 资源；发布前应使用 `verify-onnx-runtime-assets` 同时校验本地 JS runtime 与 `wasmAssets`，必要时再用 `verify-onnx-runtime-cdn` 手动联网校验 CDN。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
 
 将生成的文件安装到 userscript 管理器：
 
@@ -520,6 +569,14 @@ apps/userscript/dist/hv-pony-solver.user.js
 ```
 
 如果需要访问真实模型，需要确保构建产物中的 `modelConfig.accessKey` 对应 Worker KV 中存在的授权 key。`modelConfig.verifyIntegrity` 默认开启（`true`），会按 `packages/shared/src/model.ts` 中 `MODEL_INTEGRITY.byteLength` 与 `MODEL_INTEGRITY.sha256` 定义的字节长度和 SHA-256 对下载及缓存读取进行严格校验；当远端模型字节内容变更时，必须同步更新 `MODEL_INTEGRITY` 与 `MODEL_VERSION`，否则下载会被阻断。发布前应对待发布 ONNX 文件运行 `MODEL_FILE=/path/to/yolo26n-640.onnx corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity`，确保本地模型与 shared manifest 一致。
+
+发布前应生成模型发布说明，记录当前 shared manifest 中的版本、byteLength 和 SHA-256：
+
+```bash
+corepack pnpm release:notes
+```
+
+该命令只读取仓库内 manifest 并输出 Markdown，不上传模型、不访问 Cloudflare，也不会替代发布前的 `verify-model-integrity`。
 
 ### 部署 Model Worker
 
@@ -551,6 +608,7 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 - TypeScript 使用 `strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`、`isolatedModules`。
 - ESLint 禁止 `any`，未使用参数可用 `_` 前缀忽略。
 - Prettier 配置为无分号、单引号、trailing comma、`printWidth: 120`。
+- 新增 ESLint 规则先以 warning 接入；当 warning 清零并稳定一段时间后再升级为 error。
 - `apps/model-worker/wrangler.toml` 是生成文件，不参与 lint。
 - userscript `dist`、coverage、node_modules、Wrangler 本地产物均被忽略。
 

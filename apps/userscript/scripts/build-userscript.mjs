@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -34,6 +35,17 @@ export function validateUserscriptMetadata(metadata) {
 
 export function createUserscriptOutput(metadata, bundledText) {
   return `${metadata}\n\n${bundledText}`
+}
+
+export function createArtifactManifest({ outputFile, byteLength, sha256, minified, bundledRuntime, metafilePath }) {
+  return {
+    artifact: outputFile,
+    byteLength,
+    sha256,
+    minified,
+    bundledRuntime,
+    metafile: metafilePath || null,
+  }
 }
 
 export function createMetafileJson(mainMetafile, workerMetafile) {
@@ -152,10 +164,37 @@ async function buildUserscript({ args = process.argv.slice(2), env = process.env
   }
 
   await mkdir(dirname(outputPath), { recursive: true })
-  await writeFile(outputPath, createUserscriptOutput(metadata, outputFile.text))
+  const userscriptOutput = createUserscriptOutput(metadata, outputFile.text)
+  const outputBytes = Buffer.from(userscriptOutput)
+  const outputSha256 = sha256Hex(outputBytes)
+  await writeFile(outputPath, userscriptOutput)
   if (metafilePath) {
     await mkdir(dirname(metafilePath), { recursive: true })
     await writeFile(metafilePath, createMetafileJson(result.metafile, workerBuild.metafile))
+  }
+  const artifactSha256Path = env.HV_PONY_SOLVER_ARTIFACT_SHA256_PATH
+  if (artifactSha256Path) {
+    await mkdir(dirname(artifactSha256Path), { recursive: true })
+    await writeFile(artifactSha256Path, `${outputSha256}\n`)
+  }
+  const artifactManifestPath = env.HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH
+  if (artifactManifestPath) {
+    await mkdir(dirname(artifactManifestPath), { recursive: true })
+    await writeFile(
+      artifactManifestPath,
+      `${JSON.stringify(
+        createArtifactManifest({
+          outputFile: outputPath,
+          byteLength: outputBytes.byteLength,
+          sha256: outputSha256,
+          minified: shouldMinify,
+          bundledRuntime: env.HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME === '1',
+          metafilePath,
+        }),
+        null,
+        2,
+      )}\n`,
+    )
   }
 }
 

@@ -18,7 +18,7 @@
   },
   "scripts": {
     "build": "corepack pnpm -r build",
-    "test": "corepack pnpm -r test && node --test scripts/model-manifest.test.mjs && node --test scripts/check-docs-drift.test.mjs && node --test scripts/check-graphify-corpus.test.mjs && node --test scripts/check-architecture-boundaries.test.mjs",
+    "test": "corepack pnpm -r test && node --test scripts/model-manifest.test.mjs && node --test scripts/model-release-notes.test.mjs && node --test scripts/check-docs-drift.test.mjs && node --test scripts/check-graphify-corpus.test.mjs && node --test scripts/check-architecture-boundaries.test.mjs && node --test scripts/check-browser-sinks.test.mjs",
     "test:coverage": "corepack pnpm -r test:coverage",
     "typecheck": "corepack pnpm -r typecheck",
     "lint": "eslint .",
@@ -26,8 +26,16 @@
     "docs:check": "node scripts/check-docs-drift.mjs",
     "graphify:check": "node scripts/check-graphify-corpus.mjs",
     "architecture:check": "node scripts/check-architecture-boundaries.mjs",
+    "browser-sinks:check": "node scripts/check-browser-sinks.mjs",
+    "benchmark:inference": "corepack pnpm --filter @hv-pony-solver/userscript benchmark:inference",
+    "release:notes": "node scripts/model-release-notes.mjs",
     "format": "prettier --write .",
-    "check:quick": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm docs:check && corepack pnpm graphify:check && corepack pnpm architecture:check",
+    "test:e2e:userscript": "node scripts/run-userscript-e2e.mjs",
+    "check:e2e": "corepack pnpm test:e2e:userscript",
+    "check:userscript": "corepack pnpm --filter @hv-pony-solver/userscript typecheck && corepack pnpm --filter @hv-pony-solver/userscript test && corepack pnpm --filter @hv-pony-solver/userscript build",
+    "check:model-worker": "corepack pnpm --filter @hv-pony-solver/model-worker typecheck && corepack pnpm --filter @hv-pony-solver/model-worker test && corepack pnpm --filter @hv-pony-solver/model-worker build",
+    "check:shared": "corepack pnpm --filter @hv-pony-solver/shared typecheck && corepack pnpm --filter @hv-pony-solver/shared test && corepack pnpm --filter @hv-pony-solver/shared build",
+    "check:quick": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm docs:check && corepack pnpm graphify:check && corepack pnpm architecture:check && corepack pnpm browser-sinks:check",
     "check": "corepack pnpm check:quick && corepack pnpm test:coverage && corepack pnpm build"
   },
   "devDependencies": {

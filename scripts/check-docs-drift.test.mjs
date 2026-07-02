@@ -156,7 +156,10 @@ test('fails clearly when README omits ONNX Runtime asset manifest field names', 
         .replaceAll('ONNX_RUNTIME_ASSETS', 'ONNX Runtime assets')
         .replaceAll('scriptAsset.byteLength', 'script asset byte length')
         .replaceAll('scriptAsset.sha256', 'script asset sha256')
-        .replaceAll('scriptAsset.maxByteLength', 'script asset max byte length'),
+        .replaceAll('scriptAsset.maxByteLength', 'script asset max byte length')
+        .replaceAll('wasmAssets.byteLength', 'wasm assets byte length')
+        .replaceAll('wasmAssets.sha256', 'wasm assets sha256')
+        .replaceAll('wasmAssets', 'wasm assets'),
     )
 
     const result = await runCheck(fixtureRoot)
@@ -165,6 +168,9 @@ test('fails clearly when README omits ONNX Runtime asset manifest field names', 
     assert.match(result.stderr, /README.md.*scriptAsset\.byteLength/s)
     assert.match(result.stderr, /README.md.*scriptAsset\.sha256/s)
     assert.match(result.stderr, /README.md.*scriptAsset\.maxByteLength/s)
+    assert.match(result.stderr, /README.md.*wasmAssets/s)
+    assert.match(result.stderr, /README.md.*wasmAssets\.byteLength/s)
+    assert.match(result.stderr, /README.md.*wasmAssets\.sha256/s)
   })
 })
 
@@ -198,6 +204,7 @@ test('fails clearly when README omits ONNX Runtime asset verification command an
       readmePath,
       readme
         .replaceAll('verify-onnx-runtime-assets', 'verify onnx runtime assets')
+        .replaceAll('verify-onnx-runtime-cdn', 'verify onnx runtime cdn')
         .replaceAll('cdn.scriptUrl', 'cdn script url')
         .replaceAll('cdn.wasmPath', 'cdn wasm path')
         .replaceAll('HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME', 'BUNDLE_ONNX_RUNTIME'),
@@ -206,6 +213,7 @@ test('fails clearly when README omits ONNX Runtime asset verification command an
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /README.md.*verify-onnx-runtime-assets/s)
+    assert.match(result.stderr, /README.md.*verify-onnx-runtime-cdn/s)
     assert.match(result.stderr, /README.md.*cdn\.scriptUrl/s)
     assert.match(result.stderr, /README.md.*cdn\.wasmPath/s)
     assert.match(result.stderr, /README.md.*HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME/s)

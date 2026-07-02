@@ -10,7 +10,7 @@ routes = [
 PUBLIC_MODEL_PATH = "/yolo26n-640.onnx"
 REAL_MODEL_OBJECT_KEY = "real/yolo26n-640.onnx"
 DECOY_MODEL_OBJECT_KEY = "decoy/yolo26n-640.onnx"
-INVALID_KEY_MODE = "decoy"
+INVALID_KEY_MODE = "${INVALID_KEY_MODE}"
 
 [[kv_namespaces]]
 binding = "MODEL_KEYS"

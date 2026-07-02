@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -6,6 +7,7 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import {
+  createArtifactManifest,
   createMainBuildOptions,
   createMetafileJson,
   createUserscriptOutput,
@@ -68,6 +70,29 @@ test('createMetafileJson preserves main and worker esbuild metafiles', () => {
       null,
       2,
     ),
+  )
+})
+
+test('createArtifactManifest records artifact integrity and build options', () => {
+  const manifest = createArtifactManifest({
+    outputFile: 'apps/userscript/dist/hv-pony-solver.user.js',
+    byteLength: 12,
+    sha256: 'a'.repeat(64),
+    minified: true,
+    bundledRuntime: true,
+    metafilePath: 'apps/userscript/dist/meta.json',
+  })
+
+  assert.deepEqual(
+    {
+      artifact: 'apps/userscript/dist/hv-pony-solver.user.js',
+      byteLength: 12,
+      sha256: 'a'.repeat(64),
+      minified: true,
+      bundledRuntime: true,
+      metafile: 'apps/userscript/dist/meta.json',
+    },
+    manifest,
   )
 })
 
@@ -223,12 +248,34 @@ test('build-userscript writes an esbuild metafile when requested', async () => {
   )
 })
 
-async function runBuildInTempDir({ args = [], runtimeSource, withMetafile, ...env }) {
+test('build-userscript writes artifact manifest and sha256 when requested', async () => {
+  const result = await runBuildInTempDir({ withArtifactManifest: true, args: ['--minify'] })
+  const manifest = JSON.parse(result.artifactManifest)
+
+  assert.equal(true, manifest.artifact.endsWith('hv-pony-solver.user.js'))
+  assert.equal(true, manifest.minified)
+  assert.equal(false, manifest.bundledRuntime)
+  assert.equal(Buffer.byteLength(result.output), manifest.byteLength)
+  assert.match(manifest.sha256, /^[a-f0-9]{64}$/)
+  assert.equal(manifest.sha256, result.sha256Text.trim())
+})
+
+test('build-userscript records metafile path in artifact manifest when both outputs are requested', async () => {
+  const result = await runBuildInTempDir({ withArtifactManifest: true, withMetafile: true })
+  const manifest = JSON.parse(result.artifactManifest)
+
+  assert.equal(result.metafilePath, manifest.metafile)
+  assert.equal(true, result.metafile.includes('src/main.ts'))
+})
+
+async function runBuildInTempDir({ args = [], runtimeSource, withMetafile, withArtifactManifest, ...env }) {
   const outputDir = await mkdtemp(join(tmpdir(), 'hv-pony-userscript-'))
   try {
     const runtimePath = runtimeSource ? join(outputDir, 'ort.min.js') : undefined
     const outputPath = join(outputDir, 'hv-pony-solver.user.js')
     const metafilePath = withMetafile ? join(outputDir, 'meta.json') : undefined
+    const artifactManifestPath = withArtifactManifest ? join(outputDir, 'artifact.json') : undefined
+    const artifactSha256Path = withArtifactManifest ? join(outputDir, 'artifact.sha256') : undefined
     if (runtimePath) {
       await writeFile(runtimePath, runtimeSource)
     }
@@ -239,12 +286,19 @@ async function runBuildInTempDir({ args = [], runtimeSource, withMetafile, ...en
         ...env,
         ...(runtimePath ? { HV_PONY_SOLVER_ONNX_RUNTIME_PATH: runtimePath } : {}),
         ...(metafilePath ? { HV_PONY_SOLVER_METAFILE_PATH: metafilePath } : {}),
+        ...(artifactManifestPath ? { HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH: artifactManifestPath } : {}),
+        ...(artifactSha256Path ? { HV_PONY_SOLVER_ARTIFACT_SHA256_PATH: artifactSha256Path } : {}),
         HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH: outputPath,
       },
     })
     const output = await readFile(outputPath, 'utf8')
-    if (metafilePath) {
-      return { output, metafile: await readFile(metafilePath, 'utf8') }
+    if (metafilePath || artifactManifestPath || artifactSha256Path) {
+      return {
+        output,
+        ...(metafilePath ? { metafile: await readFile(metafilePath, 'utf8'), metafilePath } : {}),
+        ...(artifactManifestPath ? { artifactManifest: await readFile(artifactManifestPath, 'utf8') } : {}),
+        ...(artifactSha256Path ? { sha256Text: await readFile(artifactSha256Path, 'utf8') } : {}),
+      }
     }
     return output
   } finally {

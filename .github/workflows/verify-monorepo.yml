@@ -17,32 +17,45 @@ on:
         type: boolean
         required: true
         default: false
+      run_userscript_e2e:
+        description: 'Run userscript Playwright smoke test'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  validate-inputs:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
       - name: Require bundled runtime for published userscript artifacts
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_userscript_artifact && !inputs.bundle_onnx_runtime }}
         run: |
           echo "Publishing userscript artifacts requires bundle_onnx_runtime=true" >&2
           exit 1
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+      - name: Inputs accepted
+        run: echo "Workflow inputs accepted."
+
+  guardrails:
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
           run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -62,11 +75,74 @@ jobs:
           MODEL_BUCKET_NAME: test-bucket
         run: pnpm --filter @hv-pony-solver/model-worker render-config
 
+      - name: Docs drift
+        run: pnpm docs:check
+
+      - name: Graphify corpus
+        run: pnpm graphify:check
+
+      - name: Architecture boundaries
+        run: pnpm architecture:check
+
+      - name: Browser sink guardrail
+        run: pnpm browser-sinks:check
+
+  test:
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Render test Wrangler config
+        env:
+          MODEL_KEYS_KV_NAMESPACE_ID: test-kv
+          MODEL_BUCKET_NAME: test-bucket
+        run: pnpm --filter @hv-pony-solver/model-worker render-config
+
       - name: Test
         run: pnpm test
 
-      - name: Guardrail checks
-        run: pnpm docs:check && pnpm graphify:check && pnpm architecture:check
+  coverage-build:
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Render test Wrangler config
+        env:
+          MODEL_KEYS_KV_NAMESPACE_ID: test-kv
+          MODEL_BUCKET_NAME: test-bucket
+        run: pnpm --filter @hv-pony-solver/model-worker render-config
 
       - name: Coverage
         run: pnpm test:coverage
@@ -74,14 +150,76 @@ jobs:
       - name: Build
         run: pnpm build
 
+  userscript-e2e:
+    needs: validate-inputs
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_userscript_e2e }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @hv-pony-solver/userscript exec playwright install --with-deps chromium
+
+      - name: Userscript E2E smoke
+        run: pnpm test:e2e:userscript
+
+  bundled-userscript:
+    needs:
+      - validate-inputs
+      - guardrails
+      - test
+      - coverage-build
+      - userscript-e2e
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.bundle_onnx_runtime && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && (needs['userscript-e2e'].result == 'success' || needs['userscript-e2e'].result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Build bundled userscript
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_onnx_runtime }}
-        run: pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
+        env:
+          HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH: apps/userscript/dist/hv-pony-solver.artifact.json
+          HV_PONY_SOLVER_ARTIFACT_SHA256_PATH: apps/userscript/dist/hv-pony-solver.user.js.sha256
+          HV_PONY_SOLVER_METAFILE_PATH: apps/userscript/dist/hv-pony-solver.metafile.json
+        run: pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 
       - name: Publish userscript artifact
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_userscript_artifact }}
+        if: ${{ inputs.publish_userscript_artifact }}
         uses: actions/upload-artifact@v4
         with:
           name: hv-pony-solver-userscript
-          path: apps/userscript/dist/hv-pony-solver.user.js
+          path: |
+            apps/userscript/dist/hv-pony-solver.user.js
+            apps/userscript/dist/hv-pony-solver.user.js.sha256
+            apps/userscript/dist/hv-pony-solver.artifact.json
+            apps/userscript/dist/hv-pony-solver.metafile.json
           if-no-files-found: error

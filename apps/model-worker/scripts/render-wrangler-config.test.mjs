@@ -102,14 +102,56 @@ test('renderWranglerConfigFile escapes custom main paths as TOML strings', async
   })
 })
 
+test('renderWranglerConfig defaults INVALID_KEY_MODE to decoy', async () => {
+  const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+
+  const template = 'INVALID_KEY_MODE = "${INVALID_KEY_MODE}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
+  const rendered = renderWranglerConfig(template, { values: testWranglerConfigEnv })
+
+  assert.match(rendered, /INVALID_KEY_MODE = "decoy"/)
+})
+
+test('renderWranglerConfig accepts INVALID_KEY_MODE error', async () => {
+  const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+
+  const template = 'INVALID_KEY_MODE = "${INVALID_KEY_MODE}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
+  const rendered = renderWranglerConfig(template, {
+    values: { ...testWranglerConfigEnv, INVALID_KEY_MODE: 'error' },
+  })
+
+  assert.match(rendered, /INVALID_KEY_MODE = "error"/)
+})
+
+test('renderWranglerConfig rejects unsupported INVALID_KEY_MODE values', async () => {
+  const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+
+  const template = 'INVALID_KEY_MODE = "${INVALID_KEY_MODE}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
+
+  assert.throws(
+    () => renderWranglerConfig(template, { values: { ...testWranglerConfigEnv, INVALID_KEY_MODE: 'allow' } }),
+    /INVALID_KEY_MODE must be one of: decoy, error/,
+  )
+})
+
 test('render-wrangler-config renders test placeholders outside production mode', async () => {
   const result = await runRender({
     MODEL_KEYS_KV_NAMESPACE_ID: 'test-kv',
     MODEL_BUCKET_NAME: 'test-bucket',
   })
 
+  assert.match(result.wrangler, /INVALID_KEY_MODE = "decoy"/)
   assert.match(result.wrangler, /id = "test-kv"/)
   assert.match(result.wrangler, /bucket_name = "test-bucket"/)
+})
+
+test('render-wrangler-config renders INVALID_KEY_MODE error from env', async () => {
+  const result = await runRender({
+    MODEL_KEYS_KV_NAMESPACE_ID: 'test-kv',
+    MODEL_BUCKET_NAME: 'test-bucket',
+    INVALID_KEY_MODE: 'error',
+  })
+
+  assert.match(result.wrangler, /INVALID_KEY_MODE = "error"/)
 })
 
 test('model-worker vitest config keeps test placeholders isolated from deploy render mode', async () => {

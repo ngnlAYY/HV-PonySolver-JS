@@ -1,6 +1,7 @@
+import { ANSWER_CODES } from '@hv-pony-solver/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
+import type { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 import { CaptchaSolver } from '../../src/captcha/captcha-solver'
 import type { ImageLoader } from '../../src/captcha/captcha-types'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
@@ -57,13 +58,17 @@ function emptyDetectionResult(success: boolean): YoloParseResult {
   }
 }
 
-function createSolver(overrides: Partial<Readonly<{
-  panel: StatusPanel
-  detector: DetectorService
-  imageLoader: ImageLoader
-  answerSubmitter: AnswerSubmitter
-  getAbortSignal: () => AbortSignal | undefined
-}>> = {}): Readonly<{
+function createSolver(
+  overrides: Partial<
+    Readonly<{
+      panel: StatusPanel
+      detector: DetectorService
+      imageLoader: ImageLoader
+      answerSubmitter: AnswerSubmitter
+      getAbortSignal: () => AbortSignal | undefined
+    }>
+  > = {},
+): Readonly<{
   solver: CaptchaSolver
   panel: StatusPanel
   detector: DetectorService
@@ -92,6 +97,62 @@ describe('CaptchaSolver', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     vi.restoreAllMocks()
+  })
+
+  it('submits detected ponies and records success', async () => {
+    appendCaptcha()
+    const detector = createDetector(
+      vi.fn(async () => ({
+        success: true,
+        ponies: ['RA'],
+        confidences: { RA: 0.97 },
+        detections: [],
+        candidates: [],
+      })),
+    )
+    const { solver, panel, answerSubmitter } = createSolver({ detector })
+
+    vi.mocked(answerSubmitter.submit).mockImplementation(async (_form, _ponies, _onError, onSubmitted) => {
+      onSubmitted()
+    })
+
+    const result = await solver.trigger()
+
+    expect(result).toEqual({ solved: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(answerSubmitter.submit).toHaveBeenCalledWith(
+      expect.any(HTMLFormElement),
+      ['RA'],
+      expect.any(Function),
+      expect.any(Function),
+      undefined,
+    )
+    expect(panel.addSuccess).toHaveBeenCalledWith(['RA'], { RA: 0.97 }, expect.any(Number))
+  })
+
+  it('does not submit when cancellation happens after detection', async () => {
+    appendCaptcha()
+    const abortController = new AbortController()
+    const detector = createDetector(
+      vi.fn(async () => {
+        abortController.abort()
+        return {
+          success: true,
+          ponies: ['RA'],
+          confidences: { RA: 0.97 },
+          detections: [],
+          candidates: [],
+        }
+      }),
+    )
+    const { solver, answerSubmitter } = createSolver({
+      detector,
+      getAbortSignal: () => abortController.signal,
+    })
+
+    const result = await solver.trigger()
+
+    expect(result).toEqual({ solved: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(answerSubmitter.submit).not.toHaveBeenCalled()
   })
 
   it('reports image loading failures with an image stage prefix', async () => {
@@ -184,5 +245,40 @@ describe('CaptchaSolver', () => {
 
     expect(result.solved).toBe(false)
     expectPanelError(panel, '答题异常: Error: 面板异常')
+  })
+})
+
+describe('CaptchaSolver random fallback', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    vi.restoreAllMocks()
+  })
+
+  it('submits a random pony when randomOnFail is enabled', async () => {
+    vi.resetModules()
+    vi.doMock('../../src/captcha/solver-config', () => ({ solverConfig: { randomOnFail: true } }))
+    try {
+      const { CaptchaSolver: RandomCaptchaSolver } = await import('../../src/captcha/captcha-solver')
+      appendCaptcha()
+      const panel = createPanel()
+      const detector = createDetector(vi.fn(async () => emptyDetectionResult(false)))
+      const imageLoader = { get: vi.fn(async () => new Blob(['captcha'])) }
+      const answerSubmitter = createAnswerSubmitter()
+      let submittedPony: string | undefined
+      vi.mocked(answerSubmitter.submit).mockImplementation(async (_form, ponies, _onError, onSubmitted) => {
+        expect(ponies).toHaveLength(1)
+        submittedPony = ponies[0]
+        expect(ANSWER_CODES).toContain(submittedPony)
+        onSubmitted()
+      })
+
+      const solver = new RandomCaptchaSolver(panel, detector, imageLoader, answerSubmitter)
+      const result = await solver.trigger()
+
+      expect(result).toEqual({ solved: true, captchaKey: 'http://localhost:3000/captcha.png' })
+      expect(panel.addRandomFailure).toHaveBeenCalledWith(submittedPony, expect.any(Number))
+    } finally {
+      vi.doUnmock('../../src/captcha/solver-config')
+    }
   })
 })
