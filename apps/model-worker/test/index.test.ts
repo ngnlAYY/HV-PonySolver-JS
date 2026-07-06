@@ -592,6 +592,8 @@ describe('model worker', () => {
     expect(response.status).toBe(405)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
     expect(response.headers.get('allow')).toBe('GET, HEAD, OPTIONS')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
   })
 
   it('returns 500 text when the selected R2 object is missing', async () => {
