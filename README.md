@@ -128,6 +128,9 @@ corepack pnpm install
 | `pnpm graphify:check` | 检查 Graphify 语料排除规则与可选图谱报告                    |
 | `pnpm architecture:check` | 检查 userscript、model-worker 与 shared 的架构边界       |
 | `pnpm browser-sinks:check` | 检查 userscript 中 `innerHTML`、`new Function` 与 `importScripts` 是否只出现在已审计位置 |
+| `pnpm bundle:check` | 显式先构建默认未压缩 userscript，再按 96 KiB 预算检查产物大小 |
+| `pnpm bundle:check:default` | 检查已有默认 userscript 产物是否超过 96 KiB；不执行构建 |
+| `pnpm bundle:check:bundled` | 检查已有 minify + bundled-runtime userscript 产物是否超过 480 KiB；不执行构建 |
 | `pnpm benchmark:inference` | 运行 userscript 推理纯函数本地 micro benchmark |
 | `pnpm release:notes` | 根据 shared model manifest 生成模型发布说明 |
 | `pnpm test:e2e:userscript` | 运行 userscript Playwright 本地 fixture smoke 测试       |
@@ -135,7 +138,7 @@ corepack pnpm install
 | `pnpm check:userscript` | 依次运行 userscript 的 typecheck、test 与 build |
 | `pnpm check:model-worker` | 依次运行 Model Worker 的 typecheck、test 与 build |
 | `pnpm check:shared` | 依次运行 shared 包的 typecheck、test 与 build |
-| `pnpm check:quick` | 依次运行 lint、typecheck、test、docs:check、graphify:check、architecture:check、browser-sinks:check |
+| `pnpm check:quick` | 依次运行 lint、typecheck、test、docs:check、graphify:check、architecture:check、browser-sinks:check、bundle:check |
 | `pnpm check`      | 先运行 check:quick，再运行 test:coverage 与 build              |
 | `pnpm format`     | 用 Prettier 格式化仓库文件                                       |
 
@@ -487,6 +490,7 @@ pnpm test:coverage
 pnpm docs:check
 pnpm graphify:check
 pnpm architecture:check
+pnpm bundle:check
 pnpm build
 ```
 
@@ -510,9 +514,9 @@ userscript E2E 仅在 `workflow_dispatch` 且 `run_userscript_e2e=true` 时执�
 1. `validate-inputs` 先检查手动发布 artifact 时是否同时启用 `bundle_onnx_runtime=true`，否则直接失败，避免发布依赖远程 JS runtime 的 userscript artifact。
 2. `guardrails` job 设置 Node.js 22、启用 pnpm cache、安装依赖，然后运行 `pnpm audit:high`、`pnpm lint`、`pnpm typecheck`、测试值 Wrangler 配置渲染、`pnpm docs:check`、`pnpm graphify:check`、`pnpm architecture:check` 和 `pnpm browser-sinks:check`。
 3. `test` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test`。
-4. `coverage-build` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test:coverage` 和 `pnpm build`。
+4. `coverage-build` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test:coverage` 和 `pnpm build`，随后用 `pnpm bundle:check:default` 检查默认未压缩 userscript 的 96 KiB 大小预算。
 5. `userscript-e2e` job 仅在 `workflow_dispatch` 且 `run_userscript_e2e=true` 时运行；它安装 Playwright Chromium 依赖，再运行 `pnpm test:e2e:userscript`。
-6. `bundled-userscript` job 依赖 guardrails、test、coverage-build 和可选 E2E 成功后运行；当 `bundle_onnx_runtime=true` 时以 `--minify` 构建内置 ONNX Runtime Web JS runtime 的 userscript，并生成 `.sha256`、artifact manifest 与 esbuild metafile。
+6. `bundled-userscript` job 依赖 guardrails、test、coverage-build 和可选 E2E 成功后运行；当 `bundle_onnx_runtime=true` 时以 `--minify` 构建内置 ONNX Runtime Web JS runtime 的 userscript，生成 `.sha256`、artifact manifest 与 esbuild metafile，再用 `pnpm bundle:check:bundled` 检查 480 KiB 大小预算。
 7. 如果 `publish_userscript_artifact=true`，`bundled-userscript` job 上传 `apps/userscript/dist/hv-pony-solver.user.js`、`.sha256`、artifact manifest 与 esbuild metafile；默认不上传，且必须同时设置 `bundle_onnx_runtime=true`。
 
 ### Model Worker 部署 workflow
@@ -561,6 +565,8 @@ corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 ```
 
 默认构建不内置 JS runtime；`HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1` 或 `build:bundled-runtime` 会先按 `ONNX_RUNTIME_ASSETS.scriptAsset.byteLength` 与 `ONNX_RUNTIME_ASSETS.scriptAsset.sha256` 校验本地 `onnxruntime-web@1.27.0/dist/ort.min.js`，再把 JS runtime 内置进 userscript。两种构建都仍通过 `ortWasmPath` 加载 WASM 资源；发布前应使用 `verify-onnx-runtime-assets` 同时校验本地 JS runtime 与 `wasmAssets`，必要时再用 `verify-onnx-runtime-cdn` 手动联网校验 CDN。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
+
+产物大小预算守卫按文件 byteLength 检查：默认未压缩 profile 固定为 96 KiB，`--minify` + bundled-runtime profile 固定为 480 KiB（当前实测分别为 72,204 B 与 398,993 B，后者预算取整并保留约 20% 余量）。根命令 `pnpm bundle:check` 会显式先运行默认 userscript build，保证 `check:quick` 在干净工作区也有产物；纯检查命令 `pnpm bundle:check:default` 与 `pnpm bundle:check:bundled` 不会偷偷构建，目标文件缺失或超预算都会失败并输出 profile、actual、budget 与 delta。
 
 将生成的文件安装到 userscript 管理器：
 

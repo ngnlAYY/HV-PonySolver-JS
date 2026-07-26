@@ -150,6 +150,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Check default userscript bundle budget
+        run: pnpm bundle:check:default
+
   userscript-e2e:
     needs: validate-inputs
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_userscript_e2e }}
@@ -211,6 +214,9 @@ jobs:
           HV_PONY_SOLVER_ARTIFACT_SHA256_PATH: apps/userscript/dist/hv-pony-solver.user.js.sha256
           HV_PONY_SOLVER_METAFILE_PATH: apps/userscript/dist/hv-pony-solver.metafile.json
         run: pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
+
+      - name: Check bundled userscript bundle budget
+        run: pnpm bundle:check:bundled
 
       - name: Publish userscript artifact
         if: ${{ inputs.publish_userscript_artifact }}

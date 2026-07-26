@@ -62,7 +62,16 @@ test('current repository README is in sync with source facts', async () => {
 
 // README 文档契约：这些测试验证 README 是否准确描述脚本、模型、ONNX Runtime 和 Model Worker 的当前事实。
 // 运行时 HTTP 行为应由 apps/model-worker 的 Worker tests 覆盖；这里关注文档是否漂移。
-const rootCheckCommandNames = ['check:quick', 'test:coverage', 'build', 'docs:check', 'graphify:check', 'architecture:check']
+const rootCheckCommandNames = [
+  'check:quick',
+  'test:coverage',
+  'build',
+  'docs:check',
+  'graphify:check',
+  'architecture:check',
+  'browser-sinks:check',
+  'bundle:check',
+]
 
 for (const commandName of rootCheckCommandNames) {
   test(`fails clearly when README omits ${commandName} from pnpm check description`, async () => {

@@ -19,7 +19,16 @@ function checkRootCheckCommand(rootPackageJson, readme) {
   if (typeof quickCheckCommand !== 'string') {
     return errors
   }
-  for (const commandName of ['lint', 'typecheck', 'test', 'docs:check', 'graphify:check', 'architecture:check']) {
+  for (const commandName of [
+    'lint',
+    'typecheck',
+    'test',
+    'docs:check',
+    'graphify:check',
+    'architecture:check',
+    'browser-sinks:check',
+    'bundle:check',
+  ]) {
     if (quickCheckCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check:quick', commandName)) {
       errors.push(`README.md pnpm check:quick description must mention ${commandName} because package.json scripts.check:quick runs it`)
     }
