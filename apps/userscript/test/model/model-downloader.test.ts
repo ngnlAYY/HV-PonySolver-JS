@@ -37,10 +37,12 @@ describe('downloadModel', () => {
     expect(url).toBe(MODEL_URL)
     expect(url).not.toContain('?key=')
     expect(new Headers(init.headers).get('authorization')).toBeNull()
-    expect(init).toEqual(expect.objectContaining({
-      cache: 'no-store',
-      signal: expect.any(AbortSignal),
-    }))
+    expect(init).toEqual(
+      expect.objectContaining({
+        cache: 'no-store',
+        signal: expect.any(AbortSignal),
+      }),
+    )
   })
 
   it('uses the saved model access key as Authorization when downloading', async () => {
@@ -101,6 +103,18 @@ describe('downloadModel', () => {
     const [url, init] = getFetchCall(fetchMock)
     expect(url).toBe(MODEL_URL)
     expect(url).not.toContain('?key=')
+    expect(new Headers(init.headers).get('authorization')).toBeNull()
+  })
+
+  it('continues without Authorization when saved key storage fails', async () => {
+    getModelAccessKey.mockRejectedValue(new Error('storage unavailable'))
+    const response = new Response(new Uint8Array([1, 2, 3]))
+    const fetchMock = vi.fn(async () => response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await downloadModel(undefined, { integrity: TEST_INTEGRITY })
+
+    const [, init] = getFetchCall(fetchMock)
     expect(new Headers(init.headers).get('authorization')).toBeNull()
   })
 
@@ -223,9 +237,9 @@ describe('downloadModel', () => {
       vi.fn(async () => response),
     )
 
-    await expect(
-      downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
-    ).rejects.toThrow('下载模型大小校验失败: abc')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+      '下载模型大小校验失败: abc',
+    )
 
     expect(cancel).toHaveBeenCalledTimes(1)
     expect(getReader).not.toHaveBeenCalled()
@@ -249,15 +263,37 @@ describe('downloadModel', () => {
         vi.fn(async () => response),
       )
 
-      await expect(
-        downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
-      ).rejects.toThrow('下载模型大小校验失败:')
+      await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+        '下载模型大小校验失败:',
+      )
 
       expect(cancel).toHaveBeenCalledTimes(1)
       expect(getReader).not.toHaveBeenCalled()
       expect(arrayBuffer).not.toHaveBeenCalled()
     },
   )
+
+  it('rejects unsafe decimal content lengths before reading the body', async () => {
+    const cancel = vi.fn()
+    const getReader = vi.fn()
+    const contentLength = '9007199254740992'
+    const response = {
+      ok: true,
+      headers: new Headers({ 'content-length': contentLength }),
+      body: { cancel, getReader },
+    } as unknown as Response
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+      `下载模型大小校验失败: ${contentLength}`,
+    )
+
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(getReader).not.toHaveBeenCalled()
+  })
 
   it('rejects downloaded models with unexpected integrity by default', async () => {
     const response = new Response(new Uint8Array([1, 2, 3]))
@@ -500,6 +536,31 @@ describe('downloadModel', () => {
         verifyIntegrity: false,
       }),
     ).rejects.toThrow('下载模型大小校验失败: 4 > 3')
+    expect(arrayBuffer).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects fallback arrayBuffer responses larger than the verified expected size', async () => {
+    const arrayBuffer = vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer)
+    const response = {
+      ok: true,
+      headers: new Headers(),
+      body: null,
+      arrayBuffer,
+    } as unknown as Response
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(
+      downloadModel(undefined, {
+        integrity: {
+          ...TEST_INTEGRITY,
+          byteLength: 3,
+        },
+        forceVerifyIntegrity: true,
+      }),
+    ).rejects.toThrow('下载模型大小校验失败: 4 != 3')
     expect(arrayBuffer).toHaveBeenCalledTimes(1)
   })
 
