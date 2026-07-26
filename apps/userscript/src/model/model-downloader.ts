@@ -33,7 +33,7 @@ async function getRequestAccessKey(accessKeyOverride?: string): Promise<string> 
   if (candidateAccessKey) {
     return candidateAccessKey
   }
-  let storedAccessKey = ''
+  let storedAccessKey: string
   try {
     storedAccessKey = await getModelAccessKey()
   } catch {

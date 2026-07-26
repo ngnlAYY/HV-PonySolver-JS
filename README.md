@@ -18,7 +18,7 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 | 语言            | TypeScript, ESM                                      |
 | 构建            | esbuild, TypeScript `tsc --noEmit`                   |
 | 测试            | Vitest, jsdom, `@cloudflare/vitest-pool-workers`     |
-| Lint / Format   | ESLint 9, typescript-eslint, Prettier                |
+| Lint / Format   | ESLint 10, typescript-eslint, Prettier               |
 | Userscript 推理 | ONNX Runtime Web 1.26.0, Web Worker, OffscreenCanvas |
 | 模型分发        | Cloudflare Workers, KV, R2, Wrangler                 |
 | CI/CD           | GitHub Actions                                       |

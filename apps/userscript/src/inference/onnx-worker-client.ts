@@ -117,7 +117,7 @@ export class OnnxWorkerClient implements DetectorService {
       this.ready = false
       this.clearPrepareAbortController(abortController)
       if (this.destroyed || abortController.signal.aborted) {
-        throw new Error('Worker 已关闭')
+        throw new Error('Worker 已关闭', { cause: error })
       }
       throw error
     }

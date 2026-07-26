@@ -118,7 +118,9 @@ async function handleInit(message: InitMessage): Promise<{ type: 'response', req
     try {
       importScripts(message.ortScriptUrl)
     } catch (error) {
-      throw new Error(`onnxruntime-web 加载失败: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error(`onnxruntime-web 加载失败: ${error instanceof Error ? error.message : String(error)}`, {
+        cause: error,
+      })
     }
   }
   if (!workerSelf.ort) {

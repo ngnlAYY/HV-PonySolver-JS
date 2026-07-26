@@ -4,7 +4,7 @@ import { warn } from '../utils/logger'
 export class CachedImageLoader implements ImageLoader {
   async get(url: string): Promise<Blob> {
     // 先尝试仅缓存读取
-    let firstError: string | null = null
+    let firstError: string
     try {
       const cachedResponse = await fetch(url, {
         cache: 'only-if-cached',
