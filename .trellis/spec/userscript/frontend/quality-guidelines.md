@@ -118,6 +118,74 @@ node scripts/check-bundle-budget.mjs --profile <default|bundled> [--file <path>]
 "bundle:check:default": "node scripts/check-bundle-budget.mjs --profile default"
 ```
 
+### 场景：Userscript E2E CI gate
+
+#### 1. Scope / Trigger
+
+修改 userscript 启动、DOM 扫描、模型/Worker 初始化、答案提交、构建产物或 E2E fixture 时，PR 与 `main` push 必须运行 Playwright smoke；发布型 workflow dispatch 可由显式 input 控制是否运行。
+
+#### 2. Signatures
+
+```text
+pnpm test:e2e:userscript
+pnpm --filter @hv-pony-solver/userscript exec playwright --version
+pnpm --filter @hv-pony-solver/userscript exec playwright install --with-deps chromium
+```
+
+GitHub Actions job：`verify-monorepo.yml#userscript-e2e`。缓存版本 step id 固定为 `playwright-version`，output 名为 `version`。
+
+#### 3. Contracts
+
+- `pull_request`：E2E job 必须运行。
+- `push`：workflow 顶层只接受 `main`，E2E job 必须运行。
+- `workflow_dispatch`：仅 `inputs.run_userscript_e2e=true` 时运行。
+- Chromium 缓存路径为 `~/.cache/ms-playwright`；key 必须包含 `runner.os`、`chromium` 和严格解析的 Playwright semver。
+- 即使 cache hit，仍运行 `playwright install --with-deps chromium`，保证 Ubuntu system dependencies。
+- `bundled-userscript` 仅允许 workflow dispatch：input=false 时接受 E2E=`skipped`，input=true 时只接受 E2E=`success`；E2E failure 不得发布 artifact。
+
+#### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| Playwright 输出严格匹配 `Version <semver>` | 写入 `$GITHUB_OUTPUT`，用于 cache key |
+| 输出为空、多行或非 semver | version step 失败，不使用污染的 output |
+| PR / main push | E2E job 运行，bundled publish job 不运行 |
+| dispatch + `run_userscript_e2e=false` | E2E skipped；满足其他条件时 bundled job 可运行 |
+| dispatch + `run_userscript_e2e=true` + E2E success | bundled job 可运行 |
+| dispatch + `run_userscript_e2e=true` + E2E failure | bundled job skipped，不能发布 artifact |
+
+#### 5. Good / Base / Bad Cases
+
+- Good：PR 冷缓存成功，后续 revision 命中相同 Playwright 版本缓存，两个 E2E job 都稳定且各自 <5 分钟。
+- Base：dispatch 不请求 E2E，E2E skipped，但请求的 bundled build 仍可执行。
+- Bad：用 `continue-on-error` 放过 E2E failure；或只以 lockfile 通用 hash 作 cache key而不显式包含 Playwright 版本。
+
+#### 6. Tests Required
+
+- 本地：`pnpm test:e2e:userscript` 通过并发现 Chromium smoke test。
+- 仓库：`pnpm check`、`pnpm docs:check`、workflow YAML parse 与格式检查通过。
+- 远程：至少两个 PR revision 的 `userscript-e2e` 成功；记录 cold/hot cache、安装耗时和 job 总耗时。
+- 若 remote job flake 或 >5 分钟，改为 `main` push + nightly，并在任务/PR 中保留实测依据。
+
+#### 7. Wrong vs Correct
+
+```yaml
+# Wrong：PR 不跑，或 E2E 失败仍继续发布
+if: ${{ github.event_name == 'workflow_dispatch' }}
+continue-on-error: true
+
+# Correct：PR/main 常态运行，dispatch 显式 opt-in
+if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_userscript_e2e) }}
+```
+
+```yaml
+# Wrong：缓存 key 不反映 Playwright/browser revision
+key: playwright-${{ runner.os }}
+
+# Correct：使用严格解析的实际版本
+key: playwright-${{ runner.os }}-chromium-${{ steps.playwright-version.outputs.version }}
+```
+
 ---
 
 ## Code Review Checklist

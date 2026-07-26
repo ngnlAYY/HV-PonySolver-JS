@@ -155,7 +155,7 @@ jobs:
 
   userscript-e2e:
     needs: validate-inputs
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_userscript_e2e }}
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_userscript_e2e) }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -175,6 +175,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          output="$(pnpm --filter @hv-pony-solver/userscript exec playwright --version)"
+          if [[ ! "$output" =~ ^Version\ ([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$ ]]; then
+            printf 'Unexpected Playwright version output: %q\n' "$output" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ steps.playwright-version.outputs.version }}
+
       - name: Install Playwright Chromium
         run: pnpm --filter @hv-pony-solver/userscript exec playwright install --with-deps chromium
 
@@ -188,7 +204,7 @@ jobs:
       - test
       - coverage-build
       - userscript-e2e
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.bundle_onnx_runtime && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && (needs['userscript-e2e'].result == 'success' || needs['userscript-e2e'].result == 'skipped') }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.bundle_onnx_runtime && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && ((inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'success') || (!inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'skipped')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

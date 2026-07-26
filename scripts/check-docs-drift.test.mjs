@@ -1058,11 +1058,12 @@ test('fails clearly when README selected R2 miss row omits Internal Server Error
   await withFixture(async (fixtureRoot) => {
     const readmePath = join(fixtureRoot, 'README.md')
     const readme = await readFile(readmePath, 'utf8')
-    assert.ok(readme.includes('| 选中的 R2 object 缺失'))
-    await writeFile(
-      readmePath,
-      readme.replace('| 选中的 R2 object 缺失                                          | `500 Internal Server Error`', '| 选中的 R2 object 缺失                                          | `404 Not Found`'),
+    const mutatedReadme = readme.replace(
+      /^\|\s*选中的 R2 object 缺失\s*\|\s*`500 Internal Server Error`\s*\|$/m,
+      '| 选中的 R2 object 缺失 | `404 Not Found` |',
     )
+    assert.notEqual(mutatedReadme, readme, 'fixture should contain the selected R2 object missing row')
+    await writeFile(readmePath, mutatedReadme)
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)

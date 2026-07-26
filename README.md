@@ -117,43 +117,43 @@ corepack pnpm install
 
 ### 根目录命令
 
-| 命令              | 说明                                                             |
-| ----------------- | ---------------------------------------------------------------- |
-| `pnpm install`    | 安装所有 workspace 依赖                                          |
-| `pnpm lint`       | 对整个仓库运行 ESLint                                            |
-| `pnpm typecheck`  | 对所有 workspace 运行 TypeScript 类型检查                        |
-| `pnpm test`       | 运行所有 workspace 的 Vitest 测试与 node:test 脚本测试           |
-| `pnpm build`      | 运行所有 workspace 的构建检查；userscript 会生成产物             |
-| `pnpm docs:check` | 检查 README.md 与 source 关键事实是否发生 drift                 |
-| `pnpm graphify:check` | 检查 Graphify 语料排除规则与可选图谱报告                    |
-| `pnpm architecture:check` | 检查 userscript、model-worker 与 shared 的架构边界       |
-| `pnpm browser-sinks:check` | 检查 userscript 中 `innerHTML`、`new Function` 与 `importScripts` 是否只出现在已审计位置 |
-| `pnpm bundle:check` | 显式先构建默认未压缩 userscript，再按 96 KiB 预算检查产物大小 |
-| `pnpm bundle:check:default` | 检查已有默认 userscript 产物是否超过 96 KiB；不执行构建 |
-| `pnpm bundle:check:bundled` | 检查已有 minify + bundled-runtime userscript 产物是否超过 480 KiB；不执行构建 |
-| `pnpm benchmark:inference` | 运行 userscript 推理纯函数本地 micro benchmark |
-| `pnpm release:notes` | 根据 shared model manifest 生成模型发布说明 |
-| `pnpm test:e2e:userscript` | 运行 userscript Playwright 本地 fixture smoke 测试       |
-| `pnpm check:e2e` | 运行当前 E2E gate                                              |
-| `pnpm check:userscript` | 依次运行 userscript 的 typecheck、test 与 build |
-| `pnpm check:model-worker` | 依次运行 Model Worker 的 typecheck、test 与 build |
-| `pnpm check:shared` | 依次运行 shared 包的 typecheck、test 与 build |
-| `pnpm check:quick` | 依次运行 lint、typecheck、test、docs:check、graphify:check、architecture:check、browser-sinks:check、bundle:check |
-| `pnpm check`      | 先运行 check:quick，再运行 test:coverage 与 build              |
-| `pnpm format`     | 用 Prettier 格式化仓库文件                                       |
+| 命令                        | 说明                                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `pnpm install`              | 安装所有 workspace 依赖                                                                                           |
+| `pnpm lint`                 | 对整个仓库运行 ESLint                                                                                             |
+| `pnpm typecheck`            | 对所有 workspace 运行 TypeScript 类型检查                                                                         |
+| `pnpm test`                 | 运行所有 workspace 的 Vitest 测试与 node:test 脚本测试                                                            |
+| `pnpm build`                | 运行所有 workspace 的构建检查；userscript 会生成产物                                                              |
+| `pnpm docs:check`           | 检查 README.md 与 source 关键事实是否发生 drift                                                                   |
+| `pnpm graphify:check`       | 检查 Graphify 语料排除规则与可选图谱报告                                                                          |
+| `pnpm architecture:check`   | 检查 userscript、model-worker 与 shared 的架构边界                                                                |
+| `pnpm browser-sinks:check`  | 检查 userscript 中 `innerHTML`、`new Function` 与 `importScripts` 是否只出现在已审计位置                          |
+| `pnpm bundle:check`         | 显式先构建默认未压缩 userscript，再按 96 KiB 预算检查产物大小                                                     |
+| `pnpm bundle:check:default` | 检查已有默认 userscript 产物是否超过 96 KiB；不执行构建                                                           |
+| `pnpm bundle:check:bundled` | 检查已有 minify + bundled-runtime userscript 产物是否超过 480 KiB；不执行构建                                     |
+| `pnpm benchmark:inference`  | 运行 userscript 推理纯函数本地 micro benchmark                                                                    |
+| `pnpm release:notes`        | 根据 shared model manifest 生成模型发布说明                                                                       |
+| `pnpm test:e2e:userscript`  | 运行 userscript Playwright 本地 fixture smoke 测试                                                                |
+| `pnpm check:e2e`            | 运行当前 E2E gate                                                                                                 |
+| `pnpm check:userscript`     | 依次运行 userscript 的 typecheck、test 与 build                                                                   |
+| `pnpm check:model-worker`   | 依次运行 Model Worker 的 typecheck、test 与 build                                                                 |
+| `pnpm check:shared`         | 依次运行 shared 包的 typecheck、test 与 build                                                                     |
+| `pnpm check:quick`          | 依次运行 lint、typecheck、test、docs:check、graphify:check、architecture:check、browser-sinks:check、bundle:check |
+| `pnpm check`                | 先运行 check:quick，再运行 test:coverage 与 build                                                                 |
+| `pnpm format`               | 用 Prettier 格式化仓库文件                                                                                        |
 
 ### Userscript 命令
 
-| 命令                                                                                                   | 说明                                                                                   |
-| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| `corepack pnpm --filter @hv-pony-solver/userscript build`                                              | 用 esbuild 打包未压缩 userscript，并写入 `apps/userscript/dist/hv-pony-solver.user.js` |
-| `corepack pnpm --filter @hv-pony-solver/userscript build -- --minify`                                  | 用 esbuild 打包压缩 userscript                                                         |
-| `pnpm --filter @hv-pony-solver/userscript typecheck`                                                   | 类型检查 userscript 源码                                                               |
-| `pnpm --filter @hv-pony-solver/userscript test`                                                        | 运行 userscript Vitest/jsdom 单元测试与 node:test 脚本测试                             |
-| `MODEL_FILE=/path/to/yolo26n-640.onnx pnpm --filter @hv-pony-solver/userscript verify-model-integrity` | 校验待发布模型与 shared manifest 的 byteLength / SHA-256 一致性                        |
+| 命令                                                                                                   | 说明                                                                                            |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `corepack pnpm --filter @hv-pony-solver/userscript build`                                              | 用 esbuild 打包未压缩 userscript，并写入 `apps/userscript/dist/hv-pony-solver.user.js`          |
+| `corepack pnpm --filter @hv-pony-solver/userscript build -- --minify`                                  | 用 esbuild 打包压缩 userscript                                                                  |
+| `pnpm --filter @hv-pony-solver/userscript typecheck`                                                   | 类型检查 userscript 源码                                                                        |
+| `pnpm --filter @hv-pony-solver/userscript test`                                                        | 运行 userscript Vitest/jsdom 单元测试与 node:test 脚本测试                                      |
+| `MODEL_FILE=/path/to/yolo26n-640.onnx pnpm --filter @hv-pony-solver/userscript verify-model-integrity` | 校验待发布模型与 shared manifest 的 byteLength / SHA-256 一致性                                 |
 | `corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-assets`                         | 校验本地 ONNX Runtime asset manifest 与已安装 `onnxruntime-web` JS runtime / WASM assets 一致性 |
-| `corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-cdn`                            | 发布前手动联网校验 CDN 上的 ONNX Runtime JS runtime / WASM assets 一致性                         |
-| `corepack pnpm --filter @hv-pony-solver/userscript benchmark:inference`                               | 运行推理纯函数本地 micro benchmark，输出预处理与 YOLO parser 的 `ms/op`                         |
+| `corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-cdn`                            | 发布前手动联网校验 CDN 上的 ONNX Runtime JS runtime / WASM assets 一致性                        |
+| `corepack pnpm --filter @hv-pony-solver/userscript benchmark:inference`                                | 运行推理纯函数本地 micro benchmark，输出预处理与 YOLO parser 的 `ms/op`                         |
 
 ### Model Worker 命令
 
@@ -200,11 +200,11 @@ apps/userscript/dist/hv-pony-solver.user.js
 
 发布用构建可通过环境变量额外写出产物校验文件：
 
-| 环境变量                                      | 输出内容                              |
-| --------------------------------------------- | ------------------------------------- |
-| `HV_PONY_SOLVER_ARTIFACT_SHA256_PATH`         | 最终 `.user.js` 产物的 SHA-256 文本   |
-| `HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH`       | 产物路径、byteLength、SHA-256、压缩状态、runtime 打包状态和 metafile 路径 |
-| `HV_PONY_SOLVER_METAFILE_PATH`                | esbuild main / worker metafile JSON   |
+| 环境变量                                | 输出内容                                                                  |
+| --------------------------------------- | ------------------------------------------------------------------------- |
+| `HV_PONY_SOLVER_ARTIFACT_SHA256_PATH`   | 最终 `.user.js` 产物的 SHA-256 文本                                       |
+| `HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH` | 产物路径、byteLength、SHA-256、压缩状态、runtime 打包状态和 metafile 路径 |
+| `HV_PONY_SOLVER_METAFILE_PATH`          | esbuild main / worker metafile JSON                                       |
 
 手动发布 userscript artifact 时，CI 会使用 `build:bundled-runtime -- --minify`，并同时上传 `.user.js`、`.sha256`、artifact manifest 与 esbuild metafile。
 
@@ -385,11 +385,11 @@ apps/model-worker/wrangler.toml
 
 ### 渲染配置所需环境变量
 
-| 变量                         | 必填 | 用途                        | 示例                               |
-| ---------------------------- | ---- | --------------------------- | ---------------------------------- |
-| `MODEL_KEYS_KV_NAMESPACE_ID` | 是   | 替换 Worker KV namespace id | `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
-| `MODEL_BUCKET_NAME`          | 是   | 替换 Worker R2 bucket 名称  | `hv-pony-models`                   |
-| `INVALID_KEY_MODE`           | 否   | 控制无效 token 响应；默认 `decoy`，可选 `decoy` / `error` | `decoy` |
+| 变量                         | 必填 | 用途                                                      | 示例                               |
+| ---------------------------- | ---- | --------------------------------------------------------- | ---------------------------------- |
+| `MODEL_KEYS_KV_NAMESPACE_ID` | 是   | 替换 Worker KV namespace id                               | `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
+| `MODEL_BUCKET_NAME`          | 是   | 替换 Worker R2 bucket 名称                                | `hv-pony-models`                   |
+| `INVALID_KEY_MODE`           | 否   | 控制无效 token 响应；默认 `decoy`，可选 `decoy` / `error` | `decoy`                            |
 
 示例：
 
@@ -405,29 +405,29 @@ MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> INVALID_KEY_M
 
 ### Worker 运行时绑定与变量
 
-| 名称                     | 类型       | 必填 | 说明                                               |
-| ------------------------ | ---------- | ---- | -------------------------------------------------- |
-| `MODEL_KEYS`             | KV binding | 是   | 授权 token 存储；token 字符串作为 key，值非空即可  |
-| `MODEL_BUCKET`           | R2 binding | 是   | 存放真实模型与 decoy 模型                          |
-| `PUBLIC_MODEL_PATH`      | var        | 否   | 公开下载路径；缺省使用共享常量 `/yolo26n-640.onnx` |
-| `REAL_MODEL_OBJECT_KEY`  | var        | 是   | 真实模型在 R2 中的 object key                      |
-| `DECOY_MODEL_OBJECT_KEY` | var        | 是   | decoy 模型在 R2 中的 object key                    |
+| 名称                     | 类型       | 必填 | 说明                                                             |
+| ------------------------ | ---------- | ---- | ---------------------------------------------------------------- |
+| `MODEL_KEYS`             | KV binding | 是   | 授权 token 存储；token 字符串作为 key，值非空即可                |
+| `MODEL_BUCKET`           | R2 binding | 是   | 存放真实模型与 decoy 模型                                        |
+| `PUBLIC_MODEL_PATH`      | var        | 否   | 公开下载路径；缺省使用共享常量 `/yolo26n-640.onnx`               |
+| `REAL_MODEL_OBJECT_KEY`  | var        | 是   | 真实模型在 R2 中的 object key                                    |
+| `DECOY_MODEL_OBJECT_KEY` | var        | 是   | decoy 模型在 R2 中的 object key                                  |
 | `INVALID_KEY_MODE`       | var        | 否   | `decoy` 或 `error`；会归一化大小写与首尾空白，其他值触发配置错误 |
 
 ### HTTP 行为
 
-| 场景                                                           | 响应                                         |
-| -------------------------------------------------------------- | -------------------------------------------- |
-| `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中  | `200` 真实模型，模型响应使用 `Cache-Control: no-store` |
-| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200` 无 body，保留模型 headers                       |
-| `OPTIONS /yolo26n-640.onnx`                                    | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization` |
-| 缺少 Bearer token、token 格式错误、KV 未命中，且 `INVALID_KEY_MODE=decoy` | `200` decoy 模型                                      |
-| 缺少 Bearer token、token 格式错误、KV 未命中，且 `INVALID_KEY_MODE=error` | `403 Forbidden`                                       |
-| 只提供 query string key                                         | 不授权真实模型；按缺少 Bearer token 处理               |
-| 非模型路径                                                     | `404 Not Found`                                       |
-| 非 `GET` / `HEAD` / `OPTIONS` 方法                              | `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS` |
-| 选中的 R2 object 缺失                                          | `500 Internal Server Error`                           |
-| 必填运行时变量缺失                                             | `500 Internal Server Error`                           |
+| 场景                                                                                 | 响应                                                                                                               |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中  | `200` 真实模型，模型响应使用 `Cache-Control: no-store`                                                             |
+| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200` 无 body，保留模型 headers                                                                                    |
+| `OPTIONS /yolo26n-640.onnx`                                                          | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization` |
+| 缺少 Bearer token、token 格式错误、KV 未命中，且 `INVALID_KEY_MODE=decoy`            | `200` decoy 模型                                                                                                   |
+| 缺少 Bearer token、token 格式错误、KV 未命中，且 `INVALID_KEY_MODE=error`            | `403 Forbidden`                                                                                                    |
+| 只提供 query string key                                                              | 不授权真实模型；按缺少 Bearer token 处理                                                                           |
+| 非模型路径                                                                           | `404 Not Found`                                                                                                    |
+| 非 `GET` / `HEAD` / `OPTIONS` 方法                                                   | `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`                                                              |
+| 选中的 R2 object 缺失                                                                | `500 Internal Server Error`                                                                                        |
+| 必填运行时变量缺失                                                                   | `500 Internal Server Error`                                                                                        |
 
 ### 授权 key 规则
 
@@ -451,16 +451,16 @@ userscript 仍会按 `packages/shared/src/model.ts` 中的 `MODEL_INTEGRITY` 校
 
 `packages/shared` 只包含跨应用共享且稳定的契约：
 
-| 导出                            | 说明                                             |
-| ------------------------------- | ------------------------------------------------ |
-| `ANSWER_CODES`                  | `['TS', 'RA', 'FS', 'RD', 'PP', 'AJ']`           |
-| `AnswerCode`                    | 上述答案编码的联合类型                           |
-| `answerCodeForClassId(classId)` | 按 class id 返回对应答案编码                     |
-| `MODEL_FILENAME`                | `yolo26n-640.onnx`                               |
-| `DEFAULT_PUBLIC_MODEL_PATH`     | `/yolo26n-640.onnx`                              |
-| `ModelAccessDecision`           | `'real' \| 'decoy' \| 'forbidden'`             |
-| `MODEL_ACCESS_TOKEN_PATTERN`    | 64 位十六进制 token 正则                         |
-| `isModelAccessToken(value)`     | token 类型守卫                                   |
+| 导出                            | 说明                                   |
+| ------------------------------- | -------------------------------------- |
+| `ANSWER_CODES`                  | `['TS', 'RA', 'FS', 'RD', 'PP', 'AJ']` |
+| `AnswerCode`                    | 上述答案编码的联合类型                 |
+| `answerCodeForClassId(classId)` | 按 class id 返回对应答案编码           |
+| `MODEL_FILENAME`                | `yolo26n-640.onnx`                     |
+| `DEFAULT_PUBLIC_MODEL_PATH`     | `/yolo26n-640.onnx`                    |
+| `ModelAccessDecision`           | `'real' \| 'decoy' \| 'forbidden'`     |
+| `MODEL_ACCESS_TOKEN_PATTERN`    | 64 位十六进制 token 正则               |
+| `isModelAccessToken(value)`     | token 类型守卫                         |
 
 应用之间不互相 import；跨应用共享内容应放在 `packages/shared`。
 
@@ -505,9 +505,9 @@ pnpm --filter @hv-pony-solver/model-worker test
 
 ### CI workflow
 
-`.github/workflows/verify-monorepo.yml` 会在 `pull_request`、推送到 `main` 和 `workflow_dispatch` 时运行仓库校验；手动触发时可额外选择是否构建内置 ONNX Runtime Web JS runtime 的 userscript、是否运行 userscript Playwright smoke 测试，以及是否发布 artifact。workflow 使用 `actions/setup-node` 的 pnpm cache，并把 guardrails、测试、coverage/build 拆成并行 jobs。
+`.github/workflows/verify-monorepo.yml` 会在 `pull_request`、推送到 `main` 和 `workflow_dispatch` 时运行仓库校验；手动触发时可额外选择是否构建内置 ONNX Runtime Web JS runtime 的 userscript、是否运行 userscript Playwright smoke 测试，以及是否发布 artifact。workflow 使用 `actions/setup-node` 的 pnpm cache，并把 guardrails、测试、coverage/build 和 userscript E2E 拆成独立 jobs；E2E job 还按实际安装的 Playwright 版本缓存 Chromium 浏览器文件。
 
-userscript E2E 仅在 `workflow_dispatch` 且 `run_userscript_e2e=true` 时执行；它使用仓库内本地 fixture 页面进行 smoke 验证，不会访问真实 Hentaiverse 站点。
+userscript E2E 在 `pull_request` 和推送到 `main` 时常态执行；`workflow_dispatch` 仍仅在 `run_userscript_e2e=true` 时执行。它使用仓库内本地 fixture 页面进行 smoke 验证，不会访问真实 Hentaiverse 站点。
 
 `Security Scan` workflow 使用 CodeQL 扫描 TypeScript/JavaScript，并在 PR 上运行 dependency review；根命令 `pnpm audit:high` 仍在主验证 workflow 的 `guardrails` job 中执行。
 
@@ -515,8 +515,8 @@ userscript E2E 仅在 `workflow_dispatch` 且 `run_userscript_e2e=true` 时执�
 2. `guardrails` job 设置 Node.js 22、启用 pnpm cache、安装依赖，然后运行 `pnpm audit:high`、`pnpm lint`、`pnpm typecheck`、测试值 Wrangler 配置渲染、`pnpm docs:check`、`pnpm graphify:check`、`pnpm architecture:check` 和 `pnpm browser-sinks:check`。
 3. `test` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test`。
 4. `coverage-build` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test:coverage` 和 `pnpm build`，随后用 `pnpm bundle:check:default` 检查默认未压缩 userscript 的 96 KiB 大小预算。
-5. `userscript-e2e` job 仅在 `workflow_dispatch` 且 `run_userscript_e2e=true` 时运行；它安装 Playwright Chromium 依赖，再运行 `pnpm test:e2e:userscript`。
-6. `bundled-userscript` job 依赖 guardrails、test、coverage-build 和可选 E2E 成功后运行；当 `bundle_onnx_runtime=true` 时以 `--minify` 构建内置 ONNX Runtime Web JS runtime 的 userscript，生成 `.sha256`、artifact manifest 与 esbuild metafile，再用 `pnpm bundle:check:bundled` 检查 480 KiB 大小预算。
+5. `userscript-e2e` job 在 `pull_request`、推送到 `main` 时运行，在 `workflow_dispatch` 时由 `run_userscript_e2e` 控制；它读取实际 Playwright CLI 版本，用包含该版本的 key 缓存 `~/.cache/ms-playwright`，再通过 `playwright install --with-deps chromium` 保证 Chromium 和系统依赖可用，最后运行 `pnpm test:e2e:userscript`。
+6. `bundled-userscript` job 仅在 `workflow_dispatch` 且 `bundle_onnx_runtime=true` 时运行，并依赖 guardrails、test、coverage-build 和可选 E2E：`run_userscript_e2e=false` 时接受 E2E job 为 `skipped`，`run_userscript_e2e=true` 时要求 E2E job 为 `success`。随后它以 `--minify` 构建内置 ONNX Runtime Web JS runtime 的 userscript，生成 `.sha256`、artifact manifest 与 esbuild metafile，再用 `pnpm bundle:check:bundled` 检查 480 KiB 大小预算。
 7. 如果 `publish_userscript_artifact=true`，`bundled-userscript` job 上传 `apps/userscript/dist/hv-pony-solver.user.js`、`.sha256`、artifact manifest 与 esbuild metafile；默认不上传，且必须同时设置 `bundle_onnx_runtime=true`。
 
 ### Model Worker 部署 workflow
