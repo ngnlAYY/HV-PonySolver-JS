@@ -184,7 +184,7 @@ test('fails clearly when README omits ONNX Runtime asset package facts', async (
       readmePath,
       readme
         .replaceAll('onnxruntime-web', 'onnx runtime web')
-        .replaceAll('1.26.0', '1.x')
+        .replaceAll('1.27.0', '1.x')
         .replaceAll('dist/ort.min.js', 'dist runtime')
         .replaceAll('ort.min.js', 'ort min js'),
     )
@@ -192,7 +192,7 @@ test('fails clearly when README omits ONNX Runtime asset package facts', async (
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /README.md.*onnxruntime-web/s)
-    assert.match(result.stderr, /README.md.*1\.26\.0/s)
+    assert.match(result.stderr, /README.md.*1\.27\.0/s)
     assert.match(result.stderr, /README.md.*dist\/ort\.min\.js/s)
     assert.match(result.stderr, /README.md.*ort\.min\.js/s)
   })

@@ -16,10 +16,10 @@
     "@hv-pony-solver/shared": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.16.17",
-    "@cloudflare/workers-types": "^4.20260619.1",
+    "@cloudflare/vitest-pool-workers": "^0.16.20",
+    "@cloudflare/workers-types": "^4.20260702.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.0",
-    "wrangler": "^4.102.0"
+    "vitest": "^4.1.10",
+    "wrangler": "^4.114.0"
   }
 }

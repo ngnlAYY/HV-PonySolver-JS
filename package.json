@@ -16,7 +16,7 @@
       "postcss": "^8.5.18",
       "protobufjs": "8.7.1",
       "sharp": "^0.35.0",
-      "vite": "8.0.16",
+      "vite": "8.1.5",
       "ws": "8.21.0"
     }
   },
@@ -45,13 +45,13 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
-    "@vitest/coverage-istanbul": "4.1.6",
-    "@vitest/coverage-v8": "4.1.6",
+    "@vitest/coverage-istanbul": "4.1.10",
+    "@vitest/coverage-v8": "4.1.10",
     "eslint": "^10.8.0",
-    "prettier": "^3.7.4",
+    "prettier": "^3.9.6",
     "typescript": "^5.9.3",
-    "vite": "8.0.16",
-    "typescript-eslint": "^8.48.0",
-    "vitest": "^4.1.0"
+    "typescript-eslint": "^8.65.0",
+    "vite": "8.1.5",
+    "vitest": "^4.1.10"
   }
 }

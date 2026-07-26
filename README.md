@@ -19,7 +19,7 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 | 构建            | esbuild, TypeScript `tsc --noEmit`                   |
 | 测试            | Vitest, jsdom, `@cloudflare/vitest-pool-workers`     |
 | Lint / Format   | ESLint 10, typescript-eslint, Prettier               |
-| Userscript 推理 | ONNX Runtime Web 1.26.0, Web Worker, OffscreenCanvas |
+| Userscript 推理 | ONNX Runtime Web 1.27.0, Web Worker, OffscreenCanvas |
 | 模型分发        | Cloudflare Workers, KV, R2, Wrangler                 |
 | CI/CD           | GitHub Actions                                       |
 
@@ -219,7 +219,7 @@ apps/userscript/dist/hv-pony-solver.user.js
 
 ### ONNX Runtime asset manifest
 
-`apps/userscript/src/inference/onnx-runtime-assets.ts` 中的 `ONNX_RUNTIME_ASSETS` 是 ONNX Runtime Web JS runtime 与 WASM assets 的唯一来源。当前 package 为 `onnxruntime-web@1.26.0`，本地校验目标是已安装依赖中的 `dist/ort.min.js` / `ort.min.js`，以及 `wasmAssets` 中记录的 `dist/ort-wasm-simd-threaded.asyncify.wasm`、`dist/ort-wasm-simd-threaded.jsep.wasm`、`dist/ort-wasm-simd-threaded.jspi.wasm` 和 `dist/ort-wasm-simd-threaded.wasm`；manifest 记录 `scriptAsset.byteLength`、`scriptAsset.sha256`、`scriptAsset.maxByteLength`、`wasmAssets.byteLength` 和 `wasmAssets.sha256`，并通过 `cdn.scriptUrl`、`cdn.wasmPath` 派生 `onnxRuntimeConfig` 的远程资源位置。
+`apps/userscript/src/inference/onnx-runtime-assets.ts` 中的 `ONNX_RUNTIME_ASSETS` 是 ONNX Runtime Web JS runtime 与 WASM assets 的唯一来源。当前 package 为 `onnxruntime-web@1.27.0`，本地校验目标是已安装依赖中的 `dist/ort.min.js` / `ort.min.js`，以及 `wasmAssets` 中记录的 `dist/ort-wasm-simd-threaded.asyncify.wasm`、`dist/ort-wasm-simd-threaded.jsep.wasm`、`dist/ort-wasm-simd-threaded.jspi.wasm` 和 `dist/ort-wasm-simd-threaded.wasm`；manifest 记录 `scriptAsset.byteLength`、`scriptAsset.sha256`、`scriptAsset.maxByteLength`、`wasmAssets.byteLength` 和 `wasmAssets.sha256`，并通过 `cdn.scriptUrl`、`cdn.wasmPath` 派生 `onnxRuntimeConfig` 的远程资源位置。
 
 发布前可运行本地 asset 校验：
 
@@ -294,8 +294,8 @@ corepack pnpm benchmark:inference
 | `yoloOutputConfig.rowSize`                      | `6`                                                                   | YOLO 输出每行 float 数                                       |
 | `yoloOutputConfig.confidenceIndex`              | `4`                                                                   | YOLO 输出 confidence 列                                      |
 | `yoloOutputConfig.classIndex`                   | `5`                                                                   | YOLO 输出 class id 列                                        |
-| `onnxRuntimeConfig.ortScriptUrl`                | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js` | 默认构建下 Worker 动态加载 ONNX Runtime Web JS runtime       |
-| `onnxRuntimeConfig.ortWasmPath`                 | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/`           | ONNX Runtime Web wasm 资源路径，内置 JS runtime 时仍远程加载 |
+| `onnxRuntimeConfig.ortScriptUrl`                | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js` | 默认构建下 Worker 动态加载 ONNX Runtime Web JS runtime       |
+| `onnxRuntimeConfig.ortWasmPath`                 | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/`           | ONNX Runtime Web wasm 资源路径，内置 JS runtime 时仍远程加载 |
 | `inferenceTimeoutConfig.workerInitTimeoutMs`    | `60000`                                                               | ONNX Worker 初始化请求超时                                   |
 | `inferenceTimeoutConfig.workerDetectTimeoutMs`  | `30000`                                                               | ONNX Worker 单次检测请求超时                                 |
 | `inferenceTimeoutConfig.modelDownloadTimeoutMs` | `30000`                                                               | 模型下载超时                                                 |
@@ -560,7 +560,7 @@ corepack pnpm --filter @hv-pony-solver/userscript build
 corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 ```
 
-默认构建不内置 JS runtime；`HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1` 或 `build:bundled-runtime` 会先按 `ONNX_RUNTIME_ASSETS.scriptAsset.byteLength` 与 `ONNX_RUNTIME_ASSETS.scriptAsset.sha256` 校验本地 `onnxruntime-web@1.26.0/dist/ort.min.js`，再把 JS runtime 内置进 userscript。两种构建都仍通过 `ortWasmPath` 加载 WASM 资源；发布前应使用 `verify-onnx-runtime-assets` 同时校验本地 JS runtime 与 `wasmAssets`，必要时再用 `verify-onnx-runtime-cdn` 手动联网校验 CDN。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
+默认构建不内置 JS runtime；`HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1` 或 `build:bundled-runtime` 会先按 `ONNX_RUNTIME_ASSETS.scriptAsset.byteLength` 与 `ONNX_RUNTIME_ASSETS.scriptAsset.sha256` 校验本地 `onnxruntime-web@1.27.0/dist/ort.min.js`，再把 JS runtime 内置进 userscript。两种构建都仍通过 `ortWasmPath` 加载 WASM 资源；发布前应使用 `verify-onnx-runtime-assets` 同时校验本地 JS runtime 与 `wasmAssets`，必要时再用 `verify-onnx-runtime-cdn` 手动联网校验 CDN。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
 
 将生成的文件安装到 userscript 管理器：
 

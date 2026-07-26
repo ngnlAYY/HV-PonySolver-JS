@@ -128,7 +128,7 @@ test('createMainBuildOptions injects ONNX runtime and worker script sources', ()
 test('build-userscript defaults to remote onnxruntime-web runtime', async () => {
   const output = await runBuildInTempDir({ HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '' })
 
-  assert.equal(output.includes('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js'), true)
+  assert.equal(output.includes('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js'), true)
   assert.equal(output.includes(runtimeMarker), false)
   assert.equal(output.includes('hvPonySolverDebug'), false)
   assert.equal(output.includes('调试日志'), false)
@@ -164,7 +164,7 @@ test('build-userscript rejects bundled runtime sources with unexpected byte leng
       HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '1',
       runtimeSource: `${runtimeSource}\n`,
     }),
-    /ONNX runtime source size must be 360388 bytes/,
+    /ONNX runtime source size must be 360434 bytes/,
   )
 })
 
