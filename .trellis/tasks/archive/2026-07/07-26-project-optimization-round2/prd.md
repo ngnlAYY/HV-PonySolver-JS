@@ -71,7 +71,7 @@ Playwright smoke 从仅手动触发改为 PR 常态运行（独立 job，不阻�
 
 1. `corepack pnpm check`（含 audit 前提下的 check:quick + coverage + build）在仓库根全绿。
 2. `pnpm audit --audit-level high` exit 0。
-3. CI `verify-monorepo` 三个常规 job（guardrails/test/coverage-build）+ 新增 E2E job 在 PR 上全绿。
+3. CI `verify-monorepo` 的 guardrails/test/coverage-build/E2E/bundled-userscript 在远程 GitHub runner 上连续两次全绿；按用户 2026-07-27 最新要求不创建 PR，改用远程分支两次顺序 `workflow_dispatch` 验证 cold/hot cache，PR/main 触发条件做静态复核。
 4. 无任何 CI 门禁被放宽（audit level、覆盖率阈值只升不降、guardrail 脚本不删）。
 5. R6 评估结论已写入父任务 research/ 并在 wrap-up 时汇报。
 
@@ -82,3 +82,14 @@ Playwright smoke 从仅手动触发改为 PR 常态运行（独立 job，不阻�
 3. R6 维持只评估：Node 24 / TS 7 本轮不实施。
 4. 计划整体批准，执行从子任务 01 开始。
 5. **修订（同日）**：eslint 10 升级并入子任务 01——brace-expansion v1 链无上游补丁且 override 因 CJS API 不兼容不可行，eslint 10 是 audit 变绿的唯一真手段；用户批准。R6 评估范围相应缩为 TS 7 + Node 24。
+6. **远程验收修订（2026-07-27）**：用户要求不创建 PR，直接推送远程分支并触发构建；因此用 runs `30232888062` / `30232999410` 顺序验证真实 GitHub runner、E2E、bundled build 与 cold/hot cache，PR/main 触发条件保留静态复核。
+
+## 完成结果（2026-07-27）
+
+- R1：全量 `pnpm audit` 零漏洞；ESLint 10 升级完成。
+- R2：例行依赖与 ONNX Runtime Web 1.27.0 升级完成，本地五项资产完整性通过；CDN 校验保留为发布前手动步骤。
+- R3：门槛 90/90/80/90；实际 lines/functions/branches/statements = 94.29/95.86/83.97/94.04。
+- R4：default 72,204/98,304 B，bundled 398,993/491,520 B；预算 CLI、测试与 CI gate 完成。
+- R5：两次远程完整 workflow 全绿；cold→hot 的 Chromium install 22s→11s，E2E job 63s→31s；无 flake且远低于 5 分钟。
+- R6：TS 7 等待 TS 7.1+ 与 typescript-eslint 正式支持；Node 24 建议先做 Node 22.13 + 24 CI qualification；`@types/node` 对齐最低 runtime major。
+- 最终本地 `corepack pnpm check` 与全量 `pnpm audit` exit 0；全部 5 个子任务达到验收标准。

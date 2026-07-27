@@ -23,19 +23,19 @@
 
 - [x] 子任务 userscript-coverage-uplift（R3）：补测试 → 提门槛 90/90/80/90 → `check:userscript` 绿（6cd4b0d；实际 94.29/95.86/83.97/94.04）
 - [x] 子任务 bundle-size-budget（R4）：新脚本 + 测试 + 接入 check:quick/CI → `pnpm test`（含脚本 node:test）绿（e23a833；default 72,204/98,304 B，bundled 398,993/491,520 B）
-- [~] 子任务 e2e-on-pr（R5）：workflow 改造 + playwright 缓存 → 本地完成并提交 4ed834f，分支已 push；用户尚未创建 PR，因此仍等待两个 PR revision 的远程实测与 cold/hot cache 数据
+- [x] 子任务 e2e-on-pr（R5）：workflow 改造 + Playwright 版本化缓存 → 提交 4ed834f；远程 runs 30232888062 / 30232999410 连续全绿，cold→hot 安装 22s→11s、E2E job 63s→31s；按用户要求以 workflow_dispatch 替代实际 PR 验收
 - 回滚点：三个子任务各自独立 commit，互不影响
 
 ## Phase D — 父任务收尾
 
 - [x] R6 评估写入 `research/major-upgrades.md`（TS 7：等待 TS7.1+ 与 typescript-eslint 支持；Node 24：先做 22.13+24 双版本 CI qualification；ESLint 10 已实施）
-- [~] 集成复核：仓库根 `corepack pnpm check` 与全量 `pnpm audit` 已 exit 0；R1-R4、R6 本地验收已核对。跨子任务验收标准 3（PR 上 E2E）仍等待 R5 的两次远程 PR 与 cold/hot cache 数据
+- [x] 集成复核：仓库根 `corepack pnpm check` 与全量 `pnpm audit` exit 0；R1-R6 全部验收，远程 GitHub Actions 两次完整构建全绿
 - [x] README 命令参考已同步 `bundle:check` 与 E2E CI 事实，`pnpm docs:check` 通过
 - [x] bundle budget 与 E2E CI 可执行契约已写入 `.trellis/spec/userscript/frontend/quality-guidelines.md` 并更新对应 index
-- [ ] 父任务 wrap-up：汇总各子任务提交与 R6 结论
+- [x] 父任务 wrap-up：已在 PRD 完成结果中汇总各子任务提交、远程 runs 与 R6 结论
 
 ## Review Gates
 
 - Gate 1（现在）：用户批准本规划 + Open Questions 三项答复
 - Gate 2（B 段后）：audit 绿灯 + 升级批完成，确认进入并行段
-- Gate 3（D 段前）：R3 / R4 已归档；R5 仅本地实现完成，必须等待两次远程 PR 与 cold/hot cache 验收后才能归档并进入父任务 wrap-up
+- Gate 3（D 段前）：R3 / R4 / R5 已归档或具备归档条件；两次远程完整 workflow 与 cold/hot cache 验收完成，可进入父任务 wrap-up
