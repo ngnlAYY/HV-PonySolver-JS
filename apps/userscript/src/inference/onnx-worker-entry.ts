@@ -1,3 +1,4 @@
+import { onnxRuntimeConfig } from './inference-config'
 import { calculateLetterboxLayout, copyRgbaToChwFloat32 } from './image-preprocess'
 import { parseYoloOutput } from './yolo-output-parser'
 
@@ -26,7 +27,6 @@ type WorkerGlobal = DedicatedWorkerGlobalScope & {
 type InitMessage = Readonly<{
   type: 'init'
   requestId?: number
-  ortScriptUrl?: string
   wasmPath: string
   modelBuffer: ArrayBuffer
 }>
@@ -112,11 +112,8 @@ async function preprocessImage(imageBlob: Blob, size: number): Promise<Float32Ar
 async function handleInit(message: InitMessage): Promise<{ type: 'response', requestId: number | undefined }> {
   loadBundledRuntime()
   if (!workerSelf.ort) {
-    if (!message.ortScriptUrl) {
-      throw new Error('onnxruntime-web URL 未配置')
-    }
     try {
-      importScripts(message.ortScriptUrl)
+      importScripts(onnxRuntimeConfig.ortScriptUrl)
     } catch (error) {
       throw new Error(`onnxruntime-web 加载失败: ${error instanceof Error ? error.message : String(error)}`, {
         cause: error,

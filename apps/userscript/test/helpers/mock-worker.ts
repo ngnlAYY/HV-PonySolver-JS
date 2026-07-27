@@ -20,7 +20,7 @@ export class FailingWorker {
 
 export class TimeoutThenSuccessfulWorker {
   static instances: Array<TimeoutThenSuccessfulWorker | SuccessfulWorker> = []
-  static messages: Array<{ requestId?: number; type?: string; ortScriptUrl?: string; wasmPath?: string; imageBlob?: Blob }> = []
+  static messages: Array<{ requestId?: number; type?: string; wasmPath?: string; imageBlob?: Blob }> = []
   static transfers: Transferable[][] = []
   static constructedCount = 0
 
@@ -46,7 +46,7 @@ export class TimeoutThenSuccessfulWorker {
     SuccessfulWorker.reset()
   }
 
-  postMessage(message: { requestId?: number; type?: string; ortScriptUrl?: string; wasmPath?: string; imageBlob?: Blob }, transfer?: Transferable[]): void {
+  postMessage(message: { requestId?: number; type?: string; wasmPath?: string; imageBlob?: Blob }, transfer?: Transferable[]): void {
     TimeoutThenSuccessfulWorker.messages.push(message)
     TimeoutThenSuccessfulWorker.transfers.push(transfer ?? [])
     for (const item of transfer ?? []) {
@@ -69,7 +69,7 @@ export class TimeoutThenSuccessfulWorker {
 }
 
 export class SuccessfulWorker {
-  static messages: Array<{ requestId?: number; type?: string; ortScriptUrl?: string; wasmPath?: string; imageBlob?: Blob }> = []
+  static messages: Array<{ requestId?: number; type?: string; wasmPath?: string; imageBlob?: Blob }> = []
   static transfers: Transferable[][] = []
   static instances: SuccessfulWorker[] = []
   static terminateCount = 0
@@ -91,7 +91,7 @@ export class SuccessfulWorker {
     SuccessfulWorker.autoRespond = true
   }
 
-  postMessage(message: { requestId?: number; type?: string; ortScriptUrl?: string; wasmPath?: string; imageBlob?: Blob }, transfer?: Transferable[]): void {
+  postMessage(message: { requestId?: number; type?: string; wasmPath?: string; imageBlob?: Blob }, transfer?: Transferable[]): void {
     SuccessfulWorker.messages.push(message)
     SuccessfulWorker.transfers.push(transfer ?? [])
     for (const item of transfer ?? []) {

@@ -41,7 +41,7 @@ describe('OnnxWorkerClient', () => {
     expect(modelCache.putCached).not.toHaveBeenCalled()
   })
 
-  it('sends ortScriptUrl by default when worker init succeeds', async () => {
+  it('sends a fixed init message shape when worker init succeeds', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
     const putCached = vi.fn(async (buffer: ArrayBuffer) => {
@@ -62,12 +62,12 @@ describe('OnnxWorkerClient', () => {
     expect(putCached).toHaveBeenCalledWith(modelBuffer, true, true)
     expect(SuccessfulWorker.messages[0]).toMatchObject({
       type: 'init',
-      ortScriptUrl: ONNX_RUNTIME_ASSETS.cdn.scriptUrl,
       wasmPath: ONNX_RUNTIME_ASSETS.cdn.wasmPath,
     })
+    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')
   })
 
-  it('omits ortScriptUrl when configured for bundled runtime', async () => {
+  it('keeps the init message URL-free with a bundled runtime', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
     const modelCache = {
@@ -83,7 +83,7 @@ describe('OnnxWorkerClient', () => {
       type: 'init',
       wasmPath: ONNX_RUNTIME_ASSETS.cdn.wasmPath,
     })
-    expect(SuccessfulWorker.messages[0]?.ortScriptUrl).toBeUndefined()
+    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')
   })
 
   it('sends image blobs to worker without copying them into array buffers', async () => {

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ONNX_RUNTIME_ASSETS } from '../../src/inference/onnx-runtime-assets'
+
 type MockSession = Readonly<{
   run: ReturnType<typeof vi.fn>
 }>
@@ -86,20 +88,18 @@ describe('ONNX worker entry', () => {
     await sendMessage(harness, {
       type: 'init',
       requestId: 7,
-      ortScriptUrl: 'https://cdn.example/ort.js',
       wasmPath: 'https://cdn.example/wasm/',
       modelBuffer,
     })
     await sendMessage(harness, {
       type: 'init',
       requestId: 8,
-      ortScriptUrl: 'https://cdn.example/ort.js',
       wasmPath: 'https://cdn.example/wasm/',
       modelBuffer,
     })
 
     expect(harness.importScripts).toHaveBeenCalledTimes(1)
-    expect(harness.importScripts).toHaveBeenCalledWith('https://cdn.example/ort.js')
+    expect(harness.importScripts).toHaveBeenCalledWith(ONNX_RUNTIME_ASSETS.cdn.scriptUrl)
     expect(ort.env.wasm).toEqual({ wasmPaths: 'https://cdn.example/wasm/', numThreads: 1 })
     expect(ort.InferenceSession.create).toHaveBeenCalledTimes(1)
     expect(ort.InferenceSession.create).toHaveBeenCalledWith(modelBuffer, { executionProviders: ['wasm'] })
@@ -127,37 +127,21 @@ describe('ONNX worker entry', () => {
     expect(harness.worker.postMessage).toHaveBeenCalledWith({ type: 'response', requestId: 11 })
   })
 
-  it('reports runtime configuration and loading failures through the worker protocol', async () => {
-    const missingUrlHarness = await loadWorker()
-
-    await sendMessage(missingUrlHarness, {
-      type: 'init',
-      requestId: 21,
-      wasmPath: '/ort/',
-      modelBuffer: new ArrayBuffer(1),
-    })
-
-    expect(missingUrlHarness.worker.postMessage).toHaveBeenCalledWith({
-      type: 'error',
-      requestId: 21,
-      message: 'onnxruntime-web URL 未配置',
-    })
-
-    vi.resetModules()
-    const loadFailureHarness = await loadWorker()
-    loadFailureHarness.importScripts.mockImplementation(() => {
+  it('reports canonical remote runtime loading failures through the worker protocol', async () => {
+    const harness = await loadWorker()
+    harness.importScripts.mockImplementation(() => {
       throw 'blocked by policy'
     })
 
-    await sendMessage(loadFailureHarness, {
+    await sendMessage(harness, {
       type: 'init',
       requestId: 22,
-      ortScriptUrl: 'https://cdn.example/ort.js',
       wasmPath: '/ort/',
       modelBuffer: new ArrayBuffer(1),
     })
 
-    expect(loadFailureHarness.worker.postMessage).toHaveBeenCalledWith({
+    expect(harness.importScripts).toHaveBeenCalledWith(ONNX_RUNTIME_ASSETS.cdn.scriptUrl)
+    expect(harness.worker.postMessage).toHaveBeenCalledWith({
       type: 'error',
       requestId: 22,
       message: 'onnxruntime-web 加载失败: blocked by policy',
@@ -170,7 +154,6 @@ describe('ONNX worker entry', () => {
     await sendMessage(harness, {
       type: 'init',
       requestId: 23,
-      ortScriptUrl: 'https://cdn.example/empty.js',
       wasmPath: '/ort/',
       modelBuffer: new ArrayBuffer(1),
     })

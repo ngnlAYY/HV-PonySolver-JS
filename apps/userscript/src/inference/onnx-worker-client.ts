@@ -163,7 +163,6 @@ export class OnnxWorkerClient implements DetectorService {
       await this.post(
         {
           type: 'init',
-          ...(this.options.bundledRuntimeSource ? {} : { ortScriptUrl: onnxRuntimeConfig.ortScriptUrl }),
           wasmPath: onnxRuntimeConfig.ortWasmPath,
           modelBuffer,
         },
