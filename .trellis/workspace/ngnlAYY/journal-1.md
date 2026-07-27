@@ -31,3 +31,31 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: 恢复 Model Worker 并初始化 Trellis 规范
+
+**Date**: 2026-07-27
+**Task**: 恢复 Model Worker 并初始化 Trellis 规范
+**Branch**: `fix/authorized-model-download`
+
+### Summary
+
+修复 CodeQL Worker URL sink，部署并恢复 Model Worker 公开 CORS 契约，增加发布后 checker 与传播窗口；完成三 workspace Trellis 真实规范并归档 bootstrap task。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4b7caf8` | (see git log) |
+| `b677f55` | (see git log) |
+| `4a51f93` | (see git log) |
+| `f8b93d3` | (see git log) |
+| `88c4e5e` | (see git log) |
+| `e12da9a` | (see git log) |
+| `36e8019` | (see git log) |
+| `10df652` | (see git log) |
+
+### Status
+
+[OK] **Completed**

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-07-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~33 | Active |
+| `journal-1.md` | ~61 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-07-27 | 恢复 Model Worker 并初始化 Trellis 规范 | `4b7caf8`, `b677f55`, `4a51f93`, `f8b93d3`, `88c4e5e`, `e12da9a`, `36e8019`, `10df652` | `fix/authorized-model-download` |
 | 1 | 2026-07-27 | 全面优化 Round 2 | `fc0c005`, `d10ab05`, `6cd4b0d`, `e23a833`, `4ed834f`, `0f0b06e` | `chore/optimization-round2` |
 <!-- @@@/auto:session-history -->
 
