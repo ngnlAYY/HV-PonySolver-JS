@@ -157,14 +157,15 @@ corepack pnpm install
 
 ### Model Worker 命令
 
-| 命令                                                                                                                     | 说明                                                                         |
-| ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket> pnpm --filter @hv-pony-solver/model-worker render-config` | 从 `wrangler.template.toml` 渲染本地 `wrangler.toml`                         |
-| `pnpm --filter @hv-pony-solver/model-worker dev`                                                                         | 渲染 Wrangler 配置后启动 `wrangler dev`                                      |
-| `pnpm --filter @hv-pony-solver/model-worker typecheck`                                                                   | 类型检查 Worker 源码                                                         |
-| `pnpm --filter @hv-pony-solver/model-worker test`                                                                        | 使用 Cloudflare Vitest pool 运行 Worker 测试                                 |
-| `pnpm --filter @hv-pony-solver/model-worker build`                                                                       | 运行 Worker TypeScript 构建检查                                              |
-| `pnpm --filter @hv-pony-solver/model-worker run deploy`                                                                  | 渲染配置并部署 Worker；使用 `run deploy` 避免 pnpm 10 内置 `deploy` 命令冲突 |
+| 命令                                                                                                                                                                                          | 说明                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket> pnpm --filter @hv-pony-solver/model-worker render-config`                                                                      | 从 `wrangler.template.toml` 渲染本地 `wrangler.toml`                         |
+| `pnpm --filter @hv-pony-solver/model-worker dev`                                                                                                                                              | 渲染 Wrangler 配置后启动 `wrangler dev`                                      |
+| `pnpm --filter @hv-pony-solver/model-worker typecheck`                                                                                                                                        | 类型检查 Worker 源码                                                         |
+| `pnpm --filter @hv-pony-solver/model-worker test`                                                                                                                                             | 使用 Cloudflare Vitest pool 运行 Worker 测试                                 |
+| `pnpm --filter @hv-pony-solver/model-worker build`                                                                                                                                            | 运行 Worker TypeScript 构建检查                                              |
+| `MODEL_WORKER_URL=https://models.ngnl.host/yolo26n-640.onnx MODEL_WORKER_INVALID_KEY_MODE=decoy MODEL_WORKER_PROBE_ID=<probe-id> pnpm --filter @hv-pony-solver/model-worker check:deployment` | 仅用无 Key 的 OPTIONS/HEAD 验证已部署 Worker 的公开 HTTP/CORS 契约           |
+| `pnpm --filter @hv-pony-solver/model-worker run deploy`                                                                                                                                       | 渲染配置并部署 Worker；使用 `run deploy` 避免 pnpm 10 内置 `deploy` 命令冲突 |
 
 ### Shared 包命令
 
@@ -521,7 +522,7 @@ userscript E2E 在 `pull_request` 和推送到 `main` 时常态执行；`workflo
 
 ### Model Worker 部署 workflow
 
-`.github/workflows/deploy-cloudflare-model-worker.yml` 默认手动触发，用于按需验证 Model Worker；只有 `publish_model_worker=true` 时才部署，默认不部署。手动触发时可通过 `invalid_key_mode` 选择无效 token 行为，默认 `decoy`，可选 `decoy` 或 `error`。workflow 同样使用 `actions/setup-node` 的 pnpm cache。
+`.github/workflows/deploy-cloudflare-model-worker.yml` 默认手动触发，用于按需验证 Model Worker；只有 `publish_model_worker=true` 时才部署，默认不部署。手动触发时可通过 `invalid_key_mode` 选择无效 token 行为，默认 `decoy`，可选 `decoy` 或 `error`。workflow 同样使用 `actions/setup-node` 的 pnpm cache。绿色的 dry-run 只证明配置能够生成并通过 Wrangler 校验，不证明生产 Worker 已经部署；必须检查 `Deploy Worker` 和其后的公开契约检查步骤是否实际执行成功。
 
 验证与部署步骤：
 
@@ -534,6 +535,9 @@ userscript E2E 在 `pull_request` 和推送到 `main` 时常态执行；`workflo
 7. 运行 Worker 测试。
 8. 如果 Cloudflare secrets 完整，运行 Wrangler dry-run。
 9. 如果 `publish_model_worker=true`，执行 `pnpm --filter @hv-pony-solver/model-worker run deploy`；默认跳过部署。
+10. 仅在实际部署后运行 `check:deployment`：使用 GitHub run/attempt 作为非秘密 probe ID，对两个允许 Origin 发送无 Key、无 body 的 OPTIONS/HEAD 请求，并按 `invalid_key_mode` 验证公开 HTTP/CORS 契约。
+
+当 `publish_model_worker=false` 时，第 9、10 步都会跳过；因此 workflow 总体绿色不能单独作为“已发布”的证据。发布后检查失败表示部署可能已经发生但公开验收未通过，workflow 不会自动回滚，需按 [Model Worker 运维说明](docs/model-worker-ops.md) 保存证据并人工决定后续操作。
 
 需要配置的 GitHub Secrets：
 
@@ -607,7 +611,16 @@ MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> pnpm --filter
 pnpm --filter @hv-pony-solver/model-worker run deploy
 ```
 
-注意：使用 pnpm 10 时，过滤 workspace 后运行名为 `deploy` 的 package script 必须显式加 `run`，否则可能触发 pnpm 内置 `deploy` 命令。
+部署完成后，可使用一个不含凭据和用户数据的唯一 probe ID 验证公开契约；该命令只发送无 Key 的 `OPTIONS`/`HEAD`，不会读取模型 body：
+
+```bash
+MODEL_WORKER_URL=https://models.ngnl.host/yolo26n-640.onnx \
+MODEL_WORKER_INVALID_KEY_MODE=decoy \
+MODEL_WORKER_PROBE_ID=<probe-id> \
+pnpm --filter @hv-pony-solver/model-worker check:deployment
+```
+
+注意：使用 pnpm 10 时，过滤 workspace 后运行名为 `deploy` 的 package script 必须显式加 `run`，否则可能触发 pnpm 内置 `deploy` 命令。公开契约通过后，真实 Key 仍应只在用户本地菜单中验证，不应放入命令、URL、日志或聊天。
 
 ## 代码风格与约束
 

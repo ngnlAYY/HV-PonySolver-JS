@@ -105,3 +105,11 @@ jobs:
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
           INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
         run: pnpm --filter @hv-pony-solver/model-worker run deploy
+
+      - name: Verify deployed Worker contract
+        if: ${{ inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready == 'true' }}
+        env:
+          MODEL_WORKER_URL: https://models.ngnl.host/yolo26n-640.onnx
+          MODEL_WORKER_INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
+          MODEL_WORKER_PROBE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: pnpm --filter @hv-pony-solver/model-worker check:deployment
