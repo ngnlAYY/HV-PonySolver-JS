@@ -1,195 +1,173 @@
 # Quality Guidelines
 
-> Code quality standards for frontend development.
+## Required Baseline
 
----
+Userscript变更必须保持：
 
-## Overview
+- ESLint / strict TypeScript / Prettier；
+- Vitest/jsdom unit tests与 node:test script tests；
+- coverage thresholds：lines 90%、functions 90%、branches 80%、statements 90%；
+- docs drift、architecture boundary、browser sink与bundle budget guards；
+- default build；涉及启动/DOM/build artifact时运行 Playwright local fixture E2E。
 
-<!--
-Document your project's quality standards here.
+最小 package gate：
 
-Questions to answer:
-- What patterns are forbidden?
-- What linting rules do you enforce?
-- What are your testing requirements?
-- What code review standards apply?
--->
+```bash
+corepack pnpm check:userscript
+```
 
-(To be filled by the team)
+完整 gate：
 
----
+```bash
+corepack pnpm check
+```
 
-## Forbidden Patterns
+## Security / Integrity Boundaries
 
-<!-- Patterns that should never be used and why -->
+### Model download
 
-(To be filled by the team)
+- 使用标准 `fetch` 与 `Authorization: Bearer <key>`；query string Key不授权。
+- 不使用 `GM_xmlhttpRequest` / `GM.xmlHttpRequest` 绕过 CORS。
+- Candidate Key通过 override验证后才保存；失败不能覆盖现有配置。
+- Download/cache read都验证 canonical byteLength与 SHA-256；错误 bytes不能进入 cache或 ONNX session。
+- Key不进入 URL、log、DOM/history、fixture、task artifact或聊天。
 
----
+真实实现/测试：`model-downloader.ts`、`model-integrity.ts`、`model-cache.ts` 及对应 `test/model/`。
 
-## Required Patterns
+### ONNX Runtime assets
 
-<!-- Patterns that must always be used -->
+- `onnx-runtime-assets.ts` 是 CDN script/WASM URL、byteLength、SHA-256 的 canonical source。
+- Default build不内置 JS runtime；bundled-runtime build先验证本地 installed asset再内置 JS，WASM仍从 canonical path加载。
+- Worker init message不携带 script URL；remote `importScripts` 只读 canonical config。
+- `verify-onnx-runtime-assets` 是默认可离线 release guard；`verify-onnx-runtime-cdn` 会联网，只手动用于 release，不接默认 CI。
+- 禁止关闭 asset integrity或允许 caller提供任意 HTTPS script URL。
 
-(To be filled by the team)
+### Browser sinks
 
----
+`scripts/check-browser-sinks.mjs` 审计 Userscript source：
 
-## Testing Requirements
+- `innerHTML` 只允许 status panel controller的一个 sink，dynamic values先 `escapeHtml`。
+- `new Function` / `importScripts` 只允许 audited Worker entry paths。
+- 新 sink不得仅通过增加 allowlist计数放行；先证明 trust/data-flow、补测试，再更新 guard。
 
-<!-- What level of testing is expected -->
+```bash
+corepack pnpm browser-sinks:check
+```
 
-(To be filled by the team)
+## Unit / Script Test Strategy
 
-### 场景：Userscript bundle 大小预算守卫
+- DOM/controller/storage/network behavior：Vitest + jsdom + injected adapters/mocks。
+- Pure inference：直接测试 preprocess/layout/YOLO parser的数值与边界。
+- Worker client/entry：mock Worker globals，覆盖 remote/bundled init、message shape、timeouts、abort、stale worker、transferables、load/session failures。
+- Build/asset/model verification scripts：Node `node:test` + temp dirs/injected fetch；默认 tests不访问公网。
+- 所有 async lifecycle change覆盖 success、base、failure、destroy/abort/retry/cleanup。
 
-#### 1. Scope / Trigger
+不要只测试 happy path；至少包含 empty/missing/invalid/boundary与 owner teardown。
 
-当 userscript 的源码、构建配置、ONNX Runtime 资源或依赖变化可能影响发布产物大小时，必须运行 bundle budget gate；新增构建 profile 时必须同时定义其预算与 CI 检查点。
+## Architecture Guard
 
-#### 2. Signatures
+`scripts/check-architecture-boundaries.mjs` 保持：
 
-```text
+- inference layer不依赖 status panel implementation；通过 status ports通信。
+- status panel不依赖 inference。
+- inference不直接导入 GM storage bridge。
+- Userscript与Model Worker不相互 import；Shared不反向 import apps。
+
+当前 guard跳过 type-only import，review仍要人工检查 type dependency leak。
+
+```bash
+corepack pnpm architecture:check
+```
+
+## Bundle Budget Contract
+
+### Profiles
+
+| Profile   | Build contract                 |  Budget | Artifact                                      |
+| --------- | ------------------------------ | ------: | --------------------------------------------- |
+| `default` | 未压缩、不内置 ONNX Runtime JS |  96 KiB | `apps/userscript/dist/hv-pony-solver.user.js` |
+| `bundled` | `--minify` + bundled-runtime   | 480 KiB | 同一 artifact path                            |
+
+Commands：
+
+```bash
 pnpm bundle:check
 pnpm bundle:check:default
 pnpm bundle:check:bundled
 node scripts/check-bundle-budget.mjs --profile <default|bundled> [--file <path>] [--repo-root <path>]
 ```
 
-- `bundle:check`：显式构建默认 userscript 后调用 default 纯检查。
-- `bundle:check:default` / `bundle:check:bundled`：只检查已存在的产物，不执行构建。
+- `bundle:check` 显式构建 default后检查。
+- `bundle:check:default` / `:bundled` 是 pure checker，不隐式 build。
+- CI `coverage-build` 在 default build后用 default profile；`bundled-userscript` 在 minified bundled build后用 bundled profile。
+- Success/failure输出 profile、actual、budget、delta、absolute file。
+- Unknown profile（包括 `__proto__`）、缺 flag value、missing/non-file artifact、unsafe integers、over-budget全部非零失败。
+- `actual === budget` 允许通过。
 
-#### 3. Contracts
+Forbidden：bundled artifact误用 default profile；default artifact只用宽松 bundled预算；pure checker偷偷 build；missing artifact静默 skip。
 
-| Profile | 构建契约 | 预算 | 默认产物 |
-| --- | --- | ---: | --- |
-| `default` | 未压缩、不内置 ONNX Runtime JS | 96 KiB | `apps/userscript/dist/hv-pony-solver.user.js` |
-| `bundled` | `--minify` + bundled-runtime | 480 KiB | `apps/userscript/dist/hv-pony-solver.user.js` |
+## E2E CI Contract
 
-成功输出必须包含 `profile`、`actual`、`budget`、`delta` 和绝对 `file` 路径。`check:quick` 调用 `bundle:check`；CI 的 `coverage-build` 在默认 build 后调用 default profile，`bundled-userscript` 在 bundled build 后调用 bundled profile。
+`apps/userscript/test/e2e/` 使用本地 fixture，不访问真实 Hentaiverse。
 
-#### 4. Validation & Error Matrix
-
-| 条件 | 行为 |
-| --- | --- |
-| profile 不在 `default` / `bundled`（包括 `__proto__` 等继承属性） | 非零退出，报告 `Unknown bundle budget profile` |
-| `--profile` / `--file` / `--repo-root` 缺值 | 非零退出，报告对应 flag requires a value |
-| 产物不存在或目标不是普通文件 | 非零退出，输出 `actual=missing` 与先构建提示；包装错误保留 `cause` |
-| `actualBytes` / `budgetBytes` 非非负 safe integer | 抛出参数验证错误 |
-| `actualBytes > budgetBytes` | 非零退出，输出正数 overage delta |
-| `actualBytes <= budgetBytes` | 零退出，输出剩余预算（负数或零 delta） |
-
-#### 5. Good / Base / Bad Cases
-
-- Good：构建命令完成后立即运行对应 profile，产物小于预算，CI 继续。
-- Base：产物恰好等于预算，允许通过（`delta=0`）。
-- Bad：在 bundled build 后误跑 default profile，或 pure checker 遇到缺失产物却静默跳过。
-
-#### 6. Tests Required
-
-`node --test scripts/check-bundle-budget.test.mjs` 至少断言：
-
-- 两个 profile 的固定预算；恰好等于预算与超过预算的边界。
-- 缺文件、未知参数、未知 profile 和原型继承 profile 的非零失败。
-- CLI 成功/失败输出同时含 profile、actual、budget、delta。
-- CI workflow 中两个 profile 位于各自构建步骤之后。
-
-仓库级验收必须运行 `pnpm check`，并单独实测 bundled build + `pnpm bundle:check:bundled`。
-
-#### 7. Wrong vs Correct
-
-```yaml
-# Wrong：默认构建后检查 bundled 预算，过宽预算会掩盖默认产物膨胀
-- run: pnpm build
-- run: pnpm bundle:check:bundled
-
-# Correct：每种构建紧跟对应 profile
-- run: pnpm build
-- run: pnpm bundle:check:default
+```bash
+corepack pnpm test:e2e:userscript
 ```
 
-```json
-// Wrong：让纯 checker 隐式构建，CI 无法看出被检查的产物来源
-"bundle:check:default": "pnpm build && node scripts/check-bundle-budget.mjs --profile default"
+`.github/workflows/verify-monorepo.yml#userscript-e2e`：
 
-// Correct：build-and-check 与 pure-check 命令分离
-"bundle:check": "pnpm --filter @hv-pony-solver/userscript build && pnpm bundle:check:default",
-"bundle:check:default": "node scripts/check-bundle-budget.mjs --profile default"
+- `pull_request` 与 push to `main` 常态运行。
+- `workflow_dispatch` 仅在 `run_userscript_e2e=true` 时运行。
+- 严格解析 `playwright --version` 的单行 `Version <semver>`；无效 output直接失败。
+- Cache path `~/.cache/ms-playwright`，key包含 runner OS、`chromium`、实际 Playwright version。
+- Cache hit后仍运行 `playwright install --with-deps chromium`，保证 Ubuntu system dependencies。
+- `bundled-userscript` 只在 dispatch：input=false接受 E2E skipped，input=true只接受 E2E success；failure不得发布 artifact。
+- 不使用 `continue-on-error` 放过 E2E。
+
+## Build / Release Gates
+
+Default build：
+
+```bash
+corepack pnpm --filter @hv-pony-solver/userscript build
+corepack pnpm bundle:check:default
 ```
 
-### 场景：Userscript E2E CI gate
+Bundled release build：
 
-#### 1. Scope / Trigger
-
-修改 userscript 启动、DOM 扫描、模型/Worker 初始化、答案提交、构建产物或 E2E fixture 时，PR 与 `main` push 必须运行 Playwright smoke；发布型 workflow dispatch 可由显式 input 控制是否运行。
-
-#### 2. Signatures
-
-```text
-pnpm test:e2e:userscript
-pnpm --filter @hv-pony-solver/userscript exec playwright --version
-pnpm --filter @hv-pony-solver/userscript exec playwright install --with-deps chromium
+```bash
+corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
+corepack pnpm bundle:check:bundled
 ```
 
-GitHub Actions job：`verify-monorepo.yml#userscript-e2e`。缓存版本 step id 固定为 `playwright-version`，output 名为 `version`。
+Model artifact发布前：
 
-#### 3. Contracts
-
-- `pull_request`：E2E job 必须运行。
-- `push`：workflow 顶层只接受 `main`，E2E job 必须运行。
-- `workflow_dispatch`：仅 `inputs.run_userscript_e2e=true` 时运行。
-- Chromium 缓存路径为 `~/.cache/ms-playwright`；key 必须包含 `runner.os`、`chromium` 和严格解析的 Playwright semver。
-- 即使 cache hit，仍运行 `playwright install --with-deps chromium`，保证 Ubuntu system dependencies。
-- `bundled-userscript` 仅允许 workflow dispatch：input=false 时接受 E2E=`skipped`，input=true 时只接受 E2E=`success`；E2E failure 不得发布 artifact。
-
-#### 4. Validation & Error Matrix
-
-| 条件 | 行为 |
-| --- | --- |
-| Playwright 输出严格匹配 `Version <semver>` | 写入 `$GITHUB_OUTPUT`，用于 cache key |
-| 输出为空、多行或非 semver | version step 失败，不使用污染的 output |
-| PR / main push | E2E job 运行，bundled publish job 不运行 |
-| dispatch + `run_userscript_e2e=false` | E2E skipped；满足其他条件时 bundled job 可运行 |
-| dispatch + `run_userscript_e2e=true` + E2E success | bundled job 可运行 |
-| dispatch + `run_userscript_e2e=true` + E2E failure | bundled job skipped，不能发布 artifact |
-
-#### 5. Good / Base / Bad Cases
-
-- Good：PR 冷缓存成功，后续 revision 命中相同 Playwright 版本缓存，两个 E2E job 都稳定且各自 <5 分钟。
-- Base：dispatch 不请求 E2E，E2E skipped，但请求的 bundled build 仍可执行。
-- Bad：用 `continue-on-error` 放过 E2E failure；或只以 lockfile 通用 hash 作 cache key而不显式包含 Playwright 版本。
-
-#### 6. Tests Required
-
-- 本地：`pnpm test:e2e:userscript` 通过并发现 Chromium smoke test。
-- 仓库：`pnpm check`、`pnpm docs:check`、workflow YAML parse 与格式检查通过。
-- 远程：至少两个 PR revision 的 `userscript-e2e` 成功；记录 cold/hot cache、安装耗时和 job 总耗时。
-- 若 remote job flake 或 >5 分钟，改为 `main` push + nightly，并在任务/PR 中保留实测依据。
-
-#### 7. Wrong vs Correct
-
-```yaml
-# Wrong：PR 不跑，或 E2E 失败仍继续发布
-if: ${{ github.event_name == 'workflow_dispatch' }}
-continue-on-error: true
-
-# Correct：PR/main 常态运行，dispatch 显式 opt-in
-if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_userscript_e2e) }}
+```bash
+MODEL_FILE=/path/to/yolo26n-640.onnx \
+corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity
+corepack pnpm release:notes
 ```
 
-```yaml
-# Wrong：缓存 key 不反映 Playwright/browser revision
-key: playwright-${{ runner.os }}
+`release:notes` 只读 repository manifest，不上传模型、不访问 Cloudflare，也不替代 artifact integrity verification。
 
-# Correct：使用严格解析的实际版本
-key: playwright-${{ runner.os }}-chromium-${{ steps.playwright-version.outputs.version }}
-```
+## Forbidden / Common Mistakes
 
----
+- 修改 source但只运行 typecheck，不跑 behavior/coverage/build guard。
+- 默认 tests或E2E访问公网/真实 Hentaiverse/Cloudflare。
+- 测试 fixture包含真实 Key、credential、生产 resource ID或 model body。
+- 关闭 integrity、CORS或browser sink guard来让失败“通过”。
+- 在 async test中遗漏 cleanup，留下 timer/observer/Worker/IndexedDB state。
+- 硬编码当前 bundle实际字节数作为预算；预算是固定上限，actual会变化。
+- 依赖 Playwright cache而不执行 browser/system dependency install。
+- 修改 Worker protocol或runtime asset后只测 client或只测 entry。
 
 ## Code Review Checklist
 
-<!-- What reviewers should check -->
-
-(To be filled by the team)
+- [ ] 变更位于正确 feature/lifecycle owner，dependency direction未破坏？
+- [ ] External DOM/storage/network/Worker data均 runtime narrowed？
+- [ ] Key/Bearer/CORS与 model/runtime integrity边界未削弱？
+- [ ] Browser sink data flow受审计，未简单扩 allowlist？
+- [ ] Success/base/failure/abort/destroy/cache-corrupt branches有测试？
+- [ ] Coverage threshold、docs、architecture、browser sink、build与bundle gate通过？
+- [ ] 涉及启动/DOM/build artifact时 E2E通过？
+- [ ] 无 secret、generated dist、coverage、`.tmp` 或 model artifact进入提交？

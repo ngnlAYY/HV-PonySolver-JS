@@ -105,7 +105,7 @@ corepack enable
 pnpm install
 ```
 
-协作流程、分包快速检查命令和 commit 风格见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+协作时以本 README 的架构、命令与代码风格说明，以及 `.trellis/spec/` 中各 workspace 的可执行规范为准。
 
 如果本机没有裸 `pnpm` 命令，也可以使用：
 
@@ -329,10 +329,10 @@ YOLO 输出解析规则：
 
 1. 先从 IndexedDB `pony-solver-local` 的 `models` object store 读取缓存。
 2. 缓存记录必须匹配当前 `version`，且包含 `ArrayBuffer`。
-3. 未命中或读取失败时，从 `urlBase` 下载；如果 `accessKey` 非空，下载请求会发送 `Authorization: Bearer <accessKey>`。
+3. 未命中或读取失败时，从 `urlBase` 下载；设置菜单正在验证的候选 Key或本地已保存 Key会通过 `Authorization: Bearer <key>` 发送。
 4. 下载成功后写回 IndexedDB；写入失败不会阻止本次使用已下载模型。
 
-注意：当前源码默认 `accessKey` 为空。如果要访问真实模型，需要为构建产物提供授权 key。userscript 里的 key 对安装者可见，不应被视作真正保密的服务端密钥。
+注意：`modelConfig.accessKey` 是空字符串 fallback，真实 Key不应写入源码或构建产物。安装者通过 Userscript 设置菜单在本地验证 Key，验证成功后才保存到 GM storage；Key 对安装者可见，但不得进入 URL、日志、测试 fixture、发布 artifact 或聊天。
 
 ### 答题与历史记录
 
@@ -406,14 +406,14 @@ MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> INVALID_KEY_M
 
 ### Worker 运行时绑定与变量
 
-| 名称                     | 类型       | 必填 | 说明                                                             |
-| ------------------------ | ---------- | ---- | ---------------------------------------------------------------- |
-| `MODEL_KEYS`             | KV binding | 是   | 授权 token 存储；token 字符串作为 key，值非空即可                |
-| `MODEL_BUCKET`           | R2 binding | 是   | 存放真实模型与 decoy 模型                                        |
-| `PUBLIC_MODEL_PATH`      | var        | 否   | 公开下载路径；缺省使用共享常量 `/yolo26n-640.onnx`               |
-| `REAL_MODEL_OBJECT_KEY`  | var        | 是   | 真实模型在 R2 中的 object key                                    |
-| `DECOY_MODEL_OBJECT_KEY` | var        | 是   | decoy 模型在 R2 中的 object key                                  |
-| `INVALID_KEY_MODE`       | var        | 否   | `decoy` 或 `error`；会归一化大小写与首尾空白，其他值触发配置错误 |
+| 名称                     | 类型       | 必填 | 说明                                                                                             |
+| ------------------------ | ---------- | ---- | ------------------------------------------------------------------------------------------------ |
+| `MODEL_KEYS`             | KV binding | 是   | 授权 token 存储；token 字符串作为 key，`get` 返回值不是 `null` 即授权，marker 内容不表达额外权限 |
+| `MODEL_BUCKET`           | R2 binding | 是   | 存放真实模型与 decoy 模型                                                                        |
+| `PUBLIC_MODEL_PATH`      | var        | 否   | 公开下载路径；缺省使用共享常量 `/yolo26n-640.onnx`                                               |
+| `REAL_MODEL_OBJECT_KEY`  | var        | 是   | 真实模型在 R2 中的 object key                                                                    |
+| `DECOY_MODEL_OBJECT_KEY` | var        | 是   | decoy 模型在 R2 中的 object key                                                                  |
+| `INVALID_KEY_MODE`       | var        | 否   | `decoy` 或 `error`；会归一化大小写与首尾空白，其他值触发配置错误                                 |
 
 ### HTTP 行为
 
@@ -495,10 +495,9 @@ pnpm bundle:check
 pnpm build
 ```
 
-Worker 测试依赖渲染后的 `wrangler.toml`。本地测试前可先使用测试值渲染：
+Model Worker Vitest 会从 `wrangler.template.toml` 自动生成隔离的 `.wrangler/vitest/wrangler.toml`，直接运行 package test即可，不要求先渲染部署用的根 `wrangler.toml`：
 
 ```bash
-MODEL_KEYS_KV_NAMESPACE_ID=test-kv MODEL_BUCKET_NAME=test-bucket pnpm --filter @hv-pony-solver/model-worker render-config
 pnpm --filter @hv-pony-solver/model-worker test
 ```
 
@@ -570,7 +569,7 @@ corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 
 默认构建不内置 JS runtime；`HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1` 或 `build:bundled-runtime` 会先按 `ONNX_RUNTIME_ASSETS.scriptAsset.byteLength` 与 `ONNX_RUNTIME_ASSETS.scriptAsset.sha256` 校验本地 `onnxruntime-web@1.27.0/dist/ort.min.js`，再把 JS runtime 内置进 userscript。两种构建都仍通过 `ortWasmPath` 加载 WASM 资源；发布前应使用 `verify-onnx-runtime-assets` 同时校验本地 JS runtime 与 `wasmAssets`，必要时再用 `verify-onnx-runtime-cdn` 手动联网校验 CDN。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
 
-产物大小预算守卫按文件 byteLength 检查：默认未压缩 profile 固定为 96 KiB，`--minify` + bundled-runtime profile 固定为 480 KiB（当前实测分别为 72,204 B 与 398,993 B，后者预算取整并保留约 20% 余量）。根命令 `pnpm bundle:check` 会显式先运行默认 userscript build，保证 `check:quick` 在干净工作区也有产物；纯检查命令 `pnpm bundle:check:default` 与 `pnpm bundle:check:bundled` 不会偷偷构建，目标文件缺失或超预算都会失败并输出 profile、actual、budget 与 delta。
+产物大小预算守卫按文件 byteLength 检查：默认未压缩 profile 固定为 96 KiB，`--minify` + bundled-runtime profile 固定为 480 KiB。根命令 `pnpm bundle:check` 会显式先运行默认 userscript build，保证 `check:quick` 在干净工作区也有产物；纯检查命令 `pnpm bundle:check:default` 与 `pnpm bundle:check:bundled` 不会偷偷构建，目标文件缺失或超预算都会失败并输出 profile、actual、budget 与 delta。
 
 将生成的文件安装到 userscript 管理器：
 
@@ -578,7 +577,7 @@ corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 apps/userscript/dist/hv-pony-solver.user.js
 ```
 
-如果需要访问真实模型，需要确保构建产物中的 `modelConfig.accessKey` 对应 Worker KV 中存在的授权 key。`modelConfig.verifyIntegrity` 默认开启（`true`），会按 `packages/shared/src/model.ts` 中 `MODEL_INTEGRITY.byteLength` 与 `MODEL_INTEGRITY.sha256` 定义的字节长度和 SHA-256 对下载及缓存读取进行严格校验；当远端模型字节内容变更时，必须同步更新 `MODEL_INTEGRITY` 与 `MODEL_VERSION`，否则下载会被阻断。发布前应对待发布 ONNX 文件运行 `MODEL_FILE=/path/to/yolo26n-640.onnx corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity`，确保本地模型与 shared manifest 一致。
+如果需要访问真实模型，安装者应通过 Userscript 设置菜单在本地验证并保存 Key；`modelConfig.accessKey` 应保持空字符串，不能把真实 Key发布进 `.user.js`。`modelConfig.verifyIntegrity` 默认开启（`true`），会按 `packages/shared/src/model.ts` 中 `MODEL_INTEGRITY.byteLength` 与 `MODEL_INTEGRITY.sha256` 定义的字节长度和 SHA-256 对下载及缓存读取进行严格校验；当远端模型字节内容变更时，必须同步更新 `MODEL_INTEGRITY` 与 `MODEL_VERSION`，否则下载会被阻断。发布前应对待发布 ONNX 文件运行 `MODEL_FILE=/path/to/yolo26n-640.onnx corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity`，确保本地模型与 shared manifest 一致。
 
 发布前应生成模型发布说明，记录当前 shared manifest 中的版本、byteLength 和 SHA-256：
 
@@ -643,20 +642,20 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 
 ### Worker 测试找不到 Wrangler 配置
 
-先渲染 `apps/model-worker/wrangler.toml`：
+`apps/model-worker/vitest.config.ts` 应自动在 `.wrangler/vitest/` 生成隔离测试配置。确认 `wrangler.template.toml` 存在并直接重新运行 package test；不要把部署用的根 `wrangler.toml` 当作测试前置条件，也不要提交任何生成配置：
 
 ```bash
-MODEL_KEYS_KV_NAMESPACE_ID=test-kv MODEL_BUCKET_NAME=test-bucket pnpm --filter @hv-pony-solver/model-worker render-config
+pnpm --filter @hv-pony-solver/model-worker test
 ```
 
 ### userscript 一直拿到 decoy 模型
 
 检查：
 
-1. `modelConfig.accessKey` 是否为空或格式不是 64 位十六进制。
-2. Worker KV 中是否存在同名 key。
-3. R2 中 `real/yolo26n-640.onnx` 是否存在。
-4. Worker 是否部署了最新配置。
+1. 是否已通过 Userscript 设置菜单验证并保存本地 Key；不要修改 `modelConfig.accessKey` 或把 Key写入构建产物。
+2. Worker KV 中是否存在对应 token key（任意非 `null` marker 即授权）。
+3. R2 中 `real/yolo26n-640.onnx` 是否存在且匹配 canonical manifest。
+4. Worker 是否部署了最新配置，公开 OPTIONS/CORS 契约是否通过。
 
 ### 模型缓存没有刷新
 
