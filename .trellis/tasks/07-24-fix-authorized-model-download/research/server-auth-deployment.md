@@ -51,18 +51,18 @@ KV namespace 内容和真实 R2 object 是否与 manifest 对齐仍需控制面�
 
 ## 逐项发现、置信度与验证建议
 
-| # | 发现 | 证据（file:line / 外部证据） | 置信度 | 安全验证建议 |
-|---|---|---|---|---|
-| 1 | 线上 Worker 不支持当前 `Authorization` preflight，足以直接导致浏览器下载失败 | 当前应为 `OPTIONS 204`：`apps/model-worker/src/request-router.ts:18-20`、`apps/model-worker/src/model-response.ts:57-68`；线上 2026-07-24 唯一 query 探测为 `405`、`Allow: GET, HEAD`、无 ACAH | **极高** | 部署后先做无 Key、无 body 的 `OPTIONS`；必须变为 `204` 且出现 `Access-Control-Allow-Headers: Authorization`，再进行任何真实 Key 验证 |
-| 2 | 线上是 pre-`1db43f0` 的 HTTP/授权契约，而非当前源码 | 当前 `ALLOWED_METHODS` 与 CORS 常量：`apps/model-worker/src/request-router.ts:5`、`apps/model-worker/src/model-response.ts:4,8-9`；Git `-S` 历史显示 Bearer/OPTIONS/no-store 在 `1db43f0` 引入；线上仍为 `GET, HEAD` 与 `public, max-age=86400` | **极高（语义边界）**；**中等（精确 SHA）** | 用 Cloudflare deployment history 确认实际 deployment ID、时间和 source/version；公开 headers 只能做契约指纹，不能证明唯一 SHA |
-| 3 | 最近 GitHub workflow 没有实际部署 | workflow 输入默认 `publish_model_worker=false`：`.github/workflows/deploy-cloudflare-model-worker.yml:4-18`；部署步骤条件：`:99-107`；run `28636662257` 的 `Deploy Worker` 为 `skipped` | **极高** | 触发 workflow 时显式选择 `publish_model_worker=true`；验收必须检查 `Deploy Worker` step 为 `success`，不能只看整个 workflow 的绿色状态 |
-| 4 | 该 dry-run 使用了完整 Cloudflare secrets，并渲染了正确的 binding 名，但这不代表线上已绑定这些资源 | secret gate 与渲染：`.github/workflows/deploy-cloudflare-model-worker.yml:51-79`；run log 显示 `env.MODEL_KEYS`/`env.MODEL_BUCKET` 且 resource 值被 `***` mask，随后 `--dry-run: exiting now` | **高** | 在新 deployment 的控制面详情中核对 binding target，而不是复用 dry-run 日志作为部署证据 |
-| 5 | 当前 Wrangler 模板会把 secrets 渲染到正确绑定名；guard 只验证格式与 TOML 结构，不验证 KV 内容/R2 object | `apps/model-worker/wrangler.template.toml:9-21`；`apps/model-worker/scripts/wrangler-config-guard.mjs:1-26,153-161`；renderer：`apps/model-worker/scripts/wrangler-config-renderer.mjs:42-65` | **高** | 控制面核对 namespace ID、bucket 名、运行时 vars；随后单独验证已知 token 的 KV entry 和两个 R2 object metadata |
-| 6 | 线上至少存在可用的 Worker 配置与 decoy 读取路径，但不能据此确认 KV namespace 身份或真实 object | 线上无 Key `HEAD` 为 `200` 且 ETag 为 `"6222fbc21b970bfb0e6da24be1b54683"`；按 `normalizeEnv` 与 `createModelResponse`，缺 binding/变量或 decoy object 缺失应为 `500`（`apps/model-worker/src/env.ts:22-37`、`apps/model-worker/src/model-response.ts:93-97`） | **中高**（假设线上仍沿用同一 Env 结构） | 在控制面核对实际 deployed bindings；不要把公共 decoy `200` 误作 KV 命中证据 |
-| 7 | 真实 R2 object 与 shared manifest 可能漂移，服务端不会自行发现 | manifest 固定为 version `yolo26n-640-2026-05-14`、9809075 bytes、SHA-256 `318e…f070`（`packages/shared/src/model.ts:3-7`）；Worker 只导入 `MODEL_FILENAME` 并直接流式返回 R2 body（`apps/model-worker/src/model-response.ts:1,93-102`） | **高（缺少服务端校验）**；**未知（线上是否已漂移）** | 私有控制面先核对 real object key/size/ETag，再在受控环境对 real object 做完整 SHA-256 校验；ETag 不能替代 manifest SHA-256 |
-| 8 | deployment workflow 不上传或校验真实模型 artifact，也不检查 KV entry | workflow 只有依赖安装、audit、render、typecheck、test、dry-run、deploy（`.github/workflows/deploy-cloudflare-model-worker.yml:31-107`）；发布说明仅指导人工预校验/上传（`scripts/model-release-notes.mjs:9-23`） | **极高** | 把“Worker 发布成功”和“KV/R2 数据正确”视为两个独立验收项；两者都通过后才做端到端 Key 验证 |
-| 9 | 单元测试充分覆盖当前逻辑，但全部使用测试配置和内存 fixture，不能证明生产环境 | Vitest 渲染 `test-kv`/`test-bucket`（`apps/model-worker/vitest.config.ts:5-17`）；fixture 使用 `MockKvNamespace`/`MockR2Bucket`（`apps/model-worker/test/helpers/model-worker-fixture.ts:30-59,146-165`） | **极高** | 保留单元测试作为逻辑证据，同时增加/执行单独的部署后 metadata smoke test；不要把 fixture 通过当成生产 binding 证据 |
-| 10 | `INVALID_KEY_MODE=decoy` 会让 KV miss 也返回 `200`，仅凭 status 无法判断 Key 是否有效 | `apps/model-worker/src/model-access.ts:6-8,23-34`；real/decoy 都由同一路径返回 200（`apps/model-worker/src/model-response.ts:93-102`） | **极高** | 用已知 real/decoy R2 ETag 对照授权与无授权 `HEAD`；不要发送猜测 token，也不要依靠 status 枚举 Key |
+| #   | 发现                                                                                                    | 证据（file:line / 外部证据）                                                                                                                                                                                                                                   | 置信度                                               | 安全验证建议                                                                                                                           |
+| --- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 线上 Worker 不支持当前 `Authorization` preflight，足以直接导致浏览器下载失败                            | 当前应为 `OPTIONS 204`：`apps/model-worker/src/request-router.ts:18-20`、`apps/model-worker/src/model-response.ts:57-68`；线上 2026-07-24 唯一 query 探测为 `405`、`Allow: GET, HEAD`、无 ACAH                                                                 | **极高**                                             | 部署后先做无 Key、无 body 的 `OPTIONS`；必须变为 `204` 且出现 `Access-Control-Allow-Headers: Authorization`，再进行任何真实 Key 验证   |
+| 2   | 线上是 pre-`1db43f0` 的 HTTP/授权契约，而非当前源码                                                     | 当前 `ALLOWED_METHODS` 与 CORS 常量：`apps/model-worker/src/request-router.ts:5`、`apps/model-worker/src/model-response.ts:4,8-9`；Git `-S` 历史显示 Bearer/OPTIONS/no-store 在 `1db43f0` 引入；线上仍为 `GET, HEAD` 与 `public, max-age=86400`                | **极高（语义边界）**；**中等（精确 SHA）**           | 用 Cloudflare deployment history 确认实际 deployment ID、时间和 source/version；公开 headers 只能做契约指纹，不能证明唯一 SHA          |
+| 3   | 最近 GitHub workflow 没有实际部署                                                                       | workflow 输入默认 `publish_model_worker=false`：`.github/workflows/deploy-cloudflare-model-worker.yml:4-18`；部署步骤条件：`:99-107`；run `28636662257` 的 `Deploy Worker` 为 `skipped`                                                                        | **极高**                                             | 触发 workflow 时显式选择 `publish_model_worker=true`；验收必须检查 `Deploy Worker` step 为 `success`，不能只看整个 workflow 的绿色状态 |
+| 4   | 该 dry-run 使用了完整 Cloudflare secrets，并渲染了正确的 binding 名，但这不代表线上已绑定这些资源       | secret gate 与渲染：`.github/workflows/deploy-cloudflare-model-worker.yml:51-79`；run log 显示 `env.MODEL_KEYS`/`env.MODEL_BUCKET` 且 resource 值被 `***` mask，随后 `--dry-run: exiting now`                                                                  | **高**                                               | 在新 deployment 的控制面详情中核对 binding target，而不是复用 dry-run 日志作为部署证据                                                 |
+| 5   | 当前 Wrangler 模板会把 secrets 渲染到正确绑定名；guard 只验证格式与 TOML 结构，不验证 KV 内容/R2 object | `apps/model-worker/wrangler.template.toml:9-21`；`apps/model-worker/scripts/wrangler-config-guard.mjs:1-26,153-161`；renderer：`apps/model-worker/scripts/wrangler-config-renderer.mjs:42-65`                                                                  | **高**                                               | 控制面核对 namespace ID、bucket 名、运行时 vars；随后单独验证已知 token 的 KV entry 和两个 R2 object metadata                          |
+| 6   | 线上至少存在可用的 Worker 配置与 decoy 读取路径，但不能据此确认 KV namespace 身份或真实 object          | 线上无 Key `HEAD` 为 `200` 且 ETag 为 `"6222fbc21b970bfb0e6da24be1b54683"`；按 `normalizeEnv` 与 `createModelResponse`，缺 binding/变量或 decoy object 缺失应为 `500`（`apps/model-worker/src/env.ts:22-37`、`apps/model-worker/src/model-response.ts:93-97`） | **中高**（假设线上仍沿用同一 Env 结构）              | 在控制面核对实际 deployed bindings；不要把公共 decoy `200` 误作 KV 命中证据                                                            |
+| 7   | 真实 R2 object 与 shared manifest 可能漂移，服务端不会自行发现                                          | manifest 固定为 version `yolo26n-640-2026-05-14`、9809075 bytes、SHA-256 `318e…f070`（`packages/shared/src/model.ts:3-7`）；Worker 只导入 `MODEL_FILENAME` 并直接流式返回 R2 body（`apps/model-worker/src/model-response.ts:1,93-102`）                        | **高（缺少服务端校验）**；**未知（线上是否已漂移）** | 私有控制面先核对 real object key/size/ETag，再在受控环境对 real object 做完整 SHA-256 校验；ETag 不能替代 manifest SHA-256             |
+| 8   | deployment workflow 不上传或校验真实模型 artifact，也不检查 KV entry                                    | workflow 只有依赖安装、audit、render、typecheck、test、dry-run、deploy（`.github/workflows/deploy-cloudflare-model-worker.yml:31-107`）；发布说明仅指导人工预校验/上传（`scripts/model-release-notes.mjs:9-23`）                                               | **极高**                                             | 把“Worker 发布成功”和“KV/R2 数据正确”视为两个独立验收项；两者都通过后才做端到端 Key 验证                                               |
+| 9   | 单元测试充分覆盖当前逻辑，但全部使用测试配置和内存 fixture，不能证明生产环境                            | Vitest 渲染 `test-kv`/`test-bucket`（`apps/model-worker/vitest.config.ts:5-17`）；fixture 使用 `MockKvNamespace`/`MockR2Bucket`（`apps/model-worker/test/helpers/model-worker-fixture.ts:30-59,146-165`）                                                      | **极高**                                             | 保留单元测试作为逻辑证据，同时增加/执行单独的部署后 metadata smoke test；不要把 fixture 通过当成生产 binding 证据                      |
+| 10  | `INVALID_KEY_MODE=decoy` 会让 KV miss 也返回 `200`，仅凭 status 无法判断 Key 是否有效                   | `apps/model-worker/src/model-access.ts:6-8,23-34`；real/decoy 都由同一路径返回 200（`apps/model-worker/src/model-response.ts:93-102`）                                                                                                                         | **极高**                                             | 用已知 real/decoy R2 ETag 对照授权与无授权 `HEAD`；不要发送猜测 token，也不要依靠 status 枚举 Key                                      |
 
 ## 线上只读探测结果
 
@@ -141,14 +141,14 @@ GitHub run log进一步显示 secrets gate 通过、dry-run 列出 `env.MODEL_KE
 
 `apps/model-worker/wrangler.template.toml:9-21` 固定：
 
-| Runtime name | Source |
-|---|---|
-| `PUBLIC_MODEL_PATH` | `/yolo26n-640.onnx` |
-| `REAL_MODEL_OBJECT_KEY` | `real/yolo26n-640.onnx` |
-| `DECOY_MODEL_OBJECT_KEY` | `decoy/yolo26n-640.onnx` |
-| `INVALID_KEY_MODE` | workflow/render input |
-| `MODEL_KEYS` | `${MODEL_KEYS_KV_NAMESPACE_ID}` |
-| `MODEL_BUCKET` | `${MODEL_BUCKET_NAME}` |
+| Runtime name             | Source                          |
+| ------------------------ | ------------------------------- |
+| `PUBLIC_MODEL_PATH`      | `/yolo26n-640.onnx`             |
+| `REAL_MODEL_OBJECT_KEY`  | `real/yolo26n-640.onnx`         |
+| `DECOY_MODEL_OBJECT_KEY` | `decoy/yolo26n-640.onnx`        |
+| `INVALID_KEY_MODE`       | workflow/render input           |
+| `MODEL_KEYS`             | `${MODEL_KEYS_KV_NAMESPACE_ID}` |
+| `MODEL_BUCKET`           | `${MODEL_BUCKET_NAME}`          |
 
 renderer 要求两个资源变量存在，并在 deploy 模式拒绝 test placeholder（`apps/model-worker/scripts/wrangler-config-renderer.mjs:10-29,42-65`）。guard 校验 32 位 lowercase hex namespace ID、bucket 名格式及绑定名/section（`apps/model-worker/scripts/wrangler-config-guard.mjs:1-26,49-67,129-161`）。
 
@@ -332,29 +332,29 @@ R2 ETag 只能用于确认 Worker 选中了哪个 object，不能替代 SHA-256 
 
 ## Files Found
 
-| File Path | Description |
-|---|---|
-| `apps/model-worker/src/index.ts` | Worker 入口、Env normalization、统一 500 |
-| `apps/model-worker/src/request-router.ts` | 路径、OPTIONS、方法路由 |
-| `apps/model-worker/src/model-access.ts` | Bearer 解析、KV lookup、real/decoy/forbidden 决策 |
-| `apps/model-worker/src/env.ts` | binding/变量校验与 normalization |
-| `apps/model-worker/src/model-response.ts` | R2 object 选择、HEAD/body、CORS/cache headers |
-| `apps/model-worker/src/worker-types.ts` | `MODEL_KEYS`、`MODEL_BUCKET` 与 runtime vars 类型 |
-| `apps/model-worker/wrangler.template.toml` | custom domain、bindings、object keys 模板 |
-| `apps/model-worker/scripts/wrangler-config-renderer.mjs` | secrets → generated Wrangler config |
-| `apps/model-worker/scripts/wrangler-config-guard.mjs` | deploy config 格式与 binding section guard |
-| `apps/model-worker/scripts/render-wrangler-config.test.mjs` | 渲染与 guard 测试 |
-| `.github/workflows/deploy-cloudflare-model-worker.yml` | 手动 dry-run/deploy workflow |
-| `packages/shared/src/token.ts` | 64-hex token 与 historical-case lookup |
-| `packages/shared/src/model.ts` | canonical filename/version/byteLength/SHA-256 |
-| `apps/model-worker/test/index.test.ts` | Worker HTTP/Bearer/CORS/R2 行为测试 |
-| `apps/model-worker/test/env.test.ts` | binding/变量拒绝测试 |
-| `apps/model-worker/test/helpers/model-worker-fixture.ts` | 内存 KV/R2 fixture |
-| `packages/shared/test/token.test.ts` | token contract tests |
-| `packages/shared/test/model.test.ts` | manifest constant tests |
-| `scripts/model-release-notes.mjs` | 人工 artifact 预校验/上传说明生成器 |
-| `docs/model-cache-strategy.md` | `no-store` 授权缓存决策 |
-| `docs/model-worker-ops.md` | manual deploy input 与 invalid mode 运维流程 |
+| File Path                                                   | Description                                       |
+| ----------------------------------------------------------- | ------------------------------------------------- |
+| `apps/model-worker/src/index.ts`                            | Worker 入口、Env normalization、统一 500          |
+| `apps/model-worker/src/request-router.ts`                   | 路径、OPTIONS、方法路由                           |
+| `apps/model-worker/src/model-access.ts`                     | Bearer 解析、KV lookup、real/decoy/forbidden 决策 |
+| `apps/model-worker/src/env.ts`                              | binding/变量校验与 normalization                  |
+| `apps/model-worker/src/model-response.ts`                   | R2 object 选择、HEAD/body、CORS/cache headers     |
+| `apps/model-worker/src/worker-types.ts`                     | `MODEL_KEYS`、`MODEL_BUCKET` 与 runtime vars 类型 |
+| `apps/model-worker/wrangler.template.toml`                  | custom domain、bindings、object keys 模板         |
+| `apps/model-worker/scripts/wrangler-config-renderer.mjs`    | secrets → generated Wrangler config               |
+| `apps/model-worker/scripts/wrangler-config-guard.mjs`       | deploy config 格式与 binding section guard        |
+| `apps/model-worker/scripts/render-wrangler-config.test.mjs` | 渲染与 guard 测试                                 |
+| `.github/workflows/deploy-cloudflare-model-worker.yml`      | 手动 dry-run/deploy workflow                      |
+| `packages/shared/src/token.ts`                              | 64-hex token 与 historical-case lookup            |
+| `packages/shared/src/model.ts`                              | canonical filename/version/byteLength/SHA-256     |
+| `apps/model-worker/test/index.test.ts`                      | Worker HTTP/Bearer/CORS/R2 行为测试               |
+| `apps/model-worker/test/env.test.ts`                        | binding/变量拒绝测试                              |
+| `apps/model-worker/test/helpers/model-worker-fixture.ts`    | 内存 KV/R2 fixture                                |
+| `packages/shared/test/token.test.ts`                        | token contract tests                              |
+| `packages/shared/test/model.test.ts`                        | manifest constant tests                           |
+| `scripts/model-release-notes.mjs`                           | 人工 artifact 预校验/上传说明生成器               |
+| `docs/model-cache-strategy.md`                              | `no-store` 授权缓存决策                           |
+| `docs/model-worker-ops.md`                                  | manual deploy input 与 invalid mode 运维流程      |
 
 ## Related Specs
 
@@ -374,7 +374,6 @@ R2 ETag 只能用于确认 Worker 选中了哪个 object，不能替代 SHA-256 
 - 未发送真实 Key或猜测 Key；所以没有从公网验证 real object selection。
 - 未下载任何线上模型 body；所以没有计算线上 real/decoy SHA-256。
 - GitHub 当前可见 workflow history 只有 run `28636662257`；若曾有本地 `wrangler deploy` 或已删除的 Actions run，GitHub 列表无法证明或排除。
-
 
 ---
 
@@ -535,3 +534,62 @@ response_code=200
 2. **P1，部署后再查**：新 deployment 的 KV namespace/entry 不一致。它只会在 preflight 通过、GET 实际发生后参与。
 3. **P1，部署后再查**：real R2 object/manifest 漂移。它应产生 HTTP 200 后的大小/SHA 错误，而非当前的裸 `Failed to fetch`。
 4. **P2，现场依赖**：用户本地 DNS/TLS、扩展拦截、代理或 Userscript 网络限制。本研究视角 DNS/TLS 正常；只有部署修复 OPTIONS 后仍失败，才应把它升为首要调查方向。
+
+## 2026-07-27 生产恢复证据
+
+### Deployment
+
+- 目标 ref：`main`
+- head SHA：`4a51f938052b8b233caf0c9ca59c9e35a683e46e`
+- workflow run：<https://github.com/ngnlAYY/HV-PonySolver-JS/actions/runs/30237695547>
+- inputs：`publish_model_worker=true`、`invalid_key_mode=decoy`
+- `Deploy Worker` step：`success`
+- Wrangler 上传时间：`2026-07-27T04:39:59Z`
+- custom domain trigger 部署时间：`2026-07-27T04:40:01Z`
+- Cloudflare Current Version ID：`18b98339-9be3-4e18-b769-ca4051d5c042`
+
+未读取或输出 Cloudflare secret、KV namespace ID、R2 bucket credential 或模型 Key。
+
+### 传播窗口与 checker 结果
+
+`Verify deployed Worker contract` 在部署完成后立即开始，使用无 Key、无 body 的公开请求。最初 5 次尝试在 20 秒窗口内均观察到：
+
+```text
+OPTIONS origin=https://hentaiverse.org: status mismatch; expected=204 actual=403
+```
+
+因此 workflow conclusion 为 `failure`，但这不撤销已经成功的 Worker deployment。按既定边界没有自动回滚或自动二次部署。
+
+部署约 55 秒后，从独立网络位置使用唯一 probe ID 复核，两个允许 Origin 均稳定满足：
+
+```text
+OPTIONS 204
+Access-Control-Allow-Origin: <request Origin>
+Access-Control-Allow-Methods: GET, HEAD, OPTIONS
+Access-Control-Allow-Headers: Authorization
+Cache-Control: no-store
+Vary: Origin
+
+HEAD 200
+Access-Control-Allow-Origin: <request Origin>
+Cache-Control: no-store
+Vary: Origin
+```
+
+随后以仓库 `check:deployment`、`attempts=1` 再次检查，输出：
+
+```text
+Model Worker deployment contract verified: attempt=1/1 mode=decoy origins=2
+```
+
+该证据证明当前公开 CORS/decoy 契约已恢复，但无 Key `HEAD 200` 不证明真实模型选择。生产观测同时证明原默认 5 次、5 秒间隔仅提供 20 秒传播窗口，不足以覆盖本次 Cloudflare edge 收敛；checker 默认值因此调整为 13 次尝试、5 秒间隔，即 60 秒有限窗口，并保留每请求 10 秒超时。该调整只更新后续 workflow 守卫，不执行第二次 Worker 部署。
+
+### CodeQL 复扫
+
+默认分支 Security Scan run <https://github.com/ngnlAYY/HV-PonySolver-JS/actions/runs/30237688682> 在 head `4a51f938052b8b233caf0c9ca59c9e35a683e46e` 成功完成。GitHub code-scanning alert #1（`js/client-side-unvalidated-url-redirection`）状态为 `fixed`，没有 dismiss；这验证了移除 Worker init 消息中的动态 `ortScriptUrl` 后，不可信消息值已不再流入 `importScripts` sink。
+
+### 剩余验收
+
+- 用户仍需在本地 Userscript 菜单验证已知 Key及保存后的普通下载；Key 不进入聊天、URL、日志或 task artifact。
+- 若公开契约正确但 Key返回 `403`，再核对 deployed mode、KV binding target 与 entry。
+- 若下载返回 `200` 后出现 byteLength/SHA-256 错误，再核对 real/decoy R2 object 与 canonical manifest。

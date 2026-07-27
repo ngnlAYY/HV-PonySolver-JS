@@ -14,24 +14,24 @@
 
 ### 1.1 部署前
 
-- [ ] 再次向用户明确说明目标环境、ref（`main`）、`publish_model_worker=true` 和 `invalid_key_mode=decoy`，取得生产部署确认。
-- [ ] 记录部署前公开契约指纹：OPTIONS `405`、旧 `Allow: GET, HEAD`、旧 public cache；不发送 Key、不下载 body。
-- [ ] 确认 GitHub Actions secrets gate 可用，但不读取或输出 secret 值。
+- [x] 用户已确认目标环境、ref（`main`）、`publish_model_worker=true` 和 `invalid_key_mode=decoy`。
+- [x] 记录部署前公开契约指纹：OPTIONS `405`、旧 `Allow: GET, HEAD`、旧 public cache；未发送 Key、未下载 body。
+- [x] GitHub Actions secrets gate 返回 ready；未读取或输出 secret 值。
 
 ### 1.2 执行发布
 
-- [ ] 从 GitHub Actions 在 `main` ref 触发 `Deploy Cloudflare Model Worker`。
-- [ ] 显式传入 `publish_model_worker=true`。
-- [ ] 默认传入 `invalid_key_mode=decoy`，除非用户另行决定。
-- [ ] 等待 workflow 完成，并检查 `Deploy Worker` step 自身为 `success`；不能只看 workflow 总体 conclusion。
-- [ ] 记录 run URL、head SHA 和 Cloudflare deployment 时间/ID（若 workflow 输出可见）。
+- [x] 从 GitHub Actions 在 `main` ref 触发 `Deploy Cloudflare Model Worker`。
+- [x] 显式传入 `publish_model_worker=true`。
+- [x] 传入 `invalid_key_mode=decoy`。
+- [x] workflow run `30237695547` 的 `Deploy Worker` step 为 `success`；发布后 checker 因 20 秒传播窗口不足而失败，未把 workflow 总体 conclusion 当作部署状态。
+- [x] 记录 run URL、head SHA、Cloudflare deployment 时间和 Version ID。
 
 ### 1.3 发布后公开验收
 
-- [ ] 用不含 Key、无 body 的 OPTIONS/HEAD 探测验证两个允许 Origin。
-- [ ] 确认 OPTIONS `204`、允许 Bearer preflight、`no-store`、`Vary: Origin`。
-- [ ] 确认 decoy 模式无 Key HEAD `200`，且不再出现旧 public cache header。
-- [ ] 若公开契约仍旧，停止 Key/R2 排查并检查 deployment ref/route/传播；必要时在再次确认后回滚。
+- [x] 用不含 Key、无 body 的 OPTIONS/HEAD 探测验证两个允许 Origin。
+- [x] 确认两个 Origin 均为 OPTIONS `204`、允许 Bearer preflight、`no-store`、`Vary: Origin`。
+- [x] 确认 decoy 模式无 Key HEAD `200`，且不再出现旧 public cache header。
+- [x] 公开契约在部署后前 20 秒短暂返回 `403`，约 55 秒后稳定为新契约；记录证据并把未来 checker 传播窗口扩大至有限 60 秒，未回滚或二次部署。
 - [ ] 由用户在本地 Userscript 菜单重新验证 Key；不要求用户把 Key发给 AI。
 
 ### 1.4 次级分流
@@ -53,7 +53,7 @@
 - [x] Worker 入口从 canonical `onnxRuntimeConfig.ortScriptUrl` 读取固定远程 runtime URL。
 - [x] bundled runtime 存在时不调用 `importScripts`；远程模式只调用 canonical URL。
 - [x] 覆盖 remote/bundled、加载失败和消息 shape 回归；构建产物不再把消息字段流入 URL sink。
-- [ ] 默认分支 CodeQL 复扫后确认 alert #1 关闭或不再开放。
+- [x] 默认分支 CodeQL run `30237688682` 成功完成，alert #1 状态为 `fixed`。
 
 验证：
 
@@ -172,7 +172,7 @@ corepack pnpm check
 
 - [x] 独立质量审查检查 PRD/设计符合性、安全边界、测试完整性和 workflow 条件；发现 stalled fetch 超时缺口后已修复并复核关闭。
 - [x] 检查 git diff，确认没有真实 Key、生成的 `wrangler.toml`、模型文件或 credential；唯一 64 位十六进制值为公开 canonical 模型 SHA-256。
-- [ ] 更新任务/研究记录，写明根因、恢复 run、公开验收结果和剩余 KV/R2 证据。
+- [x] 更新任务/研究记录，写明根因、恢复 run、公开验收结果、Cloudflare Version ID 和剩余 KV/R2 证据。
 - [ ] 若发现可复用的部署漂移规则，使用 `trellis-update-spec` 更新项目规范。
 - [ ] 是否 commit/push 按用户明确授权处理；未经授权不执行。
 
