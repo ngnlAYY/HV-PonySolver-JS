@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/model-worker/backend/index.md", "reason": "Target spec index"}
+{"file": ".trellis/spec/model-worker/frontend/index.md", "reason": "Target spec index"}
+{"file": ".trellis/spec/userscript/frontend/index.md", "reason": "Target spec index"}
+{"file": ".trellis/spec/shared/backend/index.md", "reason": "Target spec index"}
+{"file": ".trellis/spec/shared/frontend/index.md", "reason": "Target spec index"}
+{"file": ".trellis/tasks/00-bootstrap-guidelines/prd.md", "reason": "Bootstrap requirements"}
+{"file": ".trellis/tasks/00-bootstrap-guidelines/design.md", "reason": "Layer mapping and documentation contracts"}
+{"file": ".trellis/tasks/00-bootstrap-guidelines/implement.md", "reason": "Execution and verification checklist"}
