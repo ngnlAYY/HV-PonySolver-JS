@@ -14,13 +14,14 @@ Playwright smoke（`test:e2e:userscript`）从仅 workflow_dispatch 手动触发
 4. 复核 `bundled-userscript` job 的 `needs`/`if` 表达式：条件变化后 `userscript-e2e` 在 dispatch 场景可能为 success 而非 skipped，`always() && ...` 逻辑必须仍正确。
 5. 用户决策（2026-07-26）：PR 常态化优先；若实测 flake 或 job >5 分钟，降级为 main push + nightly（schedule），并在提交说明记录实测数据。
 6. README 中 E2E 相关描述如有事实变化，过 `docs:check`。
+7. **验收方式修订（2026-07-27）**：用户明确要求不创建 PR，直接推送远程并触发对应构建。因此用同一远程分支/head SHA 的两次顺序 `workflow_dispatch`（E2E + bundled-runtime）验证真实 GitHub runner、managed Chromium、cold/hot cache 与稳定性；PR 触发条件保留静态表达式复核，不再要求实际创建 PR。
 
 ## 验收标准
 
-- [ ] PR 事件触发 userscript-e2e job 并通过（远程待验证）
-- [ ] Playwright 浏览器缓存命中时安装步骤显著缩短（远程 cold/hot 数据待验证）
-- [x] `bundled-userscript` 在 dispatch 场景的表达式矩阵已复核并记录
-- [ ] 实测两次 PR 运行：时长与稳定性数据记录到提交说明或本 PRD Notes（远程待验证）
+- [x] 远程 GitHub runner 上的 userscript-e2e 两次通过；PR/main/dispatch 触发矩阵已静态复核（按用户要求不创建实际 PR）
+- [x] Playwright Chromium 冷/热缓存已验证：安装 22s → 11s，E2E job 63s → 31s
+- [x] `bundled-userscript` 在两次远程 dispatch 中均成功，表达式矩阵已复核
+- [x] 两次远程完整 workflow 均成功，无 flake且远低于 5 分钟；run IDs 与步骤数据记录于 Notes
 
 ## 验证命令
 
@@ -41,9 +42,22 @@ corepack pnpm test:e2e:userscript      # 本地先验证 smoke 本身可跑
 - 独立 `trellis-check` 严格化 Playwright `Version <semver>` 输出解析，并将受 README 格式影响的 docs fixture 改为 whitespace-tolerant 正则。
 - E2E CI 可执行契约已沉淀到 `.trellis/spec/userscript/frontend/quality-guidelines.md`。
 
-### 远程待办
+### 远程验证（2026-07-27）
 
-1. 分支 `chore/optimization-round2` 已推送至 origin（2026-07-27）；用户选择不创建 PR，因此本次 push 不触发 E2E。
-2. 后续创建/更新 PR 后，记录两个 revision 的 `userscript-e2e` 结果与总时长。
-3. 记录 cold-cache / hot-cache 的 Chromium install 时长。
-4. 若 flake 或 >5 分钟，按用户决策降级到 main push + nightly。
+远程分支：`origin/chore/optimization-round2`，head SHA：`0f0b06e48d4756758ebb6087165e3c3c47c191ca`。两次均使用：
+
+```text
+bundle_onnx_runtime=true
+publish_userscript_artifact=false
+run_userscript_e2e=true
+```
+
+| Run | URL | Cache | E2E job | Chromium install | Smoke | 完整 workflow | 结果 |
+| --- | --- | --- | ---: | ---: | ---: | ---: | --- |
+| `30232888062` | https://github.com/ngnlAYY/HV-PonySolver-JS/actions/runs/30232888062 | cold：`Cache not found`，结束后保存 `playwright-Linux-chromium-1.60.0` | 63s | 22s | 4s | 94s | 全部 jobs success |
+| `30232999410` | https://github.com/ngnlAYY/HV-PonySolver-JS/actions/runs/30232999410 | hot：命中并恢复同一 primary key，不重复保存 | 31s | 11s | 6s | 77s | 全部 jobs success |
+
+- 两次 `validate-inputs`、`guardrails`、`test`、`coverage-build`、`userscript-e2e`、`bundled-userscript` 全绿。
+- 热缓存使 Chromium install 从 22s 降至 11s（-50%），E2E job 从 63s 降至 31s（约 -51%）。
+- 两次均无 flake且远低于 5 分钟，不触发 main push + nightly 降级方案。
+- 按用户最新要求未创建 PR；PR/main 事件条件由 workflow 表达式与独立检查复核，真实 runner/cache/build 由上述两次 dispatch 验证。
