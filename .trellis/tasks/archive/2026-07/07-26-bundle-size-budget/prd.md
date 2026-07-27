@@ -11,7 +11,7 @@
 1. 新增 `scripts/check-bundle-budget.mjs` + `scripts/check-bundle-budget.test.mjs`（node:test），风格对齐现有 check-* 脚本群（纯 ESM、可测试导出、明确退出码）。
 2. 两档预算：
    - 非捆绑未压缩 `hv-pony-solver.user.js`：当前 ~72KB，预算 96KB
-   - bundled-runtime + minify 产物：首次在 CI 实测后定值（预留 +20% 余量）；实测前脚本对该档允许「配置缺省即跳过但打印警告」，实测后必须钉值
+   - bundled-runtime + minify 产物：首次实测 398,993 B 后钉为 480 KiB（491,520 B）；CI dispatch 使用同一硬预算，不允许配置缺省或跳过
 3. 行为：目标产物不存在时失败（不静默跳过）；输出实际大小、预算与差值。
 4. 接入：根 package.json 增加 `bundle:check` script；`check:quick` 链尾追加；CI `coverage-build` job 在 Build 后运行非捆绑档；`bundled-userscript` job 运行捆绑档。
 5. README 命令参考同步新增命令，过 `docs:check`。

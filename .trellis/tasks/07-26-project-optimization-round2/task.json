@@ -1,0 +1,32 @@
+{
+  "id": "project-optimization-round2",
+  "name": "project-optimization-round2",
+  "title": "全面优化项目：新一轮审计与改进",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "ngnlAYY",
+  "assignee": "ngnlAYY",
+  "createdAt": "2026-07-26",
+  "completedAt": null,
+  "branch": "chore/optimization-round2",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-26-security-audit-fix",
+    "07-26-deps-routine-upgrade",
+    "07-26-userscript-coverage-uplift",
+    "07-26-bundle-size-budget",
+    "07-26-e2e-on-pr"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -5,7 +5,7 @@
 
 ## Goal
 
-完成一轮 patch/minor 依赖升级，保持全部检查绿灯。major 升级（eslint 10 / TS 7 / @types/node 26）明确不在本任务范围。
+完成一轮 patch/minor 依赖升级，保持全部检查绿灯。ESLint 10 已由前置 R1 完成；TS 7 / Node 运行时基线及其 `@types/node` 联动升级明确不在本任务范围。
 
 ## Requirements
 
@@ -20,7 +20,7 @@
    - `verify-onnx-runtime-cdn` 留作发布前手动步骤，在提交说明中注明
    - 若 1.27.0 的 WASM 资产结构变化导致 manifest 体系需要结构性改动，暂停并回报（可能升格为独立任务）
 
-约束：不动 eslint 9、typescript 5.9、@types/node 22、esbuild override 0.28.1；README 命令/版本事实如有变化需过 `docs:check`。
+约束：不再调整前置 R1 已升级的 ESLint 10；保持 typescript 5.9、@types/node 22、esbuild override 0.28.1；README 命令/版本事实如有变化需过 `docs:check`。
 
 ## 验收标准
 
