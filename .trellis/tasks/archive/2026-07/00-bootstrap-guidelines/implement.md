@@ -51,8 +51,8 @@ corepack pnpm check
 
 - [x] 仅纳入 bootstrap task、`.trellis/spec/` 及 Trellis 运行所需 scaffold；不混入未知文件。
 - [x] 按规范内容与任务记录拆分提交。
-- [ ] 直接推送到远程 `main`（用户已授权本轮无需 PR）。
-- [ ] 归档 `00-bootstrap-guidelines`；session journal按 finish-work流程另行记录。
+- [x] 直接推送到远程 `main`（用户已授权本轮无需 PR）。
+- [x] 归档 `00-bootstrap-guidelines`；session journal按 finish-work流程另行记录。
 
 ## Rollback
 
