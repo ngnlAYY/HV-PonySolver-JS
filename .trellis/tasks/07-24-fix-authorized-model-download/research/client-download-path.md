@@ -22,29 +22,29 @@
 
 ## Files Found
 
-| File Path | Description |
-|---|---|
-| `apps/userscript/src/model/model-config.ts` | 固定模型 URL、空内置 Key、缓存名及 manifest 完整性配置 |
-| `apps/userscript/src/app/app.ts` | 注册统一设置菜单；候选 Key 验证下载与缓存回调 |
-| `apps/userscript/src/userscript/settings-menu.ts` | 顶层设置菜单把验证 callback 交给模型 Key 输入流程 |
-| `apps/userscript/src/model/model-settings.ts` | Key 输入、trim、验证成功后保存、失败保留旧值 |
-| `apps/userscript/src/userscript/gm-bridge.ts` | legacy GM storage/menu API 与 localStorage fallback |
-| `apps/userscript/src/model/model-cache.ts` | 候选 override 转发、普通下载与缓存 |
-| `apps/userscript/src/model/model-downloader.ts` | Key 选择、Bearer header、标准 `fetch`、响应大小与完整性检查 |
-| `apps/userscript/src/inference/onnx-worker-client.ts` | 普通缓存未命中后的下载入口 |
-| `apps/userscript/src/userscript/metadata.ts` | Userscript grants 与 `@connect` 声明 |
-| `apps/model-worker/src/request-router.ts` | 当前源码中的 `OPTIONS` 路由 |
-| `apps/model-worker/src/model-response.ts` | 当前源码中的 preflight/CORS header 契约 |
-| `apps/userscript/test/model/model-downloader.test.ts` | mock `fetch` 下的 saved/override Bearer header 测试 |
-| `apps/userscript/test/model/model-settings.test.ts` | GM/localStorage、验证后保存、验证失败保留旧值测试 |
-| `apps/userscript/test/model/model-cache.test.ts` | `accessKeyOverride` 转发测试 |
-| `apps/userscript/test/app/app.test.ts` | App 设置 callback 参数及缓存行为测试 |
-| `apps/userscript/test/userscript/settings-menu.test.ts` | 顶层菜单到模型设置的 callback 测试 |
-| `apps/userscript/test/userscript-metadata.test.ts` | 仅覆盖 HTTPS 页面匹配规则 |
-| `apps/userscript/test/e2e/userscript-smoke.spec.ts` | 本地页面 + mock model cache/detector 的 Chromium smoke |
-| `apps/userscript/scripts/build-userscript.test.mjs` | 构建产物中 GM storage/menu grants 的断言 |
-| `apps/model-worker/test/index.test.ts` | 当前源码的 Bearer、allowed Origin、preflight 单元测试 |
-| `.trellis/tasks/07-24-fix-authorized-model-download/prd.md` | 已确认事实、验收标准及尚缺的用户现场证据 |
+| File Path                                                   | Description                                                 |
+| ----------------------------------------------------------- | ----------------------------------------------------------- |
+| `apps/userscript/src/model/model-config.ts`                 | 固定模型 URL、空内置 Key、缓存名及 manifest 完整性配置      |
+| `apps/userscript/src/app/app.ts`                            | 注册统一设置菜单；候选 Key 验证下载与缓存回调               |
+| `apps/userscript/src/userscript/settings-menu.ts`           | 顶层设置菜单把验证 callback 交给模型 Key 输入流程           |
+| `apps/userscript/src/model/model-settings.ts`               | Key 输入、trim、验证成功后保存、失败保留旧值                |
+| `apps/userscript/src/userscript/gm-bridge.ts`               | legacy GM storage/menu API 与 localStorage fallback         |
+| `apps/userscript/src/model/model-cache.ts`                  | 候选 override 转发、普通下载与缓存                          |
+| `apps/userscript/src/model/model-downloader.ts`             | Key 选择、Bearer header、标准 `fetch`、响应大小与完整性检查 |
+| `apps/userscript/src/inference/onnx-worker-client.ts`       | 普通缓存未命中后的下载入口                                  |
+| `apps/userscript/src/userscript/metadata.ts`                | Userscript grants 与 `@connect` 声明                        |
+| `apps/model-worker/src/request-router.ts`                   | 当前源码中的 `OPTIONS` 路由                                 |
+| `apps/model-worker/src/model-response.ts`                   | 当前源码中的 preflight/CORS header 契约                     |
+| `apps/userscript/test/model/model-downloader.test.ts`       | mock `fetch` 下的 saved/override Bearer header 测试         |
+| `apps/userscript/test/model/model-settings.test.ts`         | GM/localStorage、验证后保存、验证失败保留旧值测试           |
+| `apps/userscript/test/model/model-cache.test.ts`            | `accessKeyOverride` 转发测试                                |
+| `apps/userscript/test/app/app.test.ts`                      | App 设置 callback 参数及缓存行为测试                        |
+| `apps/userscript/test/userscript/settings-menu.test.ts`     | 顶层菜单到模型设置的 callback 测试                          |
+| `apps/userscript/test/userscript-metadata.test.ts`          | 仅覆盖 HTTPS 页面匹配规则                                   |
+| `apps/userscript/test/e2e/userscript-smoke.spec.ts`         | 本地页面 + mock model cache/detector 的 Chromium smoke      |
+| `apps/userscript/scripts/build-userscript.test.mjs`         | 构建产物中 GM storage/menu grants 的断言                    |
+| `apps/model-worker/test/index.test.ts`                      | 当前源码的 Bearer、allowed Origin、preflight 单元测试       |
+| `.trellis/tasks/07-24-fix-authorized-model-download/prd.md` | 已确认事实、验收标准及尚缺的用户现场证据                    |
 
 ## 客户端调用路径
 
@@ -186,17 +186,17 @@
 
 ## Test Coverage Matrix / Gaps
 
-| Boundary | Existing coverage | What remains unproven |
-|---|---|---|
-| 候选 Key → App callback | `apps/userscript/test/app/app.test.ts:95-145` | 使用真实顶层菜单与真实 ModelCache 的浏览器场景 |
-| 菜单 trim/验证后保存 | `apps/userscript/test/model/model-settings.test.ts:150-210`; `apps/userscript/test/userscript/settings-menu.test.ts:50-89` | 真实 Tampermonkey/Violentmonkey storage 与菜单生命周期 |
-| saved/override Bearer header | `apps/userscript/test/model/model-downloader.test.ts:46-78,107-137` | 测试用 `vi.stubGlobal('fetch')`，不会产生 OPTIONS，也不会执行浏览器 CORS |
-| ModelCache override | `apps/userscript/test/model/model-cache.test.ts:297-310` | `downloadModel` 被 mock，未连到网络 |
-| 普通缓存未命中 | `apps/userscript/test/inference/onnx-worker-client.test.ts:29-68` | ModelCache 整体被 mock，不会读取 GM storage 或 fetch |
-| Metadata | `apps/userscript/test/userscript-metadata.test.ts:5-11` | 只断言 HTTPS include；不检查 `@connect` 与网络 API grant/use 一致性 |
-| 构建产物 metadata | `apps/userscript/scripts/build-userscript.test.mjs:128-139` | 断言四个菜单/storage grants，但不执行已安装 `.user.js`，也不验证跨域权限行为 |
-| Worker CORS | `apps/model-worker/test/index.test.ts:244-347` | 仅 in-memory Worker；不能证明线上部署、区域边缘、route/binding 与源码一致 |
-| Userscript E2E | `apps/userscript/test/e2e/userscript-smoke.spec.ts:14-140` | 用 `page.addScriptTag` 注入选定模块；`modelCache.download` 与 detector 均 mock（`104-123`）；没有安装 userscript manager、没有 metadata/grants/GM storage、没有模型 fetch/Authorization/OPTIONS/完整性/IndexedDB；只跑 Chromium（`apps/userscript/playwright.config.ts:10-15`） |
+| Boundary                     | Existing coverage                                                                                                          | What remains unproven                                                                                                                                                                                                                                                           |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 候选 Key → App callback      | `apps/userscript/test/app/app.test.ts:95-145`                                                                              | 使用真实顶层菜单与真实 ModelCache 的浏览器场景                                                                                                                                                                                                                                  |
+| 菜单 trim/验证后保存         | `apps/userscript/test/model/model-settings.test.ts:150-210`; `apps/userscript/test/userscript/settings-menu.test.ts:50-89` | 真实 Tampermonkey/Violentmonkey storage 与菜单生命周期                                                                                                                                                                                                                          |
+| saved/override Bearer header | `apps/userscript/test/model/model-downloader.test.ts:46-78,107-137`                                                        | 测试用 `vi.stubGlobal('fetch')`，不会产生 OPTIONS，也不会执行浏览器 CORS                                                                                                                                                                                                        |
+| ModelCache override          | `apps/userscript/test/model/model-cache.test.ts:297-310`                                                                   | `downloadModel` 被 mock，未连到网络                                                                                                                                                                                                                                             |
+| 普通缓存未命中               | `apps/userscript/test/inference/onnx-worker-client.test.ts:29-68`                                                          | ModelCache 整体被 mock，不会读取 GM storage 或 fetch                                                                                                                                                                                                                            |
+| Metadata                     | `apps/userscript/test/userscript-metadata.test.ts:5-11`                                                                    | 只断言 HTTPS include；不检查 `@connect` 与网络 API grant/use 一致性                                                                                                                                                                                                             |
+| 构建产物 metadata            | `apps/userscript/scripts/build-userscript.test.mjs:128-139`                                                                | 断言四个菜单/storage grants，但不执行已安装 `.user.js`，也不验证跨域权限行为                                                                                                                                                                                                    |
+| Worker CORS                  | `apps/model-worker/test/index.test.ts:244-347`                                                                             | 仅 in-memory Worker；不能证明线上部署、区域边缘、route/binding 与源码一致                                                                                                                                                                                                       |
+| Userscript E2E               | `apps/userscript/test/e2e/userscript-smoke.spec.ts:14-140`                                                                 | 用 `page.addScriptTag` 注入选定模块；`modelCache.download` 与 detector 均 mock（`104-123`）；没有安装 userscript manager、没有 metadata/grants/GM storage、没有模型 fetch/Authorization/OPTIONS/完整性/IndexedDB；只跑 Chromium（`apps/userscript/playwright.config.ts:10-15`） |
 
 Focused unit tests executed during this research:
 
@@ -286,7 +286,6 @@ Access-Control-Allow-Origin: *
 3. Headless Chromium 探测与 `curl` 命中了不同网络路径：Chromium HKG 路径显示 preflight 通过，而 LAX `curl` 重复 405；两者 GET/HEAD 都暴露旧的 `public, max-age=86400` 契约。区域、代理、preflight cache 或边缘路径差异尚未完全区分。
 4. 未使用真实 Key，因此没有判断线上 KV 中某一具体 Key 是否命中，也没有判断 200 响应体究竟是 real 还是 decoy。
 5. 未下载或输出线上模型体；浏览器探测在收到 response 后取消 body，线上检查主要依赖状态与响应 headers。
-
 
 ---
 

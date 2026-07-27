@@ -588,8 +588,14 @@ Model Worker deployment contract verified: attempt=1/1 mode=decoy origins=2
 
 默认分支 Security Scan run <https://github.com/ngnlAYY/HV-PonySolver-JS/actions/runs/30237688682> 在 head `4a51f938052b8b233caf0c9ca59c9e35a683e46e` 成功完成。GitHub code-scanning alert #1（`js/client-side-unvalidated-url-redirection`）状态为 `fixed`，没有 dismiss；这验证了移除 Worker init 消息中的动态 `ortScriptUrl` 后，不可信消息值已不再流入 `importScripts` sink。
 
-### 剩余验收
+### 用户本地真实模型验收
 
-- 用户仍需在本地 Userscript 菜单验证已知 Key及保存后的普通下载；Key 不进入聊天、URL、日志或 task artifact。
-- 若公开契约正确但 Key返回 `403`，再核对 deployed mode、KV binding target 与 entry。
-- 若下载返回 `200` 后出现 byteLength/SHA-256 错误，再核对 real/decoy R2 object 与 canonical manifest。
+2026-07-27，用户在被明确要求同时确认候选 Key验证、保存后的普通下载、完整性校验与缓存后回复“成功”。据此：
+
+- 本地候选 Key验证成功；
+- 保存后的普通下载成功；
+- 真实模型通过 canonical byteLength/SHA-256 完整性校验并完成缓存；
+- 未出现 HTTP `403`、大小/SHA 错误或持续 `Failed to fetch`，无需进入 KV/R2/DNS/TLS 次级分流；
+- 用户没有向 AI 提供 Key，Key 未进入聊天、URL、日志或 task artifact。
+
+生产公开契约、CodeQL、自动化回归与用户本地真实模型链路均已完成验收。

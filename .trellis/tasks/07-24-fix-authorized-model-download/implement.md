@@ -32,13 +32,13 @@
 - [x] 确认两个 Origin 均为 OPTIONS `204`、允许 Bearer preflight、`no-store`、`Vary: Origin`。
 - [x] 确认 decoy 模式无 Key HEAD `200`，且不再出现旧 public cache header。
 - [x] 公开契约在部署后前 20 秒短暂返回 `403`，约 55 秒后稳定为新契约；记录证据并把未来 checker 传播窗口扩大至有限 60 秒，未回滚或二次部署。
-- [ ] 由用户在本地 Userscript 菜单重新验证 Key；不要求用户把 Key发给 AI。
+- [x] 用户于 2026-07-27 确认本地候选 Key验证、保存后的普通下载、完整性校验与缓存均成功；未向 AI 提供 Key。
 
 ### 1.4 次级分流
 
-- [ ] 若变为 HTTP `403`，核对 deployed `INVALID_KEY_MODE`、KV binding target 与已知 entry。
-- [ ] 若变为大小/SHA 错误，核对 real/decoy R2 object metadata，并对私有 real artifact 运行现有完整性校验。
-- [ ] 若仍为 `Failed to fetch`，收集浏览器 Network 面板的非秘密 CORS/DNS/TLS 信息。
+- [x] 不适用：本地验证未出现 HTTP `403`，无需核对 mode/KV binding/entry。
+- [x] 不适用：本地验证未出现 byteLength/SHA-256 错误，无需继续核对 R2 metadata。
+- [x] 不适用：本地验证未继续出现 `Failed to fetch`，无需收集现场 CORS/DNS/TLS 信息。
 
 ## Stage 1.5：修复 CodeQL Worker URL sink
 
@@ -163,7 +163,7 @@ corepack pnpm docs:check
 corepack pnpm check
 ```
 
-- [x] 所有新增测试通过（checker 16 项；Model Worker Vitest 47 项与 node:test 46 项）。
+- [x] 所有新增测试通过（checker 17 项；Model Worker Vitest 47 项与 node:test 47 项）。
 - [x] 原 Model Worker Bearer/KV/R2/CORS 测试保持通过。
 - [x] docs drift、architecture、browser sink、coverage 和 build 保持通过。
 - [x] 确认测试没有公网请求；公网只在显式 `check:deployment` 或 workflow 发布后步骤中访问。
@@ -173,8 +173,8 @@ corepack pnpm check
 - [x] 独立质量审查检查 PRD/设计符合性、安全边界、测试完整性和 workflow 条件；发现 stalled fetch 超时缺口后已修复并复核关闭。
 - [x] 检查 git diff，确认没有真实 Key、生成的 `wrangler.toml`、模型文件或 credential；唯一 64 位十六进制值为公开 canonical 模型 SHA-256。
 - [x] 更新任务/研究记录，写明根因、恢复 run、公开验收结果、Cloudflare Version ID 和剩余 KV/R2 证据。
-- [ ] 若发现可复用的部署漂移规则，使用 `trellis-update-spec` 更新项目规范。
-- [ ] 是否 commit/push 按用户明确授权处理；未经授权不执行。
+- [x] 可复用的部署漂移、Bearer/CORS/KV/R2、checker 与人工回滚规则已写入 `.trellis/spec/model-worker/backend/` 和 Userscript/Shared 对应规范。
+- [x] 用户已授权本轮无需 PR直接推送；实现、恢复证据、Trellis 规范和最终验证均已同步到远程 `main`。
 
 ## Rollback Points
 

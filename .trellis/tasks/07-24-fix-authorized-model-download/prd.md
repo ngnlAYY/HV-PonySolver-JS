@@ -61,7 +61,7 @@ README 和 Model Worker 运维文档必须明确区分 dry-run、实际 deploy�
 - [x] **AC3 / R3-R4**：workflow 仅在 `publish_model_worker=true` 且 deploy 实际执行后运行检查器；检查器不接收 Cloudflare credential、KV/R2 标识或模型 Key。
 - [x] **AC4 / R1-R5**：线上两个允许 Origin 均返回 `OPTIONS 204`、对应 `Access-Control-Allow-Origin`、`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`、`Access-Control-Allow-Headers: Authorization`、`Cache-Control: no-store`，且 `Vary` 包含 `Origin`。
 - [x] **AC5 / R3-R6**：无 Key HEAD 在 decoy 模式返回 `200`、在 error 模式返回 `403`；两者均保持允许 Origin、`no-store` 和 `Vary: Origin`，且检查不下载 response body。
-- [ ] **AC6 / R2-R6**：用户在本地重新验证其 Key 后，首次验证与保存后的普通下载均成功取得、完整性校验并缓存真实模型；用户无需向 AI 提供 Key。
+- [x] **AC6 / R2-R6**：用户于 2026-07-27 确认本地候选 Key验证、保存后的普通下载、完整性校验与缓存均成功；用户未向 AI 提供 Key。
 - [x] **AC7 / R2-R6**：现有自动化继续证明候选/保存 Key 使用 Bearer header、KV 命中选择 real、无效 Key遵循 decoy/error、错误模型不能进入缓存或 ONNX session。
 - [x] **AC8 / R7**：文档说明绿色 dry-run 不代表部署，并提供部署、公开验收、用户验证、次级 KV/R2 检查和人工回滚步骤。
 - [x] **AC9 / R8**：`corepack pnpm check` 完整通过，且测试过程不访问公网。
