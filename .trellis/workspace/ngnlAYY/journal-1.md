@@ -59,3 +59,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: 完成授权模型真实链路验收
+
+**Date**: 2026-07-27
+**Task**: 完成授权模型真实链路验收
+**Branch**: `fix/authorized-model-download`
+
+### Summary
+
+用户确认候选 Key、本地保存后的普通下载、模型完整性校验与缓存全部成功；未收集或记录 Key，完成并归档授权模型下载任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b0ce6f0` | (see git log) |
+
+### Status
+
+[OK] **Completed**
