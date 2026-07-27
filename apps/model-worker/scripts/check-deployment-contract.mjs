@@ -7,7 +7,7 @@ import { fileURLToPath, URL } from 'node:url'
 const ALLOWED_ORIGINS = Object.freeze(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
 const EXPECTED_METHODS = Object.freeze(['get', 'head', 'options'])
 const EXPECTED_HEADERS = Object.freeze(['authorization'])
-const DEFAULT_ATTEMPTS = 5
+const DEFAULT_ATTEMPTS = 13
 const DEFAULT_RETRY_DELAY_MS = 5_000
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
 const PROBE_QUERY_NAME = 'deployment_check'

@@ -2,7 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { URL } from 'node:url'
 
-import { ALLOWED_ORIGINS, checkDeploymentContract, createProbeUrl, runCli } from './check-deployment-contract.mjs'
+import {
+  ALLOWED_ORIGINS,
+  DEFAULT_ATTEMPTS,
+  DEFAULT_RETRY_DELAY_MS,
+  checkDeploymentContract,
+  createProbeUrl,
+  runCli,
+} from './check-deployment-contract.mjs'
 
 const MODEL_URL = 'https://models.ngnl.host/yolo26n-640.onnx'
 const PROBE_ID = 'run 123/attempt-2'
@@ -220,6 +227,11 @@ for (const mismatch of [
     )
   })
 }
+
+test('默认重试配置覆盖 60 秒边缘传播窗口', () => {
+  assert.equal(DEFAULT_ATTEMPTS, 13)
+  assert.equal((DEFAULT_ATTEMPTS - 1) * DEFAULT_RETRY_DELAY_MS, 60_000)
+})
 
 test('网络失败后按固定间隔重试并成功', async () => {
   const requests = []
