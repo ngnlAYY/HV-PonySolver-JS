@@ -19,6 +19,7 @@ export interface StatusPanel extends InferenceStatusSink {
   setStatus(changes: Partial<PanelStatus>): void
   setSessionReady(elapsed: number): void
   addSuccess(ponies: AnswerCode[], confidences: Partial<Record<AnswerCode, number>>, elapsed: number): void
+  addManualResult(ponies: AnswerCode[], confidences: Partial<Record<AnswerCode, number>>, elapsed: number): void
   addRandomFailure(pony: AnswerCode, elapsed: number): void
   addError(message: string, elapsed?: number): void
   create(): void

@@ -135,7 +135,7 @@ export class App {
         return
       }
       const result = await this.solver.trigger()
-      if (result.solved && result.captchaKey && !this.destroyed) {
+      if (result.handled && result.captchaKey && !this.destroyed) {
         this.lastCaptchaKey = result.captchaKey
       }
     } catch (error) {

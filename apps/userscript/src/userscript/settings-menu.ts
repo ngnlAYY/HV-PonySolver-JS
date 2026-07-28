@@ -1,3 +1,4 @@
+import { setAnswerModeFromPrompt } from '../captcha/answer-mode-settings'
 import { setMultiClickDelayRangeFromPrompt, setSubmitDelayRangeFromPrompt } from '../captcha/timing-settings'
 import {
   clearSavedModelAccessKey,
@@ -35,6 +36,7 @@ async function chooseSettingsAction(options: SettingsMenuOptions): Promise<void>
       run: () => setModelAccessKeyFromPrompt(options.onVerifyModelAccessKey),
     },
     { label: '清除模型下载 Key', errorPrefix: '模型下载 Key 设置失败', run: clearSavedModelAccessKey },
+    { label: '设置答题模式', errorPrefix: '答题模式设置失败', run: setAnswerModeFromPrompt },
     { label: '设置答题记录显示条数', errorPrefix: '答题记录显示条数设置失败', run: setPanelHistoryLimitFromPrompt },
     { label: '设置提交前等待时间', errorPrefix: '提交前等待时间设置失败', run: setSubmitDelayRangeFromPrompt },
     { label: '设置答题间隔', errorPrefix: '答题间隔设置失败', run: setMultiClickDelayRangeFromPrompt },

@@ -56,6 +56,41 @@ describe('StatusPanel', () => {
     expect(document.body.textContent).toContain('推理状态：')
   })
 
+  it('records and shows manual results with confidences in compact mode', async () => {
+    localStorage.setItem('hvPonySolverPanelCompact', '1')
+    const store = createHistoryStore()
+    const panel = new StatusPanel(store)
+
+    panel.create()
+    panel.addManualResult(['RA'], { RA: 0.975 }, 18)
+
+    expect(store.add).toHaveBeenCalledWith('main', {
+      type: 'manual',
+      answers: 'RA(97.5)',
+      elapsed: 18,
+    })
+    await vi.waitFor(() => expect(document.body.textContent).toContain('[RA(97.5)] 待手动提交 18ms'))
+    expect(document.body.textContent).not.toContain('模型状态：')
+  })
+
+  it('escapes manual answers before rendering them', () => {
+    const panel = new StatusPanel(
+      createHistoryStore([
+        {
+          type: 'manual',
+          answers: '<img src=x onerror=alert(1)>',
+          elapsed: 12,
+        },
+      ]),
+    )
+
+    panel.create()
+
+    expect(document.body.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(document.body.innerHTML).not.toContain('<img src=x onerror=alert(1)>')
+    expect(document.body.textContent).toContain('待手动提交')
+  })
+
   it('hides model, session, and inference rows in compact mode', () => {
     localStorage.setItem('hvPonySolverPanelCompact', '1')
     const store = createHistoryStore()
@@ -71,7 +106,10 @@ describe('StatusPanel', () => {
   })
 
   it('updates compact mode from async GM storage after creating the panel', async () => {
-    vi.stubGlobal('GM_getValue', vi.fn(async (key: string) => key === 'hvPonySolverPanelCompact' ? '1' : ''))
+    vi.stubGlobal(
+      'GM_getValue',
+      vi.fn(async (key: string) => (key === 'hvPonySolverPanelCompact' ? '1' : '')),
+    )
     const store = createHistoryStore()
     const panel = new StatusPanel(store)
 
@@ -83,12 +121,15 @@ describe('StatusPanel', () => {
   })
 
   it('updates panel position from async GM storage after creating the panel', async () => {
-    vi.stubGlobal('GM_getValue', vi.fn(async (key: string) => {
-      if (key === 'hvPonySolverPanelPosition') {
-        return '12,34'
-      }
-      return ''
-    }))
+    vi.stubGlobal(
+      'GM_getValue',
+      vi.fn(async (key: string) => {
+        if (key === 'hvPonySolverPanelPosition') {
+          return '12,34'
+        }
+        return ''
+      }),
+    )
     const panel = new StatusPanel(createHistoryStore())
 
     panel.create()
@@ -101,12 +142,15 @@ describe('StatusPanel', () => {
   })
 
   it('updates history limit from async GM storage after creating the panel', async () => {
-    vi.stubGlobal('GM_getValue', vi.fn(async (key: string) => {
-      if (key === 'hvPonySolverHistoryLimit') {
-        return '2'
-      }
-      return ''
-    }))
+    vi.stubGlobal(
+      'GM_getValue',
+      vi.fn(async (key: string) => {
+        if (key === 'hvPonySolverHistoryLimit') {
+          return '2'
+        }
+        return ''
+      }),
+    )
     const panel = new StatusPanel(createHistoryStore(createSuccessRecords(6)))
 
     panel.create()

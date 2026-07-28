@@ -6,19 +6,20 @@ import { logError, warn } from '../utils/logger'
 import { safeStorage } from '../userscript/gm-bridge'
 
 function isHistoryRecordType(value: unknown): value is HistoryRecordType {
-  return value === 'success' || value === 'random' || value === 'error'
+  return value === 'success' || value === 'manual' || value === 'random' || value === 'error'
 }
 
 function isHistoryRecord(value: unknown): value is HistoryRecord {
   if (!isRecordObject(value) || !isHistoryRecordType(value.type) || typeof value.elapsed !== 'number') {
     return false
   }
-  const hasValidOptionalFields = (value.timestamp === undefined || typeof value.timestamp === 'number')
-    && (value.time === undefined || typeof value.time === 'string')
+  const hasValidOptionalFields =
+    (value.timestamp === undefined || typeof value.timestamp === 'number') &&
+    (value.time === undefined || typeof value.time === 'string')
   if (!hasValidOptionalFields) {
     return false
   }
-  if (value.type === 'success') {
+  if (value.type === 'success' || value.type === 'manual') {
     return typeof value.answers === 'string'
   }
   if (value.type === 'random') {
@@ -61,10 +62,13 @@ export class HistoryStore {
         },
         ...list,
       ].slice(0, HISTORY_MAX)
-      safeStorage.setItem(HISTORY_KEY, JSON.stringify({
-        ...root,
-        [world]: nextRecords,
-      }))
+      safeStorage.setItem(
+        HISTORY_KEY,
+        JSON.stringify({
+          ...root,
+          [world]: nextRecords,
+        }),
+      )
       return nextRecords
     } catch (error) {
       logError('保存记录失败:', formatErrorMessage(error))

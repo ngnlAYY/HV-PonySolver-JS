@@ -12,6 +12,14 @@ const validSuccessRecord: HistoryRecord = {
   time: '12:00:00',
 }
 
+const validManualRecord: HistoryRecord = {
+  type: 'manual',
+  answers: 'RA(98.0)',
+  elapsed: 234,
+  timestamp: 2,
+  time: '12:00:01',
+}
+
 const validErrorRecord: HistoryRecord = {
   type: 'error',
   elapsed: 456,
@@ -25,19 +33,24 @@ describe('HistoryStore', () => {
   })
 
   it('filters invalid localStorage records without throwing', () => {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify({
-      main: [
-        null,
-        'bad',
-        { type: 'success', answers: 'TS', elapsed: 'fast', message: '' },
-        { type: 'noop', answers: 'TS', elapsed: 1, message: '' },
-        validSuccessRecord,
-      ],
-    }))
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify({
+        main: [
+          null,
+          'bad',
+          { type: 'success', answers: 'TS', elapsed: 'fast', message: '' },
+          { type: 'noop', answers: 'TS', elapsed: 1, message: '' },
+          { type: 'manual', answers: 42, elapsed: 1 },
+          validSuccessRecord,
+          validManualRecord,
+        ],
+      }),
+    )
 
     const records = new HistoryStore().get('main')
 
-    expect(records).toEqual([validSuccessRecord])
+    expect(records).toEqual([validSuccessRecord, validManualRecord])
   })
 
   it('returns an empty list for corrupted JSON', () => {
@@ -66,13 +79,12 @@ describe('HistoryStore', () => {
   })
 
   it('drops invalid existing records when adding a new record', () => {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify({
-      main: [
-        null,
-        { type: 'random', answers: 42, elapsed: 1, message: 'bad' },
-        validErrorRecord,
-      ],
-    }))
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify({
+        main: [null, { type: 'random', answers: 42, elapsed: 1, message: 'bad' }, validErrorRecord],
+      }),
+    )
     const newRecord: HistoryRecord = {
       type: 'success',
       answers: 'RA(88.8)',

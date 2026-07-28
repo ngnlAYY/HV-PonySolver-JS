@@ -40,7 +40,7 @@ test('userscript app solves a local captcha with mocked browser detector', async
     throw new Error('Failed to build userscript e2e browser bundle')
   }
 
-  const submittedEvents: Array<{ answers: string[], source: string }> = []
+  const submittedEvents: Array<{ answers: string[]; source: string }> = []
   await page.route(localCaptchaUrl, async (route) => {
     await route.fulfill({
       status: 200,
@@ -90,7 +90,7 @@ test('userscript app solves a local captcha with mocked browser detector', async
       `,
     })
   })
-  await page.exposeFunction('recordSubmittedAnswers', (event: { answers: string[], source: string }) => {
+  await page.exposeFunction('recordSubmittedAnswers', (event: { answers: string[]; source: string }) => {
     submittedEvents.push(event)
   })
 
@@ -126,6 +126,7 @@ test('userscript app solves a local captcha with mocked browser detector', async
         mockDetector,
         { get: async () => new Blob(['captcha'], { type: 'image/png' }) },
         new window.HvPonySolverE2E.AnswerSubmitter(),
+        async () => 'auto',
       ),
     })
     window.__hvPonySolverE2EApp = app

@@ -1,3 +1,4 @@
+import { getAnswerMode } from '../captcha/answer-mode-settings'
 import { AnswerSubmitter } from '../captcha/answer-submitter'
 import { CachedImageLoader } from '../captcha/captcha-image-loader'
 import { CaptchaSolver } from '../captcha/captcha-solver'
@@ -22,7 +23,7 @@ export function createAppDependencies(getAbortSignal?: () => AbortSignal | undef
   const detector = new OnnxWorkerClient(modelCache, panel, bundledRuntimeSource ? { bundledRuntimeSource } : {})
   const imageLoader = new CachedImageLoader()
   const answerSubmitter = new AnswerSubmitter()
-  const solver = new CaptchaSolver(panel, detector, imageLoader, answerSubmitter, getAbortSignal)
+  const solver = new CaptchaSolver(panel, detector, imageLoader, answerSubmitter, getAnswerMode, getAbortSignal)
 
   return {
     panel,

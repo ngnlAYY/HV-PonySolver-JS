@@ -54,6 +54,13 @@ corepack pnpm check
 corepack pnpm browser-sinks:check
 ```
 
+### Answer mode interaction boundary
+
+- `hvPonySolverAnswerMode` 只接受 `auto` / `manual`；缺失、非法或读取失败默认 `auto`。
+- `manual` 继续图片获取和 ONNX 推理，但 solver必须从结构上绕过 `AnswerSubmitter`，不得修改 checkbox 或点击 submit。
+- `manual` 成功结果以 typed history record显示“待手动提交”，并按 captcha key去重；动态答案继续经过 renderer HTML转义。
+- 修改模式策略时同时测试配置持久化、自动模式回归、手动模式零 click、abort和同 captcha去重。
+
 ## Unit / Script Test Strategy
 
 - DOM/controller/storage/network behavior：Vitest + jsdom + injected adapters/mocks。

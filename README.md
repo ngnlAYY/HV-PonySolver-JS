@@ -6,7 +6,7 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 
 当前仓库包含三部分：
 
-- `apps/userscript`：浏览器 userscript，使用本地 ONNX Runtime Web 推理验证码图片，并自动选择/提交答案。
+- `apps/userscript`：浏览器 userscript，使用本地 ONNX Runtime Web 推理验证码图片；默认自动选择/提交答案，也可切换为仅识别的手动提交模式。
 - `apps/model-worker`：Cloudflare Worker，从 R2 分发真实模型或 decoy 模型，并用 KV 中的授权 key 控制访问。
 - `packages/shared`：跨 userscript 与 Worker 共享的稳定契约，包括答案编码、模型路径常量、访问决策类型和 token 校验。
 
@@ -42,15 +42,15 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 
 ## 运行机制概览
 
-### Userscript 自动答题流程
+### Userscript 答题流程
 
 1. `apps/userscript/src/main.ts` 在 `DOMContentLoaded` 后创建 `App`，并在页面卸载时销毁资源。
 2. `App` 创建状态面板、模型缓存、ONNX Worker 客户端、图片加载器、答案提交器和验证码求解器。
 3. `App` 监听 body 变化并合并扫描；仅当 `#riddlemaster` 内存在可用表单和图片，且该图片尚未成功处理时，才懒加载 ONNX 并触发求解。
 4. `CaptchaSolver` 使用 `CachedImageLoader` 从浏览器同源缓存读取验证码图片，调用 ONNX Worker 推理。
 5. Worker 在后台线程解析 YOLO 输出，按置信度阈值、去重与最大种类数规则生成小马答案结果。
-6. `AnswerSubmitter` 清空原有勾选，按随机顺序点击目标复选框，等待模拟延迟后点击提交按钮。
-7. `StatusPanel` 展示模型、Session、推理状态，并把最近答题记录写入 `localStorage`。
+6. 默认自动模式下，`AnswerSubmitter` 清空原有勾选，按随机顺序点击目标复选框，等待模拟延迟后点击提交按钮；手动模式下不修改复选框或点击提交按钮。
+7. `StatusPanel` 展示模型、Session、推理状态，并把自动提交结果或“待手动提交”的识别答案、置信度和耗时写入 `localStorage`。
 
 ### Model Worker 模型分发流程
 
@@ -74,7 +74,7 @@ R2 real/decoy ONNX 模型
   ↓ IndexedDB 缓存 + SHA-256 校验
 浏览器 Web Worker + ONNX Runtime Web
   ↓ YOLO 输出解析为 TS/RA/FS/RD/PP/AJ
-AnswerSubmitter 勾选并延迟提交
+识别结果消费策略：自动模式由 AnswerSubmitter 勾选并延迟提交；手动模式仅记录待手动提交结果
   ↓
 StatusPanel 记录结果、置信度与耗时
 ```
@@ -339,13 +339,14 @@ YOLO 输出解析规则：
 | 配置               | 当前值 / 存储键                                                |
 | ------------------ | -------------------------------------------------------------- |
 | `randomOnFail`     | `false`                                                        |
+| 答题模式           | 默认 `auto`；`hvPonySolverAnswerMode` 可设为 `auto` / `manual` |
 | 提交前等待时间     | 默认 `3000-5000` ms，可通过 `hvPonySolverSubmitDelay` 设置     |
 | 多选点击间隔       | 默认 `1000-1500` ms，可通过 `hvPonySolverMultiClickDelay` 设置 |
 | 历史记录 key       | `local_answer_history_v2`                                      |
 | 每个世界保留记录数 | `5`                                                            |
 | 世界识别           | URL 包含 `/isekai/` 时为异世界，否则为主世界                   |
 
-状态面板显示：模型状态、ONNX Session 状态、推理状态、当前世界和最近答题记录。渲染历史记录时会转义 HTML 敏感字符。
+状态面板显示：模型状态、ONNX Session 状态、推理状态、当前世界和最近答题记录。`manual` 模式仍执行图片获取与 ONNX 推理，把答案及置信度显示为“待手动提交”，但不会修改任何答案 checkbox，也不会点击 submit；从设置菜单切回 `auto` 后，下一次验证码恢复自动选择与提交。渲染历史记录时会转义 HTML 敏感字符。
 
 ### 默认打包范围
 

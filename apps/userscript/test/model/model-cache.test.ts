@@ -50,6 +50,7 @@ function createStatusPanel(): StatusPanel {
     setStatus: vi.fn(),
     setSessionReady: vi.fn(),
     addSuccess: vi.fn(),
+    addManualResult: vi.fn(),
     addRandomFailure: vi.fn(),
     addError: vi.fn(),
     create: vi.fn(),

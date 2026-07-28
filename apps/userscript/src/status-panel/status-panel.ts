@@ -82,6 +82,15 @@ export class StatusPanel implements StatusPanelContract {
     this.scheduleRender()
   }
 
+  addManualResult(ponies: AnswerCode[], confidences: Partial<Record<AnswerCode, number>>, elapsed: number): void {
+    this.records = this.history.add(this.world, {
+      type: 'manual',
+      answers: formatAnswers(ponies, confidences),
+      elapsed,
+    })
+    this.scheduleRender()
+  }
+
   addRandomFailure(pony: AnswerCode, elapsed: number): void {
     this.records = this.history.add(this.world, {
       type: 'random',

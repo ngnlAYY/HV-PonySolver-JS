@@ -6,18 +6,18 @@ Userscript 没有 Redux/Zustand/Pinia/context store。State由最接近其 lifec
 
 ## State Categories / Owners
 
-| State                                               | Owner                                            | Lifetime / persistence                         |
-| --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
-| Observer、scan flags、last captcha、root abort      | `App`                                            | 当前 page/app lifecycle                        |
-| Busy/current solve                                  | `CaptchaSolver`                                  | 一次 solver lifecycle                          |
-| Worker、ready、prepare promise、detect queue        | `OnnxWorkerClient`                               | detector lifecycle                             |
-| Pending Worker requests/timeouts                    | `WorkerRequestBridge`                            | 一个 Worker bridge                             |
-| ONNX session/canvas                                 | `onnx-worker-entry.ts` Worker global             | Worker lifetime                                |
-| Panel status/history snapshot/render queue          | `StatusPanel`                                    | panel lifecycle；history由 store持久化         |
-| Answer history/settings                             | `answer-history-store.ts`、panel/timing settings | GM bridge-backed persistence                   |
-| Model access Key/settings                           | `model-settings.ts` + GM bridge                  | Userscript storage；只在验证成功后保存候选 Key |
-| Model bytes/version/integrity cache                 | `model/model-cache.ts`                           | IndexedDB，按 canonical manifest校验           |
-| Canonical filename/version/hash/answers/token rules | `@hv-pony-solver/shared`                         | Immutable contract，不是 mutable store         |
+| State                                               | Owner                                                                       | Lifetime / persistence                         |
+| --------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------- |
+| Observer、scan flags、last captcha、root abort      | `App`                                                                       | 当前 page/app lifecycle                        |
+| Busy/current solve                                  | `CaptchaSolver`                                                             | 一次 solver lifecycle                          |
+| Worker、ready、prepare promise、detect queue        | `OnnxWorkerClient`                                                          | detector lifecycle                             |
+| Pending Worker requests/timeouts                    | `WorkerRequestBridge`                                                       | 一个 Worker bridge                             |
+| ONNX session/canvas                                 | `onnx-worker-entry.ts` Worker global                                        | Worker lifetime                                |
+| Panel status/history snapshot/render queue          | `StatusPanel`                                                               | panel lifecycle；history由 store持久化         |
+| Answer history/answer mode/panel/timing settings    | `answer-history-store.ts`、`answer-mode-settings.ts`、panel/timing settings | GM bridge-backed persistence                   |
+| Model access Key/settings                           | `model-settings.ts` + GM bridge                                             | Userscript storage；只在验证成功后保存候选 Key |
+| Model bytes/version/integrity cache                 | `model/model-cache.ts`                                                      | IndexedDB，按 canonical manifest校验           |
+| Canonical filename/version/hash/answers/token rules | `@hv-pony-solver/shared`                                                    | Immutable contract，不是 mutable store         |
 
 ## Ownership Rules
 
@@ -43,7 +43,9 @@ Userscript 没有 Redux/Zustand/Pinia/context store。State由最接近其 lifec
 
 ## History / UI State
 
-- History records使用 typed union（success/random/error）和 per-world partition。
+- History records使用 typed union（success/manual/random/error）和 per-world partition。
+- `answer-mode-settings.ts` 单独拥有 `auto | manual` 持久化边界；配置缺失、非法或读取失败时回退 `auto`，保持升级兼容。
+- `CaptchaSolver` 在消费推理结果时读取当前模式：`auto` 才进入 `AnswerSubmitter`，`manual` 只写“待手动提交”历史并把 captcha 标记为 handled，禁止修改 checkbox 或点击 submit。
 - Renderer接收 snapshot并保持 pure；DOM controller更新 state后 schedule render。
 - History limit/compact/position validation在 settings boundary完成，不让非法 persisted value流入 DOM style/slice。
 

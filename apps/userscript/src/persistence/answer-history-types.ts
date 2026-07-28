@@ -6,21 +6,30 @@ export type HistoryRecordBase = Readonly<{
   elapsed: number
 }>
 
-export type SuccessHistoryRecord = HistoryRecordBase & Readonly<{
-  type: 'success'
-  answers: string
-}>
+export type SuccessHistoryRecord = HistoryRecordBase &
+  Readonly<{
+    type: 'success'
+    answers: string
+  }>
 
-export type RandomHistoryRecord = HistoryRecordBase & Readonly<{
-  type: 'random'
-  answers: string
-  message: string
-}>
+export type ManualHistoryRecord = HistoryRecordBase &
+  Readonly<{
+    type: 'manual'
+    answers: string
+  }>
 
-export type ErrorHistoryRecord = HistoryRecordBase & Readonly<{
-  type: 'error'
-  message: string
-}>
+export type RandomHistoryRecord = HistoryRecordBase &
+  Readonly<{
+    type: 'random'
+    answers: string
+    message: string
+  }>
 
-export type HistoryRecord = SuccessHistoryRecord | RandomHistoryRecord | ErrorHistoryRecord
+export type ErrorHistoryRecord = HistoryRecordBase &
+  Readonly<{
+    type: 'error'
+    message: string
+  }>
+
+export type HistoryRecord = SuccessHistoryRecord | ManualHistoryRecord | RandomHistoryRecord | ErrorHistoryRecord
 export type HistoryRecordType = HistoryRecord['type']

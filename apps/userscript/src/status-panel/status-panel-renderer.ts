@@ -21,22 +21,33 @@ export function formatRecord(record: HistoryRecord): string {
   if (record.type === 'success') {
     return `${time} [${escapeHtml(record.answers)}] ${Number(record.elapsed) || 0}ms`
   }
+  if (record.type === 'manual') {
+    return `${time} [${escapeHtml(record.answers)}] 待手动提交 ${Number(record.elapsed) || 0}ms`
+  }
   if (record.type === 'random') {
     return `${time} ${escapeHtml(record.message || '识别失败，随机选择')} ${Number(record.elapsed) || 0}ms`
   }
   return `${time} ${escapeHtml(record.message || '未知错误')} ${Number(record.elapsed) || 0}ms`
 }
 
-export function renderStatusPanel(world: World, status: PanelStatus, records: HistoryRecord[], compactMode: boolean, historyLimit: number): string {
+export function renderStatusPanel(
+  world: World,
+  status: PanelStatus,
+  records: HistoryRecord[],
+  compactMode: boolean,
+  historyLimit: number,
+): string {
   const worldName = WORLD_NAMES[world] || '未知'
   const visibleRecords = records.slice(0, historyLimit)
   const rows = visibleRecords.length ? visibleRecords.map((record) => formatRecord(record)).join('<br>') : '暂无记录'
   const recentError = records.find((record) => record.type === 'error')?.message || '无'
-  const statusRows = compactMode ? [] : [
-    `模型状态：${escapeHtml(status.model)}`,
-    `会话状态：${escapeHtml(status.session)}`,
-    `推理状态：${escapeHtml(status.inference)}`,
-  ]
+  const statusRows = compactMode
+    ? []
+    : [
+        `模型状态：${escapeHtml(status.model)}`,
+        `会话状态：${escapeHtml(status.session)}`,
+        `推理状态：${escapeHtml(status.inference)}`,
+      ]
   return [
     'HV-PonySolver',
     '运行: 本地 ONNX',

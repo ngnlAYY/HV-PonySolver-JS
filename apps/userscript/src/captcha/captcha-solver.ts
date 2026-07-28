@@ -3,13 +3,14 @@ import type { DetectorService, YoloParseResult } from '../inference/inference-ty
 import type { StatusPanel } from '../status-panel/status-panel-types'
 import { formatErrorMessage } from '../utils/errors'
 import { logError } from '../utils/logger'
+import type { AnswerMode } from './answer-mode-settings'
 import type { AnswerSubmitter } from './answer-submitter'
 import { findCaptchaTarget } from './captcha-target'
 import type { ImageLoader } from './captcha-types'
 import { solverConfig } from './solver-config'
 
 export type SolveResult = Readonly<{
-  solved: boolean
+  handled: boolean
   captchaKey: string | null
 }>
 
@@ -21,6 +22,7 @@ export class CaptchaSolver {
     private readonly detector: DetectorService,
     private readonly imageLoader: ImageLoader,
     private readonly answerSubmitter: AnswerSubmitter,
+    private readonly getAnswerMode: () => Promise<AnswerMode>,
     private readonly getAbortSignal?: () => AbortSignal | undefined,
   ) {}
 
@@ -30,7 +32,7 @@ export class CaptchaSolver {
 
   trigger(): Promise<SolveResult> {
     if (this.busy) {
-      return Promise.resolve({ solved: false, captchaKey: null })
+      return Promise.resolve({ handled: false, captchaKey: null })
     }
     this.busy = true
     return this.solve().finally(() => {
@@ -42,7 +44,7 @@ export class CaptchaSolver {
     const startedAt = Date.now()
     const elapsed = (): number => Date.now() - startedAt
     let captchaKey: string | null = null
-    const result = (solved: boolean): SolveResult => ({ solved, captchaKey })
+    const result = (handled: boolean): SolveResult => ({ handled, captchaKey })
     const failSubmit = (message: string): void => {
       this.panel.setStatus({ inference: `错误: ${message}` })
       this.panel.addError(message, elapsed())
@@ -89,7 +91,17 @@ export class CaptchaSolver {
         return result(false)
       }
 
+      const answerMode = await this.getAnswerMode()
+      if (signal?.aborted) {
+        return result(false)
+      }
+
       if (detectionResult.success && detectionResult.ponies.length) {
+        if (answerMode === 'manual') {
+          this.panel.addManualResult(detectionResult.ponies, detectionResult.confidences, elapsed())
+          return result(true)
+        }
+
         let submitted = false
         await this.answerSubmitter.submit(
           target.form,
@@ -104,7 +116,7 @@ export class CaptchaSolver {
         return result(submitted)
       }
 
-      if (!solverConfig.randomOnFail) {
+      if (answerMode === 'manual' || !solverConfig.randomOnFail) {
         failSubmit('识别失败: 无可提交答案')
         return result(false)
       }
