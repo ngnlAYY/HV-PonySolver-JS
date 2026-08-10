@@ -1,665 +1,642 @@
-# HV Pony Solver
+# HV PonySolver JS
 
-<!-- AUTO-GENERATED:START -->
+HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓库项目。项目由用户脚本、Cloudflare Model Worker 和共享契约包组成，负责验证码图片预处理、ONNX Runtime Web 推理、模型安全分发以及构建与部署校验。
 
-HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse 小马验证码 userscript，以及给 userscript 分发 ONNX 模型文件的 Cloudflare Worker 服务。
+当前版本的核心约束：
 
-当前仓库包含三部分：
+- 新版用户脚本只下载并运行 `.ort` 模型。
+- 旧版用户脚本仍可通过原有 `.onnx` 路径工作。
+- 默认构建不内置 ONNX Runtime，运行时从固定版本的 jsDelivr 地址加载完整版。
+- 显式内置构建只内置精简 JS glue，精简 WASM 仍从 R2 下载。
+- 两种构建都从 Model Worker 下载同一个 `.ort` 模型。
+- 默认运行时和内置运行时之间没有自动回退。
+- 模型访问密钥只允许通过 `Authorization: Bearer` 传递，不接受查询字符串密钥。
 
-- `apps/userscript`：浏览器 userscript，默认下载固定版本的完整 ONNX Runtime Web，也可显式构建内置精简运行时；推理在本地完成。
-- `apps/model-worker`：Cloudflare Worker，从 R2 分发真实模型或 decoy 模型，并用 KV 中的授权 key 控制访问。
-- `packages/shared`：跨 userscript 与 Worker 共享的稳定契约，包括答案编码、模型路径常量、访问决策类型和 token 校验。
+## 功能概览
 
-## 技术栈
+- 在独立 Web Worker 中执行 ONNX Runtime Web 推理，避免阻塞页面主线程。
+- 将验证码图片转换为 `640 x 640` CHW `Float32` 输入。
+- 解析 YOLO 输出并映射为 Pony 答案代码。
+- 使用本地缓存减少模型重复下载。
+- 通过 Cloudflare Worker、KV 和 R2 分发真实模型、诱饵模型及公开 WASM。
+- 对 `.ort` 模型和精简 WASM 执行长度与 SHA-256 校验。
+- 提供默认外部完整版和显式内置精简版两种运行时构建。
+- 提供文档漂移、架构边界、浏览器危险调用、包体预算和部署契约检查。
 
-| 层级            | 技术                                                 |
-| --------------- | ---------------------------------------------------- |
-| Monorepo        | pnpm workspace                                       |
-| 语言            | TypeScript, ESM                                      |
-| 构建            | esbuild, TypeScript `tsc --noEmit`                   |
-| 测试            | Vitest, jsdom, `@cloudflare/vitest-pool-workers`     |
-| Lint / Format   | ESLint 10, typescript-eslint, Prettier               |
-| Userscript 推理 | ONNX Runtime Web 1.27.0, Web Worker, OffscreenCanvas |
-| 模型分发        | Cloudflare Workers, KV, R2, Wrangler                 |
-| CI/CD           | GitHub Actions                                       |
+## 架构
+
+```text
+Hentaiverse 页面
+    |
+    v
+用户脚本主线程
+    |-- 读取配置和访问密钥
+    |-- 下载并缓存 yolo26n-640.ort
+    |-- 创建 Blob Web Worker
+    |
+    v
+ONNX 推理 Worker
+    |-- external: 从 jsDelivr 加载完整 ONNX Runtime Web
+    |-- bundled: 使用内置精简 glue，并下载首方精简 WASM
+    |-- 创建 WASM Execution Provider 会话
+    |-- 执行图像预处理、推理和结果解析
+    |
+    v
+答案选择与状态面板
+
+Cloudflare Model Worker
+    |-- KV: 校验 Bearer token
+    |-- R2: 读取真实模型、诱饵模型和公开 WASM
+    |-- 路由: 旧版 ONNX、新版 ORT、精简 WASM
+```
+
+本文使用以下名称区分两类 Worker：
+
+| 名称 | 含义 |
+| --- | --- |
+| ONNX 推理 Worker | 用户脚本创建的浏览器 Web Worker |
+| Model Worker | `apps/model-worker` 中部署到 Cloudflare 的服务 |
 
 ## 仓库结构
 
+| 路径 | 作用 |
+| --- | --- |
+| `apps/userscript` | 用户脚本、ONNX 推理 Worker、构建器和浏览器测试 |
+| `apps/model-worker` | Cloudflare Model Worker、Wrangler 配置和部署契约检查 |
+| `packages/shared` | 用户脚本和 Model Worker 共用的模型、令牌及 ORT 资产契约 |
+| `config/onnxruntime` | 精简 ONNX Runtime 所需的算子与类型配置 |
+| `docs` | 运行时、运维和架构补充文档 |
+| `other` | 可供人工上传或归档的精简运行时生成物 |
+| `scripts` | 仓库级构建、校验、文档漂移和发布辅助脚本 |
+| `.github/workflows` | 验证、安全扫描和 Model Worker 部署工作流 |
+
+## 模型格式与兼容关系
+
+新版和旧版客户端由请求路径区分，不在用户脚本中做格式探测或兼容回退。
+
+| 客户端 | 请求路径 | 模型格式 | 状态 |
+| --- | --- | --- | --- |
+| 新版用户脚本 | `/yolo26n-640.ort` | ORT | 当前默认 |
+| 旧版用户脚本 | `/yolo26n-640.onnx` | ONNX | 继续保留 |
+
+新版模型契约：
+
+| 字段 | 值 |
+| --- | --- |
+| 文件名 | `yolo26n-640.ort` |
+| 公开 URL | `https://models.ngnl.host/yolo26n-640.ort` |
+| R2 对象键 | `real/yolo26n-640.ort` |
+| 字节长度 | `9,914,448` |
+| 版本 | `yolo26n-640-2026-05-14` |
+| 完整性来源 | `packages/shared/src/ort-assets.ts` |
+
+模型下载器使用固定长度和 SHA-256 契约验证 `.ort` 内容。模型 URL、对象键、长度和哈希必须一起更新，不能只替换 R2 对象。
+
+## ONNX Runtime 构建模式
+
+运行时 profile 由构建命令决定，不由运行时配置自动选择。
+
+| 项目 | 默认外部完整版 | 显式内置精简版 |
+| --- | --- | --- |
+| profile 名称 | `external` | `bundled` |
+| 构建命令 | `build` | `build:bundled-runtime` |
+| JS 运行时 | 从 jsDelivr 加载 `ort.min.js` | 构建时内置精简 glue |
+| WASM | 从 jsDelivr `dist/` 加载完整版 WASM | 从 `models.ngnl.host` 下载内容寻址 WASM |
+| WASM 校验 | 依赖固定版本 CDN | 最大长度、精确长度和 SHA-256 |
+| 自动回退 | 无 | 无 |
+| 包体预算 | `96 KiB` | `480 KiB` |
+
+### 默认外部完整版
+
+默认构建使用固定版本的 ONNX Runtime Web `1.27.0`：
+
 ```text
-.
-├── apps/
-│   ├── userscript/          # 生成 hv-pony-solver.user.js 的浏览器脚本
-│   └── model-worker/        # Cloudflare Worker 模型分发服务
-├── packages/
-│   └── shared/              # 跨应用共享的类型与常量
-├── scripts/                 # 校验、构建辅助与 CI 检查脚本
-├── .github/workflows/       # CI 与 Worker 部署 workflow
-├── package.json             # 根命令、Node/pnpm 版本约束
-├── pnpm-workspace.yaml      # workspace 包范围
-├── tsconfig.base.json       # 共享 TypeScript strict 配置
-└── vitest.workspace.ts      # Vitest workspace 配置
+https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js
+https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/
 ```
 
-## 运行机制概览
+ONNX 推理 Worker 使用 `importScripts()` 加载 `ort.min.js`，并设置：
 
-### Userscript 答题流程
+- `numThreads = 1`
+- `proxy = false`
+- WASM Execution Provider
 
-1. `apps/userscript/src/main.ts` 在 `DOMContentLoaded` 后创建 `App`，并在页面卸载时销毁资源。
-2. `App` 创建状态面板、模型缓存、ONNX Worker 客户端、图片加载器、答案提交器和验证码求解器。
-3. `App` 监听 body 变化并合并扫描；仅当 `#riddlemaster` 内存在可用表单和图片，且该图片尚未成功处理时，才懒加载 ONNX 并触发求解。
-4. `CaptchaSolver` 使用 `CachedImageLoader` 从浏览器同源缓存读取验证码图片，调用 ONNX Worker 推理。
-5. Worker 按构建 profile 加载远程完整版或内置精简版运行时，并在后台线程解析 YOLO 输出。
-6. 默认自动模式下，`AnswerSubmitter` 清空原有勾选，按随机顺序点击目标复选框，等待模拟延迟后点击提交按钮；手动模式下不修改复选框或点击提交按钮。
-7. `StatusPanel` 展示模型、Session、推理状态，并把自动提交结果或“待手动提交”的识别答案、置信度和耗时写入 `localStorage`。
+该模式不会下载项目生成的精简 WASM，也不会在 CDN 失败时切换到内置精简版。固定版本 URL 降低了版本漂移，但远程 JS 和完整版 WASM 仍属于外部 CDN 信任边界。
 
-### Model Worker 模型分发流程
+### 显式内置精简版
 
-1. Worker 只处理配置的 `PUBLIC_MODEL_PATH`，默认是 `/yolo26n-640.onnx`。
-2. 允许 `GET`、`HEAD` 和 `OPTIONS`；其他路径返回 `404`，其他方法返回 `405` 并带 `Allow: GET, HEAD, OPTIONS`。
-3. `Authorization: Bearer <token>` 中的 token 必须是 64 位十六进制字符串。
-4. 通过 `MODEL_KEYS` KV 查询授权 token：命中则返回真实 R2 模型，否则按 `INVALID_KEY_MODE` 返回 decoy 或 `403`；query string 不授权真实模型。
-5. 真实模型对象键默认 `real/yolo26n-640.onnx`，decoy 模型对象键默认 `decoy/yolo26n-640.onnx`。
-6. 成功响应使用 `application/octet-stream`，`Content-Disposition: inline; filename="yolo26n-640.onnx"`，`Cache-Control: no-store`。模型响应当前保持 `Cache-Control: no-store`；缓存策略和未来 versioned URL 前置条件见 [docs/model-cache-strategy.md](docs/model-cache-strategy.md)。无 `Origin` 请求允许直接下载；Hentaiverse 白名单 Origin 会被回显；未知 Origin 不授予 CORS。
-
-## 端到端数据流
+内置构建将以下 glue 打入 ONNX 推理 Worker：
 
 ```text
-Hentaiverse 页面验证码
-  ↓ DOM MutationObserver 检测 #riddlemaster
-userscript App
-  ↓ Authorization: Bearer <model access key>
-Cloudflare model-worker
-  ↓ KV 判断 token 是否授权
-R2 real/decoy ONNX 模型
-  ↓ IndexedDB 缓存 + SHA-256 校验
-浏览器 Web Worker + ONNX Runtime Web
-  ↓ YOLO 输出解析为 TS/RA/FS/RD/PP/AJ
-识别结果消费策略：自动模式由 AnswerSubmitter 勾选并延迟提交；手动模式仅记录待手动提交结果
-  ↓
-StatusPanel 记录结果、置信度与耗时
+apps/userscript/vendor/onnxruntime/ort.wasm.bundle.min.mjs
 ```
 
-## 架构与图谱 guardrails
+glue 在构建前校验：
 
+| 字段 | 值 |
+| --- | --- |
+| 字节长度 | `56,993` |
+| SHA-256 | `a63d4f08e70220c0f721fabfd4e4b958aa127334a19038b2732d07e919f32554` |
+| 最大长度 | `96,000` |
 
-`architecture:check` 固化当前最强的边界结论：推理层不应 import `StatusPanel`，`StatusPanel` 不应 import 推理层，`apps/userscript` 与 `apps/model-worker` 只能通过 `packages/shared` 共享稳定契约，`packages/shared` 不应反向 import 应用代码，推理层不应直接 import userscript storage bridge。`browser-sinks:check` 固化浏览器危险点审计范围：只允许 `StatusPanel` 的已审计 `innerHTML` 渲染点，以及外部完整版 ONNX Runtime Worker 入口中的固定 URL `importScripts`。
+运行时下载以下精简 WASM：
 
-推理配置已拆成聚焦导出：`imagePreprocessConfig` 负责输入尺寸，`yoloOutputConfig` 负责 YOLO 解析假设，`inferenceTimeoutConfig` 负责 worker、检测与模型下载超时。运行时 profile 和资产位置由构建清单管理，避免业务主包静态引用两套运行时资源。
+```text
+https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm
+```
 
-`Model Worker Core` 不应仅因为图谱社区低内聚就拆分；只有源码职责已经自然分离为环境归一化、请求路由、模型访问选择和响应创建时，才应继续拆分。
+精简 WASM 契约：
+
+| 字段 | 值 |
+| --- | --- |
+| 文件名 | `ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` |
+| R2 对象键 | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` |
+| 字节长度 | `1,267,937` |
+| SHA-256 | `25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa` |
+| 最大长度 | `2,000,000` |
+
+下载使用 `cache: force-cache` 和 `redirect: error`。响应必须同时通过最大长度、精确长度和 SHA-256 校验，否则推理初始化失败，不会回退到 CDN 完整版。
+
+### 精简运行时供应链
+
+当前精简运行时固定以下上游信息：
+
+| 字段 | 值 |
+| --- | --- |
+| npm 包 | `onnxruntime-web@1.27.0` |
+| ONNX Runtime 提交 | `8f0278c77bf44b0cc83c098c6c722b92a36ac4b5` |
+| emsdk | `4.0.23` |
+| 算子配置 SHA-256 | `2abe2e2987496ab518de97a7f4b157cec1bd1817c621d3523073034fb47591fe` |
+
+权威配置位于：
+
+```text
+apps/userscript/src/inference/onnx-runtime-assets.ts
+config/onnxruntime/required_operators_and_types.config
+```
+
+更详细的构建约束见 [`docs/onnx-runtime.md`](docs/onnx-runtime.md)。
 
 ## 环境要求
 
-| 依赖            | 要求                                                                      |
-| --------------- | ------------------------------------------------------------------------- |
-| Node.js         | `>=22`                                                                    |
-| pnpm            | `10.0.0`，由 `packageManager` 固定                                        |
-| Corepack        | 推荐启用，用于获得项目指定 pnpm                                           |
-| Cloudflare 资源 | 部署 Worker 时需要 Cloudflare Account、API Token、KV namespace、R2 bucket |
+| 工具 | 要求 |
+| --- | --- |
+| Node.js | `>= 22` |
+| pnpm | `10.0.0` |
+| Corepack | 推荐启用，用于固定 pnpm 版本 |
 
-首次安装：
+安装依赖：
 
 ```bash
 corepack enable
 pnpm install
 ```
 
-协作时以本 README 的架构、命令与代码风格说明，以及 `.trellis/spec/` 中各 workspace 的可执行规范为准。
-
-如果本机没有裸 `pnpm` 命令，也可以使用：
+如果当前 shell 中的 `pnpm` 不是项目声明的版本，直接使用：
 
 ```bash
 corepack pnpm install
 ```
 
-## 命令参考
+## 快速构建
 
-### 根目录命令
+### 默认外部完整版
 
-| 命令                        | 说明                                                                                                              |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `pnpm install`              | 安装所有 workspace 依赖                                                                                           |
-| `pnpm lint`                 | 对整个仓库运行 ESLint                                                                                             |
-| `pnpm typecheck`            | 对所有 workspace 运行 TypeScript 类型检查                                                                         |
-| `pnpm test`                 | 运行所有 workspace 的 Vitest 测试与 node:test 脚本测试                                                            |
-| `pnpm build`                | 运行所有 workspace 的构建检查；userscript 会生成产物                                                              |
-| `pnpm docs:check`           | 检查 README.md 与 source 关键事实是否发生 drift                                                                   |
-| `pnpm architecture:check`   | 检查 userscript、model-worker 与 shared 的架构边界                                                                |
-| `pnpm browser-sinks:check`  | 检查 userscript 中 `innerHTML`、`new Function` 与 `importScripts` 是否只出现在已审计位置                          |
-| `pnpm bundle:check`         | 显式先构建默认未压缩 userscript，再按 96 KiB 预算检查产物大小                                                     |
-| `pnpm bundle:check:default` | 检查已有默认 userscript 产物是否超过 96 KiB；不执行构建                                                           |
-| `pnpm bundle:check:bundled` | 检查已有 minify + bundled-runtime userscript 产物是否超过 480 KiB；不执行构建                                     |
-| `pnpm benchmark:inference`  | 运行 userscript 推理纯函数本地 micro benchmark                                                                    |
-| `pnpm release:notes`        | 根据 shared model manifest 生成模型发布说明                                                                       |
-| `pnpm test:e2e:userscript`  | 运行 userscript Playwright 本地 fixture smoke 测试                                                                |
-| `pnpm check:e2e`            | 运行当前 E2E gate                                                                                                 |
-| `pnpm check:userscript`     | 依次运行 userscript 的 typecheck、test 与 build                                                                   |
-| `pnpm check:model-worker`   | 依次运行 Model Worker 的 typecheck、test 与 build                                                                 |
-| `pnpm check:shared`         | 依次运行 shared 包的 typecheck、test 与 build                                                                     |
-| `pnpm check:quick`          | 依次运行 lint、typecheck、test、docs:check、architecture:check、browser-sinks:check、bundle:check |
-| `pnpm check`                | 先运行 check:quick，再运行 test:coverage 与 build                                                                 |
-| `pnpm format`               | 用 Prettier 格式化仓库文件                                                                                        |
+```bash
+pnpm --filter @hv-pony-solver/userscript build -- --minify
+```
 
-### Userscript 命令
+### 显式内置精简版
 
-| 命令                                                                                                   | 说明                                                                                            |
-| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `corepack pnpm --filter @hv-pony-solver/userscript build`                                              | 用 esbuild 打包未压缩 userscript，并写入 `apps/userscript/dist/hv-pony-solver.user.js`          |
-| `corepack pnpm --filter @hv-pony-solver/userscript build -- --minify`                                  | 用 esbuild 打包压缩 userscript                                                                  |
-| `corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime`                              | 构建显式内置精简 JS glue、远程校验精简 WASM 的 userscript                                       |
-| `pnpm --filter @hv-pony-solver/userscript typecheck`                                                   | 类型检查 userscript 源码                                                                        |
-| `pnpm --filter @hv-pony-solver/userscript test`                                                        | 运行 userscript Vitest/jsdom 单元测试与 node:test 脚本测试                                      |
-| `MODEL_FILE=/path/to/yolo26n-640.ort pnpm --filter @hv-pony-solver/userscript verify-model-integrity`  | 校验待发布 ORT 模型与 shared manifest 的 byteLength / SHA-256 一致性                            |
-| `corepack pnpm verify:onnx-runtime`                                                                    | 校验仓库内置 ONNX Runtime bundle 与 manifest 的 byteLength / SHA-256 一致性                     |
-| `corepack pnpm --filter @hv-pony-solver/userscript benchmark:inference`                                | 运行推理纯函数本地 micro benchmark，输出预处理与 YOLO parser 的 `ms/op`                         |
+```bash
+pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
+```
+
+两条命令默认写入同一个用户脚本输出路径。连续构建两种 profile 时，后一次构建会覆盖前一次。需要同时保留时，可以显式设置不同输出：
+
+```bash
+HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH=apps/userscript/dist/hv-pony-solver.external.user.js \
+HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH=apps/userscript/dist/hv-pony-solver.external.artifact.json \
+pnpm --filter @hv-pony-solver/userscript build -- --minify
+
+HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH=apps/userscript/dist/hv-pony-solver.bundled.user.js \
+HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH=apps/userscript/dist/hv-pony-solver.bundled.artifact.json \
+pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
+```
+
+构建器支持以下输出环境变量：
+
+| 环境变量 | 作用 |
+| --- | --- |
+| `HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH` | 用户脚本输出路径 |
+| `HV_PONY_SOLVER_METAFILE_PATH` | esbuild metafile 输出路径 |
+| `HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH` | 构建产物清单路径 |
+| `HV_PONY_SOLVER_ARTIFACT_SHA256_PATH` | 构建产物 SHA-256 文件路径 |
+
+构建产物清单记录文件名、字节长度、SHA-256、是否压缩以及 `bundledRuntime` 标志。
+
+## 常用开发命令
+
+### 仓库级命令
+
+| 命令 | 作用 |
+| --- | --- |
+| `pnpm build` | 构建所有工作区包，用户脚本使用默认外部 profile |
+| `pnpm lint` | 执行 ESLint |
+| `pnpm typecheck` | 对所有工作区执行 TypeScript 类型检查 |
+| `pnpm test` | 执行工作区和仓库级测试 |
+| `pnpm test:coverage` | 生成覆盖率报告 |
+| `pnpm docs:check` | 检查 README 与源码、配置和资产清单的漂移 |
+| `pnpm architecture:check` | 检查跨层和跨应用导入边界 |
+| `pnpm browser-sinks:check` | 检查浏览器危险调用白名单 |
+| `pnpm bundle:check` | 构建默认 profile 并检查 `96 KiB` 预算 |
+| `pnpm bundle:check:default` | 检查当前产物的默认 profile 预算 |
+| `pnpm bundle:check:bundled` | 检查当前产物的内置 profile 预算 |
+| `pnpm benchmark:inference` | 执行推理预处理和解析基准，不作为 CI 性能门槛 |
+| `pnpm test:e2e` | 执行用户脚本 Playwright Chromium 测试 |
+| `pnpm check:userscript` | 执行用户脚本聚合检查 |
+| `pnpm check:model-worker` | 执行 Model Worker 聚合检查 |
+| `pnpm check` | 执行仓库聚合质量门 |
+| `pnpm build:onnx-runtime` | 从固定上游构建精简 ONNX Runtime |
+| `pnpm verify:onnx-runtime` | 校验已纳入仓库的精简 glue |
+
+### 用户脚本命令
+
+```bash
+pnpm --filter @hv-pony-solver/userscript build
+pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
+pnpm --filter @hv-pony-solver/userscript test
+pnpm --filter @hv-pony-solver/userscript typecheck
+pnpm --filter @hv-pony-solver/userscript test:e2e
+pnpm --filter @hv-pony-solver/userscript verify:onnx-runtime
+```
+
+校验本地 `.ort` 模型：
+
+```bash
+MODEL_FILE=/path/to/yolo26n-640.ort \
+pnpm --filter @hv-pony-solver/userscript verify:model
+```
 
 ### Model Worker 命令
 
-| 命令                                                                                                                                                                                          | 说明                                                                         |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket> pnpm --filter @hv-pony-solver/model-worker render-config`                                                                      | 从 `wrangler.template.toml` 渲染本地 `wrangler.toml`                         |
-| `pnpm --filter @hv-pony-solver/model-worker dev`                                                                                                                                              | 渲染 Wrangler 配置后启动 `wrangler dev`                                      |
-| `pnpm --filter @hv-pony-solver/model-worker typecheck`                                                                                                                                        | 类型检查 Worker 源码                                                         |
-| `pnpm --filter @hv-pony-solver/model-worker test`                                                                                                                                             | 使用 Cloudflare Vitest pool 运行 Worker 测试                                 |
-| `pnpm --filter @hv-pony-solver/model-worker build`                                                                                                                                            | 运行 Worker TypeScript 构建检查                                              |
-| `MODEL_WORKER_URL=https://models.ngnl.host/yolo26n-640.onnx MODEL_WORKER_INVALID_KEY_MODE=decoy MODEL_WORKER_PROBE_ID=<probe-id> pnpm --filter @hv-pony-solver/model-worker check:deployment` | 仅用无 Key 的 OPTIONS/HEAD 验证已部署 Worker 的公开 HTTP/CORS 契约           |
-| `pnpm --filter @hv-pony-solver/model-worker run deploy`                                                                                                                                       | 渲染配置并部署 Worker；使用 `run deploy` 避免 pnpm 10 内置 `deploy` 命令冲突 |
-
-### Shared 包命令
-
-| 命令                                             | 说明               |
-| ------------------------------------------------ | ------------------ |
-| `pnpm --filter @hv-pony-solver/shared typecheck` | 类型检查共享契约   |
-| `pnpm --filter @hv-pony-solver/shared test`      | 运行共享契约测试   |
-| `pnpm --filter @hv-pony-solver/shared build`     | 运行共享包构建检查 |
-
-## Userscript 详细说明
-
-### 构建产物
-
-构建命令：
-
 ```bash
-corepack pnpm --filter @hv-pony-solver/userscript build
+pnpm --filter @hv-pony-solver/model-worker render-config
+pnpm --filter @hv-pony-solver/model-worker validate-wrangler-config
+pnpm --filter @hv-pony-solver/model-worker dev
+pnpm --filter @hv-pony-solver/model-worker typecheck
+pnpm --filter @hv-pony-solver/model-worker test
+pnpm --filter @hv-pony-solver/model-worker build
 ```
 
-默认输出未压缩产物；需要压缩产物时使用 `--minify` 或 `--minify=true`，需要显式关闭时使用 `--minify=false`：
+pnpm 10 会将 `deploy` 识别为自身命令。部署 Model Worker 时必须显式使用：
 
 ```bash
-corepack pnpm --filter @hv-pony-solver/userscript build -- --minify
-corepack pnpm --filter @hv-pony-solver/userscript build -- --minify=true
-corepack pnpm --filter @hv-pony-solver/userscript build -- --minify=false
+pnpm --filter @hv-pony-solver/model-worker run deploy
 ```
 
-输出文件：
+## 生成精简 ONNX Runtime
+
+生成命令：
+
+```bash
+pnpm build:onnx-runtime
+```
+
+脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。默认输出到 `other/`：
 
 ```text
-apps/userscript/dist/hv-pony-solver.user.js
+other/ort.wasm.bundle.min.mjs
+other/ort-wasm-simd-<sha256>.wasm
 ```
 
-发布用构建可通过环境变量额外写出产物校验文件：
+当前可上传文件：
 
-| 环境变量                                | 输出内容                                                                  |
-| --------------------------------------- | ------------------------------------------------------------------------- |
-| `HV_PONY_SOLVER_ARTIFACT_SHA256_PATH`   | 最终 `.user.js` 产物的 SHA-256 文本                                       |
-| `HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH` | 产物路径、byteLength、SHA-256、压缩状态、runtime 打包状态和 metafile 路径 |
-| `HV_PONY_SOLVER_METAFILE_PATH`          | esbuild main / worker metafile JSON                                       |
+```text
+other/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm
+```
 
-手动发布 userscript artifact 时，CI 会使用 `build:bundled-runtime -- --minify`，并同时上传 `.user.js`、`.sha256`、artifact manifest 与 esbuild metafile。
+生成脚本不会上传 R2、部署 Model Worker 或自动发布用户脚本。采用新生成物前必须同步：
 
-构建脚本会：
+- `apps/userscript/vendor/onnxruntime/ort.wasm.bundle.min.mjs`
+- `apps/userscript/src/inference/onnx-runtime-assets.ts`
+- `packages/shared/src/ort-assets.ts`
+- `apps/model-worker/wrangler.template.toml`
+- 对应测试、文档和 R2 对象
 
-1. 以 `apps/userscript/src/main.ts` 为入口。
-2. 使用 esbuild 打包为浏览器 IIFE。
-3. 从 `src/userscript/metadata.ts` 读取 userscript metadata。
-4. 校验 metadata 必须以 `// ==UserScript==` 开始、以 `// ==/UserScript==` 结束。
-5. 将 metadata 拼接到 bundle 前面。
-6. 默认 profile 为远程完整版；只有 `build:bundled-runtime` 才验证并打入精简 JS glue。
-
-### Bundle budget
-
-`apps/userscript/scripts/build-userscript.test.mjs` 会确认默认 Worker 小于 20KB 且不含精简运行时资源，内置精简 Worker 小于 250KB。最终 userscript 由 default 96 KiB、bundled 480 KiB 两套预算继续约束。
-
-### ONNX Runtime asset manifest
-
-`ONNX_RUNTIME_ASSETS` 固定最小运行时的完整供应链信息：`onnxruntime-web` `1.27.0`、源码提交 `8f0278c77bf44b0cc83c098c6c722b92a36ac4b5`、emsdk `4.0.23`，以及算子配置 SHA-256 `2abe2e2987496ab518de97a7f4b157cec1bd1817c621d3523073034fb47591fe`。
-
-`externalFullRuntime` 固定默认完整版 URL：`https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js` 和 `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/`。默认构建信任固定版本 CDN；它不使用内容哈希校验，也不会回退到精简版。
-
-内置 glue 记录为 `bundleAsset`：路径 `apps/userscript/vendor/onnxruntime/ort.wasm.bundle.min.mjs`、文件名 `ort.wasm.bundle.min.mjs`，并固定 `bundleAsset.byteLength`、`bundleAsset.sha256` 与 `bundleAsset.maxByteLength`。构建时会先验证这些值，再将该模块直接打入 Worker。
-
-`bundledMinimalRuntime` 使用内置 glue 和一个远程 `wasmAsset`：文件名 `ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`，公开路径 `/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`，`wasmAsset.url` 为 `https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`，R2 对象键为 `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`；manifest 同时固定 `wasmAsset.byteLength`、`wasmAsset.sha256` 与 `wasmAsset.maxByteLength`。
-
-需要从固定源码重新生成最小运行时时运行；输出的 WASM 已按 SHA-256 命名，可直接用脚本打印的 `runtime/<filename>` 对象键上传 R2：
+随后执行：
 
 ```bash
-corepack pnpm build:onnx-runtime
+pnpm verify:onnx-runtime
+pnpm lint
+pnpm typecheck
+pnpm test
 ```
 
-提交或构建前校验仓库内置 bundle：
+## Model Worker 配置
 
-```bash
-corepack pnpm verify:onnx-runtime
-```
-
-该校验只读取仓库内文件，不访问 CDN；WASM 二进制由发布者按 manifest 的对象键上传至 R2。
-
-推理性能基准用于比较同一台机器上改动前后的纯函数耗时，不作为 CI gate。运行：
-
-```bash
-corepack pnpm benchmark:inference
-```
-
-输出包含 `copyRgbaToChwFloat32` 与 `parseYoloOutput` 的 `ms/op`；不同机器、负载和 Node.js 版本下的绝对数值不可直接比较。
-
-### Userscript metadata
-
-当前 metadata：
-
-| 字段           | 值                                                                       |
-| -------------- | ------------------------------------------------------------------------ |
-| `@name`        | `HV-PonySolver-Local`                                                    |
-| `@version`     | `3.0.0`                                                                  |
-| `@description` | 使用浏览器本地 ONNX Runtime Web 自动识别并答题小马验证码                 |
-| `@include`     | `https://hentaiverse.org/*`, `https://alt.hentaiverse.org/*`             |
-| `@exclude`     | `battle_stats` 页面和 `equip` 页面                                       |
-| `@grant`       | `GM_registerMenuCommand`, `GM_getValue`, `GM_setValue`, `GM_deleteValue` |
-| `@run-at`      | `document-end`                                                           |
-| `@connect`     | `cdn.jsdelivr.net`, `models.ngnl.host`                                   |
-
-### DOM 选择器
-
-| 用途       | Selector                       |
-| ---------- | ------------------------------ |
-| 验证码表单 | `form[name="riddleform"]`      |
-| 验证码图片 | `#riddleimage img`             |
-| 验证码容器 | `#riddlemaster`                |
-| 提交按钮   | `#riddlesubmit`                |
-| 答案复选框 | `input[name="riddleanswer[]"]` |
-
-### 答案编码
-
-共享包定义了六个答案编码，顺序会被模型 class id 直接索引：
-
-| Class ID | AnswerCode |
-| -------- | ---------- |
-| `0`      | `TS`       |
-| `1`      | `RA`       |
-| `2`      | `FS`       |
-| `3`      | `RD`       |
-| `4`      | `PP`       |
-| `5`      | `AJ`       |
-
-### 推理配置
-
-| 配置                                            | 当前值                                                                | 说明                                                         |
-| ----------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `imagePreprocessConfig.imageSize`               | `640`                                                                 | 输入图像会 letterbox 到 640x640                              |
-| `yoloOutputConfig.confidenceThreshold`          | `0.30`                                                                | YOLO 行置信度阈值                                            |
-| `yoloOutputConfig.maxDetections`                | `16`                                                                  | 最多读取 16 个候选框                                         |
-| `yoloOutputConfig.maxKinds`                     | `3`                                                                   | 识别到 1 到 3 种不同小马才算成功                             |
-| `yoloOutputConfig.rowSize`                      | `6`                                                                   | YOLO 输出每行 float 数                                       |
-| `yoloOutputConfig.confidenceIndex`              | `4`                                                                   | YOLO 输出 confidence 列                                      |
-| `yoloOutputConfig.classIndex`                   | `5`                                                                   | YOLO 输出 class id 列                                        |
-| `inferenceTimeoutConfig.workerInitTimeoutMs`    | `60000`                                                               | ONNX Worker 初始化请求超时                                   |
-| `inferenceTimeoutConfig.workerDetectTimeoutMs`  | `30000`                                                               | ONNX Worker 单次检测请求超时                                 |
-| `inferenceTimeoutConfig.modelDownloadTimeoutMs` | `30000`                                                               | 模型下载超时                                                 |
-
-YOLO 输出解析规则：
-
-- 输出格式假设集中在 `yoloOutputConfig`：每行按 6 个 float 读取，第 5 个值是 confidence，第 6 个值是 class id。
-- 图片尺寸由 `imagePreprocessConfig.imageSize` 控制；运行时 profile 与资产位置由 `ONNX_RUNTIME_ASSETS` 和构建器控制；worker 和模型下载超时由 `inferenceTimeoutConfig` 控制。
-- data 长度不是完整行倍数时忽略尾部不完整行。
-- 忽略非有限 confidence 和无法映射到答案的 class id；浮点 class id 会先按 `Math.trunc()` 截断。
-- 优先保留 confidence 大于等于 `0.30` 的行。
-- 如果没有任何行过阈值，但存在有效输出行，则回退到最高 confidence 的一行。
-- 重复 class 只保留最高 confidence。
-- 返回所有去重后的命中答案；检测到超过 3 种时 `success=false`，但不会丢弃第 4 种及后续命中信息。
-
-### 模型下载与缓存
-
-| 配置        | 当前值                                      |
-| ----------- | ------------------------------------------- |
-| `urlBase`   | `https://models.ngnl.host/yolo26n-640.onnx` |
-| `accessKey` | 空字符串                                    |
-| `cacheName` | `pony-solver-local`                         |
-| `cacheKey`  | `yolo26n-640.onnx`                          |
-| `version`   | `yolo26n-640-2026-05-14`                    |
-
-模型加载流程：
-
-1. 先从 IndexedDB `pony-solver-local` 的 `models` object store 读取缓存。
-2. 缓存记录必须匹配当前 `version`，且包含 `ArrayBuffer`。
-3. 未命中或读取失败时，从 `urlBase` 下载；设置菜单正在验证的候选 Key或本地已保存 Key会通过 `Authorization: Bearer <key>` 发送。
-4. 下载成功后写回 IndexedDB；写入失败不会阻止本次使用已下载模型。
-
-注意：`modelConfig.accessKey` 是空字符串 fallback，真实 Key不应写入源码或构建产物。安装者通过 Userscript 设置菜单在本地验证 Key，验证成功后才保存到 GM storage；Key 对安装者可见，但不得进入 URL、日志、测试 fixture、发布 artifact 或聊天。
-
-### 答题与历史记录
-
-| 配置               | 当前值 / 存储键                                                |
-| ------------------ | -------------------------------------------------------------- |
-| `randomOnFail`     | `false`                                                        |
-| 答题模式           | 默认 `auto`；`hvPonySolverAnswerMode` 可设为 `auto` / `manual` |
-| 提交前等待时间     | 默认 `3000-5000` ms，可通过 `hvPonySolverSubmitDelay` 设置     |
-| 多选点击间隔       | 默认 `1000-1500` ms，可通过 `hvPonySolverMultiClickDelay` 设置 |
-| 历史记录 key       | `local_answer_history_v2`                                      |
-| 每个世界保留记录数 | `5`                                                            |
-| 世界识别           | URL 包含 `/isekai/` 时为异世界，否则为主世界                   |
-
-状态面板显示：模型状态、ONNX Session 状态、推理状态、当前世界和最近答题记录。`manual` 模式仍执行图片获取与 ONNX 推理，把答案及置信度显示为“待手动提交”，但不会修改任何答案 checkbox，也不会点击 submit；从设置菜单切回 `auto` 后，下一次验证码恢复自动选择与提交。渲染历史记录时会转义 HTML 敏感字符。
-
-### 默认打包范围
-
-默认 userscript bundle 只包含验证码识别、模型下载/缓存、状态面板、答题记录和必要设置菜单。调试日志开关及其菜单动作不进入默认构建；运行时仍保留警告和错误输出，便于排障。
-
-## Model Worker 详细说明
-
-### Wrangler 配置来源
-
-版本控制中的源文件是：
+Model Worker 使用 Wrangler 模板生成部署配置：
 
 ```text
 apps/model-worker/wrangler.template.toml
 ```
 
-本地生成文件是：
+生成的 `apps/model-worker/wrangler.toml` 是本地或 CI 产物，不应手工维护为权威来源。
+
+### 绑定
+
+| 绑定 | 类型 | 作用 |
+| --- | --- | --- |
+| `MODEL_KEYS` | Cloudflare KV | 保存允许访问真实模型的 token 标记 |
+| `MODEL_BUCKET` | Cloudflare R2 | 保存真实模型、诱饵模型和精简 WASM |
+
+### 运行时变量
+
+| 变量 | 作用 |
+| --- | --- |
+| `PUBLIC_MODEL_PATH` | 旧版 ONNX 公开路径，默认 `/yolo26n-640.onnx` |
+| `REAL_MODEL_OBJECT_KEY` | 旧版真实 ONNX 的 R2 对象键，必填 |
+| `DECOY_MODEL_OBJECT_KEY` | 鉴权失败时使用的诱饵对象键，必填 |
+| `PUBLIC_ORT_MODEL_PATH` | 新版 ORT 公开路径，默认 `/yolo26n-640.ort` |
+| `REAL_ORT_MODEL_OBJECT_KEY` | 新版真实 ORT 的 R2 对象键，默认来自共享契约 |
+| `PUBLIC_RUNTIME_WASM_PATH` | 精简 WASM 公开路径，默认来自共享契约 |
+| `RUNTIME_WASM_OBJECT_KEY` | 精简 WASM 的 R2 对象键，默认来自共享契约 |
+| `INVALID_KEY_MODE` | 无效 token 策略，只允许 `decoy` 或 `error` |
+
+### 生成 Wrangler 配置
+
+```bash
+MODEL_KEYS_KV_NAMESPACE_ID=<kv-namespace-id> \
+MODEL_BUCKET_NAME=<r2-bucket-name> \
+INVALID_KEY_MODE=decoy \
+pnpm --filter @hv-pony-solver/model-worker render-config
+
+pnpm --filter @hv-pony-solver/model-worker validate-wrangler-config
+```
+
+部署模式会拒绝测试占位值。`INVALID_KEY_MODE` 省略时使用项目默认策略。
+
+## Model Worker HTTP 契约
+
+### 路由
+
+| 路径 | 鉴权 | R2 对象 | 缓存策略 |
+| --- | --- | --- | --- |
+| `/yolo26n-640.onnx` | Bearer token | 旧版真实模型或诱饵对象 | `no-store` |
+| `/yolo26n-640.ort` | Bearer token | 新版真实模型或诱饵对象 | `no-store` |
+| `/runtime/ort-wasm-simd-<sha256>.wasm` | 公开 | 精简 WASM | 一年、`immutable` |
+
+支持的方法：
 
 ```text
-apps/model-worker/wrangler.toml
+GET, HEAD, OPTIONS
 ```
 
-`wrangler.toml` 由 `render-config` 生成，并被 `.gitignore` 忽略。`render-config` 在 `HV_PONY_SOLVER_RENDER_ENV=production` 或 `deploy` 时会拒绝 `test-kv` / `test-bucket` 占位值；未提供 `INVALID_KEY_MODE` 时默认渲染为 `decoy`，提供时只接受 `decoy` 或 `error`。`pnpm --filter @hv-pony-solver/model-worker run deploy` 会自动以 `deploy` 模式渲染配置，并在部署前校验生成的 `wrangler.toml` 不含测试占位值。
+- 未知路径返回 `404`。
+- 不支持的方法返回 `405`，并设置 `Allow: GET, HEAD, OPTIONS`。
+- `HEAD` 返回与 `GET` 一致的响应头，但不返回响应体。
+- 模型响应使用 `application/octet-stream` 和 `Cache-Control: no-store`。
+- WASM 响应使用 `application/wasm` 和 `Cache-Control: public, max-age=31536000, immutable`。
+- 文本错误响应使用 `no-store` 和 `X-Content-Type-Options: nosniff`。
 
-当前模板配置：
+### 鉴权
 
-| 字段                     | 值                               |
-| ------------------------ | -------------------------------- |
-| Worker name              | `hv-pony-models`                 |
-| Entry                    | `src/index.ts`                   |
-| compatibility date       | `2026-05-18`                     |
-| route                    | `models.ngnl.host` custom domain |
-| `PUBLIC_MODEL_PATH`      | `/yolo26n-640.onnx`              |
-| `REAL_MODEL_OBJECT_KEY`  | `real/yolo26n-640.onnx`          |
-| `DECOY_MODEL_OBJECT_KEY` | `decoy/yolo26n-640.onnx`         |
-| `INVALID_KEY_MODE`       | `decoy`                          |
-| KV binding               | `MODEL_KEYS`                     |
-| R2 binding               | `MODEL_BUCKET`                   |
+真实模型请求必须包含：
 
-### 渲染配置所需环境变量
-
-| 变量                         | 必填 | 用途                                                      | 示例                               |
-| ---------------------------- | ---- | --------------------------------------------------------- | ---------------------------------- |
-| `MODEL_KEYS_KV_NAMESPACE_ID` | 是   | 替换 Worker KV namespace id                               | `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` |
-| `MODEL_BUCKET_NAME`          | 是   | 替换 Worker R2 bucket 名称                                | `hv-pony-models`                   |
-| `INVALID_KEY_MODE`           | 否   | 控制无效 token 响应；默认 `decoy`，可选 `decoy` / `error` | `decoy`                            |
-
-示例：
-
-```bash
-MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> pnpm --filter @hv-pony-solver/model-worker render-config
+```http
+Authorization: Bearer <64位十六进制token>
 ```
 
-如需临时把无效 token 改为直接返回 `403 Forbidden`，可显式设置：
+Model Worker 只在 token 格式正确且 `MODEL_KEYS` 中存在非空标记时返回真实模型。
 
-```bash
-MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> INVALID_KEY_MODE=error pnpm --filter @hv-pony-solver/model-worker render-config
-```
-
-### Worker 运行时绑定与变量
-
-| 名称                     | 类型       | 必填 | 说明                                                                                             |
-| ------------------------ | ---------- | ---- | ------------------------------------------------------------------------------------------------ |
-| `MODEL_KEYS`             | KV binding | 是   | 授权 token 存储；token 字符串作为 key，`get` 返回值不是 `null` 即授权，marker 内容不表达额外权限 |
-| `MODEL_BUCKET`           | R2 binding | 是   | 存放真实模型与 decoy 模型                                                                        |
-| `PUBLIC_MODEL_PATH`      | var        | 否   | 公开下载路径；缺省使用共享常量 `/yolo26n-640.onnx`                                               |
-| `REAL_MODEL_OBJECT_KEY`  | var        | 是   | 真实模型在 R2 中的 object key                                                                    |
-| `DECOY_MODEL_OBJECT_KEY` | var        | 是   | decoy 模型在 R2 中的 object key                                                                  |
-| `INVALID_KEY_MODE`       | var        | 否   | `decoy` 或 `error`；会归一化大小写与首尾空白，其他值触发配置错误                                 |
-
-### HTTP 行为
-
-| 场景                                                                                 | 响应                                                                                                               |
-| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中  | `200` 真实模型，模型响应使用 `Cache-Control: no-store`                                                             |
-| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200` 无 body，保留模型 headers                                                                                    |
-| `OPTIONS /yolo26n-640.onnx`                                                          | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization` |
-| 缺少 Bearer token、token 格式错误、KV 未命中，且 `INVALID_KEY_MODE=decoy`            | `200` decoy 模型                                                                                                   |
-| 缺少 Bearer token、token 格式错误、KV 未命中，且 `INVALID_KEY_MODE=error`            | `403 Forbidden`                                                                                                    |
-| 只提供 query string key                                                              | 不授权真实模型；按缺少 Bearer token 处理                                                                           |
-| 非模型路径                                                                           | `404 Not Found`                                                                                                    |
-| 非 `GET` / `HEAD` / `OPTIONS` 方法                                                   | `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`                                                              |
-| 选中的 R2 object 缺失                                                                | `500 Internal Server Error`                                                                                        |
-| 必填运行时变量缺失                                                                   | `500 Internal Server Error`                                                                                        |
-
-### 授权 key 规则
-
-授权 key 必须匹配：
+以下方式不受支持：
 
 ```text
-/^[0-9a-fA-F]{64}$/
+?key=<token>
+?token=<token>
 ```
 
-Worker 通过 `Authorization: Bearer <token>` 读取请求 token，再用 `MODEL_KEYS.get(token)` 判断授权。只要 KV 返回值不是 `null`，就视为授权。测试中使用的 marker 值是 `1`。
+无效或缺失 token 的处理由 `INVALID_KEY_MODE` 决定：
 
-### Decoy 模型策略
+| 模式 | 行为 |
+| --- | --- |
+| `decoy` | 返回诱饵对象和 `200`，这是默认策略 |
+| `error` | 返回 `403` |
 
-`INVALID_KEY_MODE=decoy` 时，无效或未授权 key 会收到 decoy R2 对象，而不是 `403`。这个策略用于避免从 HTTP 状态直接暴露 key 是否有效。
+### CORS
 
-userscript 仍会按 `packages/shared/src/model.ts` 中的 `MODEL_INTEGRITY` 校验下载内容。推荐 decoy 对象不要匹配真实模型的 byteLength 与 SHA-256；这样未授权下载即使返回 `200`，也会在 userscript 侧被完整性校验阻断。
+模型路由允许以下浏览器来源：
 
-如果需要更直接的错误语义，可将 `INVALID_KEY_MODE` 设置为 `error`，此时无效 key 返回 `403 Forbidden`。
+```text
+https://hentaiverse.org
+https://alt.hentaiverse.org
+```
 
-## Shared 包契约
+允许的来源会被原样回显，并设置 `Vary: Origin`。未知浏览器来源不会获得允许来源响应头。没有 `Origin` 的非浏览器请求按公开响应头处理。
 
-`packages/shared` 只包含跨应用共享且稳定的契约：
+精简 WASM 是公开内容寻址资源，使用：
 
-| 导出                            | 说明                                   |
-| ------------------------------- | -------------------------------------- |
-| `ANSWER_CODES`                  | `['TS', 'RA', 'FS', 'RD', 'PP', 'AJ']` |
-| `AnswerCode`                    | 上述答案编码的联合类型                 |
-| `answerCodeForClassId(classId)` | 按 class id 返回对应答案编码           |
-| `MODEL_FILENAME`                | `yolo26n-640.onnx`                     |
-| `DEFAULT_PUBLIC_MODEL_PATH`     | `/yolo26n-640.onnx`                    |
-| `ModelAccessDecision`           | `'real' \| 'decoy' \| 'forbidden'`     |
-| `MODEL_ACCESS_TOKEN_PATTERN`    | 64 位十六进制 token 正则               |
-| `isModelAccessToken(value)`     | token 类型守卫                         |
+```http
+Access-Control-Allow-Origin: *
+```
 
-应用之间不互相 import；跨应用共享内容应放在 `packages/shared`。
+CORS 只控制浏览器读取权限，不构成真实模型鉴权。
 
-## 测试覆盖
+## R2 上传清单
 
-| 范围                    | 测试文件                                                        | 覆盖行为                                                                           |
-| ----------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Shared                  | `packages/shared/test/token.test.ts`                            | 64 位十六进制 token 校验                                                           |
-| Userscript inference    | `apps/userscript/test/inference/yolo-output-parser.test.ts`     | 阈值过滤、最高置信度回退、重复 class 去重、过多小马种类失败                        |
-| Userscript persistence  | `apps/userscript/test/persistence/answer-history-store.test.ts` | localStorage 记录过滤、坏 JSON 兜底、追加记录时剔除非法旧记录                      |
-| Userscript utils/config | `apps/userscript/test/utils/utils.test.ts`                      | DOM selector、默认配置、HTML 转义、错误格式化、随机延迟、不可变 shuffle            |
-| Model Worker            | `apps/model-worker/test/index.test.ts`                          | 授权真实模型、HEAD、CORS、decoy、`403` error 模式、`404`、`405`、R2 缺失、环境缺失 |
+部署前至少确认以下对象存在：
 
-常用验证命令：
+| 对象 | R2 对象键 | 是否公开 |
+| --- | --- | --- |
+| 旧版真实 ONNX | `REAL_MODEL_OBJECT_KEY` 配置值 | 否 |
+| 诱饵模型 | `DECOY_MODEL_OBJECT_KEY` 配置值 | 否 |
+| 新版真实 ORT | `real/yolo26n-640.ort` | 否 |
+| 精简 WASM | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 是 |
+
+上传精简 WASM 的示例：
 
 ```bash
-pnpm check
+pnpm --filter @hv-pony-solver/model-worker exec wrangler r2 object put \
+  "<bucket-name>/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm" \
+  --file "other/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm"
 ```
 
-或分开执行：
+`other/ort.wasm.bundle.min.mjs` 不需要上传 R2。内置 profile 使用的是构建时打入 Worker 的 vendor glue。
+
+## 部署 Model Worker
+
+本地部署流程：
+
+```bash
+MODEL_KEYS_KV_NAMESPACE_ID=<kv-namespace-id> \
+MODEL_BUCKET_NAME=<r2-bucket-name> \
+INVALID_KEY_MODE=decoy \
+pnpm --filter @hv-pony-solver/model-worker render-config
+
+pnpm --filter @hv-pony-solver/model-worker validate-wrangler-config
+pnpm --filter @hv-pony-solver/model-worker run deploy
+```
+
+部署后可以执行公开契约探测：
+
+```bash
+MODEL_WORKER_URL=https://models.ngnl.host/yolo26n-640.onnx \
+MODEL_WORKER_INVALID_KEY_MODE=decoy \
+MODEL_WORKER_PROBE_ID=manual-$(date +%s) \
+pnpm --filter @hv-pony-solver/model-worker check:deployment
+```
+
+该检查只验证旧版模型 URL 的未鉴权 `OPTIONS` 和 `HEAD` 行为，包括状态码、CORS、缓存和 `Vary`。检查成功不证明以下事项：
+
+- 真实 token 可以读取真实模型。
+- 新版 ORT 路由可用。
+- 精简 WASM 对象可用。
+- R2 对象内容与本地哈希一致。
+- 用户脚本已发布或浏览器推理成功。
+
+这些项目需要独立验收。
+
+## 测试与质量门
+
+推荐的本地检查顺序：
 
 ```bash
 pnpm lint
 pnpm typecheck
 pnpm test
-pnpm test:coverage
 pnpm docs:check
 pnpm architecture:check
+pnpm browser-sinks:check
 pnpm bundle:check
-pnpm build
+pnpm verify:onnx-runtime
 ```
 
-Model Worker Vitest 会从 `wrangler.template.toml` 自动生成隔离的 `.wrangler/vitest/wrangler.toml`，直接运行 package test即可，不要求先渲染部署用的根 `wrangler.toml`：
+测试范围包括：
+
+- 用户脚本配置、模型下载、缓存、推理 Worker 协议和 YOLO 输出解析。
+- 默认外部 profile 与显式内置 profile 的构建隔离。
+- 远程 `.ort` 模型契约和精简 WASM 完整性。
+- Model Worker 环境归一化、路由、鉴权、CORS、缓存和错误响应。
+- Wrangler 模板渲染与部署契约检查器。
+- README 文档漂移、架构边界和浏览器危险调用。
+- 默认和内置用户脚本包体预算。
+
+Playwright E2E 使用本地 fixture，不访问真实 Hentaiverse 网站，也不证明线上 Model Worker 或 R2 状态。
+
+## CI 与发布
+
+### 仓库验证工作流
+
+`.github/workflows/verify-monorepo.yml` 在 Pull Request、`main` 推送和手动触发时执行：
+
+- Node.js 22 和冻结依赖安装。
+- 依赖审计、ESLint 和 TypeScript 类型检查。
+- 文档漂移、架构边界和浏览器危险调用检查。
+- 工作区测试与覆盖率。
+- 默认外部 profile 构建及 `96 KiB` 预算。
+- 显式内置 profile 构建及 `480 KiB` 预算。
+- 按条件执行的 Playwright Chromium E2E。
+- 按手动输入发布的用户脚本构建产物。
+
+CI 中的 E2E 和用户脚本产物发布默认不是每次运行都执行。
+
+### Model Worker 部署工作流
+
+`.github/workflows/deploy-cloudflare-model-worker.yml` 仅支持手动触发：
+
+- 默认只渲染配置、执行检查并运行 Wrangler dry-run。
+- 只有 `publish_model_worker=true` 且所需 secrets 完整时才实际部署。
+- 部署完成后运行公开契约检查。
+
+dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare 已更新，也不证明 R2、KV 或线上路由正确。
+
+### 安全扫描
+
+`.github/workflows/security-scan.yml` 执行 JavaScript/TypeScript CodeQL，并在 Pull Request 中执行依赖审查。
+
+## 安全边界
+
+- 不要把模型 token 写入 URL、日志、README、构建产物或公开配置。
+- 查询字符串密钥不会授权真实模型。
+- `@connect` 和 CORS 只允许网络访问，不代替 token 鉴权。
+- 默认外部 profile 信任固定版本的 jsDelivr 运行时资源。
+- 内置 profile 只对首方精简 WASM 执行内容完整性校验。
+- 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致。
+- `decoy` 模式的未鉴权 `200` 不表示真实模型泄漏。
+- 部署检查、静态测试和浏览器 E2E 分别证明不同边界，不能相互替代。
+
+## 故障排查
+
+### pnpm 版本不匹配
 
 ```bash
-pnpm --filter @hv-pony-solver/model-worker test
+corepack pnpm --version
+corepack pnpm install
 ```
 
-## CI/CD
+项目固定 pnpm `10.0.0`。不要让全局 pnpm 的其他主版本接管项目脚本。
 
-### CI workflow
+### 默认构建无法加载 ONNX Runtime
 
-`.github/workflows/verify-monorepo.yml` 会在 `pull_request`、推送到 `main` 和 `workflow_dispatch` 时运行仓库校验；手动触发时可额外选择是否运行 userscript Playwright smoke 测试，以及是否发布内置精简运行时 artifact。workflow 使用 `actions/setup-node` 的 pnpm cache，并把 guardrails、测试、coverage/build 和 userscript E2E 拆成独立 jobs。
-
-userscript E2E 在 `pull_request` 和推送到 `main` 时常态执行；`workflow_dispatch` 仍仅在 `run_userscript_e2e=true` 时执行。它使用仓库内本地 fixture 页面进行 smoke 验证，不会访问真实 Hentaiverse 站点。
-
-`Security Scan` workflow 使用 CodeQL 扫描 TypeScript/JavaScript，并在 PR 上运行 dependency review；根命令 `pnpm audit:high` 仍在主验证 workflow 的 `guardrails` job 中执行。
-
-1. `validate-inputs` 接受手动 workflow 输入；默认不会发布 artifact。
-2. `guardrails` job 设置 Node.js 22、启用 pnpm cache、安装依赖，然后运行 `pnpm audit:high`、`pnpm lint`、`pnpm typecheck`、测试值 Wrangler 配置渲染、`pnpm docs:check`、`pnpm architecture:check` 和 `pnpm browser-sinks:check`。
-3. `test` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test`。
-4. `coverage-build` job 运行 coverage 和默认构建，检查 96 KiB 默认预算；随后构建内置精简运行时版本并检查 480 KiB bundled 预算。
-5. `userscript-e2e` job 在 `pull_request`、推送到 `main` 时运行，在 `workflow_dispatch` 时由 `run_userscript_e2e` 控制；它读取实际 Playwright CLI 版本，用包含该版本的 key 缓存 `~/.cache/ms-playwright`，再通过 `playwright install --with-deps chromium` 保证 Chromium 和系统依赖可用，最后运行 `pnpm test:e2e:userscript`。
-6. `userscript-artifact` job 仅在 `workflow_dispatch` 时运行，并依赖 guardrails、test、coverage-build 和可选 E2E。它以 `--minify` 构建内置精简运行时 userscript，生成校验与 metafile，再检查 bundled 预算。
-7. 只有 `publish_userscript_artifact=true` 时才上传 userscript artifact；默认不上传。
-
-### Model Worker 部署 workflow
-
-`.github/workflows/deploy-cloudflare-model-worker.yml` 默认手动触发，用于按需验证 Model Worker；只有 `publish_model_worker=true` 时才部署，默认不部署。手动触发时可通过 `invalid_key_mode` 选择无效 token 行为，默认 `decoy`，可选 `decoy` 或 `error`。workflow 同样使用 `actions/setup-node` 的 pnpm cache。绿色的 dry-run 只证明配置能够生成并通过 Wrangler 校验，不证明生产 Worker 已经部署；必须检查 `Deploy Worker` 和其后的公开契约检查步骤是否实际执行成功。
-
-验证与部署步骤：
-
-1. Checkout。
-2. 设置 Node.js 22。
-3. 设置 pnpm。
-4. `pnpm install --frozen-lockfile`。
-5. 使用 GitHub Secrets 与 `invalid_key_mode` 输入渲染 Wrangler 配置。
-6. 类型检查 Worker。
-7. 运行 Worker 测试。
-8. 如果 Cloudflare secrets 完整，运行 Wrangler dry-run。
-9. 如果 `publish_model_worker=true`，执行 `pnpm --filter @hv-pony-solver/model-worker run deploy`；默认跳过部署。
-10. 仅在实际部署后运行 `check:deployment`：使用 GitHub run/attempt 作为非秘密 probe ID，对两个允许 Origin 发送无 Key、无 body 的 OPTIONS/HEAD 请求，并按 `invalid_key_mode` 验证公开 HTTP/CORS 契约。
-
-当 `publish_model_worker=false` 时，第 9、10 步都会跳过；因此 workflow 总体绿色不能单独作为“已发布”的证据。发布后检查失败表示部署可能已经发生但公开验收未通过，workflow 不会自动回滚，需按 [Model Worker 运维说明](docs/model-worker-ops.md) 保存证据并人工决定后续操作。
-
-需要配置的 GitHub Secrets：
-
-| Secret                       | 用途                        |
-| ---------------------------- | --------------------------- |
-| `MODEL_KEYS_KV_NAMESPACE_ID` | 渲染 Worker KV namespace id |
-| `MODEL_BUCKET_NAME`          | 渲染 Worker R2 bucket 名称  |
-| `CLOUDFLARE_ACCOUNT_ID`      | Wrangler 部署认证           |
-| `CLOUDFLARE_API_TOKEN`       | Wrangler 部署认证           |
-
-### Model Worker invalid key 运维
-
-`INVALID_KEY_MODE=decoy` 是默认策略：缺少 Bearer token、token 格式错误或 KV 未命中的请求会收到 decoy 模型，用于降低通过 HTTP 状态探测 key 有效性的信号。`INVALID_KEY_MODE=error` 会返回 `403 Forbidden`，适合异常流量、成本控制或排障时临时启用。
-
-详细操作步骤、Cloudflare rate limit 建议和回滚方式记录在 `docs/model-worker-ops.md`。
-
-## 部署与发布
-
-### 发布 userscript
-
-```bash
-corepack pnpm --filter @hv-pony-solver/userscript build
-```
-
-如需把 `onnxruntime-web` JS runtime 内置进 userscript，可显式运行：
-
-```bash
-corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
-```
-
-`build` 默认不内置运行时：Blob Worker 从 jsDelivr 下载固定的 `onnxruntime-web@1.27.0` 完整版 JS 和 WASM。`build:bundled-runtime` 才会校验并内置仓库中的精简 JS glue，并从 `models.ngnl.host` 下载经过 byteLength 与 SHA-256 校验的内容寻址精简 WASM。两个 profile 都远程下载同一个 `.ort` 模型，且彼此不自动回退。
-
-产物大小预算守卫按文件 byteLength 检查：default profile 为 96 KiB，bundled profile 为 480 KiB。根命令 `pnpm bundle:check` 会先运行默认 userscript build，再检查 default profile；纯检查命令不会偷偷构建，目标文件缺失或超预算都会失败并输出 profile、actual、budget 与 delta。
-
-将生成的文件安装到 userscript 管理器：
+确认用户脚本管理器和网络允许访问：
 
 ```text
-apps/userscript/dist/hv-pony-solver.user.js
+cdn.jsdelivr.net
 ```
 
-如果需要访问真实模型，安装者应通过 Userscript 设置菜单在本地验证并保存 Key；`modelConfig.accessKey` 应保持空字符串，不能把真实 Key发布进 `.user.js`。`modelConfig.verifyIntegrity` 默认开启（`true`），会按 `packages/shared/src/model.ts` 中 `MODEL_INTEGRITY.byteLength` 与 `MODEL_INTEGRITY.sha256` 定义的字节长度和 SHA-256 对下载及缓存读取进行严格校验；当远端模型字节内容变更时，必须同步更新 `MODEL_INTEGRITY` 与 `MODEL_VERSION`，否则下载会被阻断。发布前应对待发布 ONNX 文件运行 `MODEL_FILE=/path/to/yolo26n-640.onnx corepack pnpm --filter @hv-pony-solver/userscript verify-model-integrity`，确保本地模型与 shared manifest 一致。
+默认 profile 没有内置回退。需要绕过完整版 CDN JS 时，应改用显式内置构建；内置构建仍需要访问 `models.ngnl.host` 下载精简 WASM 和 `.ort` 模型。
 
-发布前应生成模型发布说明，记录当前 shared manifest 中的版本、byteLength 和 SHA-256：
+### 精简 WASM 初始化失败
+
+检查以下项目：
+
+- R2 对象键与 `PUBLIC_RUNTIME_WASM_PATH` 是否匹配。
+- 响应是否发生重定向。
+- 字节长度是否为 `1,267,937`。
+- SHA-256 是否为 `25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa`。
+- `Content-Type` 是否为 `application/wasm`。
+
+本地先运行：
 
 ```bash
-corepack pnpm release:notes
+pnpm verify:onnx-runtime
 ```
 
-该命令只读取仓库内 manifest 并输出 Markdown，不上传模型、不访问 Cloudflare，也不会替代发布前的 `verify-model-integrity`。
+### 模型请求返回诱饵内容或 `403`
 
-### 部署 Model Worker
+确认：
 
-准备 Cloudflare 资源：
+- 请求使用 `Authorization: Bearer`。
+- token 是 64 位十六进制字符串。
+- `MODEL_KEYS` 中存在对应 token 的非空标记。
+- 没有把 token 放在查询字符串中。
+- `INVALID_KEY_MODE` 与预期一致。
 
-1. KV namespace，用于 `MODEL_KEYS`。
-2. R2 bucket，用于 `MODEL_BUCKET`。
-3. R2 中至少放置：
-   - `real/yolo26n-640.onnx`
-   - `decoy/yolo26n-640.onnx`
-4. KV 中写入允许访问真实模型的 64 位十六进制 token。
+### 内置构建体积异常
 
-本地渲染配置：
+先构建内置 profile，再检查内置预算：
 
 ```bash
-MODEL_KEYS_KV_NAMESPACE_ID=<kv-id> MODEL_BUCKET_NAME=<bucket-name> pnpm --filter @hv-pony-solver/model-worker render-config
+pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
+pnpm bundle:check:bundled
 ```
 
-本地部署：
+不要对默认 profile 产物使用内置预算来判断运行时是否真正被打包。构建产物清单中的 `bundledRuntime` 必须与预期 profile 一致。
 
-```bash
-pnpm --filter @hv-pony-solver/model-worker run deploy
-```
+### Model Worker 部署命令未执行项目脚本
 
-部署完成后，可使用一个不含凭据和用户数据的唯一 probe ID 验证公开契约；该命令只发送无 Key 的 `OPTIONS`/`HEAD`，不会读取模型 body：
-
-```bash
-MODEL_WORKER_URL=https://models.ngnl.host/yolo26n-640.onnx \
-MODEL_WORKER_INVALID_KEY_MODE=decoy \
-MODEL_WORKER_PROBE_ID=<probe-id> \
-pnpm --filter @hv-pony-solver/model-worker check:deployment
-```
-
-注意：使用 pnpm 10 时，过滤 workspace 后运行名为 `deploy` 的 package script 必须显式加 `run`，否则可能触发 pnpm 内置 `deploy` 命令。公开契约通过后，真实 Key 仍应只在用户本地菜单中验证，不应放入命令、URL、日志或聊天。
-
-## 代码风格与约束
-
-- TypeScript 使用 `strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`、`isolatedModules`。
-- ESLint 禁止 `any`，未使用参数可用 `_` 前缀忽略。
-- Prettier 配置为无分号、单引号、trailing comma、`printWidth: 120`。
-- 新增 ESLint 规则先以 warning 接入；当 warning 清零并稳定一段时间后再升级为 error。
-- `apps/model-worker/wrangler.toml` 是生成文件，不参与 lint。
-- userscript `dist`、coverage、node_modules、Wrangler 本地产物均被忽略。
-
-## 常见问题
-
-### `pnpm --filter @hv-pony-solver/model-worker deploy` 报 `ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE`
-
-这是 pnpm 10 的命令解析冲突：`deploy` 被解析为 pnpm 内置命令，而不是 package script。使用：
+使用：
 
 ```bash
 pnpm --filter @hv-pony-solver/model-worker run deploy
 ```
 
-### Worker 测试找不到 Wrangler 配置
+不要省略 `run`。
 
-`apps/model-worker/vitest.config.ts` 应自动在 `.wrangler/vitest/` 生成隔离测试配置。确认 `wrangler.template.toml` 存在并直接重新运行 package test；不要把部署用的根 `wrangler.toml` 当作测试前置条件，也不要提交任何生成配置：
+## 相关文档
 
-```bash
-pnpm --filter @hv-pony-solver/model-worker test
-```
+- [`docs/onnx-runtime.md`](docs/onnx-runtime.md)：精简运行时资产、哈希和复现说明。
+- [`docs/model-worker-ops.md`](docs/model-worker-ops.md)：Model Worker 运维和线上验收矩阵。
+- [`docs/architecture.md`](docs/architecture.md)：项目架构与边界说明。
 
-### userscript 一直拿到 decoy 模型
-
-检查：
-
-1. 是否已通过 Userscript 设置菜单验证并保存本地 Key；不要修改 `modelConfig.accessKey` 或把 Key写入构建产物。
-2. Worker KV 中是否存在对应 token key（任意非 `null` marker 即授权）。
-3. R2 中 `real/yolo26n-640.onnx` 是否存在且匹配 canonical manifest。
-4. Worker 是否部署了最新配置，公开 OPTIONS/CORS 契约是否通过。
-
-### 模型缓存没有刷新
-
-userscript 使用 `modelConfig.version` 判定 IndexedDB 缓存是否有效。模型内容更新后，应同步更新该 version，或手动清理浏览器 IndexedDB。
-
-<!-- AUTO-GENERATED:END -->
+本文档中的命令、URL、对象键和哈希属于代码契约。修改相关实现时必须同步测试和文档漂移规则。
