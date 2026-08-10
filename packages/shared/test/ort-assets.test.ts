@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   ORT_MODEL_INTEGRITY,
+  ORT_MODEL_OBJECT_KEY,
   ORT_MODEL_PUBLIC_PATH,
   ORT_MODEL_URL,
   ORT_RUNTIME_WASM_FILENAME,
@@ -15,6 +16,7 @@ describe('ORT asset contract', () => {
   it('keeps the new model separate from the legacy ONNX path', () => {
     expect(ORT_MODEL_PUBLIC_PATH).toBe('/yolo26n-640.ort')
     expect(ORT_MODEL_URL).toBe('https://models.ngnl.host/yolo26n-640.ort')
+    expect(ORT_MODEL_OBJECT_KEY).toBe('real/yolo26n-640.ort')
     expect(ORT_MODEL_INTEGRITY).toEqual({
       byteLength: 9_914_448,
       sha256: '4e771776d9356679539ffed53ee40ea012394f9b586aa92a76267e8fee38094c',

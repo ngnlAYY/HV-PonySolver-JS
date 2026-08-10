@@ -35,7 +35,7 @@ Upload these exact bytes; do not rename the WASM without also changing its conte
 
 | Request path | R2 object key | Size | SHA-256 |
 | --- | --- | ---: | --- |
-| `/yolo26n-640.ort` | `yolo26n-640.ort` | 9,914,448 | `4e771776d9356679539ffed53ee40ea012394f9b586aa92a76267e8fee38094c` |
+| `/yolo26n-640.ort` | `real/yolo26n-640.ort` | 9,914,448 | `4e771776d9356679539ffed53ee40ea012394f9b586aa92a76267e8fee38094c` |
 | `/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 1,267,937 | `25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa` |
 
 The ORT route uses the same Bearer/KV authorization and decoy behavior as the legacy ONNX route. The WASM route is

@@ -28,7 +28,7 @@
 - `https://hentaiverse.org`
 - `https://alt.hentaiverse.org`
 
-检查器对旧版 ONNX 和当前 ORT 路由发送不含 `Authorization` 的 `OPTIONS` 和 `HEAD` 请求，并对公开精简 WASM 发送 `HEAD`。`HEAD` 明确请求 identity 编码，避免边缘压缩移除原始对象的 `Content-Length`。它不读取模型 body，也不接收 Cloudflare credential、KV namespace、R2 bucket 或模型 Key。每个请求默认在 10 秒后 abort；默认最多尝试 5 次，每次失败后等待 7.5 秒，为 Cloudflare 边缘传播提供 30 秒重试窗口，同时防止未响应的 edge 永久阻塞 workflow。
+`Deploy Worker` 成功后，workflow 先等待 60 秒再开始线上请求，为 Cloudflare 边缘传播留出初始窗口。随后检查器对旧版 ONNX 和当前 ORT 路由发送不含 `Authorization` 的 `OPTIONS` 和 `HEAD` 请求，并对公开精简 WASM 发送 `HEAD`。`HEAD` 明确请求 identity 编码，避免边缘压缩移除原始对象的 `Content-Length`。它不读取模型 body，也不接收 Cloudflare credential、KV namespace、R2 bucket 或模型 Key。每个请求默认在 10 秒后 abort；默认最多尝试 5 次，每次失败后等待 7.5 秒，为后续传播提供 30 秒重试窗口，同时防止未响应的 edge 永久阻塞 workflow。
 
 公开契约必须满足：
 

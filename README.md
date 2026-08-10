@@ -465,7 +465,7 @@ CORS 只控制浏览器读取权限，不构成真实模型鉴权。
 | --- | --- | --- |
 | 旧版真实 ONNX | `REAL_MODEL_OBJECT_KEY` 配置值 | 否 |
 | 诱饵模型 | `DECOY_MODEL_OBJECT_KEY` 配置值 | 否 |
-| 新版真实 ORT | `yolo26n-640.ort` | 否 |
+| 新版真实 ORT | `real/yolo26n-640.ort` | 否 |
 | 精简 WASM | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 是 |
 
 上传精简 WASM 的示例：

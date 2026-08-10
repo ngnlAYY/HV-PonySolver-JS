@@ -106,6 +106,10 @@ jobs:
           INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
         run: pnpm --filter @hv-pony-solver/model-worker run deploy
 
+      - name: Wait for Cloudflare edge propagation
+        if: ${{ inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready == 'true' }}
+        run: sleep 60
+
       - name: Verify deployed Worker contract
         if: ${{ inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready == 'true' }}
         env:
