@@ -1,4 +1,0 @@
-{"file":".trellis/tasks/07-24-fix-authorized-model-download/research/server-auth-deployment.md","reason":"核对修复是否真正覆盖已证实的部署漂移、公开契约、生产确认门和回滚边界。"}
-{"file":".trellis/tasks/07-24-fix-authorized-model-download/research/client-download-path.md","reason":"核对实现未错误切换到 query string/GM 特权请求，并覆盖标准 fetch preflight 与客户端测试边界。"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查 workflow、公开 HTTP 契约和客户端行为是否形成闭环。"}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查新增脚本是否保持标准库优先、可测试、最小且与现有模式一致。"}

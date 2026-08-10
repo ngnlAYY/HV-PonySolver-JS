@@ -3,6 +3,11 @@ node_modules/
 **/dist/
 **/coverage/
 .pnpm-store/
+.gitignore
+.agents
+.codex/
+.claude/
+.keyenv
 worker/wrangler.toml
 worker/.wrangler/
 apps/model-worker/wrangler.toml

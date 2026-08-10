@@ -1,4 +1,0 @@
-{"file":".trellis/tasks/07-24-fix-authorized-model-download/research/server-auth-deployment.md","reason":"提供已确认的线上 OPTIONS 405、旧 cache header、GitHub deploy skipped 根因，以及安全部署/回滚顺序。"}
-{"file":".trellis/tasks/07-24-fix-authorized-model-download/research/client-download-path.md","reason":"提供 Userscript Bearer fetch、preflight、Key override/storage 证据及现有测试缺口，避免误改客户端授权边界。"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"本任务跨 Userscript、HTTP/CORS、Worker、KV/R2 与部署 workflow，需要保持端到端契约一致。"}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"部署检查器应复用现有 ESM、fetch 注入和 node:test 模式，避免新依赖与重复实现。"}
