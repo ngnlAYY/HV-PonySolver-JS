@@ -350,6 +350,7 @@ apps/model-worker/wrangler.template.toml
 | --- | --- | --- |
 | `MODEL_KEYS` | Cloudflare KV | 保存允许访问真实模型的 token 标记 |
 | `MODEL_BUCKET` | Cloudflare R2 | 保存真实模型、诱饵模型和精简 WASM |
+| `MODEL_DOWNLOAD_QUOTAS` | SQLite-backed Durable Object | 按规范化 Key 的 SHA-256 标识保存 UTC 月度下载次数 |
 
 ### 运行时变量
 
@@ -399,6 +400,7 @@ GET, HEAD, OPTIONS
 - 模型响应使用 `application/octet-stream` 和 `Cache-Control: no-store`。
 - WASM 响应使用 `application/wasm` 和 `Cache-Control: public, max-age=31536000, immutable`。
 - 文本错误响应使用 `no-store` 和 `X-Content-Type-Options: nosniff`。
+- 同一 Key 的 ONNX 与 ORT 真实模型 `GET` 共用每个 UTC 自然月 5 次额度；`HEAD`、`OPTIONS`、诱饵模型和 Runtime 不计数。
 
 ### 响应矩阵
 
@@ -408,6 +410,7 @@ GET, HEAD, OPTIONS
 | `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200`，只读取 R2 元数据且不返回响应体；`HEAD /yolo26n-640.ort` 使用相同契约 |
 | `OPTIONS /yolo26n-640.onnx` | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`；`OPTIONS /yolo26n-640.ort` 使用相同契约 |
 | 非 `GET` / `HEAD` / `OPTIONS` 方法 | `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS` |
+| 同一 Key 当月第 6 次及后续真实模型 `GET` | `429 Too Many Requests`，包含到下个 UTC 月的 `Retry-After`，并通过 `Access-Control-Expose-Headers` 暴露该响应头 |
 | 选中的 R2 object 缺失 | `500 Internal Server Error` |
 
 选中的 R2 object 缺失时不会回退到其他对象。
@@ -513,6 +516,8 @@ pnpm --filter @hv-pony-solver/model-worker check:deployment
 
 这些项目需要独立验收。
 
+`MODEL_DOWNLOAD_QUOTAS` 和 `ModelDownloadQuota` 由 `wrangler.template.toml` 中的 `new_sqlite_classes` 迁移创建，不需要新增 GitHub secret。部署后的回滚必须保留 Durable Object 类导出、绑定和迁移；如需临时停用限制，应采用保留这些资源的前向回滚，不能直接部署删除 Durable Object 配置的旧版本。
+
 ## 测试与质量门
 
 ### 源码契约索引
@@ -544,6 +549,7 @@ pnpm verify:onnx-runtime
 - 默认外部 profile 与显式内置 profile 的构建隔离。
 - 远程 `.ort` 模型契约和精简 WASM 完整性。
 - Model Worker 环境归一化、路由、鉴权、CORS、缓存和错误响应。
+- 每 Key 月度配额、ONNX/ORT 共享计数、UTC 月切换、并发硬上限和 `429` 契约。
 - Wrangler 模板渲染与部署契约检查器。
 - README 文档漂移、架构边界和浏览器危险调用。
 - 默认和内置用户脚本包体预算。
@@ -589,6 +595,7 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - 默认外部 profile 信任固定版本的 jsDelivr 运行时资源。
 - 内置 profile 只对首方精简 WASM 执行内容完整性校验。
 - 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致。
+- 原始 Key、规范化 Key、配额对象标识和配额状态均不得写入日志或响应。
 - `decoy` 模式的未鉴权 `200` 不表示真实模型泄漏。
 - 部署检查、静态测试和浏览器 E2E 分别证明不同边界，不能相互替代。
 

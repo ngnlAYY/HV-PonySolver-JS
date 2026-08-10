@@ -23,3 +23,11 @@ id = "${MODEL_KEYS_KV_NAMESPACE_ID}"
 [[r2_buckets]]
 binding = "MODEL_BUCKET"
 bucket_name = "${MODEL_BUCKET_NAME}"
+
+[[durable_objects.bindings]]
+name = "MODEL_DOWNLOAD_QUOTAS"
+class_name = "ModelDownloadQuota"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ModelDownloadQuota"]

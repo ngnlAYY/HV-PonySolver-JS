@@ -3,6 +3,7 @@ const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'
 const CORS_ALLOW_HEADERS = 'Authorization'
 const CACHE_CONTROL = 'no-store'
 const INTERNAL_ERROR_MESSAGE = 'Internal Server Error'
+const QUOTA_EXCEEDED_MESSAGE = 'Monthly model download quota exceeded'
 
 function appendVaryOrigin(headers: Headers): void {
   const tokens = (headers.get('vary') ?? '')
@@ -46,6 +47,13 @@ export function textResponse(
 
 export function internalErrorResponse(request: Request): Response {
   return textResponse(request, INTERNAL_ERROR_MESSAGE, 500)
+}
+
+export function quotaExceededResponse(request: Request, retryAfterSeconds: number): Response {
+  return textResponse(request, QUOTA_EXCEEDED_MESSAGE, 429, {
+    'access-control-expose-headers': 'Retry-After',
+    'retry-after': String(retryAfterSeconds),
+  })
 }
 
 export function preflightResponse(request: Request, isPublic: boolean): Response {

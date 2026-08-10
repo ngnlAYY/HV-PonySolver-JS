@@ -91,6 +91,9 @@ test('renderWranglerConfigFile writes generated test config from the template', 
     assert.match(rendered, /INVALID_KEY_MODE = "decoy"/)
     assert.match(rendered, /id = "test-kv"/)
     assert.match(rendered, /bucket_name = "test-bucket"/)
+    assert.match(rendered, /\[\[durable_objects\.bindings\]\]\nname = "MODEL_DOWNLOAD_QUOTAS"/)
+    assert.match(rendered, /class_name = "ModelDownloadQuota"/)
+    assert.match(rendered, /\[\[migrations\]\]\ntag = "v1"\nnew_sqlite_classes = \["ModelDownloadQuota"\]/)
   })
 })
 

@@ -1,9 +1,11 @@
 import { readWorkerConfig } from './env'
-import { selectModelAccess } from './model-access'
+import { getCanonicalRequestAccessToken, selectModelAccess } from './model-access'
+import { consumeModelDownloadQuota } from './model-download-quota'
 import {
   modelObjectResponse,
   internalErrorResponse,
   preflightResponse,
+  quotaExceededResponse,
   runtimeObjectResponse,
   textResponse,
 } from './model-response'
@@ -36,7 +38,27 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
   if (!object) {
     return internalErrorResponse(request)
   }
-  return modelObjectResponse(request, object, route.filename)
+  const response = modelObjectResponse(request, object, route.filename)
+  if (access !== 'real' || request.method !== 'GET') {
+    return response
+  }
+
+  const canonicalToken = getCanonicalRequestAccessToken(request)
+  if (!canonicalToken) {
+    await response.body?.cancel().catch(() => undefined)
+    throw new Error('Authorized model request is missing a canonical token')
+  }
+  try {
+    const quota = await consumeModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, canonicalToken)
+    if (quota.allowed) {
+      return response
+    }
+    await response.body?.cancel().catch(() => undefined)
+    return quotaExceededResponse(request, quota.retryAfterSeconds)
+  } catch (error) {
+    await response.body?.cancel().catch(() => undefined)
+    throw error
+  }
 }
 
 async function serveRuntime(request: Request, env: Env, config: WorkerConfig): Promise<Response> {

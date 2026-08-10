@@ -1,5 +1,6 @@
 import { formatErrorMessage } from '../utils/errors'
 import { alertUser, deleteGmValue, getGmValue, promptUser, registerGmMenu, runMenuAction, setGmValue } from '../userscript/gm-bridge'
+import { ModelDownloadQuotaExceededError } from './model-download-error'
 
 const MODEL_ACCESS_KEY_STORAGE_KEY = 'hvPonySolverModelAccessKey'
 
@@ -42,6 +43,11 @@ export async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKe
   try {
     await onVerify(accessKey)
   } catch (error) {
+    if (error instanceof ModelDownloadQuotaExceededError) {
+      await setModelAccessKey(accessKey)
+      alertUser(error.message)
+      return
+    }
     alertUser(`模型下载 Key 验证失败: ${formatErrorMessage(error)}`)
     return
   }

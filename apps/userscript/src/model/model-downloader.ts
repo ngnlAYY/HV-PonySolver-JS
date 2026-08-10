@@ -1,4 +1,5 @@
 import { inferenceTimeoutConfig } from '../inference/inference-config'
+import { ModelDownloadQuotaExceededError } from './model-download-error'
 import { modelConfig } from './model-config'
 import type { ModelIntegrity } from './model-integrity'
 import { verifyModelIntegrity } from './model-integrity'
@@ -51,6 +52,22 @@ function createModelFetchInit(signal: AbortSignal, accessKey: string): RequestIn
 }
 
 const contentLengthPattern = /^[0-9]+$/
+
+function parseRetryAfterSeconds(value: string | null): number | null {
+  if (value === null || !contentLengthPattern.test(value)) {
+    return null
+  }
+  const seconds = Number(value)
+  return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : null
+}
+
+async function cancelResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel()
+  } catch {
+    // The quota error remains authoritative even if the short error body cannot be cancelled.
+  }
+}
 
 function parseDeclaredByteLength(contentLength: string | null): number | null {
   if (contentLength === null) {
@@ -166,6 +183,10 @@ export async function downloadModel(signal?: AbortSignal, options: ModelIntegrit
     const accessKey = await getRequestAccessKey(options.accessKeyOverride)
     const response = await fetch(getModelUrl(), createModelFetchInit(controller.signal, accessKey))
     if (!response.ok) {
+      if (response.status === 429) {
+        await cancelResponseBody(response)
+        throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
+      }
       throw new Error(`模型下载失败: HTTP ${response.status}`)
     }
     const buffer = await readModelResponse(

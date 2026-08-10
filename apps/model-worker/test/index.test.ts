@@ -2,12 +2,15 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
+
 import { addCorsHeaders, modelObjectResponse, textResponse } from '../src/model-response'
 import {
   assetRequest,
   createEnv,
   createModelFixture,
   fetchWorker,
+  type MockModelDownloadQuotaNamespace,
   type MockKvNamespace,
   type MockR2Bucket,
   modelRequest,
@@ -787,6 +790,124 @@ describe('model worker', () => {
       expect(response.status).toBe(500)
       expect(await response.text()).toBe('Internal Server Error')
     }
+  })
+
+  it('shares one five-download quota across ONNX, ORT, and canonical token casing', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[CANONICAL_ACCESS_TOKEN, '1']]) })
+    const origin = HENTAIVERSE_ORIGIN
+
+    for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
+      const request =
+        index % 2 === 0
+          ? authorizedModelRequest(fixture, 'GET', index === 0 ? UPPERCASE_ACCESS_TOKEN : CANONICAL_ACCESS_TOKEN)
+          : assetRequest(fixture.publicOrtModelPath, 'GET', {
+              authorization: `Bearer ${index === 1 ? UPPERCASE_ACCESS_TOKEN : CANONICAL_ACCESS_TOKEN}`,
+            })
+      const response = await fetchWorker(request, env)
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+    }
+
+    const response = await fetchWorker(
+      authorizedModelRequest(fixture, 'GET', CANONICAL_ACCESS_TOKEN, { origin }),
+      env,
+    )
+    expect(response.status).toBe(429)
+    expect(await response.text()).toBe('Monthly model download quota exceeded')
+    expect(response.headers.get('retry-after')).toMatch(/^[1-9][0-9]*$/)
+    expect(response.headers.get('access-control-expose-headers')).toBe('Retry-After')
+    expect(response.headers.get('access-control-allow-origin')).toBe(origin)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+
+    const quota = env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace
+    expect(quota.requestedIdentities).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT + 1)
+    expect(new Set(quota.requestedIdentities).size).toBe(1)
+    expect(quota.requestedIdentities[0]).toMatch(/^[0-9a-f]{64}$/)
+    expect(quota.requestedIdentities[0]).not.toContain(CANONICAL_ACCESS_TOKEN)
+  })
+
+  it('enforces the hard limit under concurrent requests', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+    const responses = await Promise.all(
+      Array.from({ length: MODEL_MONTHLY_DOWNLOAD_LIMIT * 2 }, () =>
+        fetchWorker(authorizedModelRequest(fixture, 'GET'), env),
+      ),
+    )
+
+    expect(responses.filter(({ status }) => status === 200)).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT)
+    expect(responses.filter(({ status }) => status === 429)).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT)
+    await Promise.all(responses.map((response) => response.arrayBuffer()))
+  })
+
+  it('does not consume quota for HEAD, OPTIONS, decoy, or runtime requests', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+
+    const nonConsumingResponses = await Promise.all([
+      fetchWorker(authorizedModelRequest(fixture, 'HEAD'), env),
+      fetchWorker(modelRequest(fixture, 'OPTIONS'), env),
+      fetchWorker(modelRequest(fixture, 'GET'), env),
+      fetchWorker(assetRequest(fixture.publicRuntimeWasmPath, 'GET'), env),
+    ])
+    await Promise.all(nonConsumingResponses.map((response) => response.arrayBuffer()))
+
+    for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
+      const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+    }
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toHaveLength(
+      MODEL_MONTHLY_DOWNLOAD_LIMIT,
+    )
+  })
+
+  it('resets quota when the UTC calendar month changes', async () => {
+    const fixture = createModelFixture()
+    let now = new Date('2026-08-31T23:59:00.000Z')
+    const env = createEnv(fixture, {
+      keyValues: new Map([[fixture.validKey, '1']]),
+      quotaNow: () => now,
+    })
+    for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
+      await (await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).arrayBuffer()
+    }
+    expect((await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).status).toBe(429)
+
+    now = new Date('2026-09-01T00:00:00.000Z')
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+    expect(response.status).toBe(200)
+    await response.arrayBuffer()
+  })
+
+  it('keeps separate keys on independent monthly quotas', async () => {
+    const fixture = createModelFixture()
+    const otherKey = 'fedcba9876543210'.repeat(4)
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1'], [otherKey, '1']]) })
+
+    for (const key of [fixture.validKey, otherKey]) {
+      for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
+        await (await fetchWorker(authorizedModelRequest(fixture, 'GET', key), env)).arrayBuffer()
+      }
+      expect((await fetchWorker(authorizedModelRequest(fixture, 'GET', key), env)).status).toBe(429)
+    }
+    expect(new Set((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).size).toBe(2)
+  })
+
+  it('returns a generic 500 when quota storage fails', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      authorizedModelRequest(fixture, 'GET'),
+      createEnv(fixture, {
+        keyValues: new Map([[fixture.validKey, '1']]),
+        quotaError: new Error(`quota failed for ${fixture.validKey}`),
+      }),
+    )
+
+    expect(response.status).toBe(500)
+    expect(await response.text()).toBe('Internal Server Error')
   })
 
   it('keeps concurrent real, decoy, and public runtime requests isolated', async () => {

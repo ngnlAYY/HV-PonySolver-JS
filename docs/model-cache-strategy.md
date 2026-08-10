@@ -10,6 +10,7 @@ Model Worker 响应继续保持 `Cache-Control: no-store`。
 - 当前公开路径 `/yolo26n-640.onnx` 不包含不可变模型版本。
 - 在没有明确 token-aware cache 规则前，共享缓存可能扩大授权边界。
 - userscript 侧已经通过 IndexedDB 与 `MODEL_INTEGRITY` 做本地缓存和完整性校验，Worker 侧缓存收益需要先证明不会削弱授权与回滚能力。
+- 月度额度耗尽的 `429` 也必须保持 `no-store`，只通过 `Retry-After` 告知下次 UTC 月可重试时间，避免共享缓存污染其他 Key。
 
 ## 未来可选方案
 
@@ -38,3 +39,4 @@ corepack pnpm --filter @hv-pony-solver/model-worker test
 - `OPTIONS` preflight 响应允许 `Authorization` header。
 - 未知 `Origin` 不授予 CORS。
 - 版本回滚后，旧 URL 与新 URL 的缓存不会互相污染。
+- 第 6 次真实模型 `GET` 返回不可缓存的 `429`，且浏览器可读取 `Retry-After`。

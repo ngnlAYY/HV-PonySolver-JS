@@ -7,9 +7,19 @@ export interface ModelBucket {
   head(key: string): Promise<R2Object | null>
 }
 
+export interface ModelDownloadQuotaStub {
+  fetch(request: Request): Promise<Response>
+}
+
+export interface ModelDownloadQuotaNamespace {
+  idFromName(name: string): DurableObjectId
+  get(id: DurableObjectId): ModelDownloadQuotaStub
+}
+
 export interface Env {
   MODEL_KEYS: ModelKeyStore
   MODEL_BUCKET: ModelBucket
+  MODEL_DOWNLOAD_QUOTAS: ModelDownloadQuotaNamespace
   PUBLIC_MODEL_PATH?: string
   REAL_MODEL_OBJECT_KEY: string
   DECOY_MODEL_OBJECT_KEY: string

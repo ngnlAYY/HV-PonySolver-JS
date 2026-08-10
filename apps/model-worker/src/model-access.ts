@@ -1,4 +1,8 @@
-import { getModelAccessTokenLookupKeys, type ModelAccessDecision } from '@hv-pony-solver/shared'
+import {
+  getModelAccessTokenLookupKeys,
+  normalizeModelAccessToken,
+  type ModelAccessDecision,
+} from '@hv-pony-solver/shared'
 import type { InvalidKeyMode, ModelKeyStore } from './worker-types'
 
 const BEARER_AUTHORIZATION_PATTERN = /^Bearer\s+([^\s]+)$/i
@@ -15,6 +19,10 @@ function getRequestAccessToken(request: Request): string | null {
 
   const match = BEARER_AUTHORIZATION_PATTERN.exec(authorization.trim())
   return match?.[1] ?? null
+}
+
+export function getCanonicalRequestAccessToken(request: Request): string | null {
+  return normalizeModelAccessToken(getRequestAccessToken(request))
 }
 
 export async function selectModelAccess(

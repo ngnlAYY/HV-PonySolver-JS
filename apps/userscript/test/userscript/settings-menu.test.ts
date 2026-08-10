@@ -88,6 +88,26 @@ describe('settings menu', () => {
     expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
   })
 
+  it('saves a valid model key when verification reports exhausted monthly quota', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce('quota-key')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { ModelDownloadQuotaExceededError } = await import('../../src/model/model-download-error')
+    const verify = vi.fn(async () => {
+      throw new ModelDownloadQuotaExceededError(3600)
+    })
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu({ onVerifyModelAccessKey: verify })
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(localStorage.getItem('hvPonySolverModelAccessKey')).toBe('quota-key')
+    expect(alert).toHaveBeenCalledWith('本月 5 次模型下载额度已用完')
+  })
+
   it('clears the model key through the top-level settings menu', async () => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn(() => '2')

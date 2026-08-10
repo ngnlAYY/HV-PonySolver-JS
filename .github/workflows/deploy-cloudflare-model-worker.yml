@@ -105,18 +105,3 @@ jobs:
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
           INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
         run: pnpm --filter @hv-pony-solver/model-worker run deploy
-
-      - name: Wait for Cloudflare edge propagation
-        if: ${{ inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready == 'true' }}
-        run: sleep 60
-
-      - name: Verify deployed Worker contract
-        if: ${{ inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready == 'true' }}
-        env:
-          MODEL_WORKER_URL: https://models.ngnl.host/yolo26n-640.onnx
-          MODEL_WORKER_ORT_URL: https://models.ngnl.host/yolo26n-640.ort
-          MODEL_WORKER_RUNTIME_WASM_URL: https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm
-          MODEL_WORKER_RUNTIME_WASM_BYTE_LENGTH: '1267937'
-          MODEL_WORKER_INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
-          MODEL_WORKER_PROBE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-        run: pnpm --filter @hv-pony-solver/model-worker check:deployment

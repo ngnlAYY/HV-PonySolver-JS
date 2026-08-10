@@ -1,6 +1,14 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 
-import worker, { type Env, type ModelBucket, type ModelKeyStore } from '../../src/index'
+import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
+
+import worker, {
+  type Env,
+  type ModelBucket,
+  type ModelDownloadQuotaNamespace,
+  type ModelKeyStore,
+} from '../../src/index'
+import { secondsUntilNextUtcMonth, utcMonthKey } from '../../src/model-download-quota'
 
 export type StoredObject = Readonly<{
   body: string
@@ -36,6 +44,9 @@ export type EnvOptions = Readonly<{
   keyError?: Error
   bucketGetError?: Error
   bucketHeadError?: Error
+  quotaError?: Error
+  quotaNamespace?: ModelDownloadQuotaNamespace
+  quotaNow?: () => Date
 }>
 
 export class MockKvNamespace implements ModelKeyStore {
@@ -75,6 +86,40 @@ export class MockR2Bucket implements ModelBucket {
     if (this.headError) throw this.headError
     const object = this.objects.get(key)
     return object ? new MockR2Object(key, object) : null
+  }
+}
+
+export class MockModelDownloadQuotaNamespace implements ModelDownloadQuotaNamespace {
+  readonly requestedIdentities: string[] = []
+  private readonly usage = new Map<string, { month: string; used: number }>()
+
+  constructor(
+    private readonly error?: Error,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  idFromName(name: string): DurableObjectId {
+    return { toString: () => name } as DurableObjectId
+  }
+
+  get(id: DurableObjectId): { fetch(request: Request): Promise<Response> } {
+    const identity = id.toString()
+    return {
+      fetch: async (request: Request): Promise<Response> => {
+        this.requestedIdentities.push(identity)
+        if (this.error) throw this.error
+        if (request.method !== 'POST') return new Response('Not Found', { status: 404 })
+        const now = this.now()
+        const month = utcMonthKey(now)
+        const stored = this.usage.get(identity)
+        const used = stored?.month === month ? stored.used : 0
+        if (used >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
+          return Response.json({ allowed: false, retryAfterSeconds: secondsUntilNextUtcMonth(now) })
+        }
+        this.usage.set(identity, { month, used: used + 1 })
+        return Response.json({ allowed: true, retryAfterSeconds: secondsUntilNextUtcMonth(now) })
+      },
+    }
   }
 }
 
@@ -167,6 +212,8 @@ export function createEnv(fixture: ModelFixture, options: EnvOptions = {}): Env 
   const env: Env = {
     MODEL_KEYS: new MockKvNamespace(options.keyValues, options.keyError),
     MODEL_BUCKET: new MockR2Bucket(objects, options.bucketGetError, options.bucketHeadError),
+    MODEL_DOWNLOAD_QUOTAS:
+      options.quotaNamespace ?? new MockModelDownloadQuotaNamespace(options.quotaError, options.quotaNow),
     PUBLIC_MODEL_PATH: fixture.publicModelPath,
     REAL_MODEL_OBJECT_KEY: fixture.realModelObjectKey,
     DECOY_MODEL_OBJECT_KEY: fixture.decoyModelObjectKey,

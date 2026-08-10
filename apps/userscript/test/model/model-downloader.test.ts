@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ModelDownloadQuotaExceededError } from '../../src/model/model-download-error'
+
 const getModelAccessKey = vi.fn(async () => '')
 
 vi.mock('../../src/model/model-settings', () => ({
@@ -87,6 +89,19 @@ describe('downloadModel', () => {
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('模型下载失败: HTTP 403')
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('secret-token')
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('?key=')
+  })
+
+  it('returns a typed quota error with Retry-After metadata for HTTP 429', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 429, headers: { 'retry-after': '3600' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toEqual(
+      expect.objectContaining<ModelDownloadQuotaExceededError>({
+        name: 'ModelDownloadQuotaExceededError',
+        message: '本月 5 次模型下载额度已用完',
+        retryAfterSeconds: 3600,
+      }),
+    )
   })
 
   it('omits Authorization for whitespace-only saved and override keys', async () => {
