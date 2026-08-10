@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { ORT_MODEL_OBJECT_KEY } from '@hv-pony-solver/shared'
+
 import { readWorkerConfig } from '../src/env'
 import { createEnv, createModelFixture } from './helpers/model-worker-fixture'
 
@@ -23,6 +25,13 @@ describe('readWorkerConfig', () => {
     const config = readWorkerConfig(createEnv(fixture))
     expect(config.publicOrtModelPath).toBe(fixture.publicOrtModelPath)
     expect(config.realOrtModelObjectKey).toBe(fixture.realOrtModelObjectKey)
+  })
+
+  it('defaults the optional ORT object key when omitted', () => {
+    const env = createEnv(createModelFixture())
+    delete env.REAL_ORT_MODEL_OBJECT_KEY
+
+    expect(readWorkerConfig(env).realOrtModelObjectKey).toBe(ORT_MODEL_OBJECT_KEY)
   })
 
   it('uses the content-addressed runtime route', () => {

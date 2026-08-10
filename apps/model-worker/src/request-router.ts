@@ -28,6 +28,14 @@ async function readObjectForRequest(request: Request, env: Env, objectKey: strin
   return request.method === 'HEAD' ? env.MODEL_BUCKET.head(objectKey) : env.MODEL_BUCKET.get(objectKey)
 }
 
+async function cancelResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel()
+  } catch {
+    // Cancellation is best-effort cleanup and must not replace the primary response error.
+  }
+}
+
 async function serveModel(request: Request, env: Env, config: WorkerConfig, route: ModelRoute): Promise<Response> {
   const access = await selectModelAccess(request, env.MODEL_KEYS, config.invalidKeyMode)
   if (access === 'forbidden') {
@@ -45,7 +53,7 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
 
   const canonicalToken = getCanonicalRequestAccessToken(request)
   if (!canonicalToken) {
-    await response.body?.cancel().catch(() => undefined)
+    await cancelResponseBody(response)
     throw new Error('Authorized model request is missing a canonical token')
   }
   try {
@@ -53,10 +61,10 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
     if (quota.allowed) {
       return response
     }
-    await response.body?.cancel().catch(() => undefined)
+    await cancelResponseBody(response)
     return quotaExceededResponse(request, quota.retryAfterSeconds)
   } catch (error) {
-    await response.body?.cancel().catch(() => undefined)
+    await cancelResponseBody(response)
     throw error
   }
 }

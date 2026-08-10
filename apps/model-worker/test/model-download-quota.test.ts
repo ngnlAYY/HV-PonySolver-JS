@@ -1,34 +1,38 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
+import { env } from 'cloudflare:workers'
+import { reset, runInDurableObject } from 'cloudflare:test'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 
-import { ModelDownloadQuota, secondsUntilNextUtcMonth, utcMonthKey } from '../src/model-download-quota'
+import type { ModelDownloadQuota } from '../src/model-download-quota'
+import { consumeModelDownloadQuota, secondsUntilNextUtcMonth, utcMonthKey } from '../src/model-download-quota'
+import type { ModelDownloadQuotaNamespace } from '../src/worker-types'
 
-class MemoryStorage {
-  readonly values = new Map<string, unknown>()
+const quotaNamespace = (
+  env as unknown as { MODEL_DOWNLOAD_QUOTAS: DurableObjectNamespace<ModelDownloadQuota> }
+).MODEL_DOWNLOAD_QUOTAS
 
-  async transaction<T>(closure: (transaction: DurableObjectTransaction) => Promise<T>): Promise<T> {
-    const transaction = {
-      get: async <V>(key: string): Promise<V | undefined> => this.values.get(key) as V | undefined,
-      put: async <V>(key: string, value: V): Promise<void> => {
-        this.values.set(key, value)
-      },
-    } as DurableObjectTransaction
-    return closure(transaction)
+function createQuotaStub(): DurableObjectStub<ModelDownloadQuota> {
+  return quotaNamespace.getByName(crypto.randomUUID())
+}
+
+function responseQuotaNamespace(response: Response): ModelDownloadQuotaNamespace {
+  return {
+    idFromName: (name) => ({ toString: () => name }) as DurableObjectId,
+    get: () => ({ fetch: async () => response }),
   }
 }
 
-function createQuota(storage = new MemoryStorage()): ModelDownloadQuota {
-  return new ModelDownloadQuota({ storage } as unknown as DurableObjectState, {})
-}
-
 describe('ModelDownloadQuota', () => {
-  afterEach(() => vi.useRealTimers())
+  afterEach(async () => {
+    vi.useRealTimers()
+    await reset()
+  })
 
   it('rejects requests outside the internal consume contract', async () => {
-    const quota = createQuota()
+    const quota = createQuotaStub()
     expect((await quota.fetch(new Request('https://quota.internal/consume'))).status).toBe(404)
     expect((await quota.fetch(new Request('https://quota.internal/other', { method: 'POST' }))).status).toBe(404)
   })
@@ -36,7 +40,7 @@ describe('ModelDownloadQuota', () => {
   it('allows five requests and rejects subsequent requests in the same UTC month', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'))
-    const quota = createQuota()
+    const quota = createQuotaStub()
 
     for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
       await expect(
@@ -51,17 +55,39 @@ describe('ModelDownloadQuota', () => {
   it('starts a new counter after UTC month rollover and ignores corrupt stored state', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-31T23:59:59.500Z'))
-    const storage = new MemoryStorage()
-    storage.values.set('monthly-download-quota', { month: 1, used: -1 })
-    const quota = createQuota(storage)
+    const quota = createQuotaStub()
+    await runInDurableObject(quota, async (_instance, state) => {
+      await state.storage.put('monthly-download-quota', { month: 1, used: -1 })
+    })
 
     await expect(
       (await quota.fetch(new Request('https://quota.internal/consume', { method: 'POST' }))).json(),
     ).resolves.toEqual({ allowed: true, retryAfterSeconds: 1 })
+    await runInDurableObject(quota, async (_instance, state) => {
+      await state.storage.put('monthly-download-quota', { month: '2026-08', used: -1 })
+    })
+    await expect(
+      (await quota.fetch(new Request('https://quota.internal/consume', { method: 'POST' }))).json(),
+    ).resolves.toMatchObject({ allowed: true })
     vi.setSystemTime(new Date('2026-09-01T00:00:00.000Z'))
     await expect(
       (await quota.fetch(new Request('https://quota.internal/consume', { method: 'POST' }))).json(),
     ).resolves.toMatchObject({ allowed: true })
+  })
+
+  it('rejects failed and malformed internal quota responses', async () => {
+    await expect(
+      consumeModelDownloadQuota(responseQuotaNamespace(new Response('Unavailable', { status: 503 })), 'token'),
+    ).rejects.toThrow('Model download quota service failed')
+    await expect(
+      consumeModelDownloadQuota(responseQuotaNamespace(Response.json(null)), 'token'),
+    ).rejects.toThrow('Model download quota service returned an invalid response')
+    await expect(
+      consumeModelDownloadQuota(
+        responseQuotaNamespace(Response.json({ allowed: true, retryAfterSeconds: 0 })),
+        'token',
+      ),
+    ).rejects.toThrow('Model download quota service returned an invalid response')
   })
 
   it('calculates UTC month and retry boundaries deterministically', () => {

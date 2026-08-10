@@ -181,8 +181,8 @@ config/onnxruntime/required_operators_and_types.config
 
 | 工具 | 要求 |
 | --- | --- |
-| Node.js | `>= 22` |
-| pnpm | `10.0.0` |
+| Node.js | `>= 24.15.0` |
+| pnpm | `11.21.0` |
 | Corepack | 推荐启用，用于固定 pnpm 版本 |
 
 安装依赖：
@@ -290,7 +290,7 @@ pnpm --filter @hv-pony-solver/model-worker test
 pnpm --filter @hv-pony-solver/model-worker build
 ```
 
-pnpm 10 会将 `deploy` 识别为自身命令。部署 Model Worker 时必须显式使用：
+pnpm 11 会将 `deploy` 识别为自身命令。部署 Model Worker 时必须显式使用：
 
 ```bash
 pnpm --filter @hv-pony-solver/model-worker run deploy
@@ -562,7 +562,7 @@ Playwright E2E 使用本地 fixture，不访问真实 Hentaiverse 网站，也�
 
 `.github/workflows/verify-monorepo.yml` 在 Pull Request、`main` 推送和手动触发时执行：
 
-- Node.js 22 和冻结依赖安装。
+- Node.js 24 和冻结依赖安装。
 - 依赖审计、ESLint 和 TypeScript 类型检查。
 - 文档漂移、架构边界和浏览器危险调用检查。
 - 工作区测试与覆盖率。
@@ -608,7 +608,7 @@ corepack pnpm --version
 corepack pnpm install
 ```
 
-项目固定 pnpm `10.0.0`。不要让全局 pnpm 的其他主版本接管项目脚本。
+项目固定 pnpm `11.21.0`。不要让全局 pnpm 的其他主版本接管项目脚本。
 
 ### 默认构建无法加载 ONNX Runtime
 

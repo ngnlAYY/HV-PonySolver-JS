@@ -1,6 +1,19 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+const modelAccessMocks = vi.hoisted(() => ({
+  getCanonicalRequestAccessToken: vi.fn<(request: Request) => string | null>(),
+}))
+
+vi.mock(import('../src/model-access'), async (importOriginal) => {
+  const modelAccess = await importOriginal()
+  modelAccessMocks.getCanonicalRequestAccessToken.mockImplementation(modelAccess.getCanonicalRequestAccessToken)
+  return {
+    ...modelAccess,
+    getCanonicalRequestAccessToken: modelAccessMocks.getCanonicalRequestAccessToken,
+  }
+})
 
 import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 
@@ -229,7 +242,7 @@ describe('model worker', () => {
     const response = await fetchWorker(authorizedModelRequest(fixture, 'HEAD'), env)
 
     expect(response.status).toBe(200)
-    expect(await response.text()).toBe('')
+    expect(await readResponseBody(response)).toBe('')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('etag')).toBe(fixture.realEtag)
     expect(response.headers.get('content-length')).toBe(String(fixture.realBody.length))
@@ -447,7 +460,7 @@ describe('model worker', () => {
     expect(headResponse.status).toBe(200)
     expect(headResponse.headers.get('etag')).toBe(httpEtag)
     expect(headResponse.headers.get('etag')).not.toBe(storedEtag)
-    expect(await headResponse.text()).toBe('')
+    expect(await readResponseBody(headResponse)).toBe('')
   })
 
   it('omits ETag when the R2 object has no httpEtag', async () => {
@@ -639,6 +652,19 @@ describe('model worker', () => {
     expect(await response.text()).toBe('Internal Server Error')
   })
 
+  it('returns a generic 500 when real access has no canonical token', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+    })
+    modelAccessMocks.getCanonicalRequestAccessToken.mockReturnValueOnce(null)
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+
+    expect(response.status).toBe(500)
+    expect(await response.text()).toBe('Internal Server Error')
+  })
+
   it('returns 500 instead of silently falling back when INVALID_KEY_MODE is unsupported', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
@@ -681,6 +707,20 @@ describe('model worker', () => {
     expect((env.MODEL_BUCKET as unknown as { requestedKeys: string[] }).requestedKeys).toEqual([
       fixture.realOrtModelObjectKey,
     ])
+  })
+
+  it('uses the default ORT filename when the configured path ends with a slash', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+    env.PUBLIC_ORT_MODEL_PATH = `${fixture.publicOrtModelPath}/`
+
+    const response = await fetchWorker(
+      assetRequest(env.PUBLIC_ORT_MODEL_PATH, 'GET', { authorization: `Bearer ${fixture.validKey}` }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-disposition')).toBe('inline; filename="yolo26n-640.ort"')
   })
 
   it('keeps unauthorized ORT requests on the decoy path', async () => {
@@ -763,8 +803,8 @@ describe('model worker', () => {
 
     expect(ortResponse.status).toBe(200)
     expect(runtimeResponse.status).toBe(200)
-    expect(await ortResponse.text()).toBe('')
-    expect(await runtimeResponse.text()).toBe('')
+    expect(await readResponseBody(ortResponse)).toBe('')
+    expect(await readResponseBody(runtimeResponse)).toBe('')
     expect(bucket.requestedKeys).toEqual([])
     expect(bucket.headRequestedKeys).toEqual(
       expect.arrayContaining([fixture.realOrtModelObjectKey, fixture.runtimeWasmObjectKey]),
@@ -920,8 +960,8 @@ describe('model worker', () => {
       fetchWorker(assetRequest(fixture.publicRuntimeWasmPath, 'GET'), env),
     ])
 
-    await expect(realResponse.text()).resolves.toBe(fixture.realBody)
-    await expect(decoyResponse.text()).resolves.toBe(fixture.decoyBody)
-    await expect(runtimeResponse.text()).resolves.toBe(fixture.runtimeBody)
+    await expect(readResponseBody(realResponse)).resolves.toBe(fixture.realBody)
+    await expect(readResponseBody(decoyResponse)).resolves.toBe(fixture.decoyBody)
+    await expect(readResponseBody(runtimeResponse)).resolves.toBe(fixture.runtimeBody)
   })
 })
