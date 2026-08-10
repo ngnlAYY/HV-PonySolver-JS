@@ -1,5 +1,5 @@
 function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
-  const requiredConfigs = ['imagePreprocessConfig', 'yoloOutputConfig', 'onnxRuntimeConfig', 'inferenceTimeoutConfig']
+  const requiredConfigs = ['imagePreprocessConfig', 'yoloOutputConfig', 'inferenceTimeoutConfig']
   const requiredConfigNames = [
     'imageSize',
     'confidenceThreshold',

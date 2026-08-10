@@ -6,7 +6,7 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 
 当前仓库包含三部分：
 
-- `apps/userscript`：浏览器 userscript，使用本地 ONNX Runtime Web 推理验证码图片；默认自动选择/提交答案，也可切换为仅识别的手动提交模式。
+- `apps/userscript`：浏览器 userscript，默认下载固定版本的完整 ONNX Runtime Web，也可显式构建内置精简运行时；推理在本地完成。
 - `apps/model-worker`：Cloudflare Worker，从 R2 分发真实模型或 decoy 模型，并用 KV 中的授权 key 控制访问。
 - `packages/shared`：跨 userscript 与 Worker 共享的稳定契约，包括答案编码、模型路径常量、访问决策类型和 token 校验。
 
@@ -48,7 +48,7 @@ HV Pony Solver 是一个 pnpm + TypeScript monorepo，用于构建 HentaiVerse �
 2. `App` 创建状态面板、模型缓存、ONNX Worker 客户端、图片加载器、答案提交器和验证码求解器。
 3. `App` 监听 body 变化并合并扫描；仅当 `#riddlemaster` 内存在可用表单和图片，且该图片尚未成功处理时，才懒加载 ONNX 并触发求解。
 4. `CaptchaSolver` 使用 `CachedImageLoader` 从浏览器同源缓存读取验证码图片，调用 ONNX Worker 推理。
-5. Worker 在后台线程解析 YOLO 输出，按置信度阈值、去重与最大种类数规则生成小马答案结果。
+5. Worker 按构建 profile 加载远程完整版或内置精简版运行时，并在后台线程解析 YOLO 输出。
 6. 默认自动模式下，`AnswerSubmitter` 清空原有勾选，按随机顺序点击目标复选框，等待模拟延迟后点击提交按钮；手动模式下不修改复选框或点击提交按钮。
 7. `StatusPanel` 展示模型、Session、推理状态，并把自动提交结果或“待手动提交”的识别答案、置信度和耗时写入 `localStorage`。
 
@@ -82,9 +82,9 @@ StatusPanel 记录结果、置信度与耗时
 ## 架构与图谱 guardrails
 
 
-`architecture:check` 固化当前最强的边界结论：推理层不应 import `StatusPanel`，`StatusPanel` 不应 import 推理层，`apps/userscript` 与 `apps/model-worker` 只能通过 `packages/shared` 共享稳定契约，`packages/shared` 不应反向 import 应用代码，推理层不应直接 import userscript storage bridge。`browser-sinks:check` 固化浏览器危险点审计范围：只允许 `StatusPanel` 的已审计 `innerHTML` 渲染点，以及 ONNX worker 入口中加载内置 runtime 所需的 `new Function` / `importScripts`。
+`architecture:check` 固化当前最强的边界结论：推理层不应 import `StatusPanel`，`StatusPanel` 不应 import 推理层，`apps/userscript` 与 `apps/model-worker` 只能通过 `packages/shared` 共享稳定契约，`packages/shared` 不应反向 import 应用代码，推理层不应直接 import userscript storage bridge。`browser-sinks:check` 固化浏览器危险点审计范围：只允许 `StatusPanel` 的已审计 `innerHTML` 渲染点，以及外部完整版 ONNX Runtime Worker 入口中的固定 URL `importScripts`。
 
-推理配置已拆成聚焦导出：`imagePreprocessConfig` 负责输入尺寸，`yoloOutputConfig` 负责 YOLO 解析假设，`onnxRuntimeConfig` 负责运行时资源位置，`inferenceTimeoutConfig` 负责 worker、检测与模型下载超时。
+推理配置已拆成聚焦导出：`imagePreprocessConfig` 负责输入尺寸，`yoloOutputConfig` 负责 YOLO 解析假设，`inferenceTimeoutConfig` 负责 worker、检测与模型下载超时。运行时 profile 和资产位置由构建清单管理，避免业务主包静态引用两套运行时资源。
 
 `Model Worker Core` 不应仅因为图谱社区低内聚就拆分；只有源码职责已经自然分离为环境归一化、请求路由、模型访问选择和响应创建时，才应继续拆分。
 
@@ -146,11 +146,11 @@ corepack pnpm install
 | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
 | `corepack pnpm --filter @hv-pony-solver/userscript build`                                              | 用 esbuild 打包未压缩 userscript，并写入 `apps/userscript/dist/hv-pony-solver.user.js`          |
 | `corepack pnpm --filter @hv-pony-solver/userscript build -- --minify`                                  | 用 esbuild 打包压缩 userscript                                                                  |
+| `corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime`                              | 构建显式内置精简 JS glue、远程校验精简 WASM 的 userscript                                       |
 | `pnpm --filter @hv-pony-solver/userscript typecheck`                                                   | 类型检查 userscript 源码                                                                        |
 | `pnpm --filter @hv-pony-solver/userscript test`                                                        | 运行 userscript Vitest/jsdom 单元测试与 node:test 脚本测试                                      |
-| `MODEL_FILE=/path/to/yolo26n-640.onnx pnpm --filter @hv-pony-solver/userscript verify-model-integrity` | 校验待发布模型与 shared manifest 的 byteLength / SHA-256 一致性                                 |
-| `corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-assets`                         | 校验本地 ONNX Runtime asset manifest 与已安装 `onnxruntime-web` JS runtime / WASM assets 一致性 |
-| `corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-cdn`                            | 发布前手动联网校验 CDN 上的 ONNX Runtime JS runtime / WASM assets 一致性                        |
+| `MODEL_FILE=/path/to/yolo26n-640.ort pnpm --filter @hv-pony-solver/userscript verify-model-integrity`  | 校验待发布 ORT 模型与 shared manifest 的 byteLength / SHA-256 一致性                            |
+| `corepack pnpm verify:onnx-runtime`                                                                    | 校验仓库内置 ONNX Runtime bundle 与 manifest 的 byteLength / SHA-256 一致性                     |
 | `corepack pnpm --filter @hv-pony-solver/userscript benchmark:inference`                                | 运行推理纯函数本地 micro benchmark，输出预处理与 YOLO parser 的 `ms/op`                         |
 
 ### Model Worker 命令
@@ -214,30 +214,35 @@ apps/userscript/dist/hv-pony-solver.user.js
 3. 从 `src/userscript/metadata.ts` 读取 userscript metadata。
 4. 校验 metadata 必须以 `// ==UserScript==` 开始、以 `// ==/UserScript==` 结束。
 5. 将 metadata 拼接到 bundle 前面。
+6. 默认 profile 为远程完整版；只有 `build:bundled-runtime` 才验证并打入精简 JS glue。
 
 ### Bundle budget
 
-`apps/userscript/scripts/build-userscript.test.mjs` 会在生成 metafile 时检查 bundle 大小：main bundle 目标小于 80KB，worker bundle 目标小于 20KB。该检查用于防止 userscript 产物无意膨胀。
+`apps/userscript/scripts/build-userscript.test.mjs` 会确认默认 Worker 小于 20KB 且不含精简运行时资源，内置精简 Worker 小于 250KB。最终 userscript 由 default 96 KiB、bundled 480 KiB 两套预算继续约束。
 
 ### ONNX Runtime asset manifest
 
-`apps/userscript/src/inference/onnx-runtime-assets.ts` 中的 `ONNX_RUNTIME_ASSETS` 是 ONNX Runtime Web JS runtime 与 WASM assets 的唯一来源。当前 package 为 `onnxruntime-web@1.27.0`，本地校验目标是已安装依赖中的 `dist/ort.min.js` / `ort.min.js`，以及 `wasmAssets` 中记录的 `dist/ort-wasm-simd-threaded.asyncify.wasm`、`dist/ort-wasm-simd-threaded.jsep.wasm`、`dist/ort-wasm-simd-threaded.jspi.wasm` 和 `dist/ort-wasm-simd-threaded.wasm`；manifest 记录 `scriptAsset.byteLength`、`scriptAsset.sha256`、`scriptAsset.maxByteLength`、`wasmAssets.byteLength` 和 `wasmAssets.sha256`，并通过 `cdn.scriptUrl`、`cdn.wasmPath` 派生 `onnxRuntimeConfig` 的远程资源位置。
+`ONNX_RUNTIME_ASSETS` 固定最小运行时的完整供应链信息：`onnxruntime-web` `1.27.0`、源码提交 `8f0278c77bf44b0cc83c098c6c722b92a36ac4b5`、emsdk `4.0.23`，以及算子配置 SHA-256 `2abe2e2987496ab518de97a7f4b157cec1bd1817c621d3523073034fb47591fe`。
 
-发布前可运行本地 asset 校验：
+`externalFullRuntime` 固定默认完整版 URL：`https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js` 和 `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/`。默认构建信任固定版本 CDN；它不使用内容哈希校验，也不会回退到精简版。
 
-```bash
-corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-assets
-```
+内置 glue 记录为 `bundleAsset`：路径 `apps/userscript/vendor/onnxruntime/ort.wasm.bundle.min.mjs`、文件名 `ort.wasm.bundle.min.mjs`，并固定 `bundleAsset.byteLength`、`bundleAsset.sha256` 与 `bundleAsset.maxByteLength`。构建时会先验证这些值，再将该模块直接打入 Worker。
 
-该命令校验本地安装的 `onnxruntime-web` JS runtime asset 与 WASM assets 是否与 manifest 中 byteLength / SHA-256 一致，不会联网校验 CDN。内置 JS runtime 构建仍通过 `ortWasmPath` 远程加载 WASM。
+`bundledMinimalRuntime` 使用内置 glue 和一个远程 `wasmAsset`：文件名 `ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`，公开路径 `/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`，`wasmAsset.url` 为 `https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`，R2 对象键为 `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`；manifest 同时固定 `wasmAsset.byteLength`、`wasmAsset.sha256` 与 `wasmAsset.maxByteLength`。
 
-发布前如需确认 CDN 内容未漂移，可手动运行 release-only 联网校验：
+需要从固定源码重新生成最小运行时时运行；输出的 WASM 已按 SHA-256 命名，可直接用脚本打印的 `runtime/<filename>` 对象键上传 R2：
 
 ```bash
-corepack pnpm --filter @hv-pony-solver/userscript verify-onnx-runtime-cdn
+corepack pnpm build:onnx-runtime
 ```
 
-`verify-onnx-runtime-cdn` 会联网校验 `cdn.scriptUrl` 指向的 JS runtime，以及由 `cdn.wasmPath` 与 `wasmAssets` 文件名组成的 WASM assets；该命令不接入默认 CI。
+提交或构建前校验仓库内置 bundle：
+
+```bash
+corepack pnpm verify:onnx-runtime
+```
+
+该校验只读取仓库内文件，不访问 CDN；WASM 二进制由发布者按 manifest 的对象键上传至 R2。
 
 推理性能基准用于比较同一台机器上改动前后的纯函数耗时，不作为 CI gate。运行：
 
@@ -296,8 +301,6 @@ corepack pnpm benchmark:inference
 | `yoloOutputConfig.rowSize`                      | `6`                                                                   | YOLO 输出每行 float 数                                       |
 | `yoloOutputConfig.confidenceIndex`              | `4`                                                                   | YOLO 输出 confidence 列                                      |
 | `yoloOutputConfig.classIndex`                   | `5`                                                                   | YOLO 输出 class id 列                                        |
-| `onnxRuntimeConfig.ortScriptUrl`                | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js` | 默认构建下 Worker 动态加载 ONNX Runtime Web JS runtime       |
-| `onnxRuntimeConfig.ortWasmPath`                 | `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/`           | ONNX Runtime Web wasm 资源路径，内置 JS runtime 时仍远程加载 |
 | `inferenceTimeoutConfig.workerInitTimeoutMs`    | `60000`                                                               | ONNX Worker 初始化请求超时                                   |
 | `inferenceTimeoutConfig.workerDetectTimeoutMs`  | `30000`                                                               | ONNX Worker 单次检测请求超时                                 |
 | `inferenceTimeoutConfig.modelDownloadTimeoutMs` | `30000`                                                               | 模型下载超时                                                 |
@@ -305,7 +308,7 @@ corepack pnpm benchmark:inference
 YOLO 输出解析规则：
 
 - 输出格式假设集中在 `yoloOutputConfig`：每行按 6 个 float 读取，第 5 个值是 confidence，第 6 个值是 class id。
-- 图片尺寸由 `imagePreprocessConfig.imageSize` 控制；ONNX runtime URL 由 `onnxRuntimeConfig` 控制；worker 和模型下载超时由 `inferenceTimeoutConfig` 控制。
+- 图片尺寸由 `imagePreprocessConfig.imageSize` 控制；运行时 profile 与资产位置由 `ONNX_RUNTIME_ASSETS` 和构建器控制；worker 和模型下载超时由 `inferenceTimeoutConfig` 控制。
 - data 长度不是完整行倍数时忽略尾部不完整行。
 - 忽略非有限 confidence 和无法映射到答案的 class id；浮点 class id 会先按 `Math.trunc()` 截断。
 - 优先保留 confidence 大于等于 `0.30` 的行。
@@ -503,19 +506,19 @@ pnpm --filter @hv-pony-solver/model-worker test
 
 ### CI workflow
 
-`.github/workflows/verify-monorepo.yml` 会在 `pull_request`、推送到 `main` 和 `workflow_dispatch` 时运行仓库校验；手动触发时可额外选择是否构建内置 ONNX Runtime Web JS runtime 的 userscript、是否运行 userscript Playwright smoke 测试，以及是否发布 artifact。workflow 使用 `actions/setup-node` 的 pnpm cache，并把 guardrails、测试、coverage/build 和 userscript E2E 拆成独立 jobs；E2E job 还按实际安装的 Playwright 版本缓存 Chromium 浏览器文件。
+`.github/workflows/verify-monorepo.yml` 会在 `pull_request`、推送到 `main` 和 `workflow_dispatch` 时运行仓库校验；手动触发时可额外选择是否运行 userscript Playwright smoke 测试，以及是否发布内置精简运行时 artifact。workflow 使用 `actions/setup-node` 的 pnpm cache，并把 guardrails、测试、coverage/build 和 userscript E2E 拆成独立 jobs。
 
 userscript E2E 在 `pull_request` 和推送到 `main` 时常态执行；`workflow_dispatch` 仍仅在 `run_userscript_e2e=true` 时执行。它使用仓库内本地 fixture 页面进行 smoke 验证，不会访问真实 Hentaiverse 站点。
 
 `Security Scan` workflow 使用 CodeQL 扫描 TypeScript/JavaScript，并在 PR 上运行 dependency review；根命令 `pnpm audit:high` 仍在主验证 workflow 的 `guardrails` job 中执行。
 
-1. `validate-inputs` 先检查手动发布 artifact 时是否同时启用 `bundle_onnx_runtime=true`，否则直接失败，避免发布依赖远程 JS runtime 的 userscript artifact。
+1. `validate-inputs` 接受手动 workflow 输入；默认不会发布 artifact。
 2. `guardrails` job 设置 Node.js 22、启用 pnpm cache、安装依赖，然后运行 `pnpm audit:high`、`pnpm lint`、`pnpm typecheck`、测试值 Wrangler 配置渲染、`pnpm docs:check`、`pnpm architecture:check` 和 `pnpm browser-sinks:check`。
 3. `test` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test`。
-4. `coverage-build` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test:coverage` 和 `pnpm build`，随后用 `pnpm bundle:check:default` 检查默认未压缩 userscript 的 96 KiB 大小预算。
+4. `coverage-build` job 运行 coverage 和默认构建，检查 96 KiB 默认预算；随后构建内置精简运行时版本并检查 480 KiB bundled 预算。
 5. `userscript-e2e` job 在 `pull_request`、推送到 `main` 时运行，在 `workflow_dispatch` 时由 `run_userscript_e2e` 控制；它读取实际 Playwright CLI 版本，用包含该版本的 key 缓存 `~/.cache/ms-playwright`，再通过 `playwright install --with-deps chromium` 保证 Chromium 和系统依赖可用，最后运行 `pnpm test:e2e:userscript`。
-6. `bundled-userscript` job 仅在 `workflow_dispatch` 且 `bundle_onnx_runtime=true` 时运行，并依赖 guardrails、test、coverage-build 和可选 E2E：`run_userscript_e2e=false` 时接受 E2E job 为 `skipped`，`run_userscript_e2e=true` 时要求 E2E job 为 `success`。随后它以 `--minify` 构建内置 ONNX Runtime Web JS runtime 的 userscript，生成 `.sha256`、artifact manifest 与 esbuild metafile，再用 `pnpm bundle:check:bundled` 检查 480 KiB 大小预算。
-7. 如果 `publish_userscript_artifact=true`，`bundled-userscript` job 上传 `apps/userscript/dist/hv-pony-solver.user.js`、`.sha256`、artifact manifest 与 esbuild metafile；默认不上传，且必须同时设置 `bundle_onnx_runtime=true`。
+6. `userscript-artifact` job 仅在 `workflow_dispatch` 时运行，并依赖 guardrails、test、coverage-build 和可选 E2E。它以 `--minify` 构建内置精简运行时 userscript，生成校验与 metafile，再检查 bundled 预算。
+7. 只有 `publish_userscript_artifact=true` 时才上传 userscript artifact；默认不上传。
 
 ### Model Worker 部署 workflow
 
@@ -565,9 +568,9 @@ corepack pnpm --filter @hv-pony-solver/userscript build
 corepack pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 ```
 
-默认构建不内置 JS runtime；`HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1` 或 `build:bundled-runtime` 会先按 `ONNX_RUNTIME_ASSETS.scriptAsset.byteLength` 与 `ONNX_RUNTIME_ASSETS.scriptAsset.sha256` 校验本地 `onnxruntime-web@1.27.0/dist/ort.min.js`，再把 JS runtime 内置进 userscript。两种构建都仍通过 `ortWasmPath` 加载 WASM 资源；发布前应使用 `verify-onnx-runtime-assets` 同时校验本地 JS runtime 与 `wasmAssets`，必要时再用 `verify-onnx-runtime-cdn` 手动联网校验 CDN。`HV_PONY_SOLVER_ONNX_RUNTIME_PATH` 仅用于可信本地调试，不应暴露给 workflow 输入或不可信参数。
+`build` 默认不内置运行时：Blob Worker 从 jsDelivr 下载固定的 `onnxruntime-web@1.27.0` 完整版 JS 和 WASM。`build:bundled-runtime` 才会校验并内置仓库中的精简 JS glue，并从 `models.ngnl.host` 下载经过 byteLength 与 SHA-256 校验的内容寻址精简 WASM。两个 profile 都远程下载同一个 `.ort` 模型，且彼此不自动回退。
 
-产物大小预算守卫按文件 byteLength 检查：默认未压缩 profile 固定为 96 KiB，`--minify` + bundled-runtime profile 固定为 480 KiB。根命令 `pnpm bundle:check` 会显式先运行默认 userscript build，保证 `check:quick` 在干净工作区也有产物；纯检查命令 `pnpm bundle:check:default` 与 `pnpm bundle:check:bundled` 不会偷偷构建，目标文件缺失或超预算都会失败并输出 profile、actual、budget 与 delta。
+产物大小预算守卫按文件 byteLength 检查：default profile 为 96 KiB，bundled profile 为 480 KiB。根命令 `pnpm bundle:check` 会先运行默认 userscript build，再检查 default profile；纯检查命令不会偷偷构建，目标文件缺失或超预算都会失败并输出 profile、actual、budget 与 delta。
 
 将生成的文件安装到 userscript 管理器：
 

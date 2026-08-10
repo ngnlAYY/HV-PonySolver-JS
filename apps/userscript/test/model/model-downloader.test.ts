@@ -12,7 +12,7 @@ const TEST_INTEGRITY = {
   byteLength: 3,
   sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
 } as const
-const MODEL_URL = 'https://models.ngnl.host/yolo26n-640.onnx'
+const MODEL_URL = 'https://models.ngnl.host/yolo26n-640.ort'
 
 function getFetchCall(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit] {
   const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]

@@ -5,15 +5,15 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build-userscript.mjs",
-    "build:bundled-runtime": "HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME=1 node scripts/build-userscript.mjs",
+    "build:bundled-runtime": "node scripts/build-userscript.mjs --runtime=bundled",
     "benchmark:inference": "node scripts/benchmark-inference.mjs",
     "verify-model-integrity": "node scripts/verify-model-integrity.mjs",
     "verify-onnx-runtime-assets": "node scripts/verify-onnx-runtime-assets.mjs",
-    "verify-onnx-runtime-cdn": "node scripts/verify-onnx-runtime-cdn.mjs",
     "test": "vitest run && node --test scripts/build-userscript.test.mjs scripts/verify-model-integrity.test.mjs scripts/onnx-runtime-assets.test.mjs",
     "test:e2e": "playwright test test/e2e/userscript-smoke.spec.ts --project=chromium",
-    "test:coverage": "vitest run --coverage && node --test --experimental-test-coverage --test-coverage-include=scripts/build-userscript.mjs --test-coverage-include=scripts/verify-model-integrity.mjs --test-coverage-include=scripts/onnx-runtime-assets.mjs --test-coverage-include=scripts/verify-onnx-runtime-assets.mjs --test-coverage-include=scripts/verify-onnx-runtime-cdn.mjs scripts/build-userscript.test.mjs scripts/verify-model-integrity.test.mjs scripts/onnx-runtime-assets.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "test:coverage": "vitest run --coverage && node --test --experimental-test-coverage --test-coverage-include=scripts/build-userscript.mjs --test-coverage-include=scripts/verify-model-integrity.mjs --test-coverage-include=scripts/onnx-runtime-assets.mjs --test-coverage-include=scripts/verify-onnx-runtime-assets.mjs scripts/build-userscript.test.mjs scripts/verify-model-integrity.test.mjs scripts/onnx-runtime-assets.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "verify:onnx-runtime": "node scripts/verify-onnx-runtime-assets.mjs"
   },
   "dependencies": {
     "@hv-pony-solver/shared": "workspace:*"

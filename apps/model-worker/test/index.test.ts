@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import { addCorsHeaders, textResponse } from '../src/model-response'
 import {
+  assetRequest,
   createEnv,
   createModelFixture,
   fetchWorker,
@@ -638,5 +639,53 @@ describe('model worker', () => {
     expect(response.status).toBe(500)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
     expect(await response.text()).toBe('Internal Server Error')
+  })
+
+  it('serves the requested ORT model from its dedicated protected object key', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+    const response = await fetchWorker(
+      assetRequest(fixture.publicOrtModelPath, 'GET', { authorization: `Bearer ${fixture.validKey}` }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.ortBody)
+    expect(response.headers.get('content-disposition')).toBe(
+      `inline; filename="${fixture.publicOrtModelPath.split('/').at(-1)}"`,
+    )
+    expect((env.MODEL_BUCKET as unknown as { requestedKeys: string[] }).requestedKeys).toEqual([
+      fixture.realOrtModelObjectKey,
+    ])
+  })
+
+  it('keeps unauthorized ORT requests on the decoy path', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(assetRequest(fixture.publicOrtModelPath, 'GET'), createEnv(fixture))
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it('serves the exact runtime WASM route publicly with immutable caching', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      assetRequest(fixture.publicRuntimeWasmPath, 'GET', { origin: 'https://unrelated.example' }),
+      createEnv(fixture),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.runtimeBody)
+    expect(response.headers.get('content-type')).toBe('application/wasm')
+    expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+    expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('etag')).toBe(fixture.runtimeEtag)
+  })
+
+  it('does not infer model format for unconfigured paths', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(assetRequest(`${fixture.publicOrtModelPath}.onnx`, 'GET'), createEnv(fixture))
+    expect(response.status).toBe(404)
   })
 })

@@ -7,11 +7,6 @@ on:
       - main
   workflow_dispatch:
     inputs:
-      bundle_onnx_runtime:
-        description: 'Build userscript with bundled onnxruntime-web JS runtime'
-        type: boolean
-        required: true
-        default: false
       publish_userscript_artifact:
         description: 'Publish userscript artifact from this run'
         type: boolean
@@ -30,12 +25,6 @@ jobs:
   validate-inputs:
     runs-on: ubuntu-latest
     steps:
-      - name: Require bundled runtime for published userscript artifacts
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_userscript_artifact && !inputs.bundle_onnx_runtime }}
-        run: |
-          echo "Publishing userscript artifacts requires bundle_onnx_runtime=true" >&2
-          exit 1
-
       - name: Inputs accepted
         run: echo "Workflow inputs accepted."
 
@@ -150,6 +139,12 @@ jobs:
       - name: Check default userscript bundle budget
         run: pnpm bundle:check:default
 
+      - name: Build userscript with bundled minimal runtime
+        run: pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
+
+      - name: Check bundled userscript bundle budget
+        run: pnpm bundle:check:bundled
+
   userscript-e2e:
     needs: validate-inputs
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_userscript_e2e) }}
@@ -194,14 +189,14 @@ jobs:
       - name: Userscript E2E smoke
         run: pnpm test:e2e:userscript
 
-  bundled-userscript:
+  userscript-artifact:
     needs:
       - validate-inputs
       - guardrails
       - test
       - coverage-build
       - userscript-e2e
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.bundle_onnx_runtime && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && ((inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'success') || (!inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'skipped')) }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && ((inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'success') || (!inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'skipped')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -221,14 +216,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build bundled userscript
+      - name: Build userscript with embedded custom runtime
         env:
           HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH: apps/userscript/dist/hv-pony-solver.artifact.json
           HV_PONY_SOLVER_ARTIFACT_SHA256_PATH: apps/userscript/dist/hv-pony-solver.user.js.sha256
           HV_PONY_SOLVER_METAFILE_PATH: apps/userscript/dist/hv-pony-solver.metafile.json
         run: pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 
-      - name: Check bundled userscript bundle budget
+      - name: Check userscript bundle budget
         run: pnpm bundle:check:bundled
 
       - name: Publish userscript artifact

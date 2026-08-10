@@ -1,46 +1,34 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeEnv } from '../src/env'
-import type { Env } from '../src/index'
+import { readWorkerConfig } from '../src/env'
 import { createEnv, createModelFixture } from './helpers/model-worker-fixture'
 
-function createValidEnv(): Env {
-  return createEnv(createModelFixture())
-}
-
-describe('normalizeEnv', () => {
-  it('rejects missing MODEL_KEYS binding', () => {
-    const env = createValidEnv()
-    delete (env as Partial<Env>).MODEL_KEYS
-
-    expect(() => normalizeEnv(env)).toThrow('MODEL_KEYS binding is not configured')
+describe('readWorkerConfig', () => {
+  it('normalizes the invalid-key mode', () => {
+    const env = createEnv(createModelFixture(), { invalidKeyMode: ' ERROR ' })
+    expect(readWorkerConfig(env).invalidKeyMode).toBe('error')
   })
 
-  it('rejects missing MODEL_BUCKET binding', () => {
-    const env = createValidEnv()
-    delete (env as Partial<Env>).MODEL_BUCKET
-
-    expect(() => normalizeEnv(env)).toThrow('MODEL_BUCKET binding is not configured')
+  it('defaults to decoy mode', () => {
+    expect(readWorkerConfig(createEnv(createModelFixture())).invalidKeyMode).toBe('decoy')
   })
 
-  it('rejects malformed model bindings without a get method', () => {
-    const env = createValidEnv()
-    env.MODEL_KEYS = {} as Env['MODEL_KEYS']
-
-    expect(() => normalizeEnv(env)).toThrow('MODEL_KEYS binding is not configured')
+  it('rejects unsupported invalid-key modes', () => {
+    const env = createEnv(createModelFixture(), { invalidKeyMode: 'allow' })
+    expect(() => readWorkerConfig(env)).toThrow('INVALID_KEY_MODE')
   })
 
-  it('rejects blank REAL_MODEL_OBJECT_KEY values', () => {
-    const env = createValidEnv()
-    env.REAL_MODEL_OBJECT_KEY = '   '
-
-    expect(() => normalizeEnv(env)).toThrow('REAL_MODEL_OBJECT_KEY is not configured')
+  it('uses the dedicated ORT model path and object key', () => {
+    const fixture = createModelFixture()
+    const config = readWorkerConfig(createEnv(fixture))
+    expect(config.publicOrtModelPath).toBe(fixture.publicOrtModelPath)
+    expect(config.realOrtModelObjectKey).toBe(fixture.realOrtModelObjectKey)
   })
 
-  it('rejects blank DECOY_MODEL_OBJECT_KEY values', () => {
-    const env = createValidEnv()
-    env.DECOY_MODEL_OBJECT_KEY = '   '
-
-    expect(() => normalizeEnv(env)).toThrow('DECOY_MODEL_OBJECT_KEY is not configured')
+  it('uses the content-addressed runtime route', () => {
+    const fixture = createModelFixture()
+    const config = readWorkerConfig(createEnv(fixture))
+    expect(config.publicRuntimeWasmPath).toBe(fixture.publicRuntimeWasmPath)
+    expect(config.runtimeWasmObjectKey).toBe(fixture.runtimeWasmObjectKey)
   })
 })

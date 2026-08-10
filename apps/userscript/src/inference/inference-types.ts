@@ -22,7 +22,6 @@ export interface DetectorService {
 export type WorkerInitRequest = Readonly<{
   type: 'init'
   requestId?: number
-  wasmPath: string
   modelBuffer: ArrayBuffer
 }>
 

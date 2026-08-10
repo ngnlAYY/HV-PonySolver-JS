@@ -25,7 +25,7 @@ describe('checkBrowserSinks', () => {
   it('accepts known audited browser sink files', async () => {
     await withRepo(async (repoRoot) => {
       await writeSource(repoRoot, 'apps/userscript/src/status-panel/status-panel.ts', 'el.innerHTML = html\n')
-      await writeSource(repoRoot, 'apps/userscript/src/inference/onnx-worker-entry.ts', "new Function('self', runtimeSource)\nimportScripts(url)\n")
+      await writeSource(repoRoot, 'apps/userscript/src/inference/onnx-worker-external-entry.ts', 'importScripts(url)\n')
 
       await assert.doesNotReject(checkBrowserSinks(repoRoot))
     })

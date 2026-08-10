@@ -25,7 +25,7 @@ export async function selectModelAccess(request: Request, env: NormalizedEnv): P
   }
 
   for (const lookupKey of lookupKeys) {
-    const authorizationMarker = await env.modelKeys.get(lookupKey)
+    const authorizationMarker = await env.MODEL_KEYS.get(lookupKey)
     if (authorizationMarker !== null) {
       return 'real'
     }

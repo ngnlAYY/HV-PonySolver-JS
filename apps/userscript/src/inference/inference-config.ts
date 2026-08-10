@@ -1,5 +1,3 @@
-import { ONNX_RUNTIME_ASSETS } from './onnx-runtime-assets'
-
 export const imagePreprocessConfig = {
   imageSize: 640,
 } as const
@@ -11,11 +9,6 @@ export const yoloOutputConfig = {
   confidenceThreshold: 0.30,
   maxDetections: 16,
   maxKinds: 3,
-} as const
-
-export const onnxRuntimeConfig = {
-  ortScriptUrl: ONNX_RUNTIME_ASSETS.cdn.scriptUrl,
-  ortWasmPath: ONNX_RUNTIME_ASSETS.cdn.wasmPath,
 } as const
 
 export const inferenceTimeoutConfig = {

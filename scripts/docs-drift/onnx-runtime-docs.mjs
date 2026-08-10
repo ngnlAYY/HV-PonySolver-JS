@@ -11,31 +11,32 @@ function checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJs
     )
   }
 
-  const wasmAssetTerms = expectedAssets.wasmAssets.flatMap((asset) => [
-    asset.path,
-    asset.filename,
-  ])
-
   const requiredTerms = [
     'ONNX_RUNTIME_ASSETS',
     expectedAssets.packageName,
     expectedAssets.packageVersion,
-    expectedAssets.scriptAsset.path,
-    expectedAssets.scriptAsset.filename,
-    'scriptAsset.byteLength',
-    'scriptAsset.sha256',
-    'scriptAsset.maxByteLength',
-    'wasmAssets',
-    'wasmAssets.byteLength',
-    'wasmAssets.sha256',
-    ...wasmAssetTerms,
-    'cdn.scriptUrl',
-    'cdn.wasmPath',
-    'verify-onnx-runtime-assets',
-    'verify-onnx-runtime-cdn',
-    'HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME',
-    'HV_PONY_SOLVER_ONNX_RUNTIME_PATH',
-    'ortWasmPath',
+    expectedAssets.sourceCommit,
+    expectedAssets.emsdkVersion,
+    expectedAssets.operatorConfigSha256,
+    'externalFullRuntime',
+    expectedAssets.externalFullRuntime.scriptUrl,
+    expectedAssets.externalFullRuntime.wasmBaseUrl,
+    'bundledMinimalRuntime',
+    expectedAssets.bundleAsset.path,
+    expectedAssets.bundleAsset.filename,
+    'bundleAsset.byteLength',
+    'bundleAsset.sha256',
+    'bundleAsset.maxByteLength',
+    expectedAssets.wasmAsset.filename,
+    expectedAssets.wasmAsset.publicPath,
+    expectedAssets.wasmAsset.url,
+    expectedAssets.wasmAsset.objectKey,
+    'wasmAsset.url',
+    'wasmAsset.byteLength',
+    'wasmAsset.sha256',
+    'wasmAsset.maxByteLength',
+    'verify:onnx-runtime',
+    'build:onnx-runtime',
   ]
   for (const term of requiredTerms) {
     if (!readme.includes(term)) {

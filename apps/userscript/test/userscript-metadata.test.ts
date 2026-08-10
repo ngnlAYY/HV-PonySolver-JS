@@ -8,5 +8,7 @@ describe('USERSCRIPT_METADATA', () => {
     expect(USERSCRIPT_METADATA).toContain('// @include     https://alt.hentaiverse.org/*')
     expect(USERSCRIPT_METADATA).not.toContain('http*://')
     expect(USERSCRIPT_METADATA).not.toContain('http://')
+    expect(USERSCRIPT_METADATA).toContain('// @connect     cdn.jsdelivr.net')
+    expect(USERSCRIPT_METADATA).toContain('// @connect     models.ngnl.host')
   })
 })

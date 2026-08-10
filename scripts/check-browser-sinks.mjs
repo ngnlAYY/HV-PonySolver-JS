@@ -9,7 +9,7 @@ const defaultRepoRoot = resolve(scriptDir, '..')
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.mjs'])
 const allowedSinks = new Map([
   ['apps/userscript/src/status-panel/status-panel.ts', { innerHTML: 1 }],
-  ['apps/userscript/src/inference/onnx-worker-entry.ts', { 'new Function': 1, importScripts: 1 }],
+  ['apps/userscript/src/inference/onnx-worker-external-entry.ts', { importScripts: 1 }],
 ])
 
 if (isDirectRun()) {

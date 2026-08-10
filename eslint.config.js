@@ -9,6 +9,8 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/dist/**',
       '**/coverage/**',
+      'other/**',
+      'apps/userscript/vendor/onnxruntime/**',
       '.claude/worktrees/**',
       'apps/model-worker/wrangler.toml',
     ],

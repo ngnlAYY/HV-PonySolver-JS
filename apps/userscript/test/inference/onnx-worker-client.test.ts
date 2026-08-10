@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
-import { ONNX_RUNTIME_ASSETS } from '../../src/inference/onnx-runtime-assets'
 import { OnnxWorkerClient } from '../../src/inference/onnx-worker-client'
 import type { ModelCache } from '../../src/model/model-cache'
 import { createMockPanel } from '../helpers/mock-panel'
@@ -60,14 +59,12 @@ describe('OnnxWorkerClient', () => {
     expect(modelCache.download).toHaveBeenCalledTimes(1)
     expect(putCached).toHaveBeenCalledTimes(1)
     expect(putCached).toHaveBeenCalledWith(modelBuffer, true, true)
-    expect(SuccessfulWorker.messages[0]).toMatchObject({
-      type: 'init',
-      wasmPath: ONNX_RUNTIME_ASSETS.cdn.wasmPath,
-    })
+    expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init', modelBuffer })
+    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('wasmPath')
     expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')
   })
 
-  it('keeps the init message URL-free with a bundled runtime', async () => {
+  it('keeps the init message runtime-profile independent', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
     const modelCache = {
@@ -75,14 +72,12 @@ describe('OnnxWorkerClient', () => {
       download: vi.fn(async () => modelBuffer),
       putCached: vi.fn(async () => undefined),
     } as unknown as ModelCache
-    const client = new OnnxWorkerClient(modelCache, createMockPanel(), { bundledRuntimeSource: 'self.ort = {};' })
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
 
     await client.prepare()
 
-    expect(SuccessfulWorker.messages[0]).toMatchObject({
-      type: 'init',
-      wasmPath: ONNX_RUNTIME_ASSETS.cdn.wasmPath,
-    })
+    expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init', modelBuffer })
+    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('wasmPath')
     expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')
   })
 

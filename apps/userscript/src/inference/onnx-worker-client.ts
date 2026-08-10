@@ -1,14 +1,10 @@
 import type { DetectorService, WorkerRequest, WorkerResponse, YoloParseResult } from './inference-types'
 import { createBlobWorker } from './blob-worker'
-import { imagePreprocessConfig, onnxRuntimeConfig } from './inference-config'
+import { imagePreprocessConfig } from './inference-config'
 import type { ModelCache } from '../model/model-cache'
 import { createOnnxWorkerScript } from './onnx-worker-script'
 import { WorkerRequestBridge } from './worker-request-bridge'
 import type { InferenceStatusSink } from '../status-panel/status-panel-types'
-
-type OnnxWorkerClientOptions = Readonly<{
-  bundledRuntimeSource?: string
-}>
 
 export class OnnxWorkerClient implements DetectorService {
   private worker: Worker | null = null
@@ -22,7 +18,6 @@ export class OnnxWorkerClient implements DetectorService {
   constructor(
     private readonly modelCache: ModelCache,
     private readonly panel: InferenceStatusSink,
-    private readonly options: OnnxWorkerClientOptions = {},
   ) {}
 
   async prepare(): Promise<Worker> {
@@ -143,7 +138,7 @@ export class OnnxWorkerClient implements DetectorService {
   }
 
   private spawnWorker(): Worker {
-    const workerScript = createOnnxWorkerScript(this.options.bundledRuntimeSource)
+    const workerScript = createOnnxWorkerScript()
     const worker = createBlobWorker(workerScript)
     const requestBridge = new WorkerRequestBridge(worker, (error) => this.failWorker(error, worker, requestBridge))
     this.requestBridge = requestBridge
@@ -163,7 +158,6 @@ export class OnnxWorkerClient implements DetectorService {
       await this.post(
         {
           type: 'init',
-          wasmPath: onnxRuntimeConfig.ortWasmPath,
           modelBuffer,
         },
         [modelBuffer],

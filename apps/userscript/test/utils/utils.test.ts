@@ -4,11 +4,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { captchaSelectors } from '../../src/captcha/captcha-selectors'
 import { solverConfig } from '../../src/captcha/solver-config'
 import { timingConfig } from '../../src/captcha/timing-config'
-import { ONNX_RUNTIME_ASSETS } from '../../src/inference/onnx-runtime-assets'
 import {
   imagePreprocessConfig,
   inferenceTimeoutConfig,
-  onnxRuntimeConfig,
   yoloOutputConfig,
 } from '../../src/inference/inference-config'
 import { modelConfig } from '../../src/model/model-config'
@@ -38,13 +36,11 @@ describe('config defaults', () => {
     expect(yoloOutputConfig.confidenceIndex).toBe(4)
     expect(yoloOutputConfig.classIndex).toBe(5)
     expect(modelConfig.accessKey).toBe('')
-    expect(modelConfig.urlBase).toBe('https://models.ngnl.host/yolo26n-640.onnx')
+    expect(modelConfig.urlBase).toBe('https://models.ngnl.host/yolo26n-640.ort')
     expect(modelConfig.cacheName).toBe('pony-solver-local')
-    expect(modelConfig.cacheKey).toBe('yolo26n-640.onnx')
+    expect(modelConfig.cacheKey).toBe('yolo26n-640.ort')
     expect(modelConfig.version).toBe('yolo26n-640-2026-05-14')
     expect(modelConfig.verifyIntegrity).toBe(true)
-    expect(onnxRuntimeConfig.ortScriptUrl).toBe(ONNX_RUNTIME_ASSETS.cdn.scriptUrl)
-    expect(onnxRuntimeConfig.ortWasmPath).toBe(ONNX_RUNTIME_ASSETS.cdn.wasmPath)
     expect(inferenceTimeoutConfig.workerInitTimeoutMs).toBe(60000)
     expect(inferenceTimeoutConfig.workerDetectTimeoutMs).toBe(30000)
     expect(inferenceTimeoutConfig.modelDownloadTimeoutMs).toBe(30000)

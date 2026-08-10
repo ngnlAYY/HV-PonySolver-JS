@@ -1,103 +1,102 @@
-import { MODEL_FILENAME, type ModelAccessDecision } from '@hv-pony-solver/shared'
-import type { NormalizedEnv } from './worker-types'
-
-const CACHE_CONTROL = 'no-store'
-const MODEL_CONTENT_TYPE = 'application/octet-stream'
-const INTERNAL_ERROR_MESSAGE = 'Internal Server Error'
-const CORS_ALLOW_ORIGIN = '*'
+const ALLOWED_ORIGINS = new Set(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
 const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'
 const CORS_ALLOW_HEADERS = 'Authorization'
-const ALLOWED_ORIGINS = new Set<string>(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
+const CACHE_CONTROL = 'no-store'
+const INTERNAL_ERROR_MESSAGE = 'Internal Server Error'
 
-function addSecurityHeaders(headers: Headers): Headers {
-  headers.set('x-content-type-options', 'nosniff')
-  return headers
+function appendVaryOrigin(headers: Headers): void {
+  const tokens = (headers.get('vary') ?? '')
+    .split(',')
+    .map((token) => token.trim())
+    .filter(Boolean)
+  if (!tokens.some((token) => token.toLowerCase() === 'origin')) {
+    tokens.push('Origin')
+  }
+  headers.set('vary', tokens.join(', '))
 }
 
 export function addCorsHeaders(headers: Headers, request: Request): Headers {
   const origin = request.headers.get('origin')
-  appendVaryOrigin(headers)
-
-  if (origin === null) {
-    headers.set('access-control-allow-origin', CORS_ALLOW_ORIGIN)
-    return headers
-  }
-
-  if (ALLOWED_ORIGINS.has(origin)) {
+  if (!origin) {
+    headers.set('access-control-allow-origin', '*')
+  } else if (ALLOWED_ORIGINS.has(origin)) {
     headers.set('access-control-allow-origin', origin)
   }
-
+  appendVaryOrigin(headers)
   return headers
 }
 
-function appendVaryOrigin(headers: Headers): void {
-  const vary = headers.get('vary')
-  if (vary === null) {
-    headers.set('vary', 'Origin')
-    return
-  }
-  const values = vary.split(',').map((value) => value.trim().toLowerCase())
-  if (!values.includes('origin')) {
-    headers.set('vary', `${vary}, Origin`)
-  }
+function addPublicCorsHeaders(headers: Headers): Headers {
+  headers.set('access-control-allow-origin', '*')
+  return headers
 }
 
-export function textResponse(request: Request, body: string, status: number, headers: HeadersInit = {}): Response {
-  const responseHeaders = addSecurityHeaders(new Headers(headers))
-  if (!responseHeaders.has('cache-control')) {
-    responseHeaders.set('cache-control', CACHE_CONTROL)
-  }
-
-  return new Response(body, {
-    status,
-    headers: addCorsHeaders(responseHeaders, request),
-  })
+export function textResponse(
+  request: Request,
+  body: string,
+  status: number,
+  initialHeaders: HeadersInit = {},
+): Response {
+  const responseHeaders = addCorsHeaders(new Headers(initialHeaders), request)
+  responseHeaders.set('content-type', 'text/plain; charset=utf-8')
+  responseHeaders.set('cache-control', CACHE_CONTROL)
+  responseHeaders.set('x-content-type-options', 'nosniff')
+  return new Response(body, { status, headers: responseHeaders })
 }
 
-export function preflightResponse(request: Request): Response {
-  const headers = addSecurityHeaders(new Headers({
-    'access-control-allow-headers': CORS_ALLOW_HEADERS,
-    'access-control-allow-methods': CORS_ALLOW_METHODS,
-    'cache-control': CACHE_CONTROL,
-  }))
-
-  return new Response(null, {
-    status: 204,
-    headers: addCorsHeaders(headers, request),
-  })
+export function internalErrorResponse(request: Request): Response {
+  return textResponse(request, INTERNAL_ERROR_MESSAGE, 500)
 }
 
-function createModelHeaders(object: R2ObjectBody, request: Request): Headers {
+export function preflightResponse(request: Request, isPublic: boolean): Response {
   const headers = new Headers({
-    'content-type': MODEL_CONTENT_TYPE,
-    'content-disposition': `inline; filename="${MODEL_FILENAME}"`,
+    'access-control-allow-methods': CORS_ALLOW_METHODS,
+    'access-control-allow-headers': CORS_ALLOW_HEADERS,
     'cache-control': CACHE_CONTROL,
   })
+  if (isPublic) {
+    addPublicCorsHeaders(headers)
+  } else {
+    addCorsHeaders(headers, request)
+  }
+  return new Response(null, { status: 204, headers })
+}
 
+function setObjectEtag(headers: Headers, object: R2ObjectBody): void {
   if (object.httpEtag) {
     headers.set('etag', object.httpEtag)
   }
-
-  return addCorsHeaders(addSecurityHeaders(headers), request)
 }
 
-export async function createModelResponse(
+function createModelHeaders(request: Request, object: R2ObjectBody, filename: string): Headers {
+  const headers = addCorsHeaders(
+    new Headers({
+      'content-type': 'application/octet-stream',
+      'content-disposition': `inline; filename="${filename}"`,
+      'cache-control': CACHE_CONTROL,
+      'x-content-type-options': 'nosniff',
+    }),
+    request,
+  )
+  setObjectEtag(headers, object)
+  return headers
+}
+
+export function modelObjectResponse(
   request: Request,
-  env: NormalizedEnv,
-  decision: ModelAccessDecision,
-): Promise<Response> {
-  if (decision === 'forbidden') {
-    return textResponse(request, 'Forbidden', 403)
-  }
+  object: R2ObjectBody,
+  filename: string,
+): Response {
+  const headers = createModelHeaders(request, object, filename)
+  return new Response(request.method === 'HEAD' ? null : object.body, { status: 200, headers })
+}
 
-  const objectKey = decision === 'real' ? env.realModelObjectKey : env.decoyModelObjectKey
-  const object = await env.modelBucket.get(objectKey)
-  if (object === null) {
-    return textResponse(request, INTERNAL_ERROR_MESSAGE, 500, { 'content-type': 'text/plain;charset=UTF-8' })
-  }
-
-  return new Response(request.method === 'HEAD' ? null : object.body, {
-    status: 200,
-    headers: createModelHeaders(object, request),
-  })
+export function runtimeObjectResponse(request: Request, object: R2ObjectBody): Response {
+  const headers = addPublicCorsHeaders(new Headers())
+  headers.set('content-type', 'application/wasm')
+  headers.set('cache-control', 'public, max-age=31536000, immutable')
+  headers.set('x-content-type-options', 'nosniff')
+  headers.set('content-length', String(object.size))
+  setObjectEtag(headers, object)
+  return new Response(request.method === 'HEAD' ? null : object.body, { status: 200, headers })
 }

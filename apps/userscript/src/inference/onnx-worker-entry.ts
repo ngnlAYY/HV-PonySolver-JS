@@ -1,175 +1,103 @@
-import { onnxRuntimeConfig } from './inference-config'
+import type * as Ort from 'onnxruntime-web/wasm'
+
 import { calculateLetterboxLayout, copyRgbaToChwFloat32 } from './image-preprocess'
 import { parseYoloOutput } from './yolo-output-parser'
 
-declare const __HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE__: string | undefined
+const INPUT_SIZE = 640
+const INPUT_NAME = 'images'
+const OUTPUT_NAME = 'output0'
 
-type OrtOutput = Readonly<{
-  data?: Float32Array | { buffer: ArrayBuffer, byteOffset: number, byteLength: number }
-}>
+type InitRequest = Readonly<{ type: 'init'; requestId: number; modelBuffer: ArrayBuffer }>
+type DetectRequest = Readonly<{ type: 'detect'; requestId: number; imageBlob: Blob }>
+type WorkerRequest = InitRequest | DetectRequest
+type WorkerResponse =
+  | Readonly<{ type: 'response'; requestId: number; result?: ReturnType<typeof parseYoloOutput> }>
+  | Readonly<{ type: 'error'; requestId: number; message: string }>
 
-type OrtSession = Readonly<{
-  run: (feeds: { images: unknown }) => Promise<Record<string, OrtOutput>>
-}>
-
-type OrtGlobal = Readonly<{
-  env: { wasm: { wasmPaths?: string, numThreads?: number } }
-  Tensor: new (type: 'float32', data: Float32Array, dims: number[]) => unknown
-  InferenceSession: {
-    create: (modelBuffer: ArrayBuffer, options: { executionProviders: string[] }) => Promise<OrtSession>
-  }
-}>
-
-type WorkerGlobal = DedicatedWorkerGlobalScope & {
-  ort?: OrtGlobal
+type WorkerScope = Readonly<{
+  postMessage(message: WorkerResponse): void
+}> & {
+  onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null
 }
 
-type InitMessage = Readonly<{
-  type: 'init'
-  requestId?: number
-  wasmPath: string
-  modelBuffer: ArrayBuffer
-}>
+type OnnxRuntime = typeof Ort
+type RuntimeInitializer = (runtime: OnnxRuntime) => void | Promise<void>
 
-type DetectMessage = Readonly<{
-  type: 'detect'
-  requestId?: number
-  imageBlob: Blob
-  size: number
-}>
+export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: RuntimeInitializer): void {
+  const workerScope = globalThis as unknown as WorkerScope
+  let session: Ort.InferenceSession | undefined
+  let runtimeInitialization: Promise<void> | undefined
 
-type WorkerRequest = InitMessage | DetectMessage
-
-const workerSelf = self as WorkerGlobal
-const runtimeSource = __HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE__
-let sessionPromise: Promise<OrtSession> | null = null
-let session: OrtSession | null = null
-let preprocessCanvas: OffscreenCanvas | null = null
-let preprocessContext: OffscreenCanvasRenderingContext2D | null = null
-let preprocessSize = 0
-let preprocessInput: Float32Array | null = null
-
-function loadBundledRuntime(): void {
-  if (!runtimeSource) {
-    return
-  }
-  const runtimeLoader = new Function('self', `${runtimeSource}\nif (!self.ort && typeof ort !== 'undefined') self.ort = ort;`)
-  runtimeLoader(workerSelf)
-}
-
-async function ensureSession(): Promise<OrtSession> {
-  if (session) {
-    return session
-  }
-  if (!sessionPromise) {
-    throw new Error('ONNX Session 未初始化')
-  }
-  session = await sessionPromise
-  return session
-}
-
-function ensurePreprocessResources(size: number): OffscreenCanvasRenderingContext2D {
-  if (preprocessCanvas && preprocessContext && preprocessSize === size) {
-    return preprocessContext
-  }
-  preprocessCanvas = new OffscreenCanvas(size, size)
-  preprocessContext = preprocessCanvas.getContext('2d', { willReadFrequently: true })
-  if (!preprocessContext) {
-    throw new Error('无法创建 2D canvas 上下文')
-  }
-  preprocessSize = size
-  return preprocessContext
-}
-
-async function preprocessImage(imageBlob: Blob, size: number): Promise<Float32Array> {
-  if (typeof createImageBitmap !== 'function') {
-    throw new Error('当前环境不支持 createImageBitmap')
-  }
-  if (typeof OffscreenCanvas !== 'function') {
-    throw new Error('当前环境不支持 OffscreenCanvas')
+  async function ensureRuntimeInitialized(): Promise<void> {
+    runtimeInitialization ??= Promise.resolve(initializeRuntime(runtime))
+    return runtimeInitialization
   }
 
-  const bitmap = await createImageBitmap(imageBlob)
-  try {
-    const context = ensurePreprocessResources(size)
-    context.fillStyle = 'rgb(114, 114, 114)'
-    context.fillRect(0, 0, size, size)
-    const layout = calculateLetterboxLayout(bitmap.width, bitmap.height, size)
-    context.drawImage(bitmap, layout.x, layout.y, layout.width, layout.height)
-    const imageData = context.getImageData(0, 0, size, size).data
-    const plane = size * size
-    if (!preprocessInput || preprocessInput.length !== plane * 3) {
-      preprocessInput = new Float32Array(plane * 3)
-    }
-    const input = preprocessInput
-    copyRgbaToChwFloat32(imageData, input, plane)
-    return input
-  } finally {
-    bitmap.close()
-  }
-}
-
-async function handleInit(message: InitMessage): Promise<{ type: 'response', requestId: number | undefined }> {
-  loadBundledRuntime()
-  if (!workerSelf.ort) {
+  async function createInputTensor(imageBlob: Blob): Promise<Ort.Tensor> {
+    const bitmap = await createImageBitmap(imageBlob)
     try {
-      importScripts(onnxRuntimeConfig.ortScriptUrl)
-    } catch (error) {
-      throw new Error(`onnxruntime-web 加载失败: ${error instanceof Error ? error.message : String(error)}`, {
-        cause: error,
-      })
+      if (bitmap.width < 1 || bitmap.height < 1) {
+        throw new Error('验证码图片尺寸无效')
+      }
+      const canvas = new OffscreenCanvas(INPUT_SIZE, INPUT_SIZE)
+      const context = canvas.getContext('2d', { willReadFrequently: true })
+      if (!context) {
+        throw new Error('无法创建验证码画布')
+      }
+      context.fillStyle = '#727272'
+      context.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE)
+      const layout = calculateLetterboxLayout(bitmap.width, bitmap.height, INPUT_SIZE)
+      context.drawImage(bitmap, layout.x, layout.y, layout.width, layout.height)
+      const rgba = context.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data
+      const plane = INPUT_SIZE * INPUT_SIZE
+      const data = new Float32Array(plane * 3)
+      copyRgbaToChwFloat32(rgba, data, plane)
+      return new runtime.Tensor('float32', data, [1, 3, INPUT_SIZE, INPUT_SIZE])
+    } finally {
+      bitmap.close()
     }
   }
-  if (!workerSelf.ort) {
-    throw new Error('onnxruntime-web 未加载')
-  }
-  workerSelf.ort.env.wasm.wasmPaths = message.wasmPath
-  workerSelf.ort.env.wasm.numThreads = 1
-  if (!sessionPromise) {
-    sessionPromise = workerSelf.ort.InferenceSession.create(message.modelBuffer, {
+
+  async function initializeSession(modelBuffer: ArrayBuffer): Promise<void> {
+    await ensureRuntimeInitialized()
+    await session?.release()
+    session = await runtime.InferenceSession.create(modelBuffer, {
       executionProviders: ['wasm'],
+      graphOptimizationLevel: 'disabled',
     })
   }
-  session = await sessionPromise
-  return { type: 'response', requestId: message.requestId }
-}
 
-async function handleDetect(message: DetectMessage): Promise<{ type: 'response', requestId: number | undefined, result: ReturnType<typeof parseYoloOutput> }> {
-  const currentSession = await ensureSession()
-  const input = await preprocessImage(message.imageBlob, message.size)
-  if (!workerSelf.ort) {
-    throw new Error('onnxruntime-web 未加载')
+  async function detect(imageBlob: Blob): Promise<ReturnType<typeof parseYoloOutput>> {
+    if (!session) {
+      throw new Error('ONNX Worker 尚未初始化')
+    }
+    const input = await createInputTensor(imageBlob)
+    const outputs = await session.run({ [INPUT_NAME]: input })
+    const output = outputs[OUTPUT_NAME]
+    if (!output || !(output.data instanceof Float32Array)) {
+      throw new Error('模型输出格式无效')
+    }
+    return parseYoloOutput(output.data)
   }
-  const tensor = new workerSelf.ort.Tensor('float32', input, [1, 3, message.size, message.size])
-  const results = await currentSession.run({ images: tensor })
-  const firstOutputKey = Object.keys(results)[0]
-  const firstOutput = firstOutputKey ? results[firstOutputKey] : undefined
-  if (!firstOutput?.data) {
-    throw new Error('ONNX 输出为空')
-  }
-  const output = firstOutput.data instanceof Float32Array
-    ? firstOutput.data
-    : new Float32Array(firstOutput.data.buffer, firstOutput.data.byteOffset, firstOutput.data.byteLength / Float32Array.BYTES_PER_ELEMENT)
-  return { type: 'response', requestId: message.requestId, result: parseYoloOutput(output) }
-}
 
-workerSelf.onmessage = async (event: MessageEvent<WorkerRequest>) => {
-  const message = event.data || ({} as WorkerRequest)
-  try {
-    if (message.type === 'init') {
-      workerSelf.postMessage(await handleInit(message))
-      return
-    }
-    if (message.type === 'detect') {
-      workerSelf.postMessage(await handleDetect(message))
-      return
-    }
-    throw new Error(`未知消息类型: ${(message as { type?: string }).type}`)
-  } catch (error) {
-    workerSelf.postMessage({
-      type: 'error',
-      requestId: message.requestId,
-      message: error instanceof Error ? error.message : String(error),
-    })
+  workerScope.onmessage = (event): void => {
+    const request = event.data
+    void (async () => {
+      try {
+        if (request.type === 'init') {
+          await initializeSession(request.modelBuffer)
+          workerScope.postMessage({ type: 'response', requestId: request.requestId })
+          return
+        }
+        const result = await detect(request.imageBlob)
+        workerScope.postMessage({ type: 'response', requestId: request.requestId, result })
+      } catch (error) {
+        workerScope.postMessage({
+          type: 'error',
+          requestId: request.requestId,
+          message: error instanceof Error ? error.message : String(error),
+        })
+      }
+    })()
   }
 }

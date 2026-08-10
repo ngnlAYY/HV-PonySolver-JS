@@ -1,61 +1,45 @@
 import { resolve } from 'node:path'
 import {
-  onnxRuntimeAssetIntegrityMatches,
-  readFirstExistingOnnxRuntimeAssetStats,
+  assetIntegrityMatches,
+  readAssetStats,
   readOnnxRuntimeAssetsManifest,
-  resolveInstalledOnnxRuntimePackageAssetPathCandidates,
+  resolveRuntimeBundlePath,
 } from './onnx-runtime-assets.mjs'
 
-if (isDirectRun()) {
-  try {
-    await runCli(resolveRepoRoot(process.argv.slice(2)))
-  } catch (error) {
-    writeError(error instanceof Error ? error.message : String(error))
-    process.exitCode = 1
+async function verifyAsset(filePath, expected, label) {
+  const actual = await readAssetStats(filePath)
+  if (!assetIntegrityMatches(actual, expected)) {
+    throw new Error(
+      `${label} integrity mismatch: expected byteLength=${expected.byteLength} sha256=${expected.sha256}; ` +
+        `actual byteLength=${actual.byteLength} sha256=${actual.sha256}`,
+    )
   }
+  return `${label} byteLength=${actual.byteLength} sha256=${actual.sha256}`
 }
 
-async function runCli(repoRoot) {
+export async function runCli(repoRoot, env = process.env) {
   const manifest = await readOnnxRuntimeAssetsManifest(repoRoot)
-  const verifiedAssets = []
-  for (const asset of [manifest.scriptAsset, ...manifest.wasmAssets]) {
-    const assetPaths = resolveInstalledOnnxRuntimePackageAssetPathCandidates(manifest, asset, repoRoot)
-    const { stats: actual } = await readFirstExistingOnnxRuntimeAssetStats(assetPaths)
-    if (!onnxRuntimeAssetIntegrityMatches(actual, asset)) {
-      writeError(`ONNX Runtime asset integrity mismatch: ${asset.filename}`)
-      writeError(`Expected: byteLength: ${asset.byteLength}, sha256: ${asset.sha256}`)
-      writeError(`Actual: byteLength: ${actual.byteLength}, sha256: ${actual.sha256}`)
-      process.exitCode = 1
-      return
-    }
-    verifiedAssets.push(`${asset.filename} byteLength=${actual.byteLength}, sha256=${actual.sha256}`)
+  const verified = [
+    await verifyAsset(resolveRuntimeBundlePath(manifest, repoRoot), manifest.bundleAsset, 'runtime bundle'),
+  ]
+  if (env.ORT_RUNTIME_WASM_FILE) {
+    verified.push(await verifyAsset(resolve(env.ORT_RUNTIME_WASM_FILE), manifest.wasmAsset, 'runtime WASM'))
   }
-
-  writeOutput(`ONNX Runtime assets verified: ${verifiedAssets.join('; ')}`)
-}
-
-function isDirectRun() {
-  return process.argv[1] ? resolve(process.argv[1]) === import.meta.filename : false
+  process.stdout.write(`ONNX Runtime assets verified: ${verified.join('; ')}\n`)
 }
 
 function resolveRepoRoot(args) {
-  const repoRootIndex = args.indexOf('--repo-root')
-  if (repoRootIndex === -1) {
-    return resolve(import.meta.dirname, '../../..')
+  const index = args.indexOf('--repo-root')
+  if (index === -1) return resolve(import.meta.dirname, '../../..')
+  if (!args[index + 1]) throw new Error('--repo-root requires a path')
+  return resolve(args[index + 1])
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
+  try {
+    await runCli(resolveRepoRoot(process.argv.slice(2)))
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exitCode = 1
   }
-  const repoRoot = args[repoRootIndex + 1]
-  if (!repoRoot) {
-    throw new Error('--repo-root requires a path')
-  }
-  return resolve(repoRoot)
 }
-
-function writeOutput(message) {
-  process.stdout.write(`${message}\n`)
-}
-
-function writeError(message) {
-  process.stderr.write(`${message}\n`)
-}
-
-export { resolveRepoRoot, runCli }

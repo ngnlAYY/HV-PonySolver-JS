@@ -1,7 +1,6 @@
 export {
   imagePreprocessConfig,
   inferenceTimeoutConfig,
-  onnxRuntimeConfig,
   yoloOutputConfig,
 } from '../inference/inference-config'
 export { solverConfig } from '../captcha/solver-config'

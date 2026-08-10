@@ -52,7 +52,11 @@ function readModelWorkerHttpFacts(requestRouterSource, modelAccessSource, modelR
     'apps/model-worker/src/model-response.ts',
     errors,
   )
-  const selectedObjectMissingStatus = readSelectedObjectMissingStatus(modelResponseSource, errors)
+  const selectedObjectMissingStatus = readSelectedObjectMissingStatus(
+    modelResponseSource,
+    requestRouterSource,
+    errors,
+  )
   validateModelWorkerHttpUseSites(requestRouterSource, modelResponseSource, errors)
 
   if (!hasBearerAuthorizationAccessPath(modelAccessSource) || !hasBearerAuthorizationSelectionPath(modelAccessSource)) {
@@ -196,13 +200,19 @@ function hasMemberCallWithStringAndIdentifierArgument(source, objectName, method
   return false
 }
 
-function readSelectedObjectMissingStatus(modelResponseSource, errors) {
-  const createModelResponseBody = readFunctionBodySource(modelResponseSource, 'createModelResponse')
-  const bucketGetIndex = createModelResponseBody.indexOf('env.modelBucket.get')
-  const searchSource = bucketGetIndex === -1 ? '' : createModelResponseBody.slice(bucketGetIndex)
-  const match = /if\s*\(\s*(?:object\s*={2,3}\s*null|null\s*={2,3}\s*object|object\s*==\s*null)\s*\)\s*(?:{\s*)?return\s+textResponse\(\s*request\s*,\s*INTERNAL_ERROR_MESSAGE\s*,\s*(?<status>[0-9]+)/s.exec(stripIgnoredSyntax(stripDeadFalseBranches(searchSource)))
-  const status = match?.groups?.status
-  if (!status) {
+function readSelectedObjectMissingStatus(modelResponseSource, requestRouterSource, errors) {
+  const internalErrorResponseBody = readFunctionBodySource(modelResponseSource, 'internalErrorResponse')
+  const statusMatch = /return\s+textResponse\(\s*request\s*,\s*INTERNAL_ERROR_MESSAGE\s*,\s*(?<status>[0-9]+)/s.exec(
+    stripIgnoredSyntax(internalErrorResponseBody),
+  )
+  const serveModelBody = readFunctionBodySource(requestRouterSource, 'serveModel')
+  const bucketGetIndex = serveModelBody.indexOf('env.MODEL_BUCKET.get')
+  const searchSource = bucketGetIndex === -1 ? '' : serveModelBody.slice(bucketGetIndex)
+  const missingObjectMatch = /if\s*\(\s*(?:!\s*object|object\s*={2,3}\s*null|null\s*={2,3}\s*object|object\s*==\s*null)\s*\)\s*(?:{\s*)?return\s+internalErrorResponse\(\s*request\s*\)/s.exec(
+    stripIgnoredSyntax(stripDeadFalseBranches(searchSource)),
+  )
+  const status = statusMatch?.groups?.status
+  if (!status || !missingObjectMatch) {
     errors.push('apps/model-worker/src/model-response.ts must return a literal status for selected R2 object misses')
     return null
   }

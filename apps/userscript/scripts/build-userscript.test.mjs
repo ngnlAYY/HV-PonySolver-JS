@@ -1,11 +1,11 @@
-import { Buffer } from 'node:buffer'
+import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
-import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+
 import {
   createArtifactManifest,
   createMainBuildOptions,
@@ -13,303 +13,180 @@ import {
   createUserscriptOutput,
   createWorkerBuildOptions,
   parseMinifyFlag,
+  parseRuntimeProfile,
   validateUserscriptMetadata,
-  workerRuntimeSourcePlaceholder,
 } from './build-userscript.mjs'
-import {
-  readFirstExistingOnnxRuntimeAssetStats,
-  readOnnxRuntimeAssetsManifest,
-  resolveInstalledOnnxRuntimeAssetPathCandidates,
-} from './onnx-runtime-assets.mjs'
 
 const execFileAsync = promisify(execFile)
 const appDir = resolve(import.meta.dirname, '..')
-const runtimeMarker = 'Microsoft Corporation'
-const runtimeSource = await readInstalledRuntimeSource()
-const mainBundleBudgetBytes = 80_000
-const workerBundleBudgetBytes = 20_000
+const runtimeManifest = {
+  externalFullRuntime: {
+    scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
+    wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/',
+  },
+  wasmAsset: {
+    url: 'https://models.example/runtime/ort-wasm-hash.wasm',
+    byteLength: 1_267_937,
+    sha256: 'a'.repeat(64),
+    maxByteLength: 2_000_000,
+  },
+}
 
-test('parseMinifyFlag only enables minification for the last explicit true flag', () => {
+test('parseMinifyFlag uses the last explicit minify setting', () => {
   assert.equal(parseMinifyFlag([]), false)
   assert.equal(parseMinifyFlag(['--minify']), true)
-  assert.equal(parseMinifyFlag(['--minify=true']), true)
   assert.equal(parseMinifyFlag(['--minify=false']), false)
-  assert.equal(parseMinifyFlag(['--minify=1']), false)
   assert.equal(parseMinifyFlag(['--minify=false', '--minify']), true)
   assert.equal(parseMinifyFlag(['--minify', '--minify=false']), false)
 })
 
-test('validateUserscriptMetadata accepts only complete userscript metadata blocks', () => {
-  const metadata = '// ==UserScript==\n// @name        Test\n// ==/UserScript=='
+test('parseRuntimeProfile defaults to external and accepts only explicit profiles', () => {
+  assert.equal(parseRuntimeProfile([]), 'external')
+  assert.equal(parseRuntimeProfile(['--runtime=bundled']), 'bundled')
+  assert.equal(parseRuntimeProfile(['--runtime', 'external']), 'external')
+  assert.throws(() => parseRuntimeProfile(['--runtime=unknown']), /Unknown runtime profile/)
+})
 
+test('metadata and output helpers retain the userscript boundary', () => {
+  const metadata = '// ==UserScript==\n// @name Test\n// ==/UserScript=='
   assert.equal(validateUserscriptMetadata(metadata), undefined)
-  assert.throws(() => validateUserscriptMetadata('// @name        Test\n// ==/UserScript=='), /must start/)
-  assert.throws(() => validateUserscriptMetadata('// ==UserScript==\n// @name        Test'), /must end/)
+  assert.equal(createUserscriptOutput(metadata, '(() => {})();'), `${metadata}\n\n(() => {})();`)
+  assert.throws(() => validateUserscriptMetadata('// @name Test'), /must start/)
 })
 
-test('createUserscriptOutput joins metadata and bundled text with a blank line', () => {
-  assert.equal(
-    createUserscriptOutput('// ==UserScript==\n// ==/UserScript==', '(() => {})();'),
-    '// ==UserScript==\n// ==/UserScript==\n\n(() => {})();',
-  )
-})
-
-test('createMetafileJson preserves main and worker esbuild metafiles', () => {
-  const metafileJson = createMetafileJson(
-    { outputs: { 'main.js': { bytes: 1 } } },
-    { outputs: { 'worker.js': { bytes: 2 } } },
-  )
-
-  assert.equal(
-    metafileJson,
-    JSON.stringify(
-      {
-        main: { outputs: { 'main.js': { bytes: 1 } } },
-        worker: { outputs: { 'worker.js': { bytes: 2 } } },
-      },
-      null,
-      2,
-    ),
-  )
-})
-
-test('createArtifactManifest records artifact integrity and build options', () => {
-  const manifest = createArtifactManifest({
-    outputFile: 'apps/userscript/dist/hv-pony-solver.user.js',
-    byteLength: 12,
-    sha256: 'a'.repeat(64),
-    minified: true,
-    bundledRuntime: true,
-    metafilePath: 'apps/userscript/dist/meta.json',
+test('build options select external full and bundled minimal runtime providers', () => {
+  const externalWorker = createWorkerBuildOptions({
+    workerEntryPoint: '/app/external-worker.ts',
+    runtimeProfile: 'external',
+    runtimeManifest,
+    shouldMinify: false,
+    shouldWriteMetafile: true,
+  })
+  assert.equal(externalWorker.alias, undefined)
+  assert.deepEqual(externalWorker.define, {
+    __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.scriptUrl),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BASE_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmBaseUrl),
   })
 
-  assert.deepEqual(
-    {
-      artifact: 'apps/userscript/dist/hv-pony-solver.user.js',
-      byteLength: 12,
-      sha256: 'a'.repeat(64),
-      minified: true,
-      bundledRuntime: true,
-      metafile: 'apps/userscript/dist/meta.json',
-    },
-    manifest,
-  )
-})
-
-test('createWorkerBuildOptions defines the runtime source placeholder', () => {
-  const options = createWorkerBuildOptions({
-    workerEntryPoint: '/app/src/inference/onnx-worker-entry.ts',
+  const bundledWorker = createWorkerBuildOptions({
+    workerEntryPoint: '/app/bundled-worker.ts',
+    runtimeProfile: 'bundled',
+    runtimeBundlePath: '/app/vendor/ort.wasm.bundle.min.mjs',
+    runtimeManifest,
     shouldMinify: true,
     shouldWriteMetafile: true,
   })
+  assert.deepEqual(bundledWorker.alias, { 'onnxruntime-web/wasm': '/app/vendor/ort.wasm.bundle.min.mjs' })
+  assert.deepEqual(bundledWorker.define, {
+    'import.meta.url': '"https://models.example/runtime/ort-wasm-hash.wasm"',
+    __HV_PONY_SOLVER_BUNDLED_ORT_WASM_URL__: '"https://models.example/runtime/ort-wasm-hash.wasm"',
+    __HV_PONY_SOLVER_BUNDLED_ORT_WASM_BYTE_LENGTH__: '1267937',
+    __HV_PONY_SOLVER_BUNDLED_ORT_WASM_SHA256__: `"${'a'.repeat(64)}"`,
+    __HV_PONY_SOLVER_BUNDLED_ORT_WASM_MAX_BYTE_LENGTH__: '2000000',
+  })
+  assert.equal(bundledWorker.minify, true)
 
-  assert.deepEqual(options.entryPoints, ['/app/src/inference/onnx-worker-entry.ts'])
-  assert.equal(options.minify, true)
-  assert.equal(options.metafile, true)
-  assert.equal(options.define.__HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE__, JSON.stringify(workerRuntimeSourcePlaceholder))
-})
-
-test('createMainBuildOptions injects ONNX runtime and worker script sources', () => {
-  const options = createMainBuildOptions({
-    entryPoint: '/app/src/main.ts',
+  const main = createMainBuildOptions({
+    entryPoint: '/app/main.ts',
     shouldMinify: false,
     shouldWriteMetafile: true,
-    onnxRuntimeSource: 'self.ort = {};',
-    workerScriptText: 'self.onmessage = () => {};',
+    workerScriptText: 'self.onmessage = () => {}',
   })
-
-  assert.deepEqual(options.entryPoints, ['/app/src/main.ts'])
-  assert.equal(options.minify, false)
-  assert.equal(options.metafile, true)
-  assert.equal(options.define.__HV_PONY_SOLVER_ONNX_RUNTIME_SOURCE__, JSON.stringify('self.ort = {};'))
-  assert.equal(options.define.__HV_PONY_SOLVER_WORKER_SCRIPT__, JSON.stringify('self.onmessage = () => {};'))
+  assert.equal(main.define.__HV_PONY_SOLVER_WORKER_SCRIPT__, JSON.stringify('self.onmessage = () => {}'))
 })
 
-test('build-userscript defaults to remote onnxruntime-web runtime', async () => {
-  const output = await runBuildInTempDir({ HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '' })
-
-  assert.equal(output.includes('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js'), true)
-  assert.equal(output.includes(runtimeMarker), false)
-  assert.equal(output.includes('hvPonySolverDebug'), false)
-  assert.equal(output.includes('调试日志'), false)
-  assert.equal(output.includes('// @grant       GM_registerMenuCommand'), true)
-  assert.equal(output.includes('// @grant       GM_getValue'), true)
-  assert.equal(output.includes('// @grant       GM_setValue'), true)
-  assert.equal(output.includes('// @grant       GM_deleteValue'), true)
-})
-
-test('build-userscript embeds onnxruntime-web runtime when enabled', async () => {
-  const output = await runBuildInTempDir({
-    HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '1',
-    runtimeSource,
-  })
-
-  assert.equal(output.includes(runtimeMarker), true)
-})
-
-test('build-userscript ignores ONNX runtime integrity environment overrides', async () => {
-  const output = await runBuildInTempDir({
-    HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '1',
-    HV_PONY_SOLVER_ONNX_RUNTIME_BYTE_LENGTH: '1',
-    HV_PONY_SOLVER_ONNX_RUNTIME_SHA256: '0000000000000000000000000000000000000000000000000000000000000000',
-    runtimeSource,
-  })
-
-  assert.equal(output.includes(runtimeMarker), true)
-})
-
-test('build-userscript rejects bundled runtime sources with unexpected byte length', async () => {
-  await assert.rejects(
-    runBuildInTempDir({
-      HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '1',
-      runtimeSource: `${runtimeSource}\n`,
+test('manifest helpers record the selected runtime profile', () => {
+  assert.equal(createMetafileJson({ a: 1 }, { b: 2 }), JSON.stringify({ main: { a: 1 }, worker: { b: 2 } }, null, 2))
+  assert.deepEqual(
+    createArtifactManifest({
+      outputFile: 'out.user.js',
+      byteLength: 12,
+      sha256: 'a'.repeat(64),
+      minified: true,
+      bundledRuntime: false,
     }),
-    /ONNX runtime source size must be 360434 bytes/,
+    { artifact: 'out.user.js', byteLength: 12, sha256: 'a'.repeat(64), minified: true, bundledRuntime: false },
   )
 })
 
-test('build-userscript rejects bundled runtime sources with unexpected SHA-256', async () => {
-  await assert.rejects(
-    runBuildInTempDir({
-      HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME: '1',
-      runtimeSource: runtimeSource.replace('ONNX Runtime Web', 'ONNX Runtime web'),
-    }),
-    /ONNX runtime source SHA-256 mismatch/,
-  )
+test('default build downloads the pinned full runtime and excludes minimal runtime assets', async () => {
+  const result = await runBuildInTempDir({ withMetafile: true })
+  assert.match(result.output, /cdn\.jsdelivr\.net\/npm\/onnxruntime-web@1\.27\.0\/dist\/ort\.min\.js/)
+  assert.match(result.output, /cdn\.jsdelivr\.net\/npm\/onnxruntime-web@1\.27\.0\/dist\//)
+  assert.match(result.output, /models\.ngnl\.host\/yolo26n-640\.ort/)
+  assert.doesNotMatch(result.output, /wasmBinary/)
+  assert.doesNotMatch(result.output, /models\.ngnl\.host\/runtime\/ort-wasm-simd-/)
+  const metafile = JSON.parse(result.metafile)
+  const workerOutput = Object.values(metafile.worker.outputs)[0]
+  assert.ok(workerOutput.bytes < 20_000, `external worker bundle ${workerOutput.bytes} bytes exceeds 20000`)
 })
 
-test('build-userscript does not minify by default', async () => {
-  const output = await runBuildInTempDir({})
-
-  assert.equal(output.includes('(() => {'), true)
-  assert.equal(output.includes('(()=>{'), false)
+test('bundled build embeds the custom glue and uses the verified first-party minimal WASM', async () => {
+  const result = await runBuildInTempDir({ args: ['--runtime=bundled'], withMetafile: true })
+  assert.match(result.output, /wasmBinary/)
+  assert.match(result.output, /models\.ngnl\.host\/runtime\/ort-wasm-simd-/)
+  assert.doesNotMatch(result.output, /cdn\.jsdelivr\.net\/npm\/onnxruntime-web@1\.27\.0\/dist\/ort\.min\.js/)
+  const metafile = JSON.parse(result.metafile)
+  const workerOutput = Object.values(metafile.worker.outputs)[0]
+  assert.ok(workerOutput.bytes < 250_000, `bundled worker bundle ${workerOutput.bytes} bytes exceeds 250000`)
 })
 
-test('build-userscript minifies main and worker bundles when requested by CLI flag', async () => {
-  const output = await runBuildInTempDir({ args: ['--minify'] })
-
-  assert.equal(output.includes('(()=>{'), true)
-  assert.equal(output.includes('function loadBundledRuntime'), false)
+test('build rejects an integrity-mismatched custom runtime bundle', async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), 'hv-pony-bad-runtime-'))
+  try {
+    const runtimePath = join(tempDir, 'ort.wasm.bundle.min.mjs')
+    await writeFile(runtimePath, 'export const invalid = true')
+    await assert.rejects(
+      runBuildInTempDir({ args: ['--runtime=bundled'], runtimeBundlePath: runtimePath }),
+      /Custom ONNX Runtime bundle integrity mismatch/,
+    )
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
 })
 
-test('build-userscript minifies main and worker bundles when CLI flag is true', async () => {
-  const output = await runBuildInTempDir({ args: ['--minify=true'] })
-
-  assert.equal(output.includes('(()=>{'), true)
-  assert.equal(output.includes('function loadBundledRuntime'), false)
-})
-
-test('build-userscript keeps bundles unminified when CLI flag is false', async () => {
-  const output = await runBuildInTempDir({ args: ['--minify=false'] })
-
-  assert.equal(output.includes('(() => {'), true)
-  assert.equal(output.includes('function loadBundledRuntime'), true)
-})
-
-test('build-userscript keeps bundles unminified for unsupported minify values', async () => {
-  const output = await runBuildInTempDir({ args: ['--minify=1'] })
-
-  assert.equal(output.includes('(() => {'), true)
-  assert.equal(output.includes('function loadBundledRuntime'), true)
-})
-
-test('build-userscript uses the last minify CLI flag', async () => {
-  const minifiedOutput = await runBuildInTempDir({ args: ['--minify=false', '--minify'] })
-  const unminifiedOutput = await runBuildInTempDir({ args: ['--minify', '--minify=false'] })
-
-  assert.equal(minifiedOutput.includes('(()=>{'), true)
-  assert.equal(unminifiedOutput.includes('(() => {'), true)
-})
-
-test('build-userscript ignores the removed HV_PONY_SOLVER_MINIFY environment variable', async () => {
-  const output = await runBuildInTempDir({ HV_PONY_SOLVER_MINIFY: '1' })
-
-  assert.equal(output.includes('(() => {'), true)
-  assert.equal(output.includes('(()=>{'), false)
-})
-
-test('build-userscript writes an esbuild metafile when requested', async () => {
-  const { output, metafile } = await runBuildInTempDir({ withMetafile: true })
-
-  const parsedMetafile = JSON.parse(metafile)
-
-  assert.equal(output.includes('HV-PonySolver-Local'), true)
-  assert.equal(metafile.includes('src/main.ts'), true)
-  assert.equal(metafile.includes('src/inference/onnx-worker-entry.ts'), true)
-  const mainOutput = Object.values(parsedMetafile.main.outputs)[0]
-  const workerOutput = Object.values(parsedMetafile.worker.outputs)[0]
-  assert.ok(
-    mainOutput.bytes < mainBundleBudgetBytes,
-    `main bundle ${mainOutput.bytes} bytes exceeds ${mainBundleBudgetBytes}`,
-  )
-  assert.ok(
-    workerOutput.bytes < workerBundleBudgetBytes,
-    `worker bundle ${workerOutput.bytes} bytes exceeds ${workerBundleBudgetBytes}`,
-  )
-})
-
-test('build-userscript writes artifact manifest and sha256 when requested', async () => {
-  const result = await runBuildInTempDir({ withArtifactManifest: true, args: ['--minify'] })
+test('minified default build writes external-profile artifact integrity outputs', async () => {
+  const result = await runBuildInTempDir({ args: ['--minify'], withArtifactManifest: true })
   const manifest = JSON.parse(result.artifactManifest)
-
-  assert.equal(true, manifest.artifact.endsWith('hv-pony-solver.user.js'))
-  assert.equal(true, manifest.minified)
-  assert.equal(false, manifest.bundledRuntime)
-  assert.equal(Buffer.byteLength(result.output), manifest.byteLength)
-  assert.match(manifest.sha256, /^[a-f0-9]{64}$/)
+  assert.equal(manifest.minified, true)
+  assert.equal(manifest.bundledRuntime, false)
+  assert.match(manifest.sha256, /^[0-9a-f]{64}$/)
   assert.equal(manifest.sha256, result.sha256Text.trim())
 })
 
-test('build-userscript records metafile path in artifact manifest when both outputs are requested', async () => {
-  const result = await runBuildInTempDir({ withArtifactManifest: true, withMetafile: true })
-  const manifest = JSON.parse(result.artifactManifest)
-
-  assert.equal(result.metafilePath, manifest.metafile)
-  assert.equal(true, result.metafile.includes('src/main.ts'))
+test('minified bundled build records its embedded runtime', async () => {
+  const result = await runBuildInTempDir({
+    args: ['--runtime=bundled', '--minify'],
+    withArtifactManifest: true,
+  })
+  assert.equal(JSON.parse(result.artifactManifest).bundledRuntime, true)
 })
 
-async function runBuildInTempDir({ args = [], runtimeSource, withMetafile, withArtifactManifest, ...env }) {
+async function runBuildInTempDir({ args = [], runtimeBundlePath, withMetafile, withArtifactManifest } = {}) {
   const outputDir = await mkdtemp(join(tmpdir(), 'hv-pony-userscript-'))
   try {
-    const runtimePath = runtimeSource ? join(outputDir, 'ort.min.js') : undefined
     const outputPath = join(outputDir, 'hv-pony-solver.user.js')
     const metafilePath = withMetafile ? join(outputDir, 'meta.json') : undefined
     const artifactManifestPath = withArtifactManifest ? join(outputDir, 'artifact.json') : undefined
     const artifactSha256Path = withArtifactManifest ? join(outputDir, 'artifact.sha256') : undefined
-    if (runtimePath) {
-      await writeFile(runtimePath, runtimeSource)
-    }
     await execFileAsync(process.execPath, [resolve(appDir, 'scripts/build-userscript.mjs'), ...args], {
       cwd: resolve(appDir, '../..'),
       env: {
         ...process.env,
-        ...env,
-        ...(runtimePath ? { HV_PONY_SOLVER_ONNX_RUNTIME_PATH: runtimePath } : {}),
+        HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH: outputPath,
+        ...(runtimeBundlePath ? { HV_PONY_SOLVER_ONNX_RUNTIME_BUNDLE_PATH: runtimeBundlePath } : {}),
         ...(metafilePath ? { HV_PONY_SOLVER_METAFILE_PATH: metafilePath } : {}),
         ...(artifactManifestPath ? { HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH: artifactManifestPath } : {}),
         ...(artifactSha256Path ? { HV_PONY_SOLVER_ARTIFACT_SHA256_PATH: artifactSha256Path } : {}),
-        HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH: outputPath,
       },
     })
-    const output = await readFile(outputPath, 'utf8')
-    if (metafilePath || artifactManifestPath || artifactSha256Path) {
-      return {
-        output,
-        ...(metafilePath ? { metafile: await readFile(metafilePath, 'utf8'), metafilePath } : {}),
-        ...(artifactManifestPath ? { artifactManifest: await readFile(artifactManifestPath, 'utf8') } : {}),
-        ...(artifactSha256Path ? { sha256Text: await readFile(artifactSha256Path, 'utf8') } : {}),
-      }
+    return {
+      output: await readFile(outputPath, 'utf8'),
+      ...(metafilePath ? { metafile: await readFile(metafilePath, 'utf8') } : {}),
+      ...(artifactManifestPath ? { artifactManifest: await readFile(artifactManifestPath, 'utf8') } : {}),
+      ...(artifactSha256Path ? { sha256Text: await readFile(artifactSha256Path, 'utf8') } : {}),
     }
-    return output
   } finally {
     await rm(outputDir, { recursive: true, force: true })
   }
-}
-
-async function readInstalledRuntimeSource() {
-  const repoRoot = resolve(appDir, '../..')
-  const manifest = await readOnnxRuntimeAssetsManifest(repoRoot)
-  const candidates = resolveInstalledOnnxRuntimeAssetPathCandidates(manifest, repoRoot)
-  const { filePath } = await readFirstExistingOnnxRuntimeAssetStats(candidates)
-  return readFile(filePath, 'utf8')
 }

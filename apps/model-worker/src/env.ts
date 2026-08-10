@@ -1,38 +1,51 @@
-import { DEFAULT_PUBLIC_MODEL_PATH } from '@hv-pony-solver/shared'
-import type { Env, InvalidKeyMode, NormalizedEnv } from './worker-types'
+import {
+  ORT_MODEL_OBJECT_KEY,
+  ORT_MODEL_PUBLIC_PATH,
+  ORT_RUNTIME_WASM_OBJECT_KEY,
+  ORT_RUNTIME_WASM_PUBLIC_PATH,
+} from '@hv-pony-solver/shared'
 
-function normalizeInvalidKeyMode(value: string | undefined): InvalidKeyMode {
-  const mode = value?.trim().toLowerCase()
-  if (mode === undefined || mode === '' || mode === 'decoy') {
-    return 'decoy'
+import type { Env, InvalidKeyMode, WorkerConfig } from './worker-types'
+
+const LEGACY_MODEL_PUBLIC_PATH = '/yolo26n-640.onnx'
+
+function readRequiredValue(value: string | undefined, name: string): string {
+  const normalized = value?.trim()
+  if (!normalized) {
+    throw new Error(`${name} is required`)
   }
-  if (mode === 'error') {
-    return 'error'
-  }
-  throw new Error('INVALID_KEY_MODE must be one of: decoy, error')
+  return normalized
 }
 
-function requireText(value: string | undefined, name: string): string {
-  if (!value?.trim()) {
-    throw new Error(`${name} is not configured`)
+function readPath(value: string | undefined, fallback: string, name: string): string {
+  const normalized = value?.trim() || fallback
+  if (!normalized.startsWith('/') || normalized.includes('?') || normalized.includes('#')) {
+    throw new Error(`${name} must be an absolute pathname`)
   }
-  return value
+  return normalized
 }
 
-function requireBinding<T>(value: T | undefined, name: string): T {
-  if (!value || typeof (value as { get?: unknown }).get !== 'function') {
-    throw new Error(`${name} binding is not configured`)
+function readInvalidKeyMode(value: string | undefined): InvalidKeyMode {
+  const normalized = value?.trim().toLowerCase() || 'decoy'
+  if (normalized !== 'decoy' && normalized !== 'error') {
+    throw new Error('INVALID_KEY_MODE must be one of: decoy, error')
   }
-  return value
+  return normalized
 }
 
-export function normalizeEnv(env: Env): NormalizedEnv {
+export function readWorkerConfig(env: Env): WorkerConfig {
   return {
-    modelKeys: requireBinding(env.MODEL_KEYS, 'MODEL_KEYS'),
-    modelBucket: requireBinding(env.MODEL_BUCKET, 'MODEL_BUCKET'),
-    publicModelPath: env.PUBLIC_MODEL_PATH ?? DEFAULT_PUBLIC_MODEL_PATH,
-    realModelObjectKey: requireText(env.REAL_MODEL_OBJECT_KEY, 'REAL_MODEL_OBJECT_KEY'),
-    decoyModelObjectKey: requireText(env.DECOY_MODEL_OBJECT_KEY, 'DECOY_MODEL_OBJECT_KEY'),
-    invalidKeyMode: normalizeInvalidKeyMode(env.INVALID_KEY_MODE),
+    publicModelPath: readPath(env.PUBLIC_MODEL_PATH, LEGACY_MODEL_PUBLIC_PATH, 'PUBLIC_MODEL_PATH'),
+    publicOrtModelPath: readPath(env.PUBLIC_ORT_MODEL_PATH, ORT_MODEL_PUBLIC_PATH, 'PUBLIC_ORT_MODEL_PATH'),
+    publicRuntimeWasmPath: readPath(
+      env.PUBLIC_RUNTIME_WASM_PATH,
+      ORT_RUNTIME_WASM_PUBLIC_PATH,
+      'PUBLIC_RUNTIME_WASM_PATH',
+    ),
+    realModelObjectKey: readRequiredValue(env.REAL_MODEL_OBJECT_KEY, 'REAL_MODEL_OBJECT_KEY'),
+    realOrtModelObjectKey: env.REAL_ORT_MODEL_OBJECT_KEY?.trim() || ORT_MODEL_OBJECT_KEY,
+    decoyModelObjectKey: readRequiredValue(env.DECOY_MODEL_OBJECT_KEY, 'DECOY_MODEL_OBJECT_KEY'),
+    runtimeWasmObjectKey: env.RUNTIME_WASM_OBJECT_KEY?.trim() || ORT_RUNTIME_WASM_OBJECT_KEY,
+    invalidKeyMode: readInvalidKeyMode(env.INVALID_KEY_MODE),
   }
 }

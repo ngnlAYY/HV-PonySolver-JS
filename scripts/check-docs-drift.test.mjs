@@ -164,23 +164,23 @@ test('fails clearly when README omits ONNX Runtime asset manifest field names', 
       readmePath,
       readme
         .replaceAll('ONNX_RUNTIME_ASSETS', 'ONNX Runtime assets')
-        .replaceAll('scriptAsset.byteLength', 'script asset byte length')
-        .replaceAll('scriptAsset.sha256', 'script asset sha256')
-        .replaceAll('scriptAsset.maxByteLength', 'script asset max byte length')
-        .replaceAll('wasmAssets.byteLength', 'wasm assets byte length')
-        .replaceAll('wasmAssets.sha256', 'wasm assets sha256')
-        .replaceAll('wasmAssets', 'wasm assets'),
+        .replaceAll('bundleAsset.byteLength', 'bundle asset byte length')
+        .replaceAll('bundleAsset.sha256', 'bundle asset sha256')
+        .replaceAll('bundleAsset.maxByteLength', 'bundle asset max byte length')
+        .replaceAll('wasmAsset.byteLength', 'wasm asset byte length')
+        .replaceAll('wasmAsset.sha256', 'wasm asset sha256')
+        .replaceAll('wasmAsset.maxByteLength', 'wasm asset max byte length'),
     )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /README.md.*ONNX_RUNTIME_ASSETS/s)
-    assert.match(result.stderr, /README.md.*scriptAsset\.byteLength/s)
-    assert.match(result.stderr, /README.md.*scriptAsset\.sha256/s)
-    assert.match(result.stderr, /README.md.*scriptAsset\.maxByteLength/s)
-    assert.match(result.stderr, /README.md.*wasmAssets/s)
-    assert.match(result.stderr, /README.md.*wasmAssets\.byteLength/s)
-    assert.match(result.stderr, /README.md.*wasmAssets\.sha256/s)
+    assert.match(result.stderr, /README.md.*bundleAsset\.byteLength/s)
+    assert.match(result.stderr, /README.md.*bundleAsset\.sha256/s)
+    assert.match(result.stderr, /README.md.*bundleAsset\.maxByteLength/s)
+    assert.match(result.stderr, /README.md.*wasmAsset\.byteLength/s)
+    assert.match(result.stderr, /README.md.*wasmAsset\.sha256/s)
+    assert.match(result.stderr, /README.md.*wasmAsset\.maxByteLength/s)
   })
 })
 
@@ -193,16 +193,16 @@ test('fails clearly when README omits ONNX Runtime asset package facts', async (
       readme
         .replaceAll('onnxruntime-web', 'onnx runtime web')
         .replaceAll('1.27.0', '1.x')
-        .replaceAll('dist/ort.min.js', 'dist runtime')
-        .replaceAll('ort.min.js', 'ort min js'),
+        .replaceAll('8f0278c77bf44b0cc83c098c6c722b92a36ac4b5', 'source commit')
+        .replaceAll('4.0.23', 'emsdk version'),
     )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /README.md.*onnxruntime-web/s)
     assert.match(result.stderr, /README.md.*1\.27\.0/s)
-    assert.match(result.stderr, /README.md.*dist\/ort\.min\.js/s)
-    assert.match(result.stderr, /README.md.*ort\.min\.js/s)
+    assert.match(result.stderr, /README.md.*8f0278c77bf44b0cc83c098c6c722b92a36ac4b5/s)
+    assert.match(result.stderr, /README.md.*4\.0\.23/s)
   })
 })
 
@@ -213,20 +213,20 @@ test('fails clearly when README omits ONNX Runtime asset verification command an
     await writeFile(
       readmePath,
       readme
-        .replaceAll('verify-onnx-runtime-assets', 'verify onnx runtime assets')
-        .replaceAll('verify-onnx-runtime-cdn', 'verify onnx runtime cdn')
-        .replaceAll('cdn.scriptUrl', 'cdn script url')
-        .replaceAll('cdn.wasmPath', 'cdn wasm path')
-        .replaceAll('HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME', 'BUNDLE_ONNX_RUNTIME'),
+        .replaceAll('verify:onnx-runtime', 'verify onnx runtime')
+        .replaceAll('build:onnx-runtime', 'build onnx runtime')
+        .replaceAll('wasmAsset.url', 'wasm asset url')
+        .replaceAll('externalFullRuntime', 'external full runtime')
+        .replaceAll('bundledMinimalRuntime', 'bundled minimal runtime'),
     )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*verify-onnx-runtime-assets/s)
-    assert.match(result.stderr, /README.md.*verify-onnx-runtime-cdn/s)
-    assert.match(result.stderr, /README.md.*cdn\.scriptUrl/s)
-    assert.match(result.stderr, /README.md.*cdn\.wasmPath/s)
-    assert.match(result.stderr, /README.md.*HV_PONY_SOLVER_BUNDLE_ONNX_RUNTIME/s)
+    assert.match(result.stderr, /README.md.*verify:onnx-runtime/s)
+    assert.match(result.stderr, /README.md.*build:onnx-runtime/s)
+    assert.match(result.stderr, /README.md.*wasmAsset\.url/s)
+    assert.match(result.stderr, /README.md.*externalFullRuntime/s)
+    assert.match(result.stderr, /README.md.*bundledMinimalRuntime/s)
   })
 })
 
@@ -536,7 +536,7 @@ test('fails clearly when Model Worker response header use-sites bypass source fa
       responseSource
         .replace("'access-control-allow-headers': CORS_ALLOW_HEADERS", "'access-control-allow-headers': 'X-Model-Token'")
         .replace("'access-control-allow-methods': CORS_ALLOW_METHODS", "'access-control-allow-methods': 'GET, HEAD'")
-        .replace("    'cache-control': CACHE_CONTROL,\n  })\n\n  if (object.httpEtag)", "    'cache-control': 'private, no-cache',\n  })\n\n  if (object.httpEtag)"),
+        .replaceAll("'cache-control': CACHE_CONTROL", "'cache-control': 'private, no-cache'"),
     )
 
     const result = await runCheck(fixtureRoot)
