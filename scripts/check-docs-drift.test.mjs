@@ -67,7 +67,6 @@ const rootCheckCommandNames = [
   'test:coverage',
   'build',
   'docs:check',
-  'graphify:check',
   'architecture:check',
   'browser-sinks:check',
   'bundle:check',
@@ -1072,8 +1071,6 @@ test('fails clearly when README selected R2 miss row omits Internal Server Error
 })
 
 const architectureGuardrailTerms = [
-  '.graphifyignore',
-  'graphify:check',
   'architecture:check',
   'inferenceTimeoutConfig',
   'StatusPanel',

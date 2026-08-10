@@ -24,7 +24,6 @@ function checkRootCheckCommand(rootPackageJson, readme) {
     'typecheck',
     'test',
     'docs:check',
-    'graphify:check',
     'architecture:check',
     'browser-sinks:check',
     'bundle:check',

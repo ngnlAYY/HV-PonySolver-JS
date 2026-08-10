@@ -81,7 +81,6 @@ StatusPanel 记录结果、置信度与耗时
 
 ## 架构与图谱 guardrails
 
-`.graphifyignore` 用于把生成索引、依赖目录和临时产物排除在 Graphify 语料之外；`graphify:check` 会校验这些排除规则，并可用 `node scripts/check-graphify-corpus.mjs --report` 校验重新生成的 `graphify-out/GRAPH_REPORT.md`。
 
 `architecture:check` 固化当前最强的边界结论：推理层不应 import `StatusPanel`，`StatusPanel` 不应 import 推理层，`apps/userscript` 与 `apps/model-worker` 只能通过 `packages/shared` 共享稳定契约，`packages/shared` 不应反向 import 应用代码，推理层不应直接 import userscript storage bridge。`browser-sinks:check` 固化浏览器危险点审计范围：只允许 `StatusPanel` 的已审计 `innerHTML` 渲染点，以及 ONNX worker 入口中加载内置 runtime 所需的 `new Function` / `importScripts`。
 
@@ -125,7 +124,6 @@ corepack pnpm install
 | `pnpm test`                 | 运行所有 workspace 的 Vitest 测试与 node:test 脚本测试                                                            |
 | `pnpm build`                | 运行所有 workspace 的构建检查；userscript 会生成产物                                                              |
 | `pnpm docs:check`           | 检查 README.md 与 source 关键事实是否发生 drift                                                                   |
-| `pnpm graphify:check`       | 检查 Graphify 语料排除规则与可选图谱报告                                                                          |
 | `pnpm architecture:check`   | 检查 userscript、model-worker 与 shared 的架构边界                                                                |
 | `pnpm browser-sinks:check`  | 检查 userscript 中 `innerHTML`、`new Function` 与 `importScripts` 是否只出现在已审计位置                          |
 | `pnpm bundle:check`         | 显式先构建默认未压缩 userscript，再按 96 KiB 预算检查产物大小                                                     |
@@ -138,7 +136,7 @@ corepack pnpm install
 | `pnpm check:userscript`     | 依次运行 userscript 的 typecheck、test 与 build                                                                   |
 | `pnpm check:model-worker`   | 依次运行 Model Worker 的 typecheck、test 与 build                                                                 |
 | `pnpm check:shared`         | 依次运行 shared 包的 typecheck、test 与 build                                                                     |
-| `pnpm check:quick`          | 依次运行 lint、typecheck、test、docs:check、graphify:check、architecture:check、browser-sinks:check、bundle:check |
+| `pnpm check:quick`          | 依次运行 lint、typecheck、test、docs:check、architecture:check、browser-sinks:check、bundle:check |
 | `pnpm check`                | 先运行 check:quick，再运行 test:coverage 与 build                                                                 |
 | `pnpm format`               | 用 Prettier 格式化仓库文件                                                                                        |
 
@@ -490,7 +488,6 @@ pnpm typecheck
 pnpm test
 pnpm test:coverage
 pnpm docs:check
-pnpm graphify:check
 pnpm architecture:check
 pnpm bundle:check
 pnpm build
@@ -513,7 +510,7 @@ userscript E2E 在 `pull_request` 和推送到 `main` 时常态执行；`workflo
 `Security Scan` workflow 使用 CodeQL 扫描 TypeScript/JavaScript，并在 PR 上运行 dependency review；根命令 `pnpm audit:high` 仍在主验证 workflow 的 `guardrails` job 中执行。
 
 1. `validate-inputs` 先检查手动发布 artifact 时是否同时启用 `bundle_onnx_runtime=true`，否则直接失败，避免发布依赖远程 JS runtime 的 userscript artifact。
-2. `guardrails` job 设置 Node.js 22、启用 pnpm cache、安装依赖，然后运行 `pnpm audit:high`、`pnpm lint`、`pnpm typecheck`、测试值 Wrangler 配置渲染、`pnpm docs:check`、`pnpm graphify:check`、`pnpm architecture:check` 和 `pnpm browser-sinks:check`。
+2. `guardrails` job 设置 Node.js 22、启用 pnpm cache、安装依赖，然后运行 `pnpm audit:high`、`pnpm lint`、`pnpm typecheck`、测试值 Wrangler 配置渲染、`pnpm docs:check`、`pnpm architecture:check` 和 `pnpm browser-sinks:check`。
 3. `test` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test`。
 4. `coverage-build` job 并行设置环境、渲染测试 Wrangler 配置并运行 `pnpm test:coverage` 和 `pnpm build`，随后用 `pnpm bundle:check:default` 检查默认未压缩 userscript 的 96 KiB 大小预算。
 5. `userscript-e2e` job 在 `pull_request`、推送到 `main` 时运行，在 `workflow_dispatch` 时由 `run_userscript_e2e` 控制；它读取实际 Playwright CLI 版本，用包含该版本的 key 缓存 `~/.cache/ms-playwright`，再通过 `playwright install --with-deps chromium` 保证 Chromium 和系统依赖可用，最后运行 `pnpm test:e2e:userscript`。

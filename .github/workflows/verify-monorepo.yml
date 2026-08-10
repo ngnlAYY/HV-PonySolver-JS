@@ -78,9 +78,6 @@ jobs:
       - name: Docs drift
         run: pnpm docs:check
 
-      - name: Graphify corpus
-        run: pnpm graphify:check
-
       - name: Architecture boundaries
         run: pnpm architecture:check
 

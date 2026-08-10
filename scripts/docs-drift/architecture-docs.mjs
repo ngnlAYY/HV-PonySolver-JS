@@ -36,8 +36,6 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
 
 function checkArchitectureGuardrails(readme) {
   const requiredTerms = [
-    '.graphifyignore',
-    'graphify:check',
     'architecture:check',
     'inferenceTimeoutConfig',
     'StatusPanel',

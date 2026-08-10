@@ -9,6 +9,7 @@ node_modules/
 .claude/
 .trellis
 .tmp/
+model/
 .keyenv
 worker/wrangler.toml
 worker/.wrangler/
