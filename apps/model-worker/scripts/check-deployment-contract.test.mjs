@@ -121,6 +121,7 @@ test('decoy 模式验证两个 Origin，且只发送无授权的 OPTIONS/HEAD', 
     assert.equal(parsed.searchParams.get('deployment_check'), PROBE_ID)
     assert.equal(init.redirect, 'error')
     assert.equal(headers.has('authorization'), false)
+    assert.equal(headers.get('accept-encoding'), init.method === 'HEAD' ? 'identity' : null)
     assert.equal('body' in init, false)
   }
   const optionsHeaders = requests[0].headers
@@ -288,9 +289,9 @@ for (const mismatch of [
   })
 }
 
-test('默认重试配置覆盖 60 秒边缘传播窗口', () => {
-  assert.equal(DEFAULT_ATTEMPTS, 13)
-  assert.equal((DEFAULT_ATTEMPTS - 1) * DEFAULT_RETRY_DELAY_MS, 60_000)
+test('默认重试配置覆盖 30 秒边缘传播窗口', () => {
+  assert.equal(DEFAULT_ATTEMPTS, 5)
+  assert.equal((DEFAULT_ATTEMPTS - 1) * DEFAULT_RETRY_DELAY_MS, 30_000)
 })
 
 test('网络失败后按固定间隔重试并成功', async () => {
