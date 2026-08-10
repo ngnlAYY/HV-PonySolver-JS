@@ -2,14 +2,14 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { addCorsHeaders, textResponse } from '../src/model-response'
+import { addCorsHeaders, modelObjectResponse, textResponse } from '../src/model-response'
 import {
   assetRequest,
   createEnv,
   createModelFixture,
   fetchWorker,
-  MockKvNamespace,
-  MockR2Bucket,
+  type MockKvNamespace,
+  type MockR2Bucket,
   modelRequest,
   randomText,
   readResponseBody,
@@ -354,6 +354,21 @@ describe('model worker', () => {
     expectVaryOrigin(response.headers)
   })
 
+  it('returns public preflight headers for the runtime WASM route', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      assetRequest(fixture.publicRuntimeWasmPath, 'OPTIONS', { origin: 'https://unrelated.example' }),
+      createEnv(fixture),
+    )
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(await response.text()).toBe('')
+  })
+
   it('does not append duplicate Origin to an existing Vary: Origin header', () => {
     const headers = addCorsHeaders(
       new Headers({ vary: 'Origin' }),
@@ -687,6 +702,29 @@ describe('model worker', () => {
     expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
     expect(response.headers.get('etag')).toBe(fixture.runtimeEtag)
+  })
+
+  it('returns a generic 500 when the runtime WASM object is missing', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      assetRequest(fixture.publicRuntimeWasmPath, 'GET'),
+      createEnv(fixture, { objects: new Map() }),
+    )
+
+    expect(response.status).toBe(500)
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(await response.text()).toBe('Internal Server Error')
+  })
+
+  it('rejects a bodyless R2 metadata object for a GET response', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    const object = await env.MODEL_BUCKET.head(fixture.realModelObjectKey)
+
+    expect(object).not.toBeNull()
+    expect(() =>
+      modelObjectResponse(assetRequest(fixture.publicModelPath, 'GET'), object!, 'yolo26n-640.onnx'),
+    ).toThrow('R2 GET response is missing a body')
   })
 
   it('does not infer model format for unconfigured paths', async () => {

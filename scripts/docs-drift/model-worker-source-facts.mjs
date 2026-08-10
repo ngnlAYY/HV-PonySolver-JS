@@ -206,10 +206,11 @@ function readSelectedObjectMissingStatus(modelResponseSource, requestRouterSourc
     stripIgnoredSyntax(internalErrorResponseBody),
   )
   const serveModelBody = readFunctionBodySource(requestRouterSource, 'serveModel')
-  const bucketGetIndex = serveModelBody.indexOf('env.MODEL_BUCKET.get')
-  const searchSource = bucketGetIndex === -1 ? '' : serveModelBody.slice(bucketGetIndex)
+  const normalizedServeModelBody = stripIgnoredSyntax(stripDeadFalseBranches(serveModelBody))
+  const objectReadMatch = /(?:env\.MODEL_BUCKET\.get|readObjectForRequest)\s*\(/.exec(normalizedServeModelBody)
+  const searchSource = objectReadMatch ? normalizedServeModelBody.slice(objectReadMatch.index) : ''
   const missingObjectMatch = /if\s*\(\s*(?:!\s*object|object\s*={2,3}\s*null|null\s*={2,3}\s*object|object\s*==\s*null)\s*\)\s*(?:{\s*)?return\s+internalErrorResponse\(\s*request\s*\)/s.exec(
-    stripIgnoredSyntax(stripDeadFalseBranches(searchSource)),
+    searchSource,
   )
   const status = statusMatch?.groups?.status
   if (!status || !missingObjectMatch) {

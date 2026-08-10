@@ -32,6 +32,13 @@ describe('readWorkerConfig', () => {
     expect(config.runtimeWasmObjectKey).toBe(fixture.runtimeWasmObjectKey)
   })
 
+  it('rejects public asset paths that are not absolute pathnames', () => {
+    const env = createEnv(createModelFixture())
+    env.PUBLIC_MODEL_PATH = 'relative-model.onnx'
+
+    expect(() => readWorkerConfig(env)).toThrow(/absolute pathname/)
+  })
+
   it('rejects colliding public paths', () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture)

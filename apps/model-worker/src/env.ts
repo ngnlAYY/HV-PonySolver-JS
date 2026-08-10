@@ -8,6 +8,7 @@ import {
 import type { Env, InvalidKeyMode, WorkerConfig } from './worker-types'
 
 const LEGACY_MODEL_PUBLIC_PATH = '/yolo26n-640.onnx'
+// eslint-disable-next-line no-control-regex -- These code points are the validation target.
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
 function readRequiredValue(value: string | undefined, name: string): string {

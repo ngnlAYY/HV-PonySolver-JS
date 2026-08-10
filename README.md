@@ -256,7 +256,8 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 | `pnpm test:e2e` | 执行用户脚本 Playwright Chromium 测试 |
 | `pnpm check:userscript` | 执行用户脚本聚合检查 |
 | `pnpm check:model-worker` | 执行 Model Worker 聚合检查 |
-| `pnpm check` | 执行仓库聚合质量门 |
+| `pnpm check:quick` | 依次执行 `lint`、`typecheck`、`test`、`docs:check`、`architecture:check`、`browser-sinks:check` 和 `bundle:check` |
+| `pnpm check` | 先执行 `check:quick`，再执行 `test:coverage` 和 `build` |
 | `pnpm build:onnx-runtime` | 从固定上游构建精简 ONNX Runtime |
 | `pnpm verify:onnx-runtime` | 校验已纳入仓库的精简 glue |
 
@@ -399,6 +400,18 @@ GET, HEAD, OPTIONS
 - WASM 响应使用 `application/wasm` 和 `Cache-Control: public, max-age=31536000, immutable`。
 - 文本错误响应使用 `no-store` 和 `X-Content-Type-Options: nosniff`。
 
+### 响应矩阵
+
+| 请求或情况 | HTTP 契约 |
+| --- | --- |
+| `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200` 真实模型，模型响应使用 `Cache-Control: no-store`；`GET /yolo26n-640.ort` 使用相同契约 |
+| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200`，只读取 R2 元数据且不返回响应体；`HEAD /yolo26n-640.ort` 使用相同契约 |
+| `OPTIONS /yolo26n-640.onnx` | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`；`OPTIONS /yolo26n-640.ort` 使用相同契约 |
+| 非 `GET` / `HEAD` / `OPTIONS` 方法 | `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS` |
+| 选中的 R2 object 缺失 | `500 Internal Server Error` |
+
+选中的 R2 object 缺失时不会回退到其他对象。
+
 ### 鉴权
 
 真实模型请求必须包含：
@@ -415,6 +428,8 @@ Model Worker 只在 token 格式正确且 `MODEL_KEYS` 中存在非空标记时�
 ?key=<token>
 ?token=<token>
 ```
+
+query-string key 不授权真实模型；按缺少 Bearer token 处理。只有有效的 `Authorization: Bearer` 可以选择真实模型对象。
 
 无效或缺失 token 的处理由 `INVALID_KEY_MODE` 决定：
 
@@ -450,7 +465,7 @@ CORS 只控制浏览器读取权限，不构成真实模型鉴权。
 | --- | --- | --- |
 | 旧版真实 ONNX | `REAL_MODEL_OBJECT_KEY` 配置值 | 否 |
 | 诱饵模型 | `DECOY_MODEL_OBJECT_KEY` 配置值 | 否 |
-| 新版真实 ORT | `real/yolo26n-640.ort` | 否 |
+| 新版真实 ORT | `yolo26n-640.ort` | 否 |
 | 精简 WASM | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 是 |
 
 上传精简 WASM 的示例：
@@ -499,6 +514,16 @@ pnpm --filter @hv-pony-solver/model-worker check:deployment
 这些项目需要独立验收。
 
 ## 测试与质量门
+
+### 源码契约索引
+
+用户脚本推理参数以 `imagePreprocessConfig`、`yoloOutputConfig` 和 `inferenceTimeoutConfig` 为权威来源。关键字段包括 `imageSize`、`confidenceThreshold`、`maxDetections`、`maxKinds`、`rowSize`、`confidenceIndex`、`classIndex`、`workerInitTimeoutMs`、`workerDetectTimeoutMs` 和 `modelDownloadTimeoutMs`。
+
+旧版 ONNX 模型清单由 `MODEL_VERSION`、`MODEL_INTEGRITY.byteLength` 和 `MODEL_INTEGRITY.sha256` 组成。`MODEL_FILE` 指定本地校验文件，`verify-model-integrity` 执行字节长度和 SHA-256 校验。新版 ORT 使用独立的共享资产清单，不覆盖旧版契约。
+
+ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFullRuntime` 对应默认外置完整版，`bundledMinimalRuntime` 对应显式内置精简版。构建 glue 使用 `bundleAsset.byteLength`、`bundleAsset.sha256` 和 `bundleAsset.maxByteLength`；首方 WASM 使用 `wasmAsset.url`、`wasmAsset.byteLength`、`wasmAsset.sha256` 和 `wasmAsset.maxByteLength`。相关入口为 `build:onnx-runtime` 与 `verify:onnx-runtime`。
+
+`architecture:check` 保护关键依赖边界：`inferenceTimeoutConfig` 继续集中管理异步超时，`StatusPanel` 继续负责 UI 状态输出，`Model Worker Core` 继续与 Userscript 浏览器代码隔离。
 
 推荐的本地检查顺序：
 
