@@ -1,10 +1,10 @@
 import { getModelAccessTokenLookupKeys, type ModelAccessDecision } from '@hv-pony-solver/shared'
-import type { NormalizedEnv } from './worker-types'
+import type { InvalidKeyMode, ModelKeyStore } from './worker-types'
 
 const BEARER_AUTHORIZATION_PATTERN = /^Bearer\s+([^\s]+)$/i
 
-function invalidAccessDecision(env: NormalizedEnv): ModelAccessDecision {
-  return env.invalidKeyMode === 'error' ? 'forbidden' : 'decoy'
+function invalidAccessDecision(invalidKeyMode: InvalidKeyMode): ModelAccessDecision {
+  return invalidKeyMode === 'error' ? 'forbidden' : 'decoy'
 }
 
 function getRequestAccessToken(request: Request): string | null {
@@ -17,19 +17,23 @@ function getRequestAccessToken(request: Request): string | null {
   return match?.[1] ?? null
 }
 
-export async function selectModelAccess(request: Request, env: NormalizedEnv): Promise<ModelAccessDecision> {
+export async function selectModelAccess(
+  request: Request,
+  keyStore: ModelKeyStore,
+  invalidKeyMode: InvalidKeyMode,
+): Promise<ModelAccessDecision> {
   const lookupKeys = getModelAccessTokenLookupKeys(getRequestAccessToken(request))
 
   if (lookupKeys.length === 0) {
-    return invalidAccessDecision(env)
+    return invalidAccessDecision(invalidKeyMode)
   }
 
   for (const lookupKey of lookupKeys) {
-    const authorizationMarker = await env.MODEL_KEYS.get(lookupKey)
+    const authorizationMarker = await keyStore.get(lookupKey)
     if (authorizationMarker !== null) {
       return 'real'
     }
   }
 
-  return invalidAccessDecision(env)
+  return invalidAccessDecision(invalidKeyMode)
 }

@@ -28,7 +28,7 @@
 - `https://hentaiverse.org`
 - `https://alt.hentaiverse.org`
 
-检查器只发送不含 `Authorization` 的 `OPTIONS` 和 `HEAD` 请求，不读取模型 body，也不接收 Cloudflare credential、KV namespace、R2 bucket 或模型 Key。每个请求默认在 10 秒后 abort；默认最多尝试 13 次，每次失败后等待 5 秒，为 Cloudflare 边缘传播提供 60 秒重试窗口，同时防止未响应的 edge 永久阻塞 workflow。
+检查器对旧版 ONNX 和当前 ORT 路由发送不含 `Authorization` 的 `OPTIONS` 和 `HEAD` 请求，并对公开精简 WASM 发送 `HEAD`。它不读取模型 body，也不接收 Cloudflare credential、KV namespace、R2 bucket 或模型 Key。每个请求默认在 10 秒后 abort；默认最多尝试 13 次，每次失败后等待 5 秒，为 Cloudflare 边缘传播提供 60 秒重试窗口，同时防止未响应的 edge 永久阻塞 workflow。
 
 公开契约必须满足：
 
@@ -37,17 +37,21 @@
 | `OPTIONS`                   | `204`；`Access-Control-Allow-Origin` 精确回显请求 Origin；`Access-Control-Allow-Methods` 精确为 `GET`、`HEAD`、`OPTIONS`；`Access-Control-Allow-Headers` 精确为 `Authorization`；`Cache-Control: no-store`；`Vary` 包含 `Origin` |
 | 无 Key `HEAD`，`decoy` 模式 | `200`；精确回显 Origin；`Cache-Control: no-store`；`Vary` 包含 `Origin`                                                                                                                                                          |
 | 无 Key `HEAD`，`error` 模式 | `403`；精确回显 Origin；`Cache-Control: no-store`；`Vary` 包含 `Origin`                                                                                                                                                          |
+| 精简 WASM `HEAD`             | `200`；`Access-Control-Allow-Origin: *`；`Content-Type: application/wasm`；一年 immutable 缓存；长度匹配共享契约；存在 ETag                                                                                                    |
 
 必要时可在本地手动运行同一检查；`MODEL_WORKER_PROBE_ID` 只能使用不含凭据和用户数据的唯一标识：
 
 ```bash
 MODEL_WORKER_URL=https://models.ngnl.host/yolo26n-640.onnx \
+MODEL_WORKER_ORT_URL=https://models.ngnl.host/yolo26n-640.ort \
+MODEL_WORKER_RUNTIME_WASM_URL=https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm \
+MODEL_WORKER_RUNTIME_WASM_BYTE_LENGTH=1267937 \
 MODEL_WORKER_INVALID_KEY_MODE=decoy \
 MODEL_WORKER_PROBE_ID=<probe-id> \
 pnpm --filter @hv-pony-solver/model-worker check:deployment
 ```
 
-无 Key `HEAD 200` 在 `decoy` 模式只证明 decoy 路径正常，不证明真实模型授权或 artifact 正确。
+无 Key `HEAD 200` 在 `decoy` 模式只证明 decoy 路径正常，不证明真实模型授权或 artifact 正确。ORT 和 WASM 探测会发现新路由未部署或公开 WASM 对象缺失，但仍不证明真实 ORT 模型内容正确。
 
 ### 3. 用户本地 Key 验证
 

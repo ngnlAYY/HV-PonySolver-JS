@@ -62,13 +62,13 @@ export function preflightResponse(request: Request, isPublic: boolean): Response
   return new Response(null, { status: 204, headers })
 }
 
-function setObjectEtag(headers: Headers, object: R2ObjectBody): void {
+function setObjectEtag(headers: Headers, object: R2Object): void {
   if (object.httpEtag) {
     headers.set('etag', object.httpEtag)
   }
 }
 
-function createModelHeaders(request: Request, object: R2ObjectBody, filename: string): Headers {
+function createModelHeaders(request: Request, object: R2Object, filename: string): Headers {
   const headers = addCorsHeaders(
     new Headers({
       'content-type': 'application/octet-stream',
@@ -78,25 +78,36 @@ function createModelHeaders(request: Request, object: R2ObjectBody, filename: st
     }),
     request,
   )
+  headers.set('content-length', String(object.size))
   setObjectEtag(headers, object)
   return headers
 }
 
+function objectResponseBody(request: Request, object: R2Object | R2ObjectBody): ReadableStream | null {
+  if (request.method === 'HEAD') {
+    return null
+  }
+  if (!('body' in object)) {
+    throw new Error('R2 GET response is missing a body')
+  }
+  return object.body
+}
+
 export function modelObjectResponse(
   request: Request,
-  object: R2ObjectBody,
+  object: R2Object | R2ObjectBody,
   filename: string,
 ): Response {
   const headers = createModelHeaders(request, object, filename)
-  return new Response(request.method === 'HEAD' ? null : object.body, { status: 200, headers })
+  return new Response(objectResponseBody(request, object), { status: 200, headers })
 }
 
-export function runtimeObjectResponse(request: Request, object: R2ObjectBody): Response {
+export function runtimeObjectResponse(request: Request, object: R2Object | R2ObjectBody): Response {
   const headers = addPublicCorsHeaders(new Headers())
   headers.set('content-type', 'application/wasm')
   headers.set('cache-control', 'public, max-age=31536000, immutable')
   headers.set('x-content-type-options', 'nosniff')
   headers.set('content-length', String(object.size))
   setObjectEtag(headers, object)
-  return new Response(request.method === 'HEAD' ? null : object.body, { status: 200, headers })
+  return new Response(objectResponseBody(request, object), { status: 200, headers })
 }

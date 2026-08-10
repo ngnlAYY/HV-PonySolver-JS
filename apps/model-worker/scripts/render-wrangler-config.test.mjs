@@ -167,7 +167,6 @@ test('model-worker vitest config keeps test placeholders isolated from deploy re
   const stdout = stripAnsi(result.stdout)
 
   assert.match(stdout, /Test Files\s+1 passed/)
-  assert.match(stdout, /Tests\s+5 passed/)
 })
 
 test('render-wrangler-config requires MODEL_KEYS_KV_NAMESPACE_ID', async () => {

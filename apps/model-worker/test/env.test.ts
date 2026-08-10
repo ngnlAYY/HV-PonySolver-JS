@@ -31,4 +31,28 @@ describe('readWorkerConfig', () => {
     expect(config.publicRuntimeWasmPath).toBe(fixture.publicRuntimeWasmPath)
     expect(config.runtimeWasmObjectKey).toBe(fixture.runtimeWasmObjectKey)
   })
+
+  it('rejects colliding public paths', () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    env.PUBLIC_ORT_MODEL_PATH = fixture.publicModelPath
+
+    expect(() => readWorkerConfig(env)).toThrow(/duplicate public path/)
+  })
+
+  it('rejects real, decoy, and public runtime object-key collisions', () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    env.RUNTIME_WASM_OBJECT_KEY = fixture.realOrtModelObjectKey
+
+    expect(() => readWorkerConfig(env)).toThrow(/duplicate R2 object key/)
+  })
+
+  it('rejects control characters in configured object keys', () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    env.REAL_MODEL_OBJECT_KEY = `${fixture.realModelObjectKey}\nunsafe`
+
+    expect(() => readWorkerConfig(env)).toThrow(/control characters/)
+  })
 })

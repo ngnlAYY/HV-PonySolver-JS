@@ -4,6 +4,7 @@ export interface ModelKeyStore {
 
 export interface ModelBucket {
   get(key: string): Promise<R2ObjectBody | null>
+  head(key: string): Promise<R2Object | null>
 }
 
 export interface Env {
@@ -31,5 +32,3 @@ export interface WorkerConfig {
   runtimeWasmObjectKey: string
   invalidKeyMode: InvalidKeyMode
 }
-
-export type NormalizedEnv = Env & WorkerConfig

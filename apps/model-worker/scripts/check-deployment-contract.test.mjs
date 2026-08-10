@@ -12,6 +12,9 @@ import {
 } from './check-deployment-contract.mjs'
 
 const MODEL_URL = 'https://models.ngnl.host/yolo26n-640.onnx'
+const ORT_MODEL_URL = 'https://models.ngnl.host/yolo26n-640.ort'
+const RUNTIME_WASM_URL = 'https://models.ngnl.host/runtime/ort-wasm-simd-hash.wasm'
+const RUNTIME_WASM_BYTE_LENGTH = 1_267_937
 const PROBE_ID = 'run 123/attempt-2'
 
 function contractHeaders(origin, extra = {}) {
@@ -21,6 +24,18 @@ function contractHeaders(origin, extra = {}) {
     'access-control-allow-headers': 'Authorization',
     'cache-control': 'no-store',
     vary: 'Accept-Encoding, Origin',
+    ...extra,
+  }
+}
+
+function runtimeHeaders(extra = {}) {
+  return {
+    'access-control-allow-origin': '*',
+    'cache-control': 'public, max-age=31536000, immutable',
+    'content-type': 'application/wasm',
+    'content-length': String(RUNTIME_WASM_BYTE_LENGTH),
+    etag: '"runtime-etag"',
+    'x-content-type-options': 'nosniff',
     ...extra,
   }
 }
@@ -52,6 +67,10 @@ function successfulFetch({ invalidKeyMode = 'decoy', onRequest } = {}) {
     const headers = fixtureHeaders(init.headers)
     const origin = headers.get('origin')
     onRequest?.({ url, init, headers, origin })
+    if (new URL(url).pathname === new URL(RUNTIME_WASM_URL).pathname) {
+      if (init.method === 'HEAD') return fixtureResponse(200, runtimeHeaders())
+      throw new Error(`unexpected runtime method: ${init.method}`)
+    }
     if (init.method === 'OPTIONS') {
       return fixtureResponse(204, contractHeaders(origin))
     }
@@ -119,6 +138,47 @@ test('error 模式接受无 Key HEAD 403', async () => {
   })
 
   assert.equal(result.invalidKeyMode, 'error')
+})
+
+test('扩展契约同时验证旧模型、ORT 模型和公开 WASM', async () => {
+  const requests = []
+  const result = await checkDeploymentContract({
+    modelUrl: MODEL_URL,
+    ortModelUrl: ORT_MODEL_URL,
+    runtimeWasmUrl: RUNTIME_WASM_URL,
+    runtimeWasmByteLength: RUNTIME_WASM_BYTE_LENGTH,
+    invalidKeyMode: 'decoy',
+    probeId: PROBE_ID,
+    attempts: 1,
+    fetchImpl: successfulFetch({ onRequest: (request) => requests.push(request) }),
+  })
+
+  assert.equal(result.assets, 3)
+  assert.equal(requests.length, ALLOWED_ORIGINS.length * 4 + 1)
+  assert.equal(requests.filter(({ url }) => new URL(url).pathname.endsWith('.ort')).length, ALLOWED_ORIGINS.length * 2)
+  assert.equal(requests.at(-1).headers.has('authorization'), false)
+})
+
+test('扩展契约拒绝缺失的 ORT 路由', async () => {
+  const success = successfulFetch()
+  await assert.rejects(
+    checkDeploymentContract({
+      modelUrl: MODEL_URL,
+      ortModelUrl: ORT_MODEL_URL,
+      runtimeWasmUrl: RUNTIME_WASM_URL,
+      runtimeWasmByteLength: RUNTIME_WASM_BYTE_LENGTH,
+      invalidKeyMode: 'decoy',
+      probeId: PROBE_ID,
+      attempts: 1,
+      fetchImpl: async (url, init) => {
+        if (new URL(url).pathname === new URL(ORT_MODEL_URL).pathname && init.method === 'HEAD') {
+          return fixtureResponse(404, contractHeaders(fixtureHeaders(init.headers).get('origin')))
+        }
+        return success(url, init)
+      },
+    }),
+    /HEAD origin=.*asset=ort-model.*status mismatch; expected=200 actual=404/,
+  )
 })
 
 test('拒绝线上旧 Worker 的 OPTIONS 405 fixture', async () => {
@@ -348,6 +408,10 @@ test('在发起请求前拒绝非法配置', async () => {
   await assert.rejects(checkDeploymentContract({ ...base, modelUrl: 'http://models.example/model.onnx' }), /HTTPS/)
   await assert.rejects(checkDeploymentContract({ ...base, origins: ['https://example.com/path'] }), /Invalid Origin/)
   await assert.rejects(checkDeploymentContract({ ...base, probeId: '' }), /probeId/)
+  await assert.rejects(
+    checkDeploymentContract({ ...base, ortModelUrl: ORT_MODEL_URL }),
+    /must be provided together/,
+  )
   assert.equal(fetchCalls, 0)
 })
 
@@ -357,6 +421,9 @@ test('CLI 成功返回 0，且只输出简短的非秘密摘要', async () => {
   const exitCode = await runCli({
     env: {
       MODEL_WORKER_URL: MODEL_URL,
+      MODEL_WORKER_ORT_URL: ORT_MODEL_URL,
+      MODEL_WORKER_RUNTIME_WASM_URL: RUNTIME_WASM_URL,
+      MODEL_WORKER_RUNTIME_WASM_BYTE_LENGTH: String(RUNTIME_WASM_BYTE_LENGTH),
       MODEL_WORKER_INVALID_KEY_MODE: 'decoy',
       MODEL_WORKER_PROBE_ID: 'workflow-1',
       MODEL_WORKER_CHECK_ATTEMPTS: '1',
@@ -381,6 +448,9 @@ test('CLI 配置错误返回 1，且不会调用 fetch', async () => {
   const exitCode = await runCli({
     env: {
       MODEL_WORKER_URL: MODEL_URL,
+      MODEL_WORKER_ORT_URL: ORT_MODEL_URL,
+      MODEL_WORKER_RUNTIME_WASM_URL: RUNTIME_WASM_URL,
+      MODEL_WORKER_RUNTIME_WASM_BYTE_LENGTH: String(RUNTIME_WASM_BYTE_LENGTH),
       MODEL_WORKER_INVALID_KEY_MODE: 'decoy',
       MODEL_WORKER_PROBE_ID: 'workflow-1',
       MODEL_WORKER_CHECK_ATTEMPTS: '1',

@@ -481,16 +481,18 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 
 ```bash
 MODEL_WORKER_URL=https://models.ngnl.host/yolo26n-640.onnx \
+MODEL_WORKER_ORT_URL=https://models.ngnl.host/yolo26n-640.ort \
+MODEL_WORKER_RUNTIME_WASM_URL=https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm \
+MODEL_WORKER_RUNTIME_WASM_BYTE_LENGTH=1267937 \
 MODEL_WORKER_INVALID_KEY_MODE=decoy \
 MODEL_WORKER_PROBE_ID=manual-$(date +%s) \
 pnpm --filter @hv-pony-solver/model-worker check:deployment
 ```
 
-该检查只验证旧版模型 URL 的未鉴权 `OPTIONS` 和 `HEAD` 行为，包括状态码、CORS、缓存和 `Vary`。检查成功不证明以下事项：
+该检查验证旧版 ONNX 和当前 ORT 路由的未鉴权 `OPTIONS`/`HEAD`，并验证公开精简 WASM 的 `HEAD`、CORS、内容类型、长度、ETag 和缓存契约。检查成功仍不证明以下事项：
 
 - 真实 token 可以读取真实模型。
-- 新版 ORT 路由可用。
-- 精简 WASM 对象可用。
+- 有效 token 能下载并通过哈希校验的真实 ORT 模型。
 - R2 对象内容与本地哈希一致。
 - 用户脚本已发布或浏览器推理成功。
 

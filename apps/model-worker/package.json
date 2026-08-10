@@ -17,8 +17,8 @@
     "@hv-pony-solver/shared": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.16.20",
-    "@cloudflare/workers-types": "^4.20260702.1",
+    "@cloudflare/vitest-pool-workers": "^0.20.3",
+    "@cloudflare/workers-types": "^5.20260722.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",
     "wrangler": "^4.114.0"

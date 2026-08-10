@@ -8,6 +8,8 @@ import {
   createEnv,
   createModelFixture,
   fetchWorker,
+  MockKvNamespace,
+  MockR2Bucket,
   modelRequest,
   randomText,
   readResponseBody,
@@ -227,6 +229,10 @@ describe('model worker', () => {
     expect(await response.text()).toBe('')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('etag')).toBe(fixture.realEtag)
+    expect(response.headers.get('content-length')).toBe(String(fixture.realBody.length))
+    const bucket = env.MODEL_BUCKET as MockR2Bucket
+    expect(bucket.requestedKeys).toEqual([])
+    expect(bucket.headRequestedKeys).toEqual([fixture.realModelObjectKey])
   })
 
   it('allows model downloads without an Origin header', async () => {
@@ -687,5 +693,76 @@ describe('model worker', () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(assetRequest(`${fixture.publicOrtModelPath}.onnx`, 'GET'), createEnv(fixture))
     expect(response.status).toBe(404)
+  })
+
+  it('checks the canonical lowercase KV key before legacy case variants', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map([[CANONICAL_ACCESS_TOKEN, '1']]),
+    })
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', UPPERCASE_ACCESS_TOKEN), env)
+
+    expect(response.status).toBe(200)
+    expect((env.MODEL_KEYS as MockKvNamespace).requestedKeys).toEqual([CANONICAL_ACCESS_TOKEN])
+  })
+
+  it('uses metadata-only R2 access for ORT and runtime HEAD requests', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+    const bucket = env.MODEL_BUCKET as MockR2Bucket
+
+    const [ortResponse, runtimeResponse] = await Promise.all([
+      fetchWorker(
+        assetRequest(fixture.publicOrtModelPath, 'HEAD', { authorization: `Bearer ${fixture.validKey}` }),
+        env,
+      ),
+      fetchWorker(assetRequest(fixture.publicRuntimeWasmPath, 'HEAD'), env),
+    ])
+
+    expect(ortResponse.status).toBe(200)
+    expect(runtimeResponse.status).toBe(200)
+    expect(await ortResponse.text()).toBe('')
+    expect(await runtimeResponse.text()).toBe('')
+    expect(bucket.requestedKeys).toEqual([])
+    expect(bucket.headRequestedKeys).toEqual(
+      expect.arrayContaining([fixture.realOrtModelObjectKey, fixture.runtimeWasmObjectKey]),
+    )
+  })
+
+  it('converts KV and R2 failures into generic secret-free errors', async () => {
+    const fixture = createModelFixture()
+    const keyFailure = await fetchWorker(
+      authorizedModelRequest(fixture, 'GET'),
+      createEnv(fixture, { keyError: new Error(`KV failed for ${fixture.validKey}`) }),
+    )
+    const getFailure = await fetchWorker(
+      modelRequest(fixture, 'GET'),
+      createEnv(fixture, { bucketGetError: new Error(`R2 GET failed for ${fixture.decoyModelObjectKey}`) }),
+    )
+    const headFailure = await fetchWorker(
+      assetRequest(fixture.publicRuntimeWasmPath, 'HEAD'),
+      createEnv(fixture, { bucketHeadError: new Error(`R2 HEAD failed for ${fixture.runtimeWasmObjectKey}`) }),
+    )
+
+    for (const response of [keyFailure, getFailure, headFailure]) {
+      expect(response.status).toBe(500)
+      expect(await response.text()).toBe('Internal Server Error')
+    }
+  })
+
+  it('keeps concurrent real, decoy, and public runtime requests isolated', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+
+    const [realResponse, decoyResponse, runtimeResponse] = await Promise.all([
+      fetchWorker(authorizedModelRequest(fixture, 'GET'), env),
+      fetchWorker(modelRequest(fixture, 'GET'), env),
+      fetchWorker(assetRequest(fixture.publicRuntimeWasmPath, 'GET'), env),
+    ])
+
+    await expect(realResponse.text()).resolves.toBe(fixture.realBody)
+    await expect(decoyResponse.text()).resolves.toBe(fixture.decoyBody)
+    await expect(runtimeResponse.text()).resolves.toBe(fixture.runtimeBody)
   })
 })
