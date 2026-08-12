@@ -1,3 +1,1 @@
-export interface ImageLoader {
-  get(url: string): Promise<Blob>
-}
+export type { ImageLoader } from '@hv-pony-solver/browser-core'

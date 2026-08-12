@@ -7,8 +7,8 @@ import ts from 'typescript'
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '..')
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.mjs'])
+const browserSourceDirs = ['apps/userscript/src', 'packages/browser-core/src', 'apps/extension/src']
 const allowedSinks = new Map([
-  ['apps/userscript/src/status-panel/status-panel.ts', { innerHTML: 1 }],
   ['apps/userscript/src/inference/onnx-worker-external-entry.ts', { importScripts: 1 }],
 ])
 
@@ -40,26 +40,30 @@ function parseArgs(args) {
 }
 
 async function checkBrowserSinks(repoRoot = defaultRepoRoot, { requireSourceDir = false } = {}) {
-  const userscriptDir = resolve(repoRoot, 'apps/userscript/src')
-  if (!existsSync(userscriptDir)) {
-    if (requireSourceDir) {
-      throw new Error('apps/userscript/src is missing')
+  const violations = []
+  const missingSourceDirs = []
+  for (const sourceDir of browserSourceDirs) {
+    const absoluteDir = resolve(repoRoot, sourceDir)
+    if (!existsSync(absoluteDir)) {
+      missingSourceDirs.push(sourceDir)
+      continue
     }
-    return
+    for (const file of await collectSourceFiles(absoluteDir)) {
+      const relativePath = relative(repoRoot, file).replaceAll('\\', '/')
+      const allowed = { ...(allowedSinks.get(relativePath) ?? {}) }
+      const source = await readFile(file, 'utf8')
+      for (const kind of findSinkKinds(source, file)) {
+        if (!allowed[kind]) {
+          violations.push(`unexpected ${kind} sink: ${relativePath}`)
+          continue
+        }
+        allowed[kind] -= 1
+      }
+    }
   }
 
-  const violations = []
-  for (const file of await collectSourceFiles(userscriptDir)) {
-    const relativePath = relative(repoRoot, file).replaceAll('\\', '/')
-    const allowed = { ...(allowedSinks.get(relativePath) ?? {}) }
-    const source = await readFile(file, 'utf8')
-    for (const kind of findSinkKinds(source, file)) {
-      if (!allowed[kind]) {
-        violations.push(`unexpected ${kind} sink: ${relativePath}`)
-        continue
-      }
-      allowed[kind] -= 1
-    }
+  if (requireSourceDir && missingSourceDirs.length > 0) {
+    throw new Error(`browser sink source directories are missing: ${missingSourceDirs.join(', ')}`)
   }
 
   if (violations.length > 0) {
@@ -157,4 +161,4 @@ function isImportScriptsExpression(expression) {
   return ts.isPropertyAccessExpression(expression) && expression.name.text === 'importScripts'
 }
 
-export { allowedSinks, checkBrowserSinks, findSinkKinds }
+export { allowedSinks, browserSourceDirs, checkBrowserSinks, findSinkKinds }

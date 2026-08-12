@@ -24,7 +24,6 @@ async function writeSource(repoRoot, relativePath, content) {
 describe('checkBrowserSinks', () => {
   it('accepts known audited browser sink files', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/status-panel/status-panel.ts', 'el.innerHTML = html\n')
       await writeSource(repoRoot, 'apps/userscript/src/inference/onnx-worker-external-entry.ts', 'importScripts(url)\n')
 
       await assert.doesNotReject(checkBrowserSinks(repoRoot))
@@ -33,9 +32,9 @@ describe('checkBrowserSinks', () => {
 
   it('rejects extra sinks in allowlisted files', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/status-panel/status-panel.ts', 'el.innerHTML = html\nother.innerHTML = userInput\n')
+      await writeSource(repoRoot, 'apps/userscript/src/inference/onnx-worker-external-entry.ts', 'importScripts(url)\nimportScripts(otherUrl)\n')
 
-      await assert.rejects(checkBrowserSinks(repoRoot), /unexpected innerHTML sink/)
+      await assert.rejects(checkBrowserSinks(repoRoot), /unexpected importScripts sink/)
     })
   })
 
@@ -65,7 +64,19 @@ describe('checkBrowserSinks', () => {
 
   it('rejects explicit repo roots without userscript sources', async () => {
     await withRepo(async (repoRoot) => {
-      await assert.rejects(checkBrowserSinks(repoRoot, { requireSourceDir: true }), /apps\/userscript\/src is missing/)
+      await assert.rejects(checkBrowserSinks(repoRoot, { requireSourceDir: true }), /browser sink source directories are missing/)
+    })
+  })
+
+  it('scans browser-core and extension sources', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'packages/browser-core/src/status-panel/panel.ts', 'node.innerHTML = unsafe\n')
+      await writeSource(repoRoot, 'apps/extension/src/content/main.ts', "new Function('unsafe')\n")
+
+      await assert.rejects(
+        checkBrowserSinks(repoRoot),
+        /unexpected innerHTML sink[\s\S]*unexpected new Function sink/,
+      )
     })
   })
 

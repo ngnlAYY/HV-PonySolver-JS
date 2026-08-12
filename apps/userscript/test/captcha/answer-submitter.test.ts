@@ -117,9 +117,7 @@ describe('AnswerSubmitter', () => {
       const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
 
       const submitPromise = new AnswerSubmitter().submit(form, ['TS', 'RA'], vi.fn(), onSubmitted)
-      await flushMicrotasks()
-
-      expect(setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 700)
+      await vi.waitFor(() => expect(setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 700))
       await vi.runOnlyPendingTimersAsync()
       await flushMicrotasks()
       expect(setTimeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 2500)

@@ -1,27 +1,24 @@
-import { alertUser, getGmValue, promptUser, setGmValue } from '../userscript/gm-bridge'
+import {
+  ANSWER_MODE_STORAGE_KEY,
+  getAnswerMode as getCoreAnswerMode,
+  setAnswerMode as setCoreAnswerMode,
+  type AnswerMode,
+} from '@hv-pony-solver/browser-core'
 
-export type AnswerMode = 'auto' | 'manual'
+import { alertUser, promptUser } from '../userscript/gm-bridge'
+import { gmSettingsStorage } from '../userscript/gm-storage'
 
-export const ANSWER_MODE_STORAGE_KEY = 'hvPonySolverAnswerMode'
+export type { AnswerMode }
+export { ANSWER_MODE_STORAGE_KEY }
 
-const DEFAULT_ANSWER_MODE: AnswerMode = 'auto'
 const ANSWER_MODE_PROMPT = ['请选择答题模式：', '1. 自动选择并提交', '2. 仅识别，手动选择并提交'].join('\n')
 
-function isAnswerMode(value: string): value is AnswerMode {
-  return value === 'auto' || value === 'manual'
+export function getAnswerMode(): Promise<AnswerMode> {
+  return getCoreAnswerMode(gmSettingsStorage)
 }
 
-export async function getAnswerMode(): Promise<AnswerMode> {
-  try {
-    const saved = await getGmValue(ANSWER_MODE_STORAGE_KEY)
-    return isAnswerMode(saved) ? saved : DEFAULT_ANSWER_MODE
-  } catch {
-    return DEFAULT_ANSWER_MODE
-  }
-}
-
-export async function setAnswerMode(mode: AnswerMode): Promise<void> {
-  await setGmValue(ANSWER_MODE_STORAGE_KEY, mode)
+export function setAnswerMode(mode: AnswerMode): Promise<void> {
+  return setCoreAnswerMode(gmSettingsStorage, mode)
 }
 
 export async function setAnswerModeFromPrompt(): Promise<void> {

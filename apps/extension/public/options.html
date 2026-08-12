@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HV Pony Solver 设置</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <h1>HV Pony Solver</h1>
+      <p class="intro">扩展版设置。模型 Key 仅保存在本扩展的 IndexedDB 中，不会写入构建产物或同步存储。</p>
+      <form id="settings-form">
+        <label>
+          答题模式
+          <select id="answer-mode">
+            <option value="auto">自动选择并提交</option>
+            <option value="manual">只显示识别结果</option>
+          </select>
+        </label>
+        <label>
+          提交延迟（毫秒或范围）
+          <input id="submit-delay" inputmode="numeric" autocomplete="off">
+        </label>
+        <label>
+          多选点击间隔（毫秒或范围）
+          <input id="multi-click-delay" inputmode="numeric" autocomplete="off">
+        </label>
+        <label>
+          面板位置（top,left）
+          <input id="panel-position" autocomplete="off">
+        </label>
+        <label>
+          历史记录显示条数
+          <input id="history-limit" type="number" min="1" max="50">
+        </label>
+        <label class="checkbox">
+          <input id="panel-compact" type="checkbox">
+          使用紧凑面板
+        </label>
+        <label class="checkbox">
+          <input id="random-on-fail" type="checkbox">
+          识别失败时随机选择一个答案
+        </label>
+        <label>
+          模型 Key
+          <input id="model-key" type="password" autocomplete="off" placeholder="留空则保持现有 Key">
+        </label>
+        <div class="actions">
+          <button type="submit">保存设置</button>
+          <button id="verify-key" type="button">验证并保存 Key</button>
+          <button id="clear-key" type="button" class="secondary">清除 Key</button>
+        </div>
+      </form>
+      <output id="status" aria-live="polite"></output>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

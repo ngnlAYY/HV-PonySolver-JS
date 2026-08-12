@@ -28,9 +28,21 @@ async function writeSource(repoRoot, relativePath, content) {
 describe('checkArchitectureBoundaries', () => {
   it('accepts allowed userscript, model-worker, and type-only contract imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/parser.ts', "import { ANSWER_CODES } from '@hv-pony-solver/shared'\nimport type { StatusPanel } from '../status-panel/status-panel-types'\n")
-      await writeSource(repoRoot, 'apps/userscript/src/status-panel/status-panel.ts', "import { HistoryStore } from '../persistence/answer-history-store'\n")
-      await writeSource(repoRoot, 'apps/model-worker/src/request-router.ts', "import { ModelAccessDecision } from '@hv-pony-solver/shared'\n")
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/parser.ts',
+        "import { ANSWER_CODES } from '@hv-pony-solver/shared'\nimport type { StatusPanel } from '../status-panel/status-panel-types'\n",
+      )
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/status-panel/status-panel.ts',
+        "import { HistoryStore } from '../persistence/answer-history-store'\n",
+      )
+      await writeSource(
+        repoRoot,
+        'apps/model-worker/src/request-router.ts',
+        "import { ModelAccessDecision } from '@hv-pony-solver/shared'\n",
+      )
 
       await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
     })
@@ -38,7 +50,11 @@ describe('checkArchitectureBoundaries', () => {
 
   it('accepts inline type-only contract imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/parser.ts', "import { type StatusPanel } from '../status-panel/status-panel-types'\n")
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/parser.ts',
+        "import { type StatusPanel } from '../status-panel/status-panel-types'\n",
+      )
 
       await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
     })
@@ -46,84 +62,95 @@ describe('checkArchitectureBoundaries', () => {
 
   it('rejects mixed runtime and inline type imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { StatusPanel, type PanelStatus } from '../status-panel/status-panel-types'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "import { StatusPanel, type PanelStatus } from '../status-panel/status-panel-types'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('rejects default imports mixed with inline type imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import StatusPanel, { type PanelStatus } from '../status-panel/status-panel-types'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "import StatusPanel, { type PanelStatus } from '../status-panel/status-panel-types'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('rejects direct inference-to-status-panel imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { StatusPanel } from '../status-panel/status-panel'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "import { StatusPanel } from '../status-panel/status-panel'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('rejects inference imports that target the forbidden directory itself', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { StatusPanel } from '../status-panel'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "import { StatusPanel } from '../status-panel'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('rejects deeper inference imports that target the forbidden directory itself', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/nested/client.ts', "import { StatusPanel } from '../../status-panel'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/nested/client.ts',
+        "import { StatusPanel } from '../../status-panel'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('rejects commented direct inference-to-status-panel imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { StatusPanel } from /* comment */ '../status-panel/status-panel'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "import { StatusPanel } from /* comment */ '../status-panel/status-panel'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('rejects commented side-effect imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import /* comment */ '../status-panel/status-panel'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "import /* comment */ '../status-panel/status-panel'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('does not reject paths with partial forbidden path segments', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { StatusPanelOther } from '../status-panel-other/status-panel'\n")
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "import { StatusPanelOther } from '../status-panel-other/status-panel'\n",
+      )
 
       await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
     })
@@ -131,40 +158,47 @@ describe('checkArchitectureBoundaries', () => {
 
   it('rejects commented direct inference-to-status-panel exports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "export { StatusPanel } from /* comment */ '../status-panel/status-panel'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "export { StatusPanel } from /* comment */ '../status-panel/status-panel'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('rejects commented dynamic inference-to-status-panel imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "await import(/* comment */ '../status-panel/status-panel')\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "await import(/* comment */ '../status-panel/status-panel')\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('rejects dynamic imports with comments before the call arguments', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "await import/* comment */('../status-panel/status-panel')\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /inference layer must not import status panel/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "await import/* comment */('../status-panel/status-panel')\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
     })
   })
 
   it('does not treat property calls named import as dynamic imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "obj.import('../status-panel/status-panel')\n")
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "obj.import('../status-panel/status-panel')\n",
+      )
 
       await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
     })
@@ -172,7 +206,11 @@ describe('checkArchitectureBoundaries', () => {
 
   it('does not treat import calls inside template strings as dynamic imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "const s = `import('../status-panel/status-panel')`\n")
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "const s = `import('../status-panel/status-panel')`\n",
+      )
 
       await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
     })
@@ -180,23 +218,64 @@ describe('checkArchitectureBoundaries', () => {
 
   it('rejects direct status-panel-to-inference imports', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/status-panel/status-panel.ts', "import { parseYoloOutput } from '../inference/yolo-output-parser'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /status panel must not import inference/,
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/status-panel/status-panel.ts',
+        "import { parseYoloOutput } from '../inference/yolo-output-parser'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /status panel must not import inference/)
     })
   })
 
   it('rejects cross-application imports between model-worker and userscript', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/model-worker/src/index.ts', "import { App } from '../../userscript/src/app/app'\n")
+      await writeSource(
+        repoRoot,
+        'apps/model-worker/src/index.ts',
+        "import { App } from '../../userscript/src/app/app'\n",
+      )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /model worker must not import userscript/)
+    })
+  })
+
+  it('rejects extension imports from private userscript source', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(
+        repoRoot,
+        'apps/extension/src/content/main.ts',
+        "import { App } from '../../../userscript/src/app/app'\n",
+      )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /extension must not import private application code/)
+    })
+  })
+
+  it('rejects type-only application imports from private browser-core source paths', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(
+        repoRoot,
+        'apps/userscript/test/model/cache.test.ts',
+        "import type { ModelCache } from '../../../../packages/browser-core/src/model/model-cache'\n",
+      )
 
       await assert.rejects(
         checkArchitectureBoundaries(repoRoot),
-        /model worker must not import userscript/,
+        /userscript must consume browser core through its package root/,
       )
+    })
+  })
+
+  it('rejects browser-core imports from applications', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(
+        repoRoot,
+        'packages/browser-core/src/app/app.ts',
+        "import { getValue } from '../../../../apps/userscript/src/userscript/gm-bridge'\n",
+      )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /browser core must not import applications/)
     })
   })
 
@@ -222,29 +301,35 @@ describe('checkArchitectureBoundaries', () => {
 
   it('rejects shared imports from application code', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'packages/shared/src/model.ts', "import { App } from '../../apps/userscript/src/app/app'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /shared package must not import apps/,
+      await writeSource(
+        repoRoot,
+        'packages/shared/src/model.ts',
+        "import { App } from '../../apps/userscript/src/app/app'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /shared package must not import apps/)
     })
   })
 
   it('rejects nested shared imports from application code', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'packages/shared/src/nested/model.ts', "import { App } from '../../../apps/userscript/src/app/app'\n")
-
-      await assert.rejects(
-        checkArchitectureBoundaries(repoRoot),
-        /shared package must not import apps/,
+      await writeSource(
+        repoRoot,
+        'packages/shared/src/nested/model.ts',
+        "import { App } from '../../../apps/userscript/src/app/app'\n",
       )
+
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /shared package must not import apps/)
     })
   })
 
   it('rejects inference runtime imports from userscript storage bridge', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', "import { getGmValue } from '../userscript/gm-bridge'\n")
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.ts',
+        "import { getGmValue } from '../userscript/gm-bridge'\n",
+      )
 
       await assert.rejects(
         checkArchitectureBoundaries(repoRoot),
@@ -255,7 +340,11 @@ describe('checkArchitectureBoundaries', () => {
 
   it('rejects nested inference runtime imports from userscript storage bridge', async () => {
     await withRepo(async (repoRoot) => {
-      await writeSource(repoRoot, 'apps/userscript/src/inference/nested/client.ts', "import { getGmValue } from '../../userscript/gm-bridge'\n")
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/nested/client.ts',
+        "import { getGmValue } from '../../userscript/gm-bridge'\n",
+      )
 
       await assert.rejects(
         checkArchitectureBoundaries(repoRoot),

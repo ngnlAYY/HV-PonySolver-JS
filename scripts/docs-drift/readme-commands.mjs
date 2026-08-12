@@ -26,6 +26,7 @@ function checkRootCheckCommand(rootPackageJson, readme) {
     'docs:check',
     'architecture:check',
     'browser-sinks:check',
+    'extension:package-check',
     'bundle:check',
   ]) {
     if (quickCheckCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check:quick', commandName)) {

@@ -1,3 +1,5 @@
+import type { AppDependencies } from '@hv-pony-solver/browser-core'
+
 import { getAnswerMode } from '../captcha/answer-mode-settings'
 import { AnswerSubmitter } from '../captcha/answer-submitter'
 import { CachedImageLoader } from '../captcha/captcha-image-loader'
@@ -6,13 +8,9 @@ import { OnnxWorkerClient } from '../inference/onnx-worker-client'
 import { ModelCache } from '../model/model-cache'
 import { HistoryStore } from '../persistence/answer-history-store'
 import { StatusPanel } from '../status-panel/status-panel'
+import { registerSettingsMenu } from '../userscript/settings-menu'
 
-export type AppDependencies = Readonly<{
-  panel: StatusPanel
-  modelCache: ModelCache
-  detector: OnnxWorkerClient
-  solver: CaptchaSolver
-}>
+export type { AppDependencies }
 
 export function createAppDependencies(getAbortSignal?: () => AbortSignal | undefined): AppDependencies {
   const history = new HistoryStore()
@@ -22,11 +20,20 @@ export function createAppDependencies(getAbortSignal?: () => AbortSignal | undef
   const imageLoader = new CachedImageLoader()
   const answerSubmitter = new AnswerSubmitter()
   const solver = new CaptchaSolver(panel, detector, imageLoader, answerSubmitter, getAnswerMode, getAbortSignal)
+  const verifyModelAccessKey = async (candidateKey: string): Promise<void> => {
+    const modelBuffer = await modelCache.download(undefined, true, candidateKey)
+    try {
+      await modelCache.putCached(modelBuffer, true)
+    } catch {
+      // Key validation succeeds once a verified model downloads; cache failure is non-authoritative.
+    }
+  }
 
   return {
     panel,
-    modelCache,
     detector,
     solver,
+    registerSettings: () => registerSettingsMenu({ onVerifyModelAccessKey: verifyModelAccessKey }),
+    dispose: () => modelCache.close(),
   }
 }

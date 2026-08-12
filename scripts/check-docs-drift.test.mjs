@@ -30,7 +30,10 @@ async function createFixture() {
     'README.md',
     'package.json',
     'apps/userscript/package.json',
-    'apps/userscript/src/inference/inference-config.ts',
+    'apps/extension/package.json',
+    'apps/extension/scripts/build-extension.mjs',
+    'docs/browser-extension.md',
+    'packages/browser-core/src/inference/inference-config.ts',
     'apps/userscript/src/inference/onnx-runtime-assets.ts',
     'apps/model-worker/src/request-router.ts',
     'apps/model-worker/src/model-access.ts',
@@ -58,6 +61,19 @@ test('current repository README is in sync with source facts', async () => {
   const result = await runCheck(repoRoot)
   assert.equal(result.exitCode, 0, result.stderr)
   assert.match(result.stdout, /Docs drift check passed/)
+})
+
+test('fails clearly when extension docs omit the generated Firefox minimum version', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const extensionDocPath = join(fixtureRoot, 'docs/browser-extension.md')
+    await writeFile(readmePath, (await readFile(readmePath, 'utf8')).replaceAll('142', 'current Firefox'))
+    await writeFile(extensionDocPath, (await readFile(extensionDocPath, 'utf8')).replaceAll('142', 'current Firefox'))
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /extension documentation omits Firefox minimum version 142\.0/)
+  })
 })
 
 // README 文档契约：这些测试验证 README 是否准确描述脚本、模型、ONNX Runtime 和 Model Worker 的当前事实。

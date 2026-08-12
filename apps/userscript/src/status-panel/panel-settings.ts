@@ -1,124 +1,70 @@
-import { alertUser, deleteGmValue, getGmValue, getGmValueSync, promptUser, registerGmMenu, runMenuAction, setGmValue } from '../userscript/gm-bridge'
+import {
+  clearPanelHistoryLimit as clearCorePanelHistoryLimit,
+  clearPanelPosition as clearCorePanelPosition,
+  getPanelHistoryLimit as getCorePanelHistoryLimit,
+  getPanelHistoryLimitSync as getCorePanelHistoryLimitSync,
+  getPanelPosition as getCorePanelPosition,
+  getPanelPositionSync as getCorePanelPositionSync,
+  isPanelCompactMode as isCorePanelCompactMode,
+  isPanelCompactModeSync as isCorePanelCompactModeSync,
+  serializePanelPosition,
+  setPanelCompactMode as setCorePanelCompactMode,
+  setPanelHistoryLimit as setCorePanelHistoryLimit,
+  setPanelPosition as setCorePanelPosition,
+  type PanelPosition,
+} from '@hv-pony-solver/browser-core'
 
-const PANEL_POSITION_STORAGE_KEY = 'hvPonySolverPanelPosition'
-const PANEL_COMPACT_MODE_STORAGE_KEY = 'hvPonySolverPanelCompact'
-const PANEL_HISTORY_LIMIT_STORAGE_KEY = 'hvPonySolverHistoryLimit'
-const DEFAULT_PANEL_POSITION: PanelPosition = { top: 150, left: 1240 }
-const DEFAULT_PANEL_HISTORY_LIMIT = 5
-const INVALID_POSITION_MESSAGE = '面板位置格式无效，请输入非负整数 top,left，例如 150,1240'
-const INVALID_HISTORY_LIMIT_MESSAGE = '答题记录条数无效，请输入 1 到 50 之间的整数'
+import { alertUser, promptUser, registerGmMenu, runMenuAction } from '../userscript/gm-bridge'
+import { gmSettingsStorage } from '../userscript/gm-storage'
 
-export type PanelPosition = Readonly<{
-  top: number
-  left: number
-}>
-
-function parsePanelPosition(value: string): PanelPosition {
-  const match = /^\s*(\d+)\s*,\s*(\d+)\s*$/.exec(value)
-  if (!match) {
-    throw new Error(INVALID_POSITION_MESSAGE)
-  }
-  return { top: Number(match[1]), left: Number(match[2]) }
-}
-
-function serializePanelPosition(position: PanelPosition): string {
-  return `${position.top},${position.left}`
-}
-
-function parsePanelHistoryLimit(value: string): number {
-  const trimmed = value.trim()
-  if (!/^\d+$/.test(trimmed)) {
-    throw new Error(INVALID_HISTORY_LIMIT_MESSAGE)
-  }
-  const limit = Number(trimmed)
-  if (limit < 1 || limit > 50) {
-    throw new Error(INVALID_HISTORY_LIMIT_MESSAGE)
-  }
-  return limit
-}
+export type { PanelPosition }
 
 export function getPanelPositionSync(): PanelPosition {
-  try {
-    const saved = getGmValueSync(PANEL_POSITION_STORAGE_KEY)
-    if (!saved) {
-      return DEFAULT_PANEL_POSITION
-    }
-    return parsePanelPosition(saved)
-  } catch {
-    return DEFAULT_PANEL_POSITION
-  }
+  return getCorePanelPositionSync(gmSettingsStorage)
 }
 
-export async function getPanelPosition(): Promise<PanelPosition> {
-  try {
-    const saved = await getGmValue(PANEL_POSITION_STORAGE_KEY)
-    if (!saved) {
-      return DEFAULT_PANEL_POSITION
-    }
-    return parsePanelPosition(saved)
-  } catch {
-    return DEFAULT_PANEL_POSITION
-  }
+export function getPanelPosition(): Promise<PanelPosition> {
+  return getCorePanelPosition(gmSettingsStorage)
 }
 
-export async function setPanelPosition(value: string): Promise<void> {
-  const position = parsePanelPosition(value)
-  await setGmValue(PANEL_POSITION_STORAGE_KEY, serializePanelPosition(position))
+export function setPanelPosition(value: string): Promise<void> {
+  return setCorePanelPosition(gmSettingsStorage, value)
 }
 
-export async function clearPanelPosition(): Promise<void> {
-  await deleteGmValue(PANEL_POSITION_STORAGE_KEY)
+export function clearPanelPosition(): Promise<void> {
+  return clearCorePanelPosition(gmSettingsStorage)
 }
 
 export function isPanelCompactModeSync(): boolean {
-  try {
-    return getGmValueSync(PANEL_COMPACT_MODE_STORAGE_KEY) === '1'
-  } catch {
-    return false
-  }
+  return isCorePanelCompactModeSync(gmSettingsStorage)
 }
 
-export async function isPanelCompactMode(): Promise<boolean> {
-  try {
-    return await getGmValue(PANEL_COMPACT_MODE_STORAGE_KEY) === '1'
-  } catch {
-    return false
-  }
+export function isPanelCompactMode(): Promise<boolean> {
+  return isCorePanelCompactMode(gmSettingsStorage)
 }
 
-export async function setPanelCompactMode(enabled: boolean): Promise<void> {
-  await setGmValue(PANEL_COMPACT_MODE_STORAGE_KEY, enabled ? '1' : '')
+export function setPanelCompactMode(enabled: boolean): Promise<void> {
+  return setCorePanelCompactMode(gmSettingsStorage, enabled)
 }
 
-export async function clearPanelCompactMode(): Promise<void> {
-  await deleteGmValue(PANEL_COMPACT_MODE_STORAGE_KEY)
+export function clearPanelCompactMode(): Promise<void> {
+  return setCorePanelCompactMode(gmSettingsStorage, false)
 }
 
 export function getPanelHistoryLimitSync(): number {
-  try {
-    const saved = getGmValueSync(PANEL_HISTORY_LIMIT_STORAGE_KEY)
-    return saved ? parsePanelHistoryLimit(saved) : DEFAULT_PANEL_HISTORY_LIMIT
-  } catch {
-    return DEFAULT_PANEL_HISTORY_LIMIT
-  }
+  return getCorePanelHistoryLimitSync(gmSettingsStorage)
 }
 
-export async function getPanelHistoryLimit(): Promise<number> {
-  try {
-    const saved = await getGmValue(PANEL_HISTORY_LIMIT_STORAGE_KEY)
-    return saved ? parsePanelHistoryLimit(saved) : DEFAULT_PANEL_HISTORY_LIMIT
-  } catch {
-    return DEFAULT_PANEL_HISTORY_LIMIT
-  }
+export function getPanelHistoryLimit(): Promise<number> {
+  return getCorePanelHistoryLimit(gmSettingsStorage)
 }
 
-export async function setPanelHistoryLimit(value: string): Promise<void> {
-  const limit = parsePanelHistoryLimit(value)
-  await setGmValue(PANEL_HISTORY_LIMIT_STORAGE_KEY, String(limit))
+export function setPanelHistoryLimit(value: string): Promise<void> {
+  return setCorePanelHistoryLimit(gmSettingsStorage, value)
 }
 
-export async function clearPanelHistoryLimit(): Promise<void> {
-  await deleteGmValue(PANEL_HISTORY_LIMIT_STORAGE_KEY)
+export function clearPanelHistoryLimit(): Promise<void> {
+  return clearCorePanelHistoryLimit(gmSettingsStorage)
 }
 
 export function registerPanelSettingsMenu(): void {

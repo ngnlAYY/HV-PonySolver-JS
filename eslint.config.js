@@ -25,7 +25,7 @@ export default tseslint.config(
   },
   {
     files: ['**/*.ts'],
-    ignores: ['apps/userscript/src/utils/logger.ts'],
+    ignores: ['apps/userscript/src/utils/logger.ts', 'packages/browser-core/src/utils/logger.ts'],
     rules: {
       '@typescript-eslint/consistent-type-imports': ['warn', { prefer: 'type-imports' }],
       '@typescript-eslint/no-explicit-any': 'error',
@@ -35,7 +35,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['apps/userscript/src/utils/logger.ts'],
+    files: ['apps/userscript/src/utils/logger.ts', 'packages/browser-core/src/utils/logger.ts'],
     rules: {
       '@typescript-eslint/consistent-type-imports': ['warn', { prefer: 'type-imports' }],
       '@typescript-eslint/no-explicit-any': 'error',

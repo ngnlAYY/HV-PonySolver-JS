@@ -1,0 +1,143 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as WebExtensionModule from '../../src/platform/webextension'
+
+const platformMocks = vi.hoisted(() => ({
+  connectListener: undefined as ((port: ExtensionPort) => void) | undefined,
+}))
+
+vi.mock('../../src/platform/webextension', async (importOriginal) => {
+  const actual = await importOriginal<typeof WebExtensionModule>()
+  return {
+    ...actual,
+    addRuntimeConnectListener: vi.fn((listener: (port: ExtensionPort) => void) => {
+      platformMocks.connectListener = listener
+      return vi.fn()
+    }),
+    runtimeId: () => 'extension-id',
+    runtimeGetUrl: () => 'moz-extension://extension-id/options.html',
+  }
+})
+
+import { MAX_PORT_DETECT_REQUESTS, isTrustedPort, registerBroker } from '../../src/background/broker'
+import { CONTENT_PORT_NAME, OPTIONS_PORT_NAME, PROTOCOL_VERSION, type HostResponse } from '../../src/protocol/messages'
+import type { ExtensionPort, ExtensionSender } from '../../src/platform/webextension'
+
+type TestPort = ExtensionPort & Readonly<{
+  emitMessage(message: unknown): void
+  emitDisconnect(): void
+}>
+
+function port(name: string, sender: ExtensionSender): TestPort {
+  let messageListener: ((message: unknown) => void) | undefined
+  let disconnectListener: (() => void) | undefined
+  return {
+    name,
+    sender,
+    onMessage: {
+      addListener: vi.fn((listener: (message: unknown) => void) => {
+        messageListener = listener
+      }),
+      removeListener: vi.fn(),
+    },
+    onDisconnect: {
+      addListener: vi.fn((listener: () => void) => {
+        disconnectListener = listener
+      }),
+      removeListener: vi.fn(),
+    },
+    postMessage: vi.fn(),
+    disconnect: vi.fn(),
+    emitMessage: (message) => messageListener?.(message),
+    emitDisconnect: () => disconnectListener?.(),
+  }
+}
+
+function detectRequest(index: number): Record<string, unknown> {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: 'detect',
+    requestId: `detect-${index}`,
+    imageBase64: 'AQID',
+    mimeType: 'image/png',
+  }
+}
+
+beforeEach(() => {
+  platformMocks.connectListener = undefined
+})
+
+describe('broker sender validation', () => {
+  const extensionId = 'extension-id'
+  const optionsUrl = 'moz-extension://extension-id/options.html'
+
+  it('accepts only the declared HentaiVerse content origins', () => {
+    expect(isTrustedPort(port(CONTENT_PORT_NAME, { id: extensionId, url: 'https://hentaiverse.org/?s=Battle' }), extensionId, optionsUrl)).toBe(true)
+    expect(isTrustedPort(port(CONTENT_PORT_NAME, { id: extensionId, url: 'https://alt.hentaiverse.org/isekai/' }), extensionId, optionsUrl)).toBe(true)
+    expect(isTrustedPort(port(CONTENT_PORT_NAME, { id: extensionId, url: 'https://hentaiverse.org.evil.invalid/' }), extensionId, optionsUrl)).toBe(false)
+    expect(isTrustedPort(port(CONTENT_PORT_NAME, { id: 'other-id', url: 'https://hentaiverse.org/' }), extensionId, optionsUrl)).toBe(false)
+  })
+
+  it('accepts the extension options page but rejects unrelated extension pages', () => {
+    expect(isTrustedPort(port(OPTIONS_PORT_NAME, { id: extensionId, url: `${optionsUrl}#key` }), extensionId, optionsUrl)).toBe(true)
+    expect(isTrustedPort(port(OPTIONS_PORT_NAME, { id: extensionId, url: 'moz-extension://extension-id/untrusted.html' }), extensionId, optionsUrl)).toBe(false)
+    expect(isTrustedPort(port('unknown', { id: extensionId, url: optionsUrl }), extensionId, optionsUrl)).toBe(false)
+  })
+})
+
+describe('broker queue and privilege boundaries', () => {
+  it('limits pending detects per content Port and releases capacity after completion', async () => {
+    const resolvers: Array<(response: HostResponse) => void> = []
+    const invokeHost = vi.fn(
+      () =>
+        new Promise<HostResponse>((resolve) => {
+          resolvers.push(resolve)
+        }),
+    )
+    registerBroker(invokeHost)
+    const client = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(client)
+
+    for (let index = 0; index < MAX_PORT_DETECT_REQUESTS + 1; index += 1) {
+      client.emitMessage(detectRequest(index))
+    }
+
+    expect(invokeHost).toHaveBeenCalledTimes(MAX_PORT_DETECT_REQUESTS)
+    expect(client.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: `detect-${MAX_PORT_DETECT_REQUESTS}`, ok: false, error: expect.stringContaining('繁忙') }),
+    )
+
+    resolvers.shift()?.({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'detect-0', ok: true })
+    await vi.waitFor(() =>
+      expect(client.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'detect-0', ok: true })),
+    )
+    await Promise.resolve()
+    client.emitMessage(detectRequest(10))
+    expect(invokeHost).toHaveBeenCalledTimes(MAX_PORT_DETECT_REQUESTS + 1)
+
+    for (const [index, resolve] of resolvers.entries()) {
+      resolve({ protocol: PROTOCOL_VERSION, type: 'result', requestId: `remaining-${index}`, ok: true })
+    }
+  })
+
+  it('does not allow content Ports to submit model keys', () => {
+    const invokeHost = vi.fn(async (): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'verify-1',
+      ok: true,
+    }))
+    registerBroker(invokeHost)
+    const client = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(client)
+
+    client.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'verify-key',
+      requestId: 'verify-1',
+      candidateKey: 'a'.repeat(64),
+    })
+
+    expect(client.disconnect).toHaveBeenCalledTimes(1)
+    expect(invokeHost).not.toHaveBeenCalled()
+  })
+})

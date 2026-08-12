@@ -1,6 +1,6 @@
 # HV PonySolver JS
 
-HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓库项目。项目由用户脚本、Cloudflare Model Worker 和共享契约包组成，负责验证码图片预处理、ONNX Runtime Web 推理、模型安全分发以及构建与部署校验。
+HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓库项目。项目由用户脚本、桌面浏览器扩展、Cloudflare Model Worker 和共享包组成，负责验证码图片预处理、ONNX Runtime Web 推理、模型安全分发以及构建与部署校验。
 
 当前版本的核心约束：
 
@@ -11,6 +11,8 @@ HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓
 - 两种构建都从 Model Worker 下载同一个 `.ort` 模型。
 - 默认运行时和内置运行时之间没有自动回退。
 - 模型访问密钥只允许通过 `Authorization: Bearer` 传递，不接受查询字符串密钥。
+- 扩展版为 Chrome、Edge 和 Firefox 分别生成 Chromium/Firefox MV3 产物；所有可执行 JS、Worker 和 WASM 均随扩展打包。
+- 用户脚本与扩展共用 `packages/browser-core` 的 DOM、答题、推理和模型契约，但拥有独立的平台适配器和构建产物。
 
 ## 功能概览
 
@@ -22,6 +24,7 @@ HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓
 - 对 `.ort` 模型和精简 WASM 执行长度与 SHA-256 校验。
 - 提供默认外部完整版和显式内置精简版两种运行时构建。
 - 提供文档漂移、架构边界、浏览器危险调用、包体预算和部署契约检查。
+- 提供可重复的 Chromium/Firefox 扩展 ZIP、SHA-256、Firefox `web-ext` lint 和 Chromium 浏览器整链测试。
 
 ## 架构
 
@@ -44,6 +47,19 @@ ONNX 推理 Worker
     v
 答案选择与状态面板
 
+扩展版：
+
+Hentaiverse 内容脚本
+    |-- DOM 观察、图片读取、答案点击和原生提交
+    |-- JSON-safe、有大小上限的图片消息
+    |
+    +--> Chromium MV3 service worker --> Offscreen Document --+
+    |                                                           |
+    +--> Firefox MV3 background page ----------------------------+
+                                                                v
+                                               打包的 module Worker
+                                               + 精简 ORT glue/WASM
+
 Cloudflare Model Worker
     |-- KV: 校验 Bearer token
     |-- R2: 读取真实模型、诱饵模型和公开 WASM
@@ -54,7 +70,8 @@ Cloudflare Model Worker
 
 | 名称 | 含义 |
 | --- | --- |
-| ONNX 推理 Worker | 用户脚本创建的浏览器 Web Worker |
+| ONNX 推理 Worker | 用户脚本或扩展推理 Host 创建的浏览器 Web Worker |
+| 扩展推理 Host | Chromium Offscreen Document 或 Firefox background page，负责模型、Key、缓存和推理会话 |
 | Model Worker | `apps/model-worker` 中部署到 Cloudflare 的服务 |
 
 ## 仓库结构
@@ -62,7 +79,9 @@ Cloudflare Model Worker
 | 路径 | 作用 |
 | --- | --- |
 | `apps/userscript` | 用户脚本、ONNX 推理 Worker、构建器和浏览器测试 |
+| `apps/extension` | Chromium/Firefox 扩展入口、消息协议、设置页、构建器和浏览器测试 |
 | `apps/model-worker` | Cloudflare Model Worker、Wrangler 配置和部署契约检查 |
+| `packages/browser-core` | 用户脚本与扩展共用的标准浏览器 DOM、答题、推理、模型和渲染逻辑 |
 | `packages/shared` | 用户脚本和 Model Worker 共用的模型、令牌及 ORT 资产契约 |
 | `config/onnxruntime` | 精简 ONNX Runtime 所需的算子与类型配置 |
 | `docs` | 运行时、运维和架构补充文档 |
@@ -77,6 +96,7 @@ Cloudflare Model Worker
 | 客户端 | 请求路径 | 模型格式 | 状态 |
 | --- | --- | --- | --- |
 | 新版用户脚本 | `/yolo26n-640.ort` | ORT | 当前默认 |
+| 浏览器扩展 | `/yolo26n-640.ort` | ORT | 本地打包运行时 |
 | 旧版用户脚本 | `/yolo26n-640.onnx` | ONNX | 继续保留 |
 
 新版模型契约：
@@ -94,7 +114,7 @@ Cloudflare Model Worker
 
 ## ONNX Runtime 构建模式
 
-运行时 profile 由构建命令决定，不由运行时配置自动选择。
+以下运行时 profile 只适用于用户脚本，并由构建命令决定，不由运行时配置自动选择。扩展版始终使用随包分发的精简 glue 和 WASM，没有外部运行时 profile。
 
 | 项目 | 默认外部完整版 | 显式内置精简版 |
 | --- | --- | --- |
@@ -200,6 +220,45 @@ corepack pnpm install
 
 ## 快速构建
 
+### 浏览器扩展
+
+```bash
+pnpm --filter @hv-pony-solver/extension build
+pnpm --filter @hv-pony-solver/extension lint:firefox
+```
+
+构建会清理并重新生成 `apps/extension/dist/`：
+
+```text
+chromium/                                      Chrome、Edge 解压目录
+firefox/                                       Firefox 解压目录
+hv-pony-solver-chromium-<version>.zip          Chromium 安装包
+hv-pony-solver-firefox-<version>.zip           Firefox 安装包
+*.zip.sha256                                   压缩包哈希
+*.artifact.json                                文件长度与 SHA-256 清单
+```
+
+ZIP 使用固定时间戳与稳定文件顺序；相同源码和工具链应产生相同字节。构建器同时审计清单引用、权限、CSP、远程可执行代码、动态导入以及 ORT glue/WASM 哈希。
+
+支持范围：
+
+| 产物 | 浏览器 | 最低版本 | 后台模型 |
+| --- | --- | --- | --- |
+| `chromium` | Chrome、Edge | Chromium 116 | MV3 service worker broker + Offscreen Document |
+| `firefox` | Firefox Desktop | Firefox 142 | MV3 nonpersistent background page |
+
+Safari、移动浏览器和 Manifest V2 不在当前范围内。Firefox 142 下限用于 AMO 内建数据传输同意声明；清单声明 `authenticationInfo`，因为模型 Key 会作为 Bearer 凭据发送到 `models.ngnl.host`。验证码图片和识别结果不发送到该服务，推理在浏览器本地完成。
+
+本地加载：
+
+- Chrome：打开 `chrome://extensions`，启用开发者模式，选择“加载已解压的扩展程序”，指向 `apps/extension/dist/chromium`。
+- Edge：打开 `edge://extensions`，启用开发人员模式，加载同一个 `chromium` 目录。
+- Firefox：打开 `about:debugging#/runtime/this-firefox`，选择“临时载入附加组件”，打开 `apps/extension/dist/firefox/manifest.json`。
+
+点击工具栏按钮会打开扩展设置页。这里可配置模型 Key、自动/手动模式、识别失败随机答案、点击/提交时间、面板位置、紧凑模式和历史显示条数。Key 只保存在扩展源的 IndexedDB 中且不会回显；小型设置和分世界历史保存在 `storage.local`。验证 Key 会实际下载并校验模型，可能消耗该 Key 的月度下载额度。
+
+不要在同一浏览器配置中同时启用用户脚本版和扩展版，否则两者可能同时处理并提交同一个验证码。
+
 ### 默认外部完整版
 
 ```bash
@@ -254,9 +313,15 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 | `pnpm bundle:check:bundled` | 检查当前产物的内置 profile 预算 |
 | `pnpm benchmark:inference` | 执行推理预处理和解析基准，不作为 CI 性能门槛 |
 | `pnpm test:e2e` | 执行用户脚本 Playwright Chromium 测试 |
+| `pnpm test:e2e:extension:content` | 加载临时 Chromium 扩展并执行确定性内容脚本整链 fixture |
+| `pnpm test:e2e:extension:chromium` | 加载生产 Chromium 产物；提供 `KvKey` 时还验证真实模型与本地运行时 |
+| `pnpm test:e2e:extension:firefox` | 用 Playwright Firefox 临时加载并重载生产 Firefox 产物 |
 | `pnpm check:userscript` | 执行用户脚本聚合检查 |
+| `pnpm check:browser-core` | 执行共用浏览器核心的类型、单元和契约检查 |
+| `pnpm check:extension` | 执行扩展类型、测试、双目标构建和 Firefox 严格 lint |
+| `pnpm extension:package-check` | 重新生成扩展双目标产物，并执行 Firefox 严格 lint |
 | `pnpm check:model-worker` | 执行 Model Worker 聚合检查 |
-| `pnpm check:quick` | 依次执行 `lint`、`typecheck`、`test`、`docs:check`、`architecture:check`、`browser-sinks:check` 和 `bundle:check` |
+| `pnpm check:quick` | 依次执行 `lint`、`typecheck`、`test`、`docs:check`、`architecture:check`、`browser-sinks:check`、`extension:package-check` 和 `bundle:check` |
 | `pnpm check` | 先执行 `check:quick`，再执行 `test:coverage` 和 `build` |
 | `pnpm build:onnx-runtime` | 从固定上游构建精简 ONNX Runtime |
 | `pnpm verify:onnx-runtime` | 校验已纳入仓库的精简 glue |
@@ -271,6 +336,20 @@ pnpm --filter @hv-pony-solver/userscript typecheck
 pnpm --filter @hv-pony-solver/userscript test:e2e
 pnpm --filter @hv-pony-solver/userscript verify:onnx-runtime
 ```
+
+### 浏览器扩展命令
+
+```bash
+pnpm --filter @hv-pony-solver/extension typecheck
+pnpm --filter @hv-pony-solver/extension test
+pnpm --filter @hv-pony-solver/extension test:coverage
+pnpm --filter @hv-pony-solver/extension build
+pnpm --filter @hv-pony-solver/extension lint:firefox
+pnpm --filter @hv-pony-solver/extension test:e2e:content
+pnpm --filter @hv-pony-solver/extension test:e2e:chromium
+```
+
+`test:e2e:content` 使用只存在于临时测试构建中的确定性推理 Host，不访问真实模型服务。`test:e2e:chromium` 不设置 `KvKey` 时只证明生产扩展可加载和设置可持久化；以安全方式向进程提供 `KvKey` 后，才会额外验证真实鉴权下载、模型完整性、IndexedDB 缓存、Offscreen Host、打包 Worker 和本地 WASM 会话初始化。任何一种 fixture 成功都不能替代另一种证据。
 
 校验本地 `.ort` 模型：
 
@@ -553,8 +632,10 @@ pnpm verify:onnx-runtime
 - Wrangler 模板渲染与部署契约检查器。
 - README 文档漂移、架构边界和浏览器危险调用。
 - 默认和内置用户脚本包体预算。
+- 扩展消息解码、来源检查、队列上限、超时/断连/重连、Key 隔离、双清单和可重复压缩包。
+- Chromium 扩展 fixture 的自动/手动答题、一次原生提交、状态/历史和排除路由。
 
-Playwright E2E 使用本地 fixture，不访问真实 Hentaiverse 网站，也不证明线上 Model Worker 或 R2 状态。
+默认 Playwright E2E 使用本地 fixture，不访问真实 Hentaiverse 网站，也不证明线上 Model Worker 或 R2 状态。只有显式提供有效 `KvKey` 的扩展 Chromium smoke 才会发起真实模型下载；该检查仍不等同于 Chrome Web Store、Edge Add-ons 或 AMO 发布验收。
 
 ## CI 与发布
 
@@ -569,6 +650,7 @@ Playwright E2E 使用本地 fixture，不访问真实 Hentaiverse 网站，也�
 - 默认外部 profile 构建及 `96 KiB` 预算。
 - 显式内置 profile 构建及 `480 KiB` 预算。
 - 按条件执行的 Playwright Chromium E2E。
+- 双目标扩展构建、Firefox `web-ext` 严格 lint 和 Chromium 扩展整链 fixture。
 - 按手动输入发布的用户脚本构建产物。
 
 CI 中的 E2E 和用户脚本产物发布默认不是每次运行都执行。
@@ -594,6 +676,8 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - `@connect` 和 CORS 只允许网络访问，不代替 token 鉴权。
 - 默认外部 profile 信任固定版本的 jsDelivr 运行时资源。
 - 内置 profile 只对首方精简 WASM 执行内容完整性校验。
+- 扩展产物不加载远程 JS/WASM；ORT glue、module Worker 和内容寻址 WASM 均随包分发，远程 `.ort` 仍按固定长度和 SHA-256 校验。
+- 扩展内容脚本不接收模型 Key 或模型字节；只有设置页可发起 Key 验证请求。
 - 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致。
 - 原始 Key、规范化 Key、配额对象标识和配额状态均不得写入日志或响应。
 - `decoy` 模式的未鉴权 `200` 不表示真实模型泄漏。
@@ -636,6 +720,16 @@ cdn.jsdelivr.net
 pnpm verify:onnx-runtime
 ```
 
+扩展版还应运行：
+
+```bash
+pnpm --filter @hv-pony-solver/extension build
+pnpm --filter @hv-pony-solver/extension lint:firefox
+pnpm --filter @hv-pony-solver/extension test:e2e:chromium
+```
+
+扩展不从 R2 下载 WASM；它读取包内 `runtime/ort-wasm-simd-<sha256>.wasm`。若出现 Emscripten import/link 错误，优先确认构建器使用的定制 glue 与包内 WASM 哈希是一对匹配资产。
+
 ### 模型请求返回诱饵内容或 `403`
 
 确认：
@@ -670,7 +764,7 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 ## 相关文档
 
 - [`docs/onnx-runtime.md`](docs/onnx-runtime.md)：精简运行时资产、哈希和复现说明。
+- [`docs/browser-extension.md`](docs/browser-extension.md)：扩展架构、权限、构建、加载、存储和验证边界。
 - [`docs/model-worker-ops.md`](docs/model-worker-ops.md)：Model Worker 运维和线上验收矩阵。
-- [`docs/architecture.md`](docs/architecture.md)：项目架构与边界说明。
 
 本文档中的命令、URL、对象键和哈希属于代码契约。修改相关实现时必须同步测试和文档漂移规则。

@@ -17,6 +17,11 @@ on:
         type: boolean
         required: true
         default: false
+      publish_extension_artifact:
+        description: 'Publish Chromium and Firefox extension artifacts from this run'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -136,6 +141,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Lint Firefox extension package
+        run: pnpm --filter @hv-pony-solver/extension lint:firefox
+
       - name: Check default userscript bundle budget
         run: pnpm bundle:check:default
 
@@ -189,6 +197,58 @@ jobs:
       - name: Userscript E2E smoke
         run: pnpm test:e2e:userscript
 
+  extension-e2e:
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          output="$(pnpm --filter @hv-pony-solver/extension exec playwright --version)"
+          if [[ ! "$output" =~ ^Version\ ([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$ ]]; then
+            printf 'Unexpected Playwright version output: %q\n' "$output" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright extension browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-extension-browsers-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps chromium
+
+      - name: Install Playwright Firefox
+        run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps firefox
+
+      - name: Extension content E2E smoke
+        run: pnpm test:e2e:extension:content
+
+      - name: Chromium production extension load smoke
+        run: pnpm test:e2e:extension:chromium
+
+      - name: Firefox production extension load smoke
+        run: pnpm test:e2e:extension:firefox
+
   userscript-artifact:
     needs:
       - validate-inputs
@@ -236,4 +296,47 @@ jobs:
             apps/userscript/dist/hv-pony-solver.user.js.sha256
             apps/userscript/dist/hv-pony-solver.artifact.json
             apps/userscript/dist/hv-pony-solver.metafile.json
+          if-no-files-found: error
+
+  extension-artifact:
+    needs:
+      - validate-inputs
+      - guardrails
+      - test
+      - coverage-build
+      - extension-e2e
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build extension artifacts
+        run: pnpm --filter @hv-pony-solver/extension build
+
+      - name: Lint Firefox extension package
+        run: pnpm --filter @hv-pony-solver/extension lint:firefox
+
+      - name: Publish extension artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: hv-pony-solver-extension
+          path: |
+            apps/extension/dist/*.zip
+            apps/extension/dist/*.zip.sha256
+            apps/extension/dist/*.artifact.json
           if-no-files-found: error

@@ -1,0 +1,94 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 340px;
+  background: Canvas;
+  color: CanvasText;
+}
+
+main {
+  box-sizing: border-box;
+  width: min(620px, 100%);
+  margin: 0 auto;
+  padding: 20px;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 1.45rem;
+}
+
+.intro {
+  margin: 0 0 18px;
+  color: GrayText;
+  line-height: 1.5;
+}
+
+form {
+  display: grid;
+  gap: 14px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+input,
+select,
+button {
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 7px 9px;
+  font: inherit;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox input {
+  min-height: auto;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+button {
+  border: 1px solid #3568d4;
+  border-radius: 6px;
+  background: #3568d4;
+  color: white;
+  cursor: pointer;
+}
+
+button.secondary {
+  border-color: GrayText;
+  background: transparent;
+  color: CanvasText;
+}
+
+#status {
+  display: block;
+  min-height: 1.5em;
+  margin-top: 16px;
+  font-weight: 600;
+}
+
+#status[data-kind='error'] {
+  color: #c43b36;
+}
+
+#status[data-kind='success'] {
+  color: #21834a;
+}

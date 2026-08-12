@@ -16,6 +16,7 @@
     "verify:onnx-runtime": "node scripts/verify-onnx-runtime-assets.mjs"
   },
   "dependencies": {
+    "@hv-pony-solver/browser-core": "workspace:*",
     "@hv-pony-solver/shared": "workspace:*"
   },
   "devDependencies": {

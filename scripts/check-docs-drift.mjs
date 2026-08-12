@@ -7,6 +7,7 @@ import { checkModelManifestDocs } from './docs-drift/model-manifest-docs.mjs'
 import { checkModelWorkerDocs, readModelWorkerHttpFacts } from './docs-drift/model-worker-docs.mjs'
 import { checkOnnxRuntimeAssetsDocs } from './docs-drift/onnx-runtime-docs.mjs'
 import { checkRootCheckCommand } from './docs-drift/readme-commands.mjs'
+import { checkExtensionDocs } from './docs-drift/extension-docs.mjs'
 import { parseModelManifest } from './model-manifest.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -50,7 +51,10 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
   const [
     rootPackageJson,
     userscriptPackageJson,
+    extensionPackageJson,
     readme,
+    extensionDoc,
+    extensionBuildSource,
     inferenceConfigSource,
     onnxRuntimeAssetsSource,
     modelWorkerRequestRouterSource,
@@ -60,8 +64,11 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
   ] = await Promise.all([
     readJson(repoRoot, 'package.json'),
     readJson(repoRoot, 'apps/userscript/package.json'),
+    readJson(repoRoot, 'apps/extension/package.json'),
     readText(repoRoot, 'README.md'),
-    readText(repoRoot, 'apps/userscript/src/inference/inference-config.ts'),
+    readText(repoRoot, 'docs/browser-extension.md'),
+    readText(repoRoot, 'apps/extension/scripts/build-extension.mjs'),
+    readText(repoRoot, 'packages/browser-core/src/inference/inference-config.ts'),
     readText(repoRoot, 'apps/userscript/src/inference/onnx-runtime-assets.ts'),
     readText(repoRoot, 'apps/model-worker/src/request-router.ts'),
     readText(repoRoot, 'apps/model-worker/src/model-access.ts'),
@@ -82,6 +89,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     ...checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJson, readme),
     ...checkModelWorkerDocs(readme, modelWorkerHttpFacts),
     ...checkArchitectureGuardrails(readme),
+    ...checkExtensionDocs(extensionPackageJson, extensionBuildSource, readme, extensionDoc),
   ]
 }
 

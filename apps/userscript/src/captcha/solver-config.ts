@@ -1,3 +1,1 @@
-export const solverConfig = {
-  randomOnFail: false,
-} as const
+export { solverConfig } from '@hv-pony-solver/browser-core'

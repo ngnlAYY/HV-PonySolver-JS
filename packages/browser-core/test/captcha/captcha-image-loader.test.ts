@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CachedImageLoader } from '../../src/captcha/captcha-image-loader'
 
-// mock logger，路径相对于本测试文件
 vi.mock('../../src/utils/logger', () => ({
   warn: vi.fn(),
   log: vi.fn(),

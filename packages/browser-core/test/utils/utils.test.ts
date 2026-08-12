@@ -47,7 +47,7 @@ describe('config defaults', () => {
   })
 })
 
-describe('utility functions', () => {
+describe('browser-core utility functions', () => {
   afterEach(() => {
     vi.useRealTimers()
   })

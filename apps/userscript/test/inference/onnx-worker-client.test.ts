@@ -264,9 +264,8 @@ describe('OnnxWorkerClient', () => {
     const panel = createMockPanel()
     const client = new OnnxWorkerClient(modelCache, panel)
 
-    const worker = await client.prepare()
+    await expect(client.prepare()).resolves.toBeUndefined()
 
-    expect(worker).toBe(SuccessfulWorker.instances[0])
     expect(panel.setSessionReady).toHaveBeenCalledWith(expect.any(Number))
     expect(SuccessfulWorker.terminateCount).toBe(0)
     expect(modelCache.putCached).toHaveBeenCalledTimes(1)
@@ -298,7 +297,7 @@ describe('OnnxWorkerClient', () => {
     await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
     SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
 
-    await expect(nextPreparePromise).resolves.toBe(SuccessfulWorker.instances[0])
+    await expect(nextPreparePromise).resolves.toBeUndefined()
     expect(TimeoutThenSuccessfulWorker.constructedCount).toBe(2)
   })
 
@@ -323,7 +322,7 @@ describe('OnnxWorkerClient', () => {
     await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
     SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
 
-    await expect(replacementPreparePromise).resolves.toBe(SuccessfulWorker.instances[0])
+    await expect(replacementPreparePromise).resolves.toBeUndefined()
     TimeoutThenSuccessfulWorker.instances[0]?.onerror?.({ error: new Error('stale worker failure') } as ErrorEvent)
 
     await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true, ponies: ['TS'] })

@@ -1,21 +1,26 @@
-import { formatErrorMessage } from '../utils/errors'
-import { alertUser, deleteGmValue, getGmValue, promptUser, registerGmMenu, runMenuAction, setGmValue } from '../userscript/gm-bridge'
-import { ModelDownloadQuotaExceededError } from './model-download-error'
+import {
+  ModelDownloadQuotaExceededError,
+  clearModelAccessKey as clearCoreModelAccessKey,
+  getModelAccessKey as getCoreModelAccessKey,
+  setModelAccessKey as setCoreModelAccessKey,
+} from '@hv-pony-solver/browser-core'
 
-const MODEL_ACCESS_KEY_STORAGE_KEY = 'hvPonySolverModelAccessKey'
+import { formatErrorMessage } from '../utils/errors'
+import { alertUser, promptUser, registerGmMenu, runMenuAction } from '../userscript/gm-bridge'
+import { gmSettingsStorage } from '../userscript/gm-storage'
 
 export type VerifyModelAccessKey = (candidateKey: string) => Promise<void>
 
-export async function getModelAccessKey(): Promise<string> {
-  return getGmValue(MODEL_ACCESS_KEY_STORAGE_KEY)
+export function getModelAccessKey(): Promise<string> {
+  return getCoreModelAccessKey(gmSettingsStorage)
 }
 
-export async function setModelAccessKey(value: string): Promise<void> {
-  await setGmValue(MODEL_ACCESS_KEY_STORAGE_KEY, value.trim())
+export function setModelAccessKey(value: string): Promise<void> {
+  return setCoreModelAccessKey(gmSettingsStorage, value)
 }
 
-export async function clearModelAccessKey(): Promise<void> {
-  await deleteGmValue(MODEL_ACCESS_KEY_STORAGE_KEY)
+export function clearModelAccessKey(): Promise<void> {
+  return clearCoreModelAccessKey(gmSettingsStorage)
 }
 
 export function registerModelSettingsMenu(onVerify?: VerifyModelAccessKey): void {

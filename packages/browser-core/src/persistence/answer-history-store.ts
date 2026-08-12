@@ -1,0 +1,80 @@
+import { HISTORY_KEY, HISTORY_MAX } from './answer-history-config'
+import type { HistoryRecord, HistoryRecordType, World } from './answer-history-types'
+import type { TextStorage } from '../platform/storage'
+import { formatErrorMessage } from '../utils/errors'
+import { isRecordObject } from '../utils/guards'
+import { logError, warn } from '../utils/logger'
+
+function isHistoryRecordType(value: unknown): value is HistoryRecordType {
+  return value === 'success' || value === 'manual' || value === 'random' || value === 'error'
+}
+
+function isHistoryRecord(value: unknown): value is HistoryRecord {
+  if (!isRecordObject(value) || !isHistoryRecordType(value.type) || typeof value.elapsed !== 'number') {
+    return false
+  }
+  const hasValidOptionalFields =
+    (value.timestamp === undefined || typeof value.timestamp === 'number') &&
+    (value.time === undefined || typeof value.time === 'string')
+  if (!hasValidOptionalFields) {
+    return false
+  }
+  if (value.type === 'success' || value.type === 'manual') {
+    return typeof value.answers === 'string'
+  }
+  if (value.type === 'random') {
+    return typeof value.answers === 'string' && typeof value.message === 'string'
+  }
+  return typeof value.message === 'string'
+}
+
+function parseHistoryRoot(storage: TextStorage): Record<string, unknown> | null {
+  const parsed: unknown = JSON.parse(storage.getItem(HISTORY_KEY) || '{}')
+  return isRecordObject(parsed) ? parsed : null
+}
+
+function getWorldRecords(root: Record<string, unknown>, world: World): HistoryRecord[] {
+  const records = root[world]
+  return Array.isArray(records) ? records.filter(isHistoryRecord) : []
+}
+
+export class HistoryStore {
+  constructor(private readonly storage: TextStorage) {}
+
+  get(world: World): HistoryRecord[] {
+    try {
+      const root = parseHistoryRoot(this.storage)
+      return root ? getWorldRecords(root, world) : []
+    } catch (error) {
+      warn('读取记录失败:', formatErrorMessage(error))
+      return []
+    }
+  }
+
+  add(world: World, record: HistoryRecord): HistoryRecord[] {
+    try {
+      const root = parseHistoryRoot(this.storage) ?? {}
+      const list = getWorldRecords(root, world)
+      const now = Date.now()
+      const nextRecords = [
+        {
+          timestamp: now,
+          time: new Date(now).toLocaleTimeString('zh-CN', { hour12: false }),
+          ...record,
+        },
+        ...list,
+      ].slice(0, HISTORY_MAX)
+      this.storage.setItem(
+        HISTORY_KEY,
+        JSON.stringify({
+          ...root,
+          [world]: nextRecords,
+        }),
+      )
+      return nextRecords
+    } catch (error) {
+      logError('保存记录失败:', formatErrorMessage(error))
+      return this.get(world)
+    }
+  }
+}
