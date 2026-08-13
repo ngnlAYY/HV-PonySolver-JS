@@ -9,6 +9,7 @@ node_modules/
 .claude/
 .trellis
 .tmp/
+.pi/
 /model/
 .keyenv
 worker/wrangler.toml

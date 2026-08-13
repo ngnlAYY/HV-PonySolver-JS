@@ -22,3 +22,15 @@ allowBuilds:
 
 minimumReleaseAgeExclude:
   - '@cloudflare/workers-types@5.20260810.1'
+
+# image-size has no fixed release for these advisories. audit:high verifies the
+# exact local patch and its regression probes before applying scoped ignores.
+patchedDependencies:
+  image-size@2.0.2: patches/image-size@2.0.2.patch
+
+# These ignores are safe only while the exact patch above and audit:high's
+# executable regression gate remain present.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-w3rx-r6r6-pgpr
+    - GHSA-5p2g-fcmc-qvqq

@@ -17,6 +17,9 @@ overrides:
   vite: 8.2.1
   ws: 8.21.3
 
+patchedDependencies:
+  image-size@2.0.2: 77c12533e3a635c4066c55da8952f4912e8210416539dc1249550fa639271595
+
 importers:
 
   .:
@@ -89,8 +92,8 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.2.0)(@vitest/coverage-istanbul@4.1.10)(@vitest/coverage-v8@4.1.10)(jsdom@30.0.1)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2))
       web-ext:
-        specifier: 10.5.0
-        version: 10.5.0(supports-color@10.2.2)
+        specifier: 10.6.0
+        version: 10.6.0(supports-color@10.2.2)
 
   apps/model-worker:
     dependencies:
@@ -371,8 +374,8 @@ packages:
     resolution: {integrity: sha512-ZzZY/b66W2Jd6NHbAhLyDWOEIBWC11VizGFk7Wx7M61JZRz7HR9Cq5P+65RKWUU7u6wgsE8Lmh9nE4Mz+U2eTg==}
     engines: {node: '>= 0.10.4'}
 
-  '@devicefarmer/adbkit@3.3.8':
-    resolution: {integrity: sha512-7rBLLzWQnBwutH2WZ0EWUkQdihqrnLYCUMaB44hSol9e0/cdIhuNFcqZO0xNheAU6qqHVA8sMiLofkYTgb+lmw==}
+  '@devicefarmer/adbkit@3.3.9':
+    resolution: {integrity: sha512-AYxk5G/b2BPEfubcuxVEZEOpsLf0isqrPNJnnwAlUjZAiLdFg/uvLNRDuBhsC/Ar62X+rUhVlvlL+tKp9HCjfQ==}
     engines: {node: '>= 0.10.4'}
     hasBin: true
 
@@ -824,8 +827,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
 
-  '@mdn/browser-compat-data@8.0.4':
-    resolution: {integrity: sha512-up6DsNsaPt3jq5d2TGx4UOXIqBKU0D86dxWwcVmmOOEYqP1rFaV1XcAcwHxMvb6bbtMfY5JpjUCszzy/aVc4yA==}
+  '@mdn/browser-compat-data@8.0.8':
+    resolution: {integrity: sha512-Rutrrc3FYOc+um4/QC4WFETNk2fV8NKWoqQl3tQfcVTQ1WFaoJRbsJBasSF34ltitmnYYD6ZsKW1cOQtSj1jbQ==}
 
   '@oxc-project/types@0.143.0':
     resolution: {integrity: sha512-u6JZdLBTLotrNC9Vd6vPssINdzcCzleKAH6EJKImQb7GtYvX5keN2dxkoK44stCc4tffE6QQRtZTXVSzsLUlWA==}
@@ -1219,8 +1222,8 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  addons-linter@10.8.0:
-    resolution: {integrity: sha512-AotpGWlp5FrmUIH8kjyYjQvCmthnSqPLpw7kOEl7DfoAWEndOCV/ONuekAVM8QObiei802RyyIClEaekA51n5g==}
+  addons-linter@10.10.0:
+    resolution: {integrity: sha512-1n5Xvn4DyHMsulchNDl4ucWnXXQhHwLif6eK80KjieI9KIK3xD+3OYXk5ZcA6a2J8y+Nrlvq9/vq6w7KOqT2MQ==}
     engines: {node: '>=20.0.0'}
     hasBin: true
 
@@ -1238,9 +1241,9 @@ packages:
       safe-compare:
         optional: true
 
-  adm-zip@0.5.18:
-    resolution: {integrity: sha512-ufJnssQGbxzLNS1Ho9bCtX4rQKCCvoVuDLHoJyc3F9dOGDB4BkWs2Ci0kv53lqocAEQ/Cbi+I2XCsNYGqVYqng==}
-    engines: {node: '>=12.0'}
+  adm-zip@0.6.0:
+    resolution: {integrity: sha512-XleryMhbuksdKtofnWZ9Sk+4CUTbms4Mb/EU32SZwToAyZ5RgVos/ki8n+yr0LWHOGKuakbXTuuYNHLQjhddgg==}
+    engines: {node: '>=14.0'}
 
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
@@ -1709,8 +1712,8 @@ packages:
     resolution: {integrity: sha512-78/PXT1wlLLDgTzDs7sjq9hzz0vXD+zn+7wypEe4fXQxCmdmqfGsEPQxmiCSQI3ajFV91bVSsvNtrJRiW6nGng==}
     engines: {node: '>=10'}
 
-  firefox-profile@4.7.0:
-    resolution: {integrity: sha512-aGApEu5bfCNbA4PGUZiRJAIU6jKmghV2UVdklXAofnNtiDjqYw0czLS46W7IfFqVKgKhFB8Ao2YoNGHY4BoIMQ==}
+  firefox-profile@4.7.1:
+    resolution: {integrity: sha512-rUFGvJzXxhhOltBxf1aML9jTVismzgC3w00v2dG4Bxu5Xr6o9/D9QUT4do1ZUE9NHzmRFyQ6Bz+HBWnxZMO65w==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -1742,8 +1745,8 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
-  fx-runner@1.5.0:
-    resolution: {integrity: sha512-EstfdRQu04tM+SXR3pBmc0+GYKZj9FMHAvA8XAbKPzTvUeHP0v1/F3aQ10bG7EluR6phvFqsvn5Z7SvYJsEgNw==}
+  fx-runner@1.6.0:
+    resolution: {integrity: sha512-PEEUfnQJw0/io6SspBbR4EIeXFL/qe/sugesCyfr9M3llgyxNaOH8stvO6KJOKRjeUAvEB6oSZKS3lgjSEOsXg==}
     hasBin: true
 
   gensync@1.0.0-beta.2:
@@ -2428,8 +2431,8 @@ packages:
     resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
     engines: {node: '>=8'}
 
-  shell-quote@1.8.4:
-    resolution: {integrity: sha512-VsC6n6vz1ihYYyZZwX7YZSF5l5x36ca17OC+a69h94YqB7X6XLwf+5MOgynYir2SLFUbl8gIYvBo8K8RoNQ6bQ==}
+  shell-quote@1.10.0:
+    resolution: {integrity: sha512-w1aiOKwKuRgtwAReIIj89puqg+I7GvX4IbLrvmhXbzQsj1+Zwi4VO3+fa6ZF91TWSjIxoEkKnMeHcLEODK5ZXA==}
     engines: {node: '>= 0.4'}
 
   siginfo@2.0.0:
@@ -2619,6 +2622,10 @@ packages:
     resolution: {integrity: sha512-VjBBquch25nUGMuVBpOb2Cj3gc8Kb7lJBqbsXR/0anZ/5uJsL14Kpth9JKfnBsckxCfgIp6hPvcvvmZ97R9X7g==}
     engines: {node: '>=20'}
 
+  upath@3.0.8:
+    resolution: {integrity: sha512-YAsrLMIlhfSCm9rga5TZsJ1mXgahs7N0qOTokzU8mFz35hUrYMvVkaEPefI3rEb/vkAWAOj1Km/qdije9RC1kQ==}
+    engines: {node: '>=20'}
+
   update-browserslist-db@1.3.0:
     resolution: {integrity: sha512-x/M6q3w4Ybp91CNaS4S69UnliqR3BzRpOT6LWbksjth0S/+jhfaPJsWjt/TewpT8j9eLIojUf5jr29WextHroA==}
     hasBin: true
@@ -2730,8 +2737,8 @@ packages:
   wcwidth@1.0.1:
     resolution: {integrity: sha512-XHPEwS0q6TaxcvG85+8EYkbiCux2XtWG2mkc47Ng2A77BQu9+DqIOJldST4HgPkuea7dvKSj5VgX3P1d4rW8Tg==}
 
-  web-ext@10.5.0:
-    resolution: {integrity: sha512-tveUHhZHu5A2Qrs7u+hbh2S+7ZPuKVH/ILzqkRwpdivFOnVmgPhDLtmtGNKT3a8N9PZbW5uP6INe6Byj5qePVQ==}
+  web-ext@10.6.0:
+    resolution: {integrity: sha512-r1MfSwVy5wRQw3UgTUCw9CDViFIoDPri1Wq8qh/mRjC8T+K0TfuxKz68bzYTEP3rbAW6Wn8y7v/jXzBYd3LLGA==}
     engines: {node: '>=20.0.0', npm: '>=8.0.0'}
     hasBin: true
 
@@ -3080,7 +3087,7 @@ snapshots:
 
   '@devicefarmer/adbkit-monkey@1.2.1': {}
 
-  '@devicefarmer/adbkit@3.3.8(supports-color@10.2.2)':
+  '@devicefarmer/adbkit@3.3.9(supports-color@10.2.2)':
     dependencies:
       '@devicefarmer/adbkit-logcat': 2.1.3
       '@devicefarmer/adbkit-monkey': 1.2.1
@@ -3407,7 +3414,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@mdn/browser-compat-data@8.0.4': {}
+  '@mdn/browser-compat-data@8.0.8': {}
 
   '@oxc-project/types@0.143.0': {}
 
@@ -3742,11 +3749,11 @@ snapshots:
 
   acorn@8.18.0: {}
 
-  addons-linter@10.8.0(supports-color@10.2.2):
+  addons-linter@10.10.0(supports-color@10.2.2):
     dependencies:
       '@fluent/syntax': 0.19.0
       '@fregante/relaxed-json': 2.0.0
-      '@mdn/browser-compat-data': 8.0.4
+      '@mdn/browser-compat-data': 8.0.8
       addons-moz-compare: 1.3.0
       addons-scanner-utils: 15.4.0
       ajv: 8.20.0
@@ -3761,12 +3768,12 @@ snapshots:
       espree: 11.2.0
       esprima: 4.0.1
       fast-json-patch: 3.1.1
-      image-size: 2.0.2
+      image-size: 2.0.2(patch_hash=77c12533e3a635c4066c55da8952f4912e8210416539dc1249550fa639271595)
       json-merge-patch: 1.0.2
       pino: 10.3.1
       semver: 7.8.5
       source-map-support: 0.5.21
-      upath: 3.0.7
+      upath: 3.0.8
       yargs: 17.7.2
       yauzl: 3.4.0
     transitivePeerDependencies:
@@ -3786,7 +3793,7 @@ snapshots:
       upath: 3.0.7
       yauzl: 3.4.0
 
-  adm-zip@0.5.18: {}
+  adm-zip@0.6.0: {}
 
   agent-base@7.1.4: {}
 
@@ -4295,9 +4302,9 @@ snapshots:
       locate-path: 6.0.0
       path-exists: 4.0.0
 
-  firefox-profile@4.7.0:
+  firefox-profile@4.7.1:
     dependencies:
-      adm-zip: 0.5.18
+      adm-zip: 0.6.0
       fs-extra: 11.4.0
       ini: 4.1.3
       minimist: 1.2.8
@@ -4326,10 +4333,10 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  fx-runner@1.5.0:
+  fx-runner@1.6.0:
     dependencies:
       commander: 12.1.0
-      shell-quote: 1.8.4
+      shell-quote: 1.10.0
       which: 4.0.0
       winreg: 0.0.12
 
@@ -4387,7 +4394,7 @@ snapshots:
 
   ignore@7.0.6: {}
 
-  image-size@2.0.2: {}
+  image-size@2.0.2(patch_hash=77c12533e3a635c4066c55da8952f4912e8210416539dc1249550fa639271595): {}
 
   immediate@3.0.6: {}
 
@@ -4997,7 +5004,7 @@ snapshots:
 
   shebang-regex@3.0.0: {}
 
-  shell-quote@1.8.4: {}
+  shell-quote@1.10.0: {}
 
   siginfo@2.0.0: {}
 
@@ -5175,6 +5182,8 @@ snapshots:
 
   upath@3.0.7: {}
 
+  upath@3.0.8: {}
+
   update-browserslist-db@1.3.0(browserslist@4.28.8):
     dependencies:
       browserslist: 4.28.8
@@ -5254,18 +5263,18 @@ snapshots:
     dependencies:
       defaults: 1.0.4
 
-  web-ext@10.5.0(supports-color@10.2.2):
+  web-ext@10.6.0(supports-color@10.2.2):
     dependencies:
       '@babel/runtime': 8.0.0
-      '@devicefarmer/adbkit': 3.3.8(supports-color@10.2.2)
-      addons-linter: 10.8.0(supports-color@10.2.2)
+      '@devicefarmer/adbkit': 3.3.9(supports-color@10.2.2)
+      addons-linter: 10.10.0(supports-color@10.2.2)
       camelcase: 8.0.0
       chrome-launcher: 1.2.0(supports-color@10.2.2)
       debounce: 1.2.1
       decamelize: 6.0.1
       es6-error: 4.1.1
-      firefox-profile: 4.7.0
-      fx-runner: 1.5.0
+      firefox-profile: 4.7.1
+      fx-runner: 1.6.0
       https-proxy-agent: 7.0.6(supports-color@10.2.2)
       jose: 5.9.6
       jszip: 3.10.1
