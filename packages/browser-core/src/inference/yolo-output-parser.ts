@@ -1,4 +1,4 @@
-import { answerCodeForClassId, type AnswerCode } from '@hv-pony-solver/shared'
+import { answerCodeForClassId, type AnswerCode } from '@hv-pony-solver/shared/answer'
 import { yoloOutputConfig } from './inference-config'
 import type { Detection, YoloParseResult } from './inference-types'
 

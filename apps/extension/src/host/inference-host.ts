@@ -1,18 +1,6 @@
-import {
-  MODEL_ACCESS_KEY_STORAGE_KEY,
-  ModelCache,
-  OnnxWorkerClient,
-  downloadModel,
-  formatErrorMessage,
-  getModelAccessKey,
-  setModelAccessKey,
-  type CacheStatusSink,
-  type DetectorService,
-  type InferenceStatusSink,
-  type AsyncStringStorage,
-} from '@hv-pony-solver/browser-core'
+import type { DetectorService } from '@hv-pony-solver/browser-core/inference/inference-types'
+import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 
-import { runtimeGetUrl } from '../platform/webextension'
 import {
   decodeImage,
   errorResponse,
@@ -20,21 +8,12 @@ import {
   type HostRequest,
   type HostResponse,
 } from '../protocol/messages'
-import { IndexedDbStringStorage } from './indexeddb-string-storage'
-
-type HostModelCache = Pick<ModelCache, 'download' | 'putCached' | 'close'>
-type HostSecretStorage = AsyncStringStorage & Readonly<{ close(): Promise<void> }>
 
 export type InferenceHostDependencies = Readonly<{
   detector: DetectorService
-  modelCache: HostModelCache
-  secretStorage: HostSecretStorage
+  verifyKey?(candidateKey: string): Promise<void>
+  close?(): void
 }>
-
-const silentStatusSink: CacheStatusSink & InferenceStatusSink = {
-  setStatus: () => undefined,
-  setSessionReady: () => undefined,
-}
 
 export class InferenceHost {
   constructor(private readonly dependencies: InferenceHostDependencies) {}
@@ -49,11 +28,10 @@ export class InferenceHost {
         const result = await this.dependencies.detector.detect(decodeImage(request))
         return successResponse(request.requestId, result)
       }
-      const candidateKey = request.candidateKey.trim()
-      const modelBuffer = await this.dependencies.modelCache.download(undefined, true, candidateKey)
-      await this.dependencies.modelCache.putCached(modelBuffer, true)
-      await this.dependencies.detector.prepare()
-      await setModelAccessKey(this.dependencies.secretStorage, candidateKey)
+      if (!this.dependencies.verifyKey) {
+        throw new Error('当前扩展版本不支持模型 Key')
+      }
+      await this.dependencies.verifyKey(request.candidateKey.trim())
       return successResponse(request.requestId)
     } catch (error) {
       return errorResponse(request.requestId, formatErrorMessage(error))
@@ -62,26 +40,6 @@ export class InferenceHost {
 
   destroy(): void {
     this.dependencies.detector.destroy()
-    this.dependencies.modelCache.close()
-    void this.dependencies.secretStorage.close()
+    this.dependencies.close?.()
   }
 }
-
-export function createInferenceHost(): InferenceHost {
-  const secretStorage = new IndexedDbStringStorage()
-  const modelCache = new ModelCache(
-    silentStatusSink,
-    (signal, options) =>
-      downloadModel(signal, options, {
-        getAccessKey: () => getModelAccessKey(secretStorage),
-      }),
-  )
-  const detector = new OnnxWorkerClient(
-    modelCache,
-    silentStatusSink,
-    () => new Worker(runtimeGetUrl('inference-worker.js'), { type: 'module' }),
-  )
-  return new InferenceHost({ detector, modelCache, secretStorage })
-}
-
-export { MODEL_ACCESS_KEY_STORAGE_KEY }

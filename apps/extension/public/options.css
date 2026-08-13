@@ -64,6 +64,41 @@ button {
   gap: 8px;
 }
 
+.key-settings {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid GrayText;
+  border-radius: 6px;
+}
+
+.key-settings legend {
+  padding: 0 5px;
+  font-weight: 700;
+}
+
+.key-settings[disabled] {
+  color: GrayText;
+  background: color-mix(in srgb, CanvasText 6%, Canvas);
+}
+
+.key-settings[disabled] input,
+.key-settings[disabled] button {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.model-hint {
+  margin: -4px 0 0;
+  color: GrayText;
+  line-height: 1.5;
+}
+
+.model-hint[hidden] {
+  display: none;
+}
+
 button {
   border: 1px solid #3568d4;
   border-radius: 6px;

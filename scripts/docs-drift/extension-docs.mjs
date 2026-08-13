@@ -10,7 +10,14 @@ export function checkExtensionDocs(extensionPackageJson, buildSource, readme, ex
   if (!chromeMinimum) errors.push('extension build minimum_chrome_version is unreadable')
   if (!firefoxMinimum) errors.push('extension build strict_min_version is unreadable')
 
-  const requiredScripts = ['build', 'lint:firefox', 'test:e2e:content', 'test:e2e:chromium']
+  const requiredScripts = [
+    'build',
+    'build:packaged',
+    'lint:firefox',
+    'test:e2e:content',
+    'test:e2e:chromium',
+    'test:e2e:packaged',
+  ]
   for (const script of requiredScripts) {
     if (typeof extensionPackageJson.scripts?.[script] !== 'string') {
       errors.push(`apps/extension/package.json scripts.${script} is missing`)
@@ -34,8 +41,18 @@ export function checkExtensionDocs(extensionPackageJson, buildSource, readme, ex
     'apps/extension/dist/chromium',
     'apps/extension/dist/firefox',
     'authenticationInfo',
+    '`none`',
     'storage.local',
     'IndexedDB',
+    '--model-mode packaged',
+    'model/yolo26n-640.ort',
+    'hv-pony-solver-chromium-packaged-<version>.zip',
+    'hv-pony-solver-firefox-packaged-<version>.zip',
+    'modelDelivery',
+    '当前版本已内置模型，无需配置模型 Key。',
+    'offscreen',
+    'ArrayBuffer',
+    'Base64',
     '不要在同一浏览器配置中同时启用用户脚本版和扩展版',
   ]
   const combinedDocs = `${readme}\n${extensionDoc}`

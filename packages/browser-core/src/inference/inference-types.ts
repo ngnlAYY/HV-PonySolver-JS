@@ -1,4 +1,4 @@
-import type { AnswerCode } from '@hv-pony-solver/shared'
+import type { AnswerCode } from '@hv-pony-solver/shared/answer'
 
 export type Detection = Readonly<{
   class_id: number

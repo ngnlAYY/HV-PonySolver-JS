@@ -1,4 +1,4 @@
-import type { AsyncStringStorage } from '@hv-pony-solver/browser-core'
+import type { AsyncStringStorage } from '@hv-pony-solver/browser-core/platform/storage'
 
 const DATABASE_NAME = 'hvPonySolverExtensionSecrets'
 const STORE_NAME = 'values'

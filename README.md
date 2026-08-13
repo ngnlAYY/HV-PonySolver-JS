@@ -11,7 +11,7 @@ HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓
 - 两种构建都从 Model Worker 下载同一个 `.ort` 模型。
 - 默认运行时和内置运行时之间没有自动回退。
 - 模型访问密钥只允许通过 `Authorization: Bearer` 传递，不接受查询字符串密钥。
-- 扩展版为 Chrome、Edge 和 Firefox 分别生成 Chromium/Firefox MV3 产物；所有可执行 JS、Worker 和 WASM 均随扩展打包。
+- 扩展版为 Chrome、Edge 和 Firefox 生成 Chromium/Firefox MV3 产物；默认远程下载模型，也可显式构建无需 Key 的内置模型版本；所有可执行 JS、Worker 和 WASM 均随扩展打包。
 - 用户脚本与扩展共用 `packages/browser-core` 的 DOM、答题、推理和模型契约，但拥有独立的平台适配器和构建产物。
 
 ## 功能概览
@@ -24,7 +24,7 @@ HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓
 - 对 `.ort` 模型和精简 WASM 执行长度与 SHA-256 校验。
 - 提供默认外部完整版和显式内置精简版两种运行时构建。
 - 提供文档漂移、架构边界、浏览器危险调用、包体预算和部署契约检查。
-- 提供可重复的 Chromium/Firefox 扩展 ZIP、SHA-256、Firefox `web-ext` lint 和 Chromium 浏览器整链测试。
+- 提供可重复的远程/内置模型 Chromium/Firefox 扩展 ZIP、SHA-256、Firefox `web-ext` lint 和真实浏览器整链测试。
 
 ## 架构
 
@@ -51,13 +51,19 @@ ONNX 推理 Worker
 
 Hentaiverse 内容脚本
     |-- DOM 观察、图片读取、答案点击和原生提交
-    |-- JSON-safe、有大小上限的图片消息
+    |-- JSON-safe、有大小上限的 Base64 图片消息
     |
     +--> Chromium MV3 service worker --> Offscreen Document --+
     |                                                           |
     +--> Firefox MV3 background page ----------------------------+
                                                                 v
-                                               打包的 module Worker
+                                               扩展推理 Host
+                                               |-- remote: Key + 下载/缓存模型
+                                               |-- packaged: 私有包内 .ort
+                                               |
+                                               v
+                                               module Worker
+                                               + 一次性模型 ArrayBuffer
                                                + 精简 ORT glue/WASM
 
 Cloudflare Model Worker
@@ -71,7 +77,7 @@ Cloudflare Model Worker
 | 名称 | 含义 |
 | --- | --- |
 | ONNX 推理 Worker | 用户脚本或扩展推理 Host 创建的浏览器 Web Worker |
-| 扩展推理 Host | Chromium Offscreen Document 或 Firefox background page，负责模型、Key、缓存和推理会话 |
+| 扩展推理 Host | Chromium Offscreen Document 或 Firefox background script；远程模式负责 Key/下载/缓存，内置模式只读取包内模型，两者都管理推理会话 |
 | Model Worker | `apps/model-worker` 中部署到 Cloudflare 的服务 |
 
 ## 仓库结构
@@ -96,7 +102,8 @@ Cloudflare Model Worker
 | 客户端 | 请求路径 | 模型格式 | 状态 |
 | --- | --- | --- | --- |
 | 新版用户脚本 | `/yolo26n-640.ort` | ORT | 当前默认 |
-| 浏览器扩展 | `/yolo26n-640.ort` | ORT | 本地打包运行时 |
+| 浏览器扩展（默认远程模型） | `/yolo26n-640.ort` | ORT | Key 鉴权下载，本地打包运行时 |
+| 浏览器扩展（显式内置模型） | `model/yolo26n-640.ort` | ORT | 无需 Key，模型与运行时均在扩展包内 |
 | 旧版用户脚本 | `/yolo26n-640.onnx` | ONNX | 继续保留 |
 
 新版模型契约：
@@ -110,7 +117,7 @@ Cloudflare Model Worker
 | 版本 | `yolo26n-640-2026-05-14` |
 | 完整性来源 | `packages/shared/src/ort-assets.ts` |
 
-模型下载器使用固定长度和 SHA-256 契约验证 `.ort` 内容。模型 URL、对象键、长度和哈希必须一起更新，不能只替换 R2 对象。
+远程模型下载器和内置模型构建器都使用固定长度和 SHA-256 契约验证 `.ort` 内容。远程模型 URL、对象键、长度和哈希必须一起更新，不能只替换 R2 对象；内置构建的输入路径固定为仓库根目录的 `model/yolo26n-640.ort`。
 
 ## ONNX Runtime 构建模式
 
@@ -224,30 +231,33 @@ corepack pnpm install
 
 ```bash
 pnpm --filter @hv-pony-solver/extension build
+pnpm --filter @hv-pony-solver/extension build:packaged
 pnpm --filter @hv-pony-solver/extension lint:firefox
 ```
 
-构建会清理并重新生成 `apps/extension/dist/`：
+`build` 默认等价于 `--model-mode remote`，需要 Key 下载模型；`build:packaged` 等价于 `--model-mode packaged`，只从固定的 `model/yolo26n-640.ort` 读取模型，不接受生产路径覆盖，也不在运行时回退到远程下载。每次构建都会清理并重新生成 `apps/extension/dist/`：
 
 ```text
 chromium/                                      Chrome、Edge 解压目录
 firefox/                                       Firefox 解压目录
 hv-pony-solver-chromium-<version>.zip          Chromium 安装包
 hv-pony-solver-firefox-<version>.zip           Firefox 安装包
+hv-pony-solver-chromium-packaged-<version>.zip 内置模型 Chromium 安装包
+hv-pony-solver-firefox-packaged-<version>.zip  内置模型 Firefox 安装包
 *.zip.sha256                                   压缩包哈希
 *.artifact.json                                文件长度与 SHA-256 清单
 ```
 
-ZIP 使用固定时间戳与稳定文件顺序；相同源码和工具链应产生相同字节。构建器同时审计清单引用、权限、CSP、远程可执行代码、动态导入以及 ORT glue/WASM 哈希。
+ZIP 使用固定时间戳与稳定文件顺序；相同源码和工具链应产生相同字节。`build-manifest.json` 和顶层 artifact 清单记录 `modelDelivery`；内置版本还记录模型文件名、`9,914,448` 字节长度和 SHA-256。构建器同时审计清单引用、权限、CSP、远程可执行代码、动态导入以及模型/ORT glue/WASM 哈希。
 
 支持范围：
 
 | 产物 | 浏览器 | 最低版本 | 后台模型 |
 | --- | --- | --- | --- |
-| `chromium` | Chrome、Edge | Chromium 116 | MV3 service worker broker + Offscreen Document |
-| `firefox` | Firefox Desktop | Firefox 142 | MV3 nonpersistent background page |
+| `chromium`（两种模型模式） | Chrome、Edge | Chromium 116 | MV3 service worker broker + Offscreen Document |
+| `firefox`（两种模型模式） | Firefox Desktop | Firefox 142 | MV3 background script，清单不写不受支持的 `persistent` |
 
-Safari、移动浏览器和 Manifest V2 不在当前范围内。Firefox 142 下限用于 AMO 内建数据传输同意声明；清单声明 `authenticationInfo`，因为模型 Key 会作为 Bearer 凭据发送到 `models.ngnl.host`。验证码图片和识别结果不发送到该服务，推理在浏览器本地完成。
+Safari、移动浏览器和 Manifest V2 不在当前范围内。Firefox 142 下限用于 AMO 内建数据传输同意声明：远程模式声明 `authenticationInfo`，因为模型 Key 会作为 Bearer 凭据发送到 `models.ngnl.host`；内置模式声明 `none`。内置版本也移除模型服务 host permission；Chromium 仍保留 `offscreen`。验证码图片和识别结果不发送到模型服务，推理在浏览器本地完成。
 
 本地加载：
 
@@ -255,7 +265,7 @@ Safari、移动浏览器和 Manifest V2 不在当前范围内。Firefox 142 下�
 - Edge：打开 `edge://extensions`，启用开发人员模式，加载同一个 `chromium` 目录。
 - Firefox：打开 `about:debugging#/runtime/this-firefox`，选择“临时载入附加组件”，打开 `apps/extension/dist/firefox/manifest.json`。
 
-点击工具栏按钮会打开扩展设置页。这里可配置模型 Key、自动/手动模式、识别失败随机答案、点击/提交时间、面板位置、紧凑模式和历史显示条数。Key 只保存在扩展源的 IndexedDB 中且不会回显；小型设置和分世界历史保存在 `storage.local`。验证 Key 会实际下载并校验模型，可能消耗该 Key 的月度下载额度。
+点击工具栏按钮会打开扩展设置页。远程版本可配置模型 Key；Key 只保存在扩展源的 IndexedDB 中且不会回显，验证会实际下载并校验模型，可能消耗月度额度。内置版本不读取也不删除旧 Key，Key 控件保持置灰并显示“当前版本已内置模型，无需配置模型 Key。”。两种版本都可配置自动/手动模式、失败随机答案、点击/提交时间、面板位置、紧凑模式和历史条数；这些小型设置与分世界历史保存在 `storage.local`。
 
 不要在同一浏览器配置中同时启用用户脚本版和扩展版，否则两者可能同时处理并提交同一个验证码。
 
@@ -316,6 +326,7 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 | `pnpm test:e2e:extension:content` | 加载临时 Chromium 扩展并执行确定性内容脚本整链 fixture |
 | `pnpm test:e2e:extension:chromium` | 加载生产 Chromium 产物；提供 `KvKey` 时还验证真实模型与本地运行时 |
 | `pnpm test:e2e:extension:firefox` | 用 Playwright Firefox 临时加载并重载生产 Firefox 产物 |
+| `pnpm --filter @hv-pony-solver/extension test:e2e:packaged` | 在真实 Chromium 和 Firefox 中验证内置模型、无 Key 推理及会话重建 |
 | `pnpm check:userscript` | 执行用户脚本聚合检查 |
 | `pnpm check:browser-core` | 执行共用浏览器核心的类型、单元和契约检查 |
 | `pnpm check:extension` | 执行扩展类型、测试、双目标构建和 Firefox 严格 lint |
@@ -344,12 +355,16 @@ pnpm --filter @hv-pony-solver/extension typecheck
 pnpm --filter @hv-pony-solver/extension test
 pnpm --filter @hv-pony-solver/extension test:coverage
 pnpm --filter @hv-pony-solver/extension build
+pnpm --filter @hv-pony-solver/extension build:packaged
 pnpm --filter @hv-pony-solver/extension lint:firefox
 pnpm --filter @hv-pony-solver/extension test:e2e:content
 pnpm --filter @hv-pony-solver/extension test:e2e:chromium
+pnpm --filter @hv-pony-solver/extension test:e2e:packaged:chromium
+pnpm --filter @hv-pony-solver/extension test:e2e:packaged:firefox
+pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 ```
 
-`test:e2e:content` 使用只存在于临时测试构建中的确定性推理 Host，不访问真实模型服务。`test:e2e:chromium` 不设置 `KvKey` 时只证明生产扩展可加载和设置可持久化；以安全方式向进程提供 `KvKey` 后，才会额外验证真实鉴权下载、模型完整性、IndexedDB 缓存、Offscreen Host、打包 Worker 和本地 WASM 会话初始化。任何一种 fixture 成功都不能替代另一种证据。
+`test:e2e:content` 使用只存在于临时测试构建中的确定性推理 Host，不访问真实模型服务。`test:e2e:chromium` 不设置 `KvKey` 时只证明生产远程版本可加载和设置可持久化；以安全方式提供 `KvKey` 后，才会额外验证真实鉴权下载、模型完整性、IndexedDB 缓存、Offscreen Host、打包 Worker 和本地 WASM 会话初始化。内置模型门禁不读取 Key：Chromium 门禁加载解压目录，Firefox 门禁用标准 WebDriver 安装实际 ZIP（需要 `geckodriver` 与 `openssl`），两者都运行真实模型/WASM 推理并在销毁后重新初始化。各种证据不能互相替代。
 
 校验本地 `.ort` 模型：
 
@@ -634,8 +649,9 @@ pnpm verify:onnx-runtime
 - 默认和内置用户脚本包体预算。
 - 扩展消息解码、来源检查、队列上限、超时/断连/重连、Key 隔离、双清单和可重复压缩包。
 - Chromium 扩展 fixture 的自动/手动答题、一次原生提交、状态/历史和排除路由。
+- 远程/内置模型四种扩展清单、私有包内模型、无 Key 设置页，以及真实 Chromium/Firefox 的内置模型推理和会话重建。
 
-默认 Playwright E2E 使用本地 fixture，不访问真实 Hentaiverse 网站，也不证明线上 Model Worker 或 R2 状态。只有显式提供有效 `KvKey` 的扩展 Chromium smoke 才会发起真实模型下载；该检查仍不等同于 Chrome Web Store、Edge Add-ons 或 AMO 发布验收。
+默认 Playwright E2E 使用本地 fixture，不访问真实 Hentaiverse 网站，也不证明线上 Model Worker 或 R2 状态。只有显式提供有效 `KvKey` 的远程扩展 Chromium smoke 才会发起真实模型下载；内置模型门禁只读取扩展私有资源。两者都不等同于 Chrome Web Store、Edge Add-ons 或 AMO 发布验收。
 
 ## CI 与发布
 
@@ -676,8 +692,9 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - `@connect` 和 CORS 只允许网络访问，不代替 token 鉴权。
 - 默认外部 profile 信任固定版本的 jsDelivr 运行时资源。
 - 内置 profile 只对首方精简 WASM 执行内容完整性校验。
-- 扩展产物不加载远程 JS/WASM；ORT glue、module Worker 和内容寻址 WASM 均随包分发，远程 `.ort` 仍按固定长度和 SHA-256 校验。
-- 扩展内容脚本不接收模型 Key 或模型字节；只有设置页可发起 Key 验证请求。
+- 扩展产物不加载远程 JS/WASM；ORT glue、module Worker 和内容寻址 WASM 均随包分发。远程 `.ort` 下载和私有包内 `.ort` 都按固定长度与 SHA-256 校验。
+- 扩展内容脚本不接收模型 Key 或模型字节。远程版本只有设置页可发起 Key 验证请求；内置版本不构建 Key 存储、验证或远程下载能力。
+- 验证码图片为兼容扩展 JSON 消息边界继续使用有上限的 Base64；模型从 Host 以一次可转移的二进制 `ArrayBuffer` 交给推理 Worker，不使用 Base64 或分片。
 - 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致。
 - 原始 Key、规范化 Key、配额对象标识和配额状态均不得写入日志或响应。
 - `decoy` 模式的未鉴权 `200` 不表示真实模型泄漏。
@@ -729,6 +746,21 @@ pnpm --filter @hv-pony-solver/extension test:e2e:chromium
 ```
 
 扩展不从 R2 下载 WASM；它读取包内 `runtime/ort-wasm-simd-<sha256>.wasm`。若出现 Emscripten import/link 错误，优先确认构建器使用的定制 glue 与包内 WASM 哈希是一对匹配资产。
+
+### 内置模型扩展构建失败
+
+内置版本只接受仓库根目录的固定输入：
+
+```text
+model/yolo26n-640.ort
+```
+
+构建会在清理旧 `dist` 前拒绝缺失文件、符号链接、非普通文件、错误长度或错误 SHA-256。它不会使用 `KvKey` 下载模型，也没有路径覆盖或远程回退。修复模型文件后运行：
+
+```bash
+pnpm --filter @hv-pony-solver/extension build:packaged
+pnpm --filter @hv-pony-solver/extension lint:firefox
+```
 
 ### 模型请求返回诱饵内容或 `403`
 

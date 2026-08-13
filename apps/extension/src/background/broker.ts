@@ -15,6 +15,7 @@ import {
 } from '../protocol/messages'
 
 export type HostInvoker = (request: HostRequest) => Promise<HostResponse>
+export type BrokerPolicy = Readonly<{ allowOptions: boolean }>
 export const MAX_PORT_DETECT_REQUESTS = 2
 export const MAX_GLOBAL_DETECT_REQUESTS = 6
 
@@ -45,10 +46,14 @@ export function isTrustedPort(port: ExtensionPort, ownExtensionId: string, optio
   return false
 }
 
-export function registerBroker(invokeHost: HostInvoker): () => void {
+export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = { allowOptions: true }): () => void {
   let globalDetectRequests = 0
   return addRuntimeConnectListener((port) => {
     if (!isTrustedPort(port, runtimeId(), runtimeGetUrl('options.html'))) {
+      port.disconnect()
+      return
+    }
+    if (port.name === OPTIONS_PORT_NAME && !policy.allowOptions) {
       port.disconnect()
       return
     }

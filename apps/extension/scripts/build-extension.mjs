@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { build } from 'esbuild'
 import { zipSync } from 'fflate'
+
+import { ORT_MODEL_FILENAME, ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared/ort-model'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const extensionRoot = path.resolve(scriptDirectory, '..')
@@ -19,6 +21,15 @@ const runtimeGlueSha256 = 'a63d4f08e70220c0f721fabfd4e4b958aa127334a19038b2732d0
 const deterministicZipTimestamp = new Date('1980-01-01T00:00:00.000Z')
 const dynamicRuntimeImport = 'import(/*webpackIgnore:true*/ /*@vite-ignore*/t)'
 const disabledDynamicRuntimeImport = 'Promise.reject(new Error("Dynamic ONNX runtime modules are disabled in the extension build"))'
+const modelDeliveryModes = new Set(['remote', 'packaged'])
+const extensionTargets = new Set(['chromium', 'firefox'])
+const remoteModelHost = 'https://models.ngnl.host/*'
+const packagedModelIdentity = Object.freeze({
+  filename: ORT_MODEL_FILENAME,
+  byteLength: ORT_MODEL_INTEGRITY.byteLength,
+  sha256: ORT_MODEL_INTEGRITY.sha256,
+})
+const packagedModelSource = path.join(repositoryRoot, 'model', ORT_MODEL_FILENAME)
 
 const contentMatches = ['https://hentaiverse.org/*', 'https://alt.hentaiverse.org/*']
 const contentExcludes = [
@@ -28,14 +39,51 @@ const contentExcludes = [
   'https://hentaiverse.org/isekai/equip/*',
 ]
 
-function commonManifest() {
+function normalizeModelDelivery(value = 'remote') {
+  if (!modelDeliveryModes.has(value)) {
+    throw new Error(`Unsupported extension model delivery mode: ${value}`)
+  }
+  return value
+}
+
+export function parseBuildArguments(args) {
+  let modelDelivery = 'remote'
+  let modelModeSeen = false
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    let value
+    if (argument === '--model-mode') {
+      value = args[index + 1]
+      if (!value || value.startsWith('--')) {
+        throw new Error('--model-mode requires remote or packaged')
+      }
+      index += 1
+    } else if (argument.startsWith('--model-mode=')) {
+      value = argument.slice('--model-mode='.length)
+      if (!value) {
+        throw new Error('--model-mode requires remote or packaged')
+      }
+    } else {
+      throw new Error(`Unknown extension build argument: ${argument}`)
+    }
+    if (modelModeSeen) {
+      throw new Error('--model-mode may be provided only once')
+    }
+    modelDelivery = normalizeModelDelivery(value)
+    modelModeSeen = true
+  }
+  return { modelDelivery }
+}
+
+function commonManifest(modelDelivery = 'remote') {
+  modelDelivery = normalizeModelDelivery(modelDelivery)
   return {
     manifest_version: 3,
     name: 'HV Pony Solver',
     version,
     description: 'Locally recognizes HentaiVerse pony captchas with a packaged ONNX runtime.',
     permissions: ['storage'],
-    host_permissions: [...contentMatches, 'https://models.ngnl.host/*'],
+    host_permissions: [...contentMatches, ...(modelDelivery === 'remote' ? [remoteModelHost] : [])],
     content_scripts: [
       {
         matches: contentMatches,
@@ -57,8 +105,9 @@ function commonManifest() {
   }
 }
 
-export function createManifest(target) {
-  const common = commonManifest()
+export function createManifest(target, options = {}) {
+  const modelDelivery = normalizeModelDelivery(options.modelDelivery)
+  const common = commonManifest(modelDelivery)
   if (target === 'chromium') {
     return {
       ...common,
@@ -74,14 +123,13 @@ export function createManifest(target) {
       ...common,
       background: {
         scripts: ['background.js'],
-        persistent: false,
       },
       browser_specific_settings: {
         gecko: {
           id: 'hv-pony-solver@ngnl.host',
           strict_min_version: '142.0',
           data_collection_permissions: {
-            required: ['authenticationInfo'],
+            required: [modelDelivery === 'remote' ? 'authenticationInfo' : 'none'],
           },
         },
       },
@@ -92,6 +140,50 @@ export function createManifest(target) {
 
 function sha256(buffer) {
   return createHash('sha256').update(buffer).digest('hex')
+}
+
+function assertPackagedModelIdentity(identity) {
+  if (!identity || !/^[A-Za-z0-9._-]+\.ort$/u.test(identity.filename ?? '')) {
+    throw new Error('Packaged model identity has an invalid filename')
+  }
+  if (!Number.isSafeInteger(identity.byteLength) || identity.byteLength <= 0) {
+    throw new Error('Packaged model identity has an invalid byte length')
+  }
+  if (!/^[a-f0-9]{64}$/u.test(identity.sha256 ?? '')) {
+    throw new Error('Packaged model identity has an invalid SHA-256')
+  }
+}
+
+function verifyPackagedModelBytes(bytes, identity) {
+  assertPackagedModelIdentity(identity)
+  if (!(bytes instanceof Uint8Array)) {
+    throw new Error('Packaged model bytes must be a Uint8Array')
+  }
+  if (bytes.byteLength !== identity.byteLength) {
+    throw new Error(`Packaged model byte length mismatch: expected ${identity.byteLength}, received ${bytes.byteLength}`)
+  }
+  const actualSha256 = sha256(bytes)
+  if (actualSha256 !== identity.sha256) {
+    throw new Error(`Packaged model SHA-256 mismatch: expected ${identity.sha256}, received ${actualSha256}`)
+  }
+  return { bytes, identity: { ...identity } }
+}
+
+export async function verifyPackagedModelFile(sourcePath, identity = packagedModelIdentity) {
+  let stats
+  try {
+    stats = await lstat(sourcePath)
+  } catch (error) {
+    throw new Error(`Unable to inspect packaged model source: ${sourcePath}`, { cause: error })
+  }
+  if (stats.isSymbolicLink()) {
+    throw new Error(`Packaged model source must not be a symbolic link: ${sourcePath}`)
+  }
+  if (!stats.isFile()) {
+    throw new Error(`Packaged model source must be a regular file: ${sourcePath}`)
+  }
+  const bytes = await readFile(sourcePath)
+  return verifyPackagedModelBytes(bytes, identity)
 }
 
 function extensionRuntimeGluePlugin() {
@@ -137,7 +229,7 @@ async function walkFiles(root, current = root) {
   return files
 }
 
-async function writeBuildManifest(targetDirectory, target) {
+async function writeBuildManifest(targetDirectory, target, metadata) {
   const files = await walkFiles(targetDirectory)
   const fileRecords = {}
   for (const file of files) {
@@ -146,12 +238,51 @@ async function writeBuildManifest(targetDirectory, target) {
   }
   await writeFile(
     path.join(targetDirectory, 'build-manifest.json'),
-    `${JSON.stringify({ target, version, files: fileRecords }, null, 2)}\n`,
+    `${JSON.stringify({ target, version, ...metadata, files: fileRecords }, null, 2)}\n`,
   )
   return fileRecords
 }
 
-export async function auditBuiltExtension(targetDirectory, target) {
+const packagedForbiddenInputSuffixes = [
+  'apps/extension/src/host/remote-inference-host.ts',
+  'apps/extension/src/host/indexeddb-string-storage.ts',
+  'apps/extension/src/options/main.ts',
+  'apps/extension/src/options/remote.ts',
+  'packages/browser-core/src/model/model-cache.ts',
+  'packages/browser-core/src/model/model-config.ts',
+  'packages/browser-core/src/model/model-download-error.ts',
+  'packages/browser-core/src/model/model-downloader.ts',
+  'packages/browser-core/src/model/model-settings.ts',
+  'packages/shared/src/ort-assets.ts',
+]
+
+function auditPackagedMetafiles(metafiles, target) {
+  const contributingInputs = new Set()
+  for (const metafile of metafiles) {
+    for (const output of Object.values(metafile.outputs ?? {})) {
+      for (const [input, contribution] of Object.entries(output.inputs ?? {})) {
+        if (contribution.bytesInOutput > 0) {
+          contributingInputs.add(input.split(path.sep).join('/'))
+        }
+      }
+    }
+  }
+  if (contributingInputs.size === 0) {
+    throw new Error(`${target} packaged-model build produced no auditable esbuild inputs`)
+  }
+  for (const forbidden of packagedForbiddenInputSuffixes) {
+    const matched = [...contributingInputs].find((input) => input.endsWith(forbidden))
+    if (matched) {
+      throw new Error(`${target} packaged-model build includes remote-only input: ${forbidden}`)
+    }
+  }
+}
+
+export async function auditBuiltExtension(targetDirectory, target, options = {}) {
+  if (!extensionTargets.has(target)) {
+    throw new Error(`Unsupported extension target: ${target}`)
+  }
+  const modelDelivery = normalizeModelDelivery(options.modelDelivery)
   const manifest = JSON.parse(await readFile(path.join(targetDirectory, 'manifest.json'), 'utf8'))
   const expectedBackground = target === 'chromium' ? manifest.background?.service_worker : manifest.background?.scripts?.[0]
   if (expectedBackground !== 'background.js') {
@@ -164,9 +295,19 @@ export async function auditBuiltExtension(targetDirectory, target) {
   if ([...manifest.permissions].sort().join(',') !== expectedPermissions.join(',')) {
     throw new Error(`${target} package requests unexpected API permissions`)
   }
-  const expectedHosts = [...contentMatches, 'https://models.ngnl.host/*'].sort()
+  const expectedHosts = [...contentMatches, ...(modelDelivery === 'remote' ? [remoteModelHost] : [])].sort()
   if ([...manifest.host_permissions].sort().join(',') !== expectedHosts.join(',')) {
     throw new Error(`${target} package requests unexpected host permissions`)
+  }
+  if (target === 'firefox') {
+    const expectedDataCollection = [modelDelivery === 'remote' ? 'authenticationInfo' : 'none']
+    const actualDataCollection = manifest.browser_specific_settings?.gecko?.data_collection_permissions?.required
+    if (JSON.stringify(actualDataCollection) !== JSON.stringify(expectedDataCollection)) {
+      throw new Error('Firefox package declares unexpected data collection permissions')
+    }
+  }
+  if ('web_accessible_resources' in manifest) {
+    throw new Error(`${target} package unexpectedly exposes a web-accessible resource`)
   }
   const files = await walkFiles(targetDirectory)
   const relativeFiles = new Set(files.map((file) => file.relativePath))
@@ -181,6 +322,20 @@ export async function auditBuiltExtension(targetDirectory, target) {
   if (target === 'firefox' && (relativeFiles.has('offscreen.html') || relativeFiles.has('offscreen.js'))) {
     throw new Error('Firefox package unexpectedly includes Chromium offscreen files')
   }
+  const ortFiles = files.filter((candidate) => candidate.relativePath.endsWith('.ort'))
+  if (modelDelivery === 'remote') {
+    if (ortFiles.length !== 0) {
+      throw new Error(`${target} remote-model package unexpectedly contains an ORT model`)
+    }
+  } else {
+    const expectedModel = options.model ?? packagedModelIdentity
+    assertPackagedModelIdentity(expectedModel)
+    const expectedModelPath = `model/${expectedModel.filename}`
+    if (ortFiles.length !== 1 || ortFiles[0]?.relativePath !== expectedModelPath) {
+      throw new Error(`${target} packaged-model package must contain only ${expectedModelPath}`)
+    }
+    verifyPackagedModelBytes(await readFile(ortFiles[0].absolutePath), expectedModel)
+  }
   for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.html'))) {
     const source = await readFile(file.absolutePath, 'utf8')
     if (/<(?:script|link)\b[^>]+(?:src|href)=["']https?:/iu.test(source)) {
@@ -192,8 +347,10 @@ export async function auditBuiltExtension(targetDirectory, target) {
       }
     }
   }
+  const javascriptSources = []
   for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.js'))) {
     const source = await readFile(file.absolutePath, 'utf8')
+    javascriptSources.push([file.relativePath, source])
     if (/\bimport\s*\(/u.test(source)) {
       throw new Error(`${file.relativePath} contains a dynamic import`)
     }
@@ -201,15 +358,40 @@ export async function auditBuiltExtension(targetDirectory, target) {
       throw new Error(`${file.relativePath} references remote executable code`)
     }
   }
+  if (modelDelivery === 'packaged') {
+    const remoteCapability = /https:\/\/models\.ngnl\.host|hvPonySolverExtensionSecrets|hvPonySolverModelAccessKey|Bearer /u
+    for (const [relativePath, source] of javascriptSources) {
+      const matched = source.match(remoteCapability)?.[0]
+      if (matched) {
+        throw new Error(`${target} ${relativePath} contains a remote-model capability: ${matched}`)
+      }
+    }
+    if (options.metafiles !== undefined) {
+      auditPackagedMetafiles(options.metafiles, target)
+    }
+  }
 }
 
-async function createArchive(targetDirectory, outputRoot, target) {
+function createBuildMetadata(modelDelivery, packagedModel, fixture) {
+  return {
+    modelDelivery,
+    ...(modelDelivery === 'packaged' ? { model: { ...packagedModel.identity } } : {}),
+    ...(fixture ? { fixture: true } : {}),
+  }
+}
+
+function artifactBaseName(target, modelDelivery) {
+  const modeSuffix = modelDelivery === 'packaged' ? '-packaged' : ''
+  return `hv-pony-solver-${target}${modeSuffix}-${version}`
+}
+
+async function createArchive(targetDirectory, outputRoot, target, modelDelivery) {
   const files = await walkFiles(targetDirectory)
   const entries = {}
   for (const file of files) {
     entries[file.relativePath] = [new Uint8Array(await readFile(file.absolutePath)), { mtime: deterministicZipTimestamp }]
   }
-  const archiveName = `hv-pony-solver-${target}-${version}.zip`
+  const archiveName = `${artifactBaseName(target, modelDelivery)}.zip`
   const archiveBytes = zipSync(entries, { level: 9 })
   const archivePath = path.join(outputRoot, archiveName)
   await writeFile(archivePath, archiveBytes)
@@ -218,7 +400,13 @@ async function createArchive(targetDirectory, outputRoot, target) {
   return { archiveName, byteLength: archiveBytes.byteLength, sha256: archiveHash }
 }
 
-async function buildTarget(outputRoot, target, fixtureHost = false) {
+async function buildTarget(outputRoot, target, options = {}) {
+  const fixtureHost = options.fixtureHost === true
+  const modelDelivery = normalizeModelDelivery(options.modelDelivery)
+  const packagedModel = options.packagedModel
+  if (modelDelivery === 'packaged' && !packagedModel) {
+    throw new Error('Packaged model bytes were not provided to the target build')
+  }
   const targetDirectory = path.join(outputRoot, target)
   await mkdir(targetDirectory, { recursive: true })
   const entryPoints = {
@@ -226,15 +414,28 @@ async function buildTarget(outputRoot, target, fixtureHost = false) {
       extensionRoot,
       'src',
       'background',
-      fixtureHost && target === 'chromium' ? 'chromium-fixture.ts' : target === 'chromium' ? 'chromium.ts' : 'firefox.ts',
+      modelDelivery === 'packaged'
+        ? target === 'chromium'
+          ? 'chromium-packaged.ts'
+          : 'firefox-packaged.ts'
+        : fixtureHost && target === 'chromium'
+          ? 'chromium-fixture.ts'
+          : target === 'chromium'
+            ? 'chromium.ts'
+            : 'firefox.ts',
     ),
     content: path.join(extensionRoot, 'src', 'content', 'main.ts'),
-    options: path.join(extensionRoot, 'src', 'options', 'main.ts'),
+    options: path.join(extensionRoot, 'src', 'options', modelDelivery === 'packaged' ? 'packaged.ts' : 'main.ts'),
   }
   if (target === 'chromium') {
-    entryPoints.offscreen = path.join(extensionRoot, 'src', 'offscreen', 'main.ts')
+    entryPoints.offscreen = path.join(
+      extensionRoot,
+      'src',
+      'offscreen',
+      modelDelivery === 'packaged' ? 'packaged.ts' : 'main.ts',
+    )
   }
-  await build({
+  const extensionBuild = await build({
     entryPoints,
     outdir: targetDirectory,
     bundle: true,
@@ -242,11 +443,13 @@ async function buildTarget(outputRoot, target, fixtureHost = false) {
     platform: 'browser',
     target: target === 'chromium' ? ['chrome116'] : ['firefox140'],
     minify: true,
+    charset: 'utf8',
     legalComments: 'none',
     sourcemap: false,
     logLevel: 'warning',
+    metafile: true,
   })
-  await build({
+  const workerBuild = await build({
     entryPoints: [path.join(extensionRoot, 'src', 'host', 'inference-worker-entry.ts')],
     outfile: path.join(targetDirectory, 'inference-worker.js'),
     bundle: true,
@@ -257,6 +460,7 @@ async function buildTarget(outputRoot, target, fixtureHost = false) {
     legalComments: 'none',
     sourcemap: false,
     logLevel: 'warning',
+    metafile: true,
     alias: {
       'onnxruntime-web/wasm': runtimeGlueSource,
     },
@@ -269,29 +473,91 @@ async function buildTarget(outputRoot, target, fixtureHost = false) {
   }
   await mkdir(path.join(targetDirectory, 'runtime'), { recursive: true })
   await cp(runtimeWasmSource, path.join(targetDirectory, 'runtime', runtimeWasmFilename))
-  await writeFile(path.join(targetDirectory, 'manifest.json'), `${JSON.stringify(createManifest(target), null, 2)}\n`)
-  await auditBuiltExtension(targetDirectory, target)
-  const files = await writeBuildManifest(targetDirectory, target)
-  const archive = await createArchive(targetDirectory, outputRoot, target)
+  if (modelDelivery === 'packaged') {
+    const modelDirectory = path.join(targetDirectory, 'model')
+    await mkdir(modelDirectory, { recursive: true })
+    await writeFile(path.join(modelDirectory, packagedModel.identity.filename), packagedModel.bytes)
+  }
   await writeFile(
-    path.join(outputRoot, `hv-pony-solver-${target}-${version}.artifact.json`),
-    `${JSON.stringify({ target, version, archive, files }, null, 2)}\n`,
+    path.join(targetDirectory, 'manifest.json'),
+    `${JSON.stringify(createManifest(target, { modelDelivery }), null, 2)}\n`,
+  )
+  await auditBuiltExtension(targetDirectory, target, {
+    modelDelivery,
+    model: packagedModel?.identity,
+    metafiles: [extensionBuild.metafile, workerBuild.metafile],
+  })
+  const metadata = createBuildMetadata(modelDelivery, packagedModel, options.fixture === true)
+  const files = await writeBuildManifest(targetDirectory, target, metadata)
+  const archive = await createArchive(targetDirectory, outputRoot, target, modelDelivery)
+  await writeFile(
+    path.join(outputRoot, `${artifactBaseName(target, modelDelivery)}.artifact.json`),
+    `${JSON.stringify({ target, version, ...metadata, archive, files }, null, 2)}\n`,
   )
 }
 
-export async function buildExtensions(options = {}) {
+function validateTargets(targets) {
+  if (!Array.isArray(targets) || targets.length < 1 || targets.some((target) => !extensionTargets.has(target))) {
+    throw new Error(`Unsupported extension targets: ${JSON.stringify(targets)}`)
+  }
+  if (new Set(targets).size !== targets.length) {
+    throw new Error('Extension build targets must be unique')
+  }
+}
+
+async function buildVerifiedExtensions(options) {
   const outputRoot = options.outputRoot ?? path.join(extensionRoot, 'dist')
   const targets = options.targets ?? ['chromium', 'firefox']
+  validateTargets(targets)
   await rm(outputRoot, { recursive: true, force: true })
   await mkdir(outputRoot, { recursive: true })
-  await assertRuntimeAssets()
   for (const target of targets) {
-    await buildTarget(outputRoot, target, options.fixtureHost === true)
+    await buildTarget(outputRoot, target, {
+      fixtureHost: options.fixtureHost === true,
+      fixture: options.fixture === true || options.fixtureHost === true,
+      modelDelivery: options.modelDelivery,
+      packagedModel: options.packagedModel,
+    })
   }
   return outputRoot
 }
 
+export async function buildExtensions(options = {}) {
+  const modelDelivery = normalizeModelDelivery(options.modelDelivery)
+  const targets = options.targets ?? ['chromium', 'firefox']
+  validateTargets(targets)
+  const fixtureHost = options.fixtureHost === true
+  if (modelDelivery === 'packaged' && fixtureHost) {
+    throw new Error('Packaged model builds do not support the remote content Host fixture')
+  }
+  const packagedModel = modelDelivery === 'packaged'
+    ? await verifyPackagedModelFile(packagedModelSource, packagedModelIdentity)
+    : undefined
+  await assertRuntimeAssets()
+  return buildVerifiedExtensions({
+    outputRoot: options.outputRoot,
+    targets,
+    fixtureHost,
+    modelDelivery,
+    packagedModel,
+  })
+}
+
+export async function buildPackagedFixtureExtensions(options = {}) {
+  const targets = options.targets ?? ['chromium', 'firefox']
+  validateTargets(targets)
+  const packagedModel = verifyPackagedModelBytes(options.modelBytes, options.model)
+  await assertRuntimeAssets()
+  return buildVerifiedExtensions({
+    outputRoot: options.outputRoot,
+    targets,
+    fixture: true,
+    modelDelivery: 'packaged',
+    packagedModel,
+  })
+}
+
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : ''
 if (invokedPath === import.meta.url) {
-  await buildExtensions()
+  await buildExtensions(parseBuildArguments(process.argv.slice(2)))
 }

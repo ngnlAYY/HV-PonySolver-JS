@@ -1,8 +1,8 @@
-import { createRemoteInferenceHost } from '../host/remote-inference-host'
+import { createPackagedInferenceHost } from '../host/packaged-inference-host'
 import { addRuntimeMessageListener, runtimeId } from '../platform/webextension'
 import { errorResponse, isOffscreenRequest } from '../protocol/messages'
 
-const host = createRemoteInferenceHost()
+const host = createPackagedInferenceHost()
 
 addRuntimeMessageListener((message, sender, sendResponse) => {
   if (sender.id !== runtimeId() || sender.tab || !isOffscreenRequest(message)) {

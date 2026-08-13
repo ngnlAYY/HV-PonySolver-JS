@@ -1,4 +1,4 @@
-import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared'
+import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
 import { randDelay, shuffle, sleep } from '../utils/delay'
 import { captchaSelectors } from './captcha-selectors'
 import type { DelayRange } from './timing-settings'

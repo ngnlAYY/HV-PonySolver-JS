@@ -42,15 +42,21 @@
           <input id="random-on-fail" type="checkbox">
           识别失败时随机选择一个答案
         </label>
-        <label>
-          模型 Key
-          <input id="model-key" type="password" autocomplete="off" placeholder="留空则保持现有 Key">
-        </label>
         <div class="actions">
           <button type="submit">保存设置</button>
-          <button id="verify-key" type="button">验证并保存 Key</button>
-          <button id="clear-key" type="button" class="secondary">清除 Key</button>
         </div>
+        <fieldset id="model-key-fieldset" class="key-settings" aria-describedby="packaged-model-hint" disabled>
+          <legend>模型 Key</legend>
+          <label>
+            模型 Key
+            <input id="model-key" type="password" autocomplete="off" placeholder="留空则保持现有 Key">
+          </label>
+          <div class="actions">
+            <button id="verify-key" type="button">验证并保存 Key</button>
+            <button id="clear-key" type="button" class="secondary">清除 Key</button>
+          </div>
+        </fieldset>
+        <p id="packaged-model-hint" class="model-hint" hidden>当前版本已内置模型，无需配置模型 Key。</p>
       </form>
       <output id="status" aria-live="polite"></output>
     </main>

@@ -1,5 +1,5 @@
-import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared'
-import type { Detection, YoloParseResult } from '@hv-pony-solver/browser-core'
+import type { Detection, YoloParseResult } from '@hv-pony-solver/browser-core/inference/inference-types'
+import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
 
 export const PROTOCOL_VERSION = 'hv-pony-solver/1' as const
 export const CONTENT_PORT_NAME = 'hv-pony-solver:content' as const
@@ -167,6 +167,26 @@ export function successResponse(requestId: string, result?: YoloParseResult): Ho
     : { protocol: PROTOCOL_VERSION, type: 'result', requestId, ok: true }
 }
 
+function readBlobBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error ?? new Error('验证码图片读取失败'))
+    reader.onabort = () => reject(new Error('验证码图片读取已取消'))
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        const separator = reader.result.indexOf(',')
+        const encoded = separator >= 0 ? reader.result.slice(separator + 1) : ''
+        if (isBase64(encoded)) {
+          resolve(encoded)
+          return
+        }
+      }
+      reject(new Error('验证码图片读取结果无效'))
+    }
+    reader.readAsDataURL(blob)
+  })
+}
+
 export async function encodeImage(blob: Blob): Promise<Pick<DetectRequest, 'imageBase64' | 'mimeType'>> {
   if (blob.size < 1 || blob.size > MAX_IMAGE_BYTE_LENGTH) {
     throw new Error('验证码图片大小无效')
@@ -174,14 +194,8 @@ export async function encodeImage(blob: Blob): Promise<Pick<DetectRequest, 'imag
   if (!isMimeType(blob.type)) {
     throw new Error('验证码图片类型不受支持')
   }
-  const bytes = new Uint8Array(await blob.arrayBuffer())
-  let binary = ''
-  const chunkSize = 0x8000
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
-  }
   return {
-    imageBase64: btoa(binary),
+    imageBase64: await readBlobBase64(blob),
     mimeType: blob.type,
   }
 }

@@ -1,5 +1,6 @@
 import { inferenceTimeoutConfig } from './inference-config'
 import type { WorkerMessage, WorkerRequest, WorkerResponse } from './inference-types'
+import { formatErrorMessage } from '../utils/errors'
 
 type PendingRequest = Readonly<{
   resolve: (message: WorkerMessage) => void
@@ -38,8 +39,9 @@ export class WorkerRequestBridge {
       } catch (error) {
         clearTimeout(timeoutId)
         this.requests.delete(requestId)
-        this.onFailure(error)
-        reject(error)
+        const contextualError = new Error(`ONNX Worker 消息发送失败: ${formatErrorMessage(error)}`, { cause: error })
+        this.onFailure(contextualError)
+        reject(contextualError)
       }
     }).then((response) => {
       if (response.type === 'error') {

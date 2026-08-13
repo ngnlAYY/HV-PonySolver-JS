@@ -1,4 +1,9 @@
-import type { DetectorService, InferenceStatusSink, YoloParseResult } from '@hv-pony-solver/browser-core'
+import type {
+  DetectorService,
+  YoloParseResult,
+} from '@hv-pony-solver/browser-core/inference/inference-types'
+import type { InferenceStatusSink } from '@hv-pony-solver/browser-core/status-panel/status-panel-types'
+import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 
 import { runtimeConnect, type ExtensionPort } from '../platform/webextension'
 import {
@@ -42,7 +47,12 @@ export class RemoteDetectorClient implements DetectorService {
   }
 
   async detect(blob: Blob): Promise<YoloParseResult> {
-    const image = await encodeImage(blob)
+    let image: Awaited<ReturnType<typeof encodeImage>>
+    try {
+      image = await encodeImage(blob)
+    } catch (error) {
+      throw new Error(`验证码图片编码失败: ${formatErrorMessage(error)}`, { cause: error })
+    }
     const response = await this.request(
       {
         protocol: PROTOCOL_VERSION,

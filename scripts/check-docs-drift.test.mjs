@@ -76,6 +76,28 @@ test('fails clearly when extension docs omit the generated Firefox minimum versi
   })
 })
 
+for (const [fact, replacement] of [
+  ['--model-mode packaged', '--model-mode local'],
+  ['model/yolo26n-640.ort', 'model/omitted.ort'],
+  ['hv-pony-solver-firefox-packaged-<version>.zip', 'omitted-firefox-package.zip'],
+  ['modelDelivery', 'omittedDelivery'],
+  ['当前版本已内置模型，无需配置模型 Key。', '内置提示已省略'],
+  ['ArrayBuffer', 'binary payload'],
+]) {
+  test(`fails clearly when extension docs omit ${fact}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      for (const relativePath of ['README.md', 'docs/browser-extension.md']) {
+        const documentPath = join(fixtureRoot, relativePath)
+        await writeFile(documentPath, (await readFile(documentPath, 'utf8')).replaceAll(fact, replacement))
+      }
+
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      assert.match(result.stderr, new RegExp(`extension documentation omits ${fact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+    })
+  })
+}
+
 // README 文档契约：这些测试验证 README 是否准确描述脚本、模型、ONNX Runtime 和 Model Worker 的当前事实。
 // 运行时 HTTP 行为应由 apps/model-worker 的 Worker tests 覆盖；这里关注文档是否漂移。
 const rootCheckCommandNames = [

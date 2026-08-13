@@ -45,10 +45,15 @@ describe('WorkerRequestBridge', () => {
     })
 
     await expect(bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])).rejects.toThrow(
-      'postMessage failed',
+      'ONNX Worker 消息发送失败: Error: postMessage failed',
     )
     expect(onFailure).toHaveBeenCalledTimes(1)
-    expect(onFailure).toHaveBeenCalledWith(expect.objectContaining({ message: 'postMessage failed' }))
+    expect(onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'ONNX Worker 消息发送失败: Error: postMessage failed',
+        cause: expect.objectContaining({ message: 'postMessage failed' }),
+      }),
+    )
   })
 
   it('rejects error responses', async () => {

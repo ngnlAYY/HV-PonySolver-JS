@@ -1,16 +1,16 @@
+import { App } from '@hv-pony-solver/browser-core/app/app'
+import { getAnswerMode } from '@hv-pony-solver/browser-core/captcha/answer-mode-settings'
+import { AnswerSubmitter } from '@hv-pony-solver/browser-core/captcha/answer-submitter'
+import { CachedImageLoader } from '@hv-pony-solver/browser-core/captcha/captcha-image-loader'
+import { CaptchaSolver } from '@hv-pony-solver/browser-core/captcha/captcha-solver'
+import { getRandomOnFailSync } from '@hv-pony-solver/browser-core/captcha/fallback-settings'
 import {
-  AnswerSubmitter,
-  App,
-  CachedImageLoader,
-  CaptchaSolver,
-  HistoryStore,
-  StatusPanel,
-  getAnswerMode,
   getMultiClickDelayRange,
-  getRandomOnFailSync,
   getSubmitDelayRange,
-  logError,
-} from '@hv-pony-solver/browser-core'
+} from '@hv-pony-solver/browser-core/captcha/timing-settings'
+import { HistoryStore } from '@hv-pony-solver/browser-core/persistence/answer-history-store'
+import { StatusPanel } from '@hv-pony-solver/browser-core/status-panel/status-panel'
+import { logError } from '@hv-pony-solver/browser-core/utils/logger'
 
 import { RemoteDetectorClient } from './remote-detector-client'
 import { startContentRuntime } from './content-runtime'

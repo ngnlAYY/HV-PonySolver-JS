@@ -1,4 +1,4 @@
-import type { AnswerCode } from '@hv-pony-solver/shared'
+import type { AnswerCode } from '@hv-pony-solver/shared/answer'
 
 export type PanelStatus = Readonly<{
   model: string

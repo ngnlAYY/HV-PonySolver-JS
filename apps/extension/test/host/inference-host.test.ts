@@ -14,7 +14,6 @@ const detectionResult: YoloParseResult = {
 }
 
 function dependencies(): InferenceHostDependencies {
-  const values = new Map<string, string>()
   const detector: DetectorService = {
     prepare: vi.fn(async () => undefined),
     detect: vi.fn(async () => detectionResult),
@@ -22,21 +21,8 @@ function dependencies(): InferenceHostDependencies {
   }
   return {
     detector,
-    modelCache: {
-      download: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
-      putCached: vi.fn(async () => undefined),
-      close: vi.fn(),
-    },
-    secretStorage: {
-      get: vi.fn(async (key) => values.get(key) ?? null),
-      set: vi.fn(async (key, value) => {
-        values.set(key, value)
-      }),
-      remove: vi.fn(async (key) => {
-        values.delete(key)
-      }),
-      close: vi.fn(async () => undefined),
-    },
+    verifyKey: vi.fn(async () => undefined),
+    close: vi.fn(),
   }
 }
 
@@ -73,14 +59,12 @@ describe('InferenceHost', () => {
       }),
     ).resolves.toMatchObject({ ok: true })
 
-    expect(deps.modelCache.download).toHaveBeenCalledWith(undefined, true, 'a'.repeat(64))
-    expect(deps.secretStorage.set).toHaveBeenCalledWith('hvPonySolverModelAccessKey', 'a'.repeat(64))
-    expect(deps.detector.prepare).toHaveBeenCalledTimes(1)
+    expect(deps.verifyKey).toHaveBeenCalledWith('a'.repeat(64))
   })
 
   it('does not persist a Key when validation fails', async () => {
     const deps = dependencies()
-    vi.mocked(deps.modelCache.download).mockRejectedValueOnce(new Error('HTTP 401'))
+    vi.mocked(deps.verifyKey!).mockRejectedValueOnce(new Error('HTTP 401'))
     const host = new InferenceHost(deps)
 
     await expect(
@@ -91,12 +75,12 @@ describe('InferenceHost', () => {
         candidateKey: 'b'.repeat(64),
       }),
     ).resolves.toMatchObject({ ok: false, error: 'Error: HTTP 401' })
-    expect(deps.secretStorage.set).not.toHaveBeenCalled()
+    expect(deps.verifyKey).toHaveBeenCalledTimes(1)
   })
 
   it('does not persist a Key when packaged inference initialization fails', async () => {
     const deps = dependencies()
-    vi.mocked(deps.detector.prepare).mockRejectedValueOnce(new Error('WASM initialization failed'))
+    vi.mocked(deps.verifyKey!).mockRejectedValueOnce(new Error('WASM initialization failed'))
     const host = new InferenceHost(deps)
 
     await expect(
@@ -107,6 +91,28 @@ describe('InferenceHost', () => {
         candidateKey: 'c'.repeat(64),
       }),
     ).resolves.toMatchObject({ ok: false, error: 'Error: WASM initialization failed' })
-    expect(deps.secretStorage.set).not.toHaveBeenCalled()
+    expect(deps.verifyKey).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails closed when the host has no Key verifier', async () => {
+    const deps = dependencies()
+    const host = new InferenceHost({ detector: deps.detector })
+
+    await expect(
+      host.handle({
+        protocol: PROTOCOL_VERSION,
+        type: 'verify-key',
+        requestId: 'verify-packaged',
+        candidateKey: 'd'.repeat(64),
+      }),
+    ).resolves.toMatchObject({ ok: false, error: expect.stringContaining('不支持模型 Key') })
+  })
+
+  it('destroys the detector and closes extra dependencies', () => {
+    const deps = dependencies()
+    const host = new InferenceHost(deps)
+    host.destroy()
+    expect(deps.detector.destroy).toHaveBeenCalledTimes(1)
+    expect(deps.close).toHaveBeenCalledTimes(1)
   })
 })

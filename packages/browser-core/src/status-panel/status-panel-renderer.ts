@@ -1,4 +1,4 @@
-import type { AnswerCode } from '@hv-pony-solver/shared'
+import type { AnswerCode } from '@hv-pony-solver/shared/answer'
 import type { HistoryRecord, World } from '../persistence/answer-history-types'
 import { WORLD_NAMES } from '../persistence/answer-history-config'
 import { escapeHtml } from '../utils/html'

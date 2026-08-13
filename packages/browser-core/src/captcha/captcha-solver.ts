@@ -1,4 +1,4 @@
-import { ANSWER_CODES } from '@hv-pony-solver/shared'
+import { ANSWER_CODES } from '@hv-pony-solver/shared/answer'
 import type { DetectorService, YoloParseResult } from '../inference/inference-types'
 import type { StatusPanel } from '../status-panel/status-panel-types'
 import { formatErrorMessage } from '../utils/errors'

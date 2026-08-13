@@ -1,4 +1,4 @@
-import type { SettingsStorage, TextStorage } from '@hv-pony-solver/browser-core'
+import type { SettingsStorage, TextStorage } from '@hv-pony-solver/browser-core/platform/storage'
 
 import {
   addStorageChangeListener,

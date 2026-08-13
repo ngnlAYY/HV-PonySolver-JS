@@ -2,6 +2,7 @@ import type * as Ort from 'onnxruntime-web/wasm'
 
 import { calculateLetterboxLayout, copyRgbaToChwFloat32 } from './image-preprocess'
 import { parseYoloOutput } from './yolo-output-parser'
+import { formatErrorMessage } from '../utils/errors'
 
 const INPUT_SIZE = 640
 const INPUT_NAME = 'images'
@@ -34,7 +35,12 @@ export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: Runtime
   }
 
   async function createInputTensor(imageBlob: Blob): Promise<Ort.Tensor> {
-    const bitmap = await createImageBitmap(imageBlob)
+    let bitmap: ImageBitmap
+    try {
+      bitmap = await createImageBitmap(imageBlob)
+    } catch (error) {
+      throw new Error(`验证码图片解码失败: ${formatErrorMessage(error)}`, { cause: error })
+    }
     try {
       if (bitmap.width < 1 || bitmap.height < 1) {
         throw new Error('验证码图片尺寸无效')
@@ -72,7 +78,12 @@ export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: Runtime
       throw new Error('ONNX Worker 尚未初始化')
     }
     const input = await createInputTensor(imageBlob)
-    const outputs = await session.run({ [INPUT_NAME]: input })
+    let outputs: Awaited<ReturnType<Ort.InferenceSession['run']>>
+    try {
+      outputs = await session.run({ [INPUT_NAME]: input })
+    } catch (error) {
+      throw new Error(`ONNX 推理执行失败: ${formatErrorMessage(error)}`, { cause: error })
+    }
     const output = outputs[OUTPUT_NAME]
     if (!output || !(output.data instanceof Float32Array)) {
       throw new Error('模型输出格式无效')

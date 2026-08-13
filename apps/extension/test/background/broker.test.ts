@@ -140,4 +140,22 @@ describe('broker queue and privilege boundaries', () => {
     expect(client.disconnect).toHaveBeenCalledTimes(1)
     expect(invokeHost).not.toHaveBeenCalled()
   })
+
+  it('disconnects the options Port when the selected product disallows Key operations', () => {
+    const invokeHost = vi.fn(async (): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'verify-packaged',
+      ok: true,
+    }))
+    registerBroker(invokeHost, { allowOptions: false })
+    const client = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(client)
+
+    expect(client.disconnect).toHaveBeenCalledTimes(1)
+    expect(invokeHost).not.toHaveBeenCalled()
+  })
 })

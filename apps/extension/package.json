@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build-extension.mjs",
+    "build:packaged": "node scripts/build-extension.mjs --model-mode packaged",
     "lint:firefox": "web-ext lint --source-dir dist/firefox --warnings-as-errors",
     "test:e2e:chromium": "node scripts/chromium-load-smoke.mjs",
     "test:e2e:content": "node scripts/chromium-content-smoke.mjs",
     "test:e2e:firefox": "node scripts/firefox-load-smoke.mjs",
+    "test:e2e:packaged:chromium": "node scripts/chromium-packaged-model-smoke.mjs",
+    "test:e2e:packaged:firefox": "node scripts/firefox-packaged-model-smoke.mjs",
+    "test:e2e:packaged": "pnpm run test:e2e:packaged:chromium && pnpm run test:e2e:packaged:firefox",
     "test": "vitest run && node --test scripts/build-extension.test.mjs",
     "test:coverage": "vitest run --coverage && node --test --experimental-test-coverage --test-coverage-include=scripts/build-extension.mjs scripts/build-extension.test.mjs",
     "typecheck": "tsc --noEmit"

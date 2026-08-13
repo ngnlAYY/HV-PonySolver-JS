@@ -1,6 +1,6 @@
 import * as ort from 'onnxruntime-web/wasm'
 
-import { startOnnxWorker } from '@hv-pony-solver/browser-core'
+import { startOnnxWorker } from '@hv-pony-solver/browser-core/inference/onnx-worker-entry'
 
 import { loadPackagedRuntimeWasm } from './packaged-wasm'
 
