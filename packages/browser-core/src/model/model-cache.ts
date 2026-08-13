@@ -62,6 +62,7 @@ export class ModelCache {
   private db: IDBDatabase | null = null
   private openPromise: Promise<IDBDatabase> | null = null
   private openRequestId = 0
+  private readonly activeWriteTransactions = new Set<IDBTransaction>()
 
   constructor(
     private readonly statusSink: CacheStatusSink,
@@ -69,10 +70,12 @@ export class ModelCache {
   ) {}
 
   async getCached(): Promise<ArrayBuffer | null> {
+    const requestId = this.openRequestId
     const startedAt = Date.now()
     this.statusSink.setStatus({ model: '确认缓存中' })
     try {
-      const cached = await this.readCached()
+      const cached = await this.readCached(requestId)
+      this.assertOperationActive(requestId)
       const elapsed = Date.now() - startedAt
       if (cached) {
         this.statusSink.setStatus({ model: `缓存命中 ${elapsed}ms` })
@@ -92,12 +95,18 @@ export class ModelCache {
     verifyIntegrity: boolean = modelConfig.verifyIntegrity,
     accessKeyOverride?: string,
   ): Promise<ArrayBuffer> {
+    if (signal?.aborted) {
+      throw new Error('模型缓存操作已取消')
+    }
     const startedAt = Date.now()
     this.statusSink.setStatus({ model: '下载中' })
     const options: ModelIntegrityOptions = accessKeyOverride === undefined
       ? { verifyIntegrity }
       : { accessKeyOverride, verifyIntegrity }
     const buffer = await this.downloadModelImpl(signal, options)
+    if (signal?.aborted) {
+      throw new Error('模型缓存操作已取消')
+    }
     this.statusSink.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
     return buffer
   }
@@ -106,14 +115,18 @@ export class ModelCache {
     buffer: ArrayBuffer,
     verifyIntegrity: boolean = modelConfig.verifyIntegrity,
     skipIntegrityVerification: boolean = false,
+    signal?: AbortSignal,
   ): Promise<void> {
     const startedAt = Date.now()
+    const requestId = this.openRequestId
     try {
-      await this.writeCached(buffer, verifyIntegrity, skipIntegrityVerification)
+      this.assertOperationActive(requestId, signal)
+      await this.writeCached(buffer, verifyIntegrity, skipIntegrityVerification, requestId, signal)
+      this.assertOperationActive(requestId, signal)
       this.statusSink.setStatus({ model: `已缓存 ${Date.now() - startedAt}ms` })
     } catch (error) {
       warn('写入模型缓存失败，继续使用已下载模型:', formatErrorMessage(error))
-      if (verifyIntegrity) {
+      if (verifyIntegrity || signal?.aborted || this.openRequestId !== requestId) {
         throw error
       }
     }
@@ -121,6 +134,14 @@ export class ModelCache {
 
   close(): void {
     this.openRequestId += 1
+    for (const transaction of this.activeWriteTransactions) {
+      try {
+        transaction.abort()
+      } catch {
+        // A transaction that has already settled needs no further cleanup.
+      }
+    }
+    this.activeWriteTransactions.clear()
     this.db?.close()
     this.db = null
     this.openPromise = null
@@ -159,8 +180,9 @@ export class ModelCache {
     return openPromise
   }
 
-  private async readCached(): Promise<ArrayBuffer | null> {
+  private async readCached(requestId: number): Promise<ArrayBuffer | null> {
     const db = await this.open()
+    this.assertOperationActive(requestId)
     return new Promise((resolve, reject) => {
       const tx = db.transaction('models', 'readonly')
       const request = tx.objectStore('models').get(modelConfig.cacheKey)
@@ -177,17 +199,68 @@ export class ModelCache {
     buffer: ArrayBuffer,
     verifyIntegrity: boolean,
     skipIntegrityVerification: boolean,
+    requestId: number,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const db = await this.open()
+    this.assertOperationActive(requestId, signal)
     const row = await createCachedModelRow(buffer, {
       verifyIntegrity: skipIntegrityVerification ? false : verifyIntegrity,
     })
+    this.assertOperationActive(requestId, signal)
+    const db = await this.open()
+    this.assertOperationActive(requestId, signal)
     return new Promise((resolve, reject) => {
       const tx = db.transaction('models', 'readwrite')
+      this.activeWriteTransactions.add(tx)
+      let settled = false
+      const cleanup = (): void => {
+        this.activeWriteTransactions.delete(tx)
+        signal?.removeEventListener('abort', abort)
+      }
+      const finish = (callback: () => void): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        cleanup()
+        callback()
+      }
+      const abort = (): void => {
+        try {
+          tx.abort()
+        } catch {
+          finish(() => reject(new Error('模型缓存操作已取消')))
+        }
+      }
+      signal?.addEventListener('abort', abort, { once: true })
       tx.objectStore('models').put(row)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error || new Error('模型缓存写入失败'))
-      tx.onabort = () => reject(tx.error || new Error('模型缓存写入事务中止'))
+      tx.oncomplete = () =>
+        finish(() => {
+          try {
+            this.assertOperationActive(requestId, signal)
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
+      tx.onerror = () => finish(() => reject(tx.error || new Error('模型缓存写入失败')))
+      tx.onabort = () =>
+        finish(() =>
+          reject(
+            signal?.aborted || this.openRequestId !== requestId
+              ? new Error('模型缓存操作已取消')
+              : (tx.error || new Error('模型缓存写入事务中止')),
+          ),
+        )
+      if (signal?.aborted || this.openRequestId !== requestId) {
+        abort()
+      }
     })
+  }
+
+  private assertOperationActive(requestId: number, signal?: AbortSignal): void {
+    if (signal?.aborted || this.openRequestId !== requestId) {
+      throw new Error('模型缓存操作已取消')
+    }
   }
 }

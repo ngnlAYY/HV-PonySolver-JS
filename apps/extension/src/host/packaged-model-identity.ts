@@ -1,0 +1,4 @@
+import { ORT_MODEL_FILENAME, ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared/ort-model'
+
+export const PACKAGED_MODEL_FILENAME = ORT_MODEL_FILENAME
+export const PACKAGED_MODEL_INTEGRITY = ORT_MODEL_INTEGRITY

@@ -23,6 +23,7 @@ const TEST_INTEGRITY = { byteLength: 3, sha256: TEST_SHA256 } as const
 
 type TestObjectStore = Pick<IDBObjectStore, 'get' | 'put'>
 type TestTransaction = {
+  abort: ReturnType<typeof vi.fn>
   objectStore: (name: string) => IDBObjectStore
   onabort: ((event: Event) => void) | null
   oncomplete: ((event: Event) => void) | null
@@ -64,12 +65,21 @@ function stubIndexedDb(
     readError?: DOMException
     openError?: DOMException
     deferOpenSuccess?: boolean
+    deferTransactionCompletion?: boolean
   }> = {},
 ): Readonly<{
   request: TestOpenRequest
   database: TestDatabase
+  transactions: TestTransaction[]
 }> {
-  const { cachedRow, readError, openError, deferOpenSuccess = false } = options
+  const {
+    cachedRow,
+    readError,
+    openError,
+    deferOpenSuccess = false,
+    deferTransactionCompletion = false,
+  } = options
+  const transactions: TestTransaction[] = []
   const readRequest: TestRequest = {
     onerror: null,
     onsuccess: null,
@@ -95,13 +105,19 @@ function stubIndexedDb(
     onversionchange: null,
     transaction: vi.fn(() => {
       const transaction: TestTransaction = {
+        abort: vi.fn(() => {
+          queueMicrotask(() => transaction.onabort?.(new Event('abort')))
+        }),
         objectStore: vi.fn(() => objectStore as IDBObjectStore),
         onabort: null,
         oncomplete: null,
         onerror: null,
         error: null,
       }
-      queueMicrotask(() => transaction.oncomplete?.(new Event('complete')))
+      transactions.push(transaction)
+      if (!deferTransactionCompletion) {
+        queueMicrotask(() => transaction.oncomplete?.(new Event('complete')))
+      }
       return transaction as unknown as IDBTransaction
     }),
   }
@@ -130,7 +146,7 @@ function stubIndexedDb(
   }
 
   vi.stubGlobal('indexedDB', indexedDb)
-  return { request, database }
+  return { request, database, transactions }
 }
 
 afterEach(() => {
@@ -345,6 +361,35 @@ describe('ModelCache', () => {
     await expect(cache.putCached(bufferFromBytes([9, 9, 9]), true, true)).resolves.toBeUndefined()
 
     expect(verifyIntegrity).not.toHaveBeenCalled()
+  })
+
+  it('aborts an active cache write when its signal is cancelled', async () => {
+    const { transactions } = stubIndexedDb({ deferTransactionCompletion: true })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const panel = createStatusPanel()
+    const cache = new ModelCache(panel)
+    const controller = new AbortController()
+    const writePromise = cache.putCached(bufferFromBytes([9, 9, 9]), false, false, controller.signal)
+    await vi.waitFor(() => expect(transactions).toHaveLength(1))
+
+    controller.abort()
+
+    await expect(writePromise).rejects.toThrow('模型缓存操作已取消')
+    expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
+    expect(panel.setStatus).not.toHaveBeenCalledWith({ model: expect.stringMatching(/^已缓存/) })
+  })
+
+  it('aborts active cache writes before close returns', async () => {
+    const { transactions } = stubIndexedDb({ deferTransactionCompletion: true })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const cache = new ModelCache(createStatusPanel())
+    const writePromise = cache.putCached(bufferFromBytes([9, 9, 9]), false)
+    await vi.waitFor(() => expect(transactions).toHaveLength(1))
+
+    cache.close()
+
+    await expect(writePromise).rejects.toThrow('模型缓存操作已取消')
+    expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
   })
 })
 

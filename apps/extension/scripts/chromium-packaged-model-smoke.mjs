@@ -8,8 +8,14 @@ import { fileURLToPath } from 'node:url'
 
 import { chromium } from '@playwright/test'
 
+import { assertSupportedBrowserVersion } from './browser-support.mjs'
+import { discoverPackagedArtifact } from './packaged-smoke-artifact.mjs'
+import { writePackagedE2eEvidence } from './packaged-e2e-evidence.mjs'
+
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const unpackedPath = path.join(extensionRoot, 'dist', 'chromium')
+const outputRoot = path.resolve(process.env.PACKAGED_EXTENSION_OUTPUT_ROOT || path.join(extensionRoot, 'dist'))
+const packagedArtifact = await discoverPackagedArtifact(outputRoot, 'chromium')
+const unpackedPath = packagedArtifact.targetDirectory
 const executablePath = process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined)
 const transparentPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -86,7 +92,7 @@ async function runInference(context, serviceWorker, pathname, browserErrors) {
 
 await Promise.all([
   access(path.join(unpackedPath, 'manifest.json')),
-  access(path.join(unpackedPath, 'model', 'yolo26n-640.ort')),
+  access(packagedArtifact.modelPath),
 ])
 
 const profilePath = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-packaged-chromium-profile-'))
@@ -97,6 +103,7 @@ try {
     headless: true,
     args: [`--disable-extensions-except=${unpackedPath}`, `--load-extension=${unpackedPath}`],
   })
+  assertSupportedBrowserVersion('chromium', context.browser()?.version() ?? '')
   let serviceWorker = context.serviceWorkers()[0]
   serviceWorker ??= await context.waitForEvent('serviceworker', { timeout: 15_000 })
   const extensionId = new globalThis.URL(serviceWorker.url()).host
@@ -151,8 +158,15 @@ try {
   await runInference(context, serviceWorker, 'packaged-inference-second', browserErrors)
 
   assert.deepEqual(browserErrors, [], `Browser errors: ${browserErrors.join(' | ')}`)
+  const browserVersion = context.browser()?.version() ?? 'unknown'
+  await writePackagedE2eEvidence(
+    process.env.PACKAGED_E2E_EVIDENCE_DIR,
+    'chromium',
+    packagedArtifact,
+    browserVersion,
+  )
   process.stdout.write(
-    `Chromium ${context.browser()?.version() ?? 'unknown'} packaged model loaded, inferred, tore down, and initialized again without a Key.\n`,
+    `Chromium ${browserVersion} packaged model loaded, inferred, tore down, and initialized again without a Key.\n`,
   )
 } finally {
   await context?.close().catch(() => undefined)

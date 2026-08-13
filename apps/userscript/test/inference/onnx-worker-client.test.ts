@@ -58,7 +58,7 @@ describe('OnnxWorkerClient', () => {
 
     expect(modelCache.download).toHaveBeenCalledTimes(1)
     expect(putCached).toHaveBeenCalledTimes(1)
-    expect(putCached).toHaveBeenCalledWith(modelBuffer, true, true)
+    expect(putCached).toHaveBeenCalledWith(modelBuffer, true, true, expect.any(AbortSignal))
     expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init', modelBuffer })
     expect(SuccessfulWorker.messages[0]).not.toHaveProperty('wasmPath')
     expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')
@@ -98,6 +98,7 @@ describe('OnnxWorkerClient', () => {
     const detectTransfer =
       SuccessfulWorker.transfers[SuccessfulWorker.messages.findIndex((message) => message.type === 'detect')]
     expect(detectMessage?.imageBlob).toBe(imageBlob)
+    expect(detectMessage).not.toHaveProperty('size')
     expect(detectTransfer).toEqual([])
     expect(imageBlob.arrayBuffer).not.toHaveBeenCalled()
     expect(result.ponies).toEqual(['TS'])
@@ -199,6 +200,76 @@ describe('OnnxWorkerClient', () => {
     SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[2]?.requestId)
 
     await secondDetect
+  })
+
+  it('settles an aborted queued detect without posting it to the Worker', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    const modelCache = {
+      getCached: vi.fn(async () => modelBuffer),
+      download: vi.fn(async () => modelBuffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+    const preparePromise = client.prepare()
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+    await preparePromise
+
+    const firstDetect = client.detect({} as Blob)
+    await vi.waitFor(() =>
+      expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1),
+    )
+    const controller = new AbortController()
+    const queuedDetect = client.detect({} as Blob, controller.signal)
+    controller.abort()
+
+    await expect(queuedDetect).rejects.toThrow('推理请求已取消')
+    expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1)
+
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[1]?.requestId)
+    await firstDetect
+    await Promise.resolve()
+    expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1)
+  })
+
+  it('keeps an aborted running detect pending until the Worker actually settles', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    const modelCache = {
+      getCached: vi.fn(async () => modelBuffer),
+      download: vi.fn(async () => modelBuffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+    const preparePromise = client.prepare()
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+    await preparePromise
+
+    const controller = new AbortController()
+    const detectPromise = client.detect({} as Blob, controller.signal)
+    await vi.waitFor(() =>
+      expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1),
+    )
+    let settled = false
+    void detectPromise.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      },
+    )
+    controller.abort()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[1]?.requestId)
+    await expect(detectPromise).rejects.toThrow('推理请求已取消')
+    expect(settled).toBe(true)
   })
 
   it('does not cache or mark ready when destroyed before worker init response', async () => {

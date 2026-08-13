@@ -43,7 +43,7 @@ describe('InferenceHost', () => {
         mimeType: 'image/png',
       }),
     ).resolves.toMatchObject({ ok: true, requestId: 'detect-1', result: detectionResult })
-    expect(deps.detector.detect).toHaveBeenCalledWith(expect.any(Blob))
+    expect(deps.detector.detect).toHaveBeenCalledWith(expect.any(Blob), expect.any(AbortSignal))
   })
 
   it('stores a candidate Key only after a verified model download', async () => {
@@ -59,7 +59,7 @@ describe('InferenceHost', () => {
       }),
     ).resolves.toMatchObject({ ok: true })
 
-    expect(deps.verifyKey).toHaveBeenCalledWith('a'.repeat(64))
+    expect(deps.verifyKey).toHaveBeenCalledWith('a'.repeat(64), expect.any(AbortSignal))
   })
 
   it('does not persist a Key when validation fails', async () => {
@@ -112,7 +112,52 @@ describe('InferenceHost', () => {
     const deps = dependencies()
     const host = new InferenceHost(deps)
     host.destroy()
+    host.destroy()
     expect(deps.detector.destroy).toHaveBeenCalledTimes(1)
     expect(deps.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts every in-flight request and suppresses success after destroy', async () => {
+    const deps = dependencies()
+    let resolveDetect: ((result: YoloParseResult) => void) | undefined
+    let receivedSignal: AbortSignal | undefined
+    vi.mocked(deps.detector.detect).mockImplementation(
+      async (_blob, signal) =>
+        new Promise<YoloParseResult>((resolve) => {
+          receivedSignal = signal
+          resolveDetect = resolve
+        }),
+    )
+    const host = new InferenceHost(deps)
+    const responsePromise = host.handle({
+      protocol: PROTOCOL_VERSION,
+      type: 'detect',
+      requestId: 'detect-destroy',
+      imageBase64: 'AQID',
+      mimeType: 'image/png',
+    })
+    await vi.waitFor(() => expect(receivedSignal).toBeInstanceOf(AbortSignal))
+
+    host.destroy()
+    expect(receivedSignal?.aborted).toBe(true)
+    resolveDetect?.(detectionResult)
+
+    await expect(responsePromise).resolves.toMatchObject({
+      ok: false,
+      requestId: 'detect-destroy',
+      error: expect.stringContaining('推理 Host 已关闭'),
+    })
+  })
+
+  it('rejects an already-aborted caller before invoking the detector', async () => {
+    const deps = dependencies()
+    const host = new InferenceHost(deps)
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      host.handle({ protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'prepare-aborted' }, controller.signal),
+    ).resolves.toMatchObject({ ok: false, error: expect.stringContaining('推理请求已取消') })
+    expect(deps.detector.prepare).not.toHaveBeenCalled()
   })
 })

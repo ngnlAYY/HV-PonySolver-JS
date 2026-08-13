@@ -7,6 +7,7 @@ export type SubmitErrorHandler = (message: string) => void
 
 export type SubmitOptions = {
   signal?: AbortSignal
+  isCurrent?: () => boolean
 }
 
 export interface AnswerSubmissionService {
@@ -35,8 +36,9 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     options?: SubmitOptions,
   ): Promise<void> {
     const signal = options?.signal
+    const shouldStop = (): boolean => signal?.aborted === true || options?.isCurrent?.() === false
 
-    if (signal?.aborted) {
+    if (shouldStop()) {
       return
     }
 
@@ -59,6 +61,9 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     }
 
     for (let i = 0; i < checkboxes.length; i += 1) {
+      if (shouldStop()) {
+        return
+      }
       const checkbox = checkboxes.item(i)
       if (checkbox.checked) {
         checkbox.click()
@@ -69,6 +74,9 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       this.getSubmitDelayRange(),
       this.getMultiClickDelayRange(),
     ])
+    if (shouldStop()) {
+      return
+    }
 
     const order = shuffle(indices)
     for (let i = 0; i < order.length; i += 1) {
@@ -77,23 +85,28 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       if (!checkbox) {
         continue
       }
+      if (shouldStop()) {
+        return
+      }
       if (!checkbox.checked) {
         checkbox.click()
       }
       if (i < order.length - 1) {
         await sleep(randDelay(multiClickDelay), signal)
-        if (signal?.aborted) {
+        if (shouldStop()) {
           return
         }
       }
     }
 
     await sleep(randDelay(submitDelay), signal)
-    if (signal?.aborted) {
+    if (shouldStop()) {
       return
     }
 
     button.click()
-    onSubmitted()
+    if (!shouldStop()) {
+      onSubmitted()
+    }
   }
 }

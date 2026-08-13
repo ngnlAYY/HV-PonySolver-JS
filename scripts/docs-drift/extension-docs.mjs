@@ -1,14 +1,9 @@
-function readQuotedValue(source, property) {
-  const match = source.match(new RegExp(`${property}:\\s*'([^']+)'`))
-  return match?.[1] ?? null
-}
-
-export function checkExtensionDocs(extensionPackageJson, buildSource, readme, extensionDoc) {
+export function checkExtensionDocs(extensionPackageJson, browserSupport, readme, extensionDoc) {
   const errors = []
-  const chromeMinimum = readQuotedValue(buildSource, 'minimum_chrome_version')
-  const firefoxMinimum = readQuotedValue(buildSource, 'strict_min_version')
-  if (!chromeMinimum) errors.push('extension build minimum_chrome_version is unreadable')
-  if (!firefoxMinimum) errors.push('extension build strict_min_version is unreadable')
+  const chromeMinimum = browserSupport?.chromium?.manifestMinimumVersion ?? null
+  const firefoxMinimum = browserSupport?.firefox?.manifestMinimumVersion ?? null
+  if (!chromeMinimum) errors.push('extension browser support minimum_chrome_version is unreadable')
+  if (!firefoxMinimum) errors.push('extension browser support strict_min_version is unreadable')
 
   const requiredScripts = [
     'build',

@@ -177,18 +177,25 @@ test('builds deterministic private packaged-model fixtures with distinct names a
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-packaged-'))
   const comparisonRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-packaged-repeat-'))
   const bytes = Uint8Array.from([1, 2, 3, 4])
-  const model = { filename: modelFilename, byteLength: bytes.byteLength, sha256: sha256(bytes) }
+  const fixtureModelFilename = 'fixture-model.ort'
+  const model = { filename: fixtureModelFilename, byteLength: bytes.byteLength, sha256: sha256(bytes) }
   try {
     await buildPackagedFixtureExtensions({ outputRoot: temporaryRoot, modelBytes: bytes, model })
     await buildPackagedFixtureExtensions({ outputRoot: comparisonRoot, modelBytes: bytes, model })
 
     for (const target of ['chromium', 'firefox']) {
-      await auditBuiltExtension(path.join(temporaryRoot, target), target, { modelDelivery: 'packaged', model })
-      const archiveName = `hv-pony-solver-${target}-packaged-0.1.0.zip`
+      const buildManifestPath = path.join(temporaryRoot, target, 'build-manifest.json')
+      const buildManifest = JSON.parse(await readFile(buildManifestPath, 'utf8'))
+      await auditBuiltExtension(path.join(temporaryRoot, target), target, {
+        modelDelivery: 'packaged',
+        model,
+        fixture: true,
+      })
+      const archiveName = `hv-pony-solver-${target}-packaged-fixture-0.1.0.zip`
       const archiveBytes = await readFile(path.join(temporaryRoot, archiveName))
       assert.deepEqual(archiveBytes, await readFile(path.join(comparisonRoot, archiveName)))
       const archive = unzipSync(new Uint8Array(archiveBytes))
-      assert.deepEqual(archive[`model/${modelFilename}`], bytes)
+      assert.deepEqual(archive[`model/${fixtureModelFilename}`], bytes)
       assert.equal(Object.keys(archive).filter((name) => name.endsWith('.ort')).length, 1)
       assert.equal('offscreen.html' in archive, target === 'chromium')
       assert.equal('offscreen.js' in archive, target === 'chromium')
@@ -210,16 +217,16 @@ test('builds deterministic private packaged-model fixtures with distinct names a
       )
       assert.match(new TextDecoder().decode(archive['options.js']), /当前版本已内置模型，无需配置模型 Key。/u)
 
-      const buildManifest = JSON.parse(new TextDecoder().decode(archive['build-manifest.json']))
+      assert.deepEqual(buildManifest, JSON.parse(new TextDecoder().decode(archive['build-manifest.json'])))
       assert.equal(buildManifest.modelDelivery, 'packaged')
       assert.equal(buildManifest.fixture, true)
       assert.deepEqual(buildManifest.model, model)
-      assert.deepEqual(buildManifest.files[`model/${modelFilename}`], {
+      assert.deepEqual(buildManifest.files[`model/${fixtureModelFilename}`], {
         byteLength: bytes.byteLength,
         sha256: model.sha256,
       })
       const artifact = JSON.parse(
-        await readFile(path.join(temporaryRoot, `hv-pony-solver-${target}-packaged-0.1.0.artifact.json`), 'utf8'),
+        await readFile(path.join(temporaryRoot, `hv-pony-solver-${target}-packaged-fixture-0.1.0.artifact.json`), 'utf8'),
       )
       assert.equal(artifact.modelDelivery, 'packaged')
       assert.equal(artifact.fixture, true)

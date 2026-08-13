@@ -1,5 +1,5 @@
 import { captchaSelectors } from '../captcha/captcha-selectors'
-import { findCaptchaTarget } from '../captcha/captcha-target'
+import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from '../captcha/captcha-target'
 import { formatErrorMessage } from '../utils/errors'
 import { warn } from '../utils/logger'
 import type { AppDependencies } from './app-dependencies'
@@ -15,7 +15,7 @@ export class App {
   private startupTimeoutId: ReturnType<typeof setTimeout> | null = null
   private scheduledScan = false
   private pendingScan = false
-  private lastCaptchaKey: string | null = null
+  private lastCaptchaTarget: CaptchaTarget | null = null
   private destroyed = false
   private settingsMenuRegistered = false
   private solveAbortController: AbortController | null = null
@@ -65,7 +65,7 @@ export class App {
     }
     this.scheduledScan = false
     this.pendingScan = false
-    this.lastCaptchaKey = null
+    this.lastCaptchaTarget = null
     this.detector.destroy()
     this.dispose?.()
     this.panel.destroy()
@@ -109,10 +109,6 @@ export class App {
     }
   }
 
-  private getCaptchaKey(): string | null {
-    return findCaptchaTarget()?.captchaKey ?? null
-  }
-
   private scheduleSolve(): void {
     if (this.destroyed) {
       return
@@ -129,17 +125,18 @@ export class App {
 
   private async runSolve(): Promise<void> {
     try {
-      const captchaKey = this.getCaptchaKey()
-      if (this.destroyed || this.solver.isBusy || !captchaKey || captchaKey === this.lastCaptchaKey) {
+      const target = findCaptchaTarget()
+      if (this.destroyed || this.solver.isBusy || !target || isSameCaptchaTarget(target, this.lastCaptchaTarget)) {
         return
       }
-      await this.detector.prepare()
-      if (this.destroyed) {
+      const signal = this.solveAbortController?.signal
+      await this.detector.prepare(signal)
+      if (this.destroyed || signal?.aborted || !isSameCaptchaTarget(target, findCaptchaTarget())) {
         return
       }
-      const result = await this.solver.trigger()
-      if (result.handled && result.captchaKey && !this.destroyed) {
-        this.lastCaptchaKey = result.captchaKey
+      const result = await this.solver.trigger(target)
+      if (result.handled && !this.destroyed && isSameCaptchaTarget(target, findCaptchaTarget())) {
+        this.lastCaptchaTarget = target
       }
     } catch (error) {
       if (!this.destroyed) {

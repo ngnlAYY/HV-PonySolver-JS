@@ -1,12 +1,11 @@
-import { ORT_MODEL_FILENAME, ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared/ort-model'
-
 import { runtimeGetUrl } from '../platform/webextension'
 import { loadPackagedAsset } from './packaged-asset'
+import { PACKAGED_MODEL_FILENAME, PACKAGED_MODEL_INTEGRITY } from './packaged-model-identity'
 
 export function loadPackagedModel(fetchImpl: typeof fetch = fetch): Promise<ArrayBuffer> {
   return loadPackagedAsset(
-    runtimeGetUrl(`model/${ORT_MODEL_FILENAME}`),
-    ORT_MODEL_INTEGRITY,
+    runtimeGetUrl(`model/${PACKAGED_MODEL_FILENAME}`),
+    PACKAGED_MODEL_INTEGRITY,
     '扩展内置模型',
     fetchImpl,
   )

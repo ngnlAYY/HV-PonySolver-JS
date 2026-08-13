@@ -1,9 +1,4 @@
-import { registerBroker } from './broker'
 import { createRemoteInferenceHost } from '../host/remote-inference-host'
-import { registerOpenOptionsAction } from '../platform/webextension'
+import { registerFirefoxBackground } from './firefox-bootstrap'
 
-const host = createRemoteInferenceHost()
-
-registerBroker((request) => host.handle(request))
-registerOpenOptionsAction()
-globalThis.addEventListener('unload', () => host.destroy(), { once: true })
+registerFirefoxBackground(createRemoteInferenceHost)

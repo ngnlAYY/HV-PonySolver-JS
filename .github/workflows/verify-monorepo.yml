@@ -138,6 +138,13 @@ jobs:
       - name: Coverage
         run: pnpm test:coverage
 
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v7
+        with:
+          name: hv-pony-solver-coverage
+          path: '**/coverage/**'
+          if-no-files-found: error
+
       - name: Build
         run: pnpm build
 
@@ -249,6 +256,153 @@ jobs:
       - name: Firefox production extension load smoke
         run: pnpm test:e2e:extension:firefox
 
+  extension-packaged-e2e:
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          output="$(pnpm --filter @hv-pony-solver/extension exec playwright --version)"
+          if [[ ! "$output" =~ ^Version\ ([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$ ]]; then
+            printf 'Unexpected Playwright version output: %q\n' "$output" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright extension browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-packaged-browsers-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright Chromium and Firefox
+        run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps chromium firefox
+
+      - name: Install pinned geckodriver
+        id: geckodriver
+        run: node apps/extension/scripts/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
+
+      - name: Build deterministic packaged fixture
+        run: pnpm --filter @hv-pony-solver/extension build:packaged:fixture
+
+      - name: Lint packaged Firefox fixture
+        run: pnpm --filter @hv-pony-solver/extension lint:firefox
+
+      - name: Chromium packaged fixture inference
+        run: pnpm --filter @hv-pony-solver/extension test:e2e:packaged:chromium
+
+      - name: Firefox packaged fixture inference
+        env:
+          GECKODRIVER_PATH: ${{ steps.geckodriver.outputs.path }}
+        run: pnpm --filter @hv-pony-solver/extension test:e2e:packaged:firefox
+
+  extension-canonical-packaged-e2e:
+    needs: validate-inputs
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    env:
+      PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL }}
+      PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
+      PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve Playwright version
+        id: playwright-version
+        run: |
+          output="$(pnpm --filter @hv-pony-solver/extension exec playwright --version)"
+          if [[ ! "$output" =~ ^Version\ ([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$ ]]; then
+            printf 'Unexpected Playwright version output: %q\n' "$output" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright extension browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-canonical-browsers-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright Chromium and Firefox
+        run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps chromium firefox
+
+      - name: Install pinned geckodriver
+        id: geckodriver
+        run: node apps/extension/scripts/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
+
+      - name: Download and verify canonical model
+        run: node apps/extension/scripts/download-canonical-model.mjs
+
+      - name: Build canonical packaged extensions
+        run: pnpm --filter @hv-pony-solver/extension build:packaged
+
+      - name: Lint canonical packaged Firefox extension
+        run: pnpm --filter @hv-pony-solver/extension lint:firefox
+
+      - name: Chromium canonical packaged inference
+        env:
+          PACKAGED_E2E_EVIDENCE_DIR: ${{ runner.temp }}/canonical-e2e-evidence
+        run: pnpm --filter @hv-pony-solver/extension test:e2e:packaged:chromium
+
+      - name: Firefox canonical packaged inference
+        env:
+          GECKODRIVER_PATH: ${{ steps.geckodriver.outputs.path }}
+          PACKAGED_E2E_EVIDENCE_DIR: ${{ runner.temp }}/canonical-e2e-evidence
+        run: pnpm --filter @hv-pony-solver/extension test:e2e:packaged:firefox
+
+      - name: Attest and preflight canonical gate
+        run: |
+          node apps/extension/scripts/release-gate.mjs attest \
+            --evidence-dir "$RUNNER_TEMP/canonical-e2e-evidence" \
+            --attestation apps/extension/dist/canonical-gate-attestation.json
+          node apps/extension/scripts/release-gate.mjs preflight \
+            --attestation apps/extension/dist/canonical-gate-attestation.json
+
+      - name: Transfer canonical products to publication job
+        uses: actions/upload-artifact@v7
+        with:
+          name: hv-pony-solver-extension-canonical-gate
+          path: |
+            apps/extension/dist/*.zip
+            apps/extension/dist/*.zip.sha256
+            apps/extension/dist/*.artifact.json
+            apps/extension/dist/canonical-gate-attestation.json
+          if-no-files-found: error
+          retention-days: 1
+
   userscript-artifact:
     needs:
       - validate-inputs
@@ -305,7 +459,9 @@ jobs:
       - test
       - coverage-build
       - extension-e2e
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' }}
+      - extension-packaged-e2e
+      - extension-canonical-packaged-e2e
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -325,11 +481,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build extension artifacts
-        run: pnpm --filter @hv-pony-solver/extension build
+      - name: Download canonical gate products
+        uses: actions/download-artifact@v7
+        with:
+          name: hv-pony-solver-extension-canonical-gate
+          path: apps/extension/dist
 
-      - name: Lint Firefox extension package
-        run: pnpm --filter @hv-pony-solver/extension lint:firefox
+      - name: Fail-closed release preflight
+        env:
+          PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL }}
+          PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
+          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
+        run: node apps/extension/scripts/release-gate.mjs preflight
 
       - name: Publish extension artifacts
         uses: actions/upload-artifact@v7

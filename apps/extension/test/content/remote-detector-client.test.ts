@@ -109,6 +109,7 @@ describe('RemoteDetectorClient', () => {
 
     await vi.advanceTimersByTimeAsync(95_000)
     await rejection
+    expect(platformMocks.ports[0]!.disconnect).toHaveBeenCalledTimes(1)
     platformMocks.ports[0]!.emitMessage({
       protocol: PROTOCOL_VERSION,
       type: 'result',
@@ -116,6 +117,17 @@ describe('RemoteDetectorClient', () => {
       ok: true,
     })
     expect(panel.setSessionReady).not.toHaveBeenCalled()
+
+    const nextPrepare = client.prepare()
+    expect(platformMocks.ports).toHaveLength(2)
+    const nextRequest = vi.mocked(platformMocks.ports[1]!.postMessage).mock.calls[0]![0] as { requestId: string }
+    platformMocks.ports[1]!.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: nextRequest.requestId,
+      ok: true,
+    })
+    await expect(nextPrepare).resolves.toBeUndefined()
   })
 
   it('rejects on disconnect and reconnects lazily for the next request', async () => {
@@ -137,5 +149,125 @@ describe('RemoteDetectorClient', () => {
 
     await expect(nextPrepare).resolves.toBeUndefined()
     expect(panel.setSessionReady).toHaveBeenCalledTimes(1)
+  })
+
+  it('disconnects the owned Port on cancellation and reconnects for later work', async () => {
+    const client = new RemoteDetectorClient(statusSink())
+    const controller = new AbortController()
+    const firstPrepare = client.prepare(controller.signal)
+    controller.abort()
+
+    await expect(firstPrepare).rejects.toThrow('扩展推理请求已取消')
+    expect(platformMocks.ports[0]!.disconnect).toHaveBeenCalledTimes(1)
+
+    const nextPrepare = client.prepare()
+    expect(platformMocks.ports).toHaveLength(2)
+    const nextRequest = vi.mocked(platformMocks.ports[1]!.postMessage).mock.calls[0]![0] as { requestId: string }
+    platformMocks.ports[1]!.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: nextRequest.requestId,
+      ok: true,
+    })
+    await expect(nextPrepare).resolves.toBeUndefined()
+  })
+
+  it('rejects host failures, ignores malformed messages, and marks prepare as failed', async () => {
+    const panel = statusSink()
+    const client = new RemoteDetectorClient(panel)
+    const preparePromise = client.prepare()
+    const port = platformMocks.ports[0]!
+    const request = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
+
+    port.emitMessage(null)
+    port.emitMessage({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'other', ok: true })
+    port.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: false,
+      error: '模型不可用',
+    })
+
+    await expect(preparePromise).rejects.toThrow('模型不可用')
+    expect(panel.setStatus).toHaveBeenLastCalledWith({ session: '错误' })
+  })
+
+  it('reports image encoding failures and rejects successful detections without a result', async () => {
+    const client = new RemoteDetectorClient(statusSink())
+
+    await expect(client.detect(new Blob([], { type: 'image/png' }))).rejects.toThrow('验证码图片编码失败')
+    expect(platformMocks.runtimeConnect).not.toHaveBeenCalled()
+
+    const detectPromise = client.detect(new Blob([new Uint8Array([1])], { type: 'image/png' }))
+    await vi.waitFor(() => expect(platformMocks.ports[0]?.postMessage).toHaveBeenCalledTimes(1))
+    const request = vi.mocked(platformMocks.ports[0]!.postMessage).mock.calls[0]![0] as { requestId: string }
+    platformMocks.ports[0]!.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    })
+
+    await expect(detectPromise).rejects.toThrow('扩展推理 Host 未返回识别结果')
+  })
+
+  it('normalizes connection and post failures and ignores stale disconnect callbacks', async () => {
+    const panel = statusSink()
+    const client = new RemoteDetectorClient(panel)
+    platformMocks.runtimeConnect.mockImplementationOnce(() => {
+      throw '连接初始化失败'
+    })
+    await expect(client.prepare()).rejects.toThrow('连接初始化失败')
+
+    platformMocks.runtimeConnect.mockImplementationOnce(() => {
+      const port = createPort()
+      vi.mocked(port.postMessage).mockImplementationOnce(() => {
+        throw new Error('发送失败')
+      })
+      platformMocks.ports.push(port)
+      return port
+    })
+    await expect(client.prepare()).rejects.toThrow('发送失败')
+    const stalePort = platformMocks.ports[0]!
+    expect(stalePort.disconnect).toHaveBeenCalledTimes(1)
+    stalePort.emitDisconnect()
+    expect(panel.setStatus).toHaveBeenLastCalledWith({ session: '错误' })
+  })
+
+  it('makes destroy idempotent, rejects pending and future work, and tolerates disconnect errors', async () => {
+    platformMocks.runtimeConnect.mockImplementationOnce(() => {
+      const port = createPort()
+      vi.mocked(port.disconnect).mockImplementationOnce(() => {
+        throw new Error('已经断开')
+      })
+      platformMocks.ports.push(port)
+      return port
+    })
+    const panel = statusSink()
+    const client = new RemoteDetectorClient(panel)
+    const pending = client.prepare()
+
+    client.destroy()
+    client.destroy()
+
+    await expect(pending).rejects.toThrow('扩展推理连接已关闭')
+    await expect(client.prepare()).rejects.toThrow('扩展推理连接已关闭')
+    expect(platformMocks.ports[0]!.disconnect).toHaveBeenCalledTimes(1)
+    expect(panel.setSessionReady).not.toHaveBeenCalled()
+  })
+
+  it('closes the abort-listener race after publishing a pending request', async () => {
+    const controller = new AbortController()
+    const originalAddEventListener = controller.signal.addEventListener.bind(controller.signal)
+    vi.spyOn(controller.signal, 'addEventListener').mockImplementation((...args) => {
+      originalAddEventListener(...args)
+      controller.abort()
+    })
+    const client = new RemoteDetectorClient(statusSink())
+
+    await expect(client.prepare(controller.signal)).rejects.toThrow('扩展推理请求已取消')
+    expect(platformMocks.ports[0]!.postMessage).not.toHaveBeenCalled()
+    expect(platformMocks.ports[0]!.disconnect).toHaveBeenCalledTimes(1)
   })
 })

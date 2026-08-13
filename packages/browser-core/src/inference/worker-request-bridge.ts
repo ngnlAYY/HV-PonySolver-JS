@@ -1,5 +1,5 @@
 import { inferenceTimeoutConfig } from './inference-config'
-import type { WorkerMessage, WorkerRequest, WorkerResponse } from './inference-types'
+import type { WorkerMessage, WorkerRequestPayload, WorkerResponse } from './inference-types'
 import { formatErrorMessage } from '../utils/errors'
 
 type PendingRequest = Readonly<{
@@ -19,7 +19,7 @@ export class WorkerRequestBridge {
     this.worker.onmessage = (event: MessageEvent<WorkerMessage>) => this.handleMessage(event)
   }
 
-  post(message: WorkerRequest, transfer: Transferable[] = []): Promise<WorkerResponse> {
+  post(message: WorkerRequestPayload, transfer: Transferable[] = []): Promise<WorkerResponse> {
     const requestId = this.nextRequestId
     this.nextRequestId += 1
     return new Promise<WorkerMessage>((resolve, reject) => {

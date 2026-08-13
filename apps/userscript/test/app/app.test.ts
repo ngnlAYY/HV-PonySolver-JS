@@ -329,6 +329,53 @@ describe('App', () => {
     expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'))
   })
 
+  it('treats a same-URL captcha node replacement as a new target', async () => {
+    let resolveFirstDetect: (() => void) | undefined
+    detect
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirstDetect = () =>
+            resolve({
+              success: true,
+              ponies: ['TS'],
+              confidences: { TS: 0.9 },
+              detections: [{ class_id: 0, confidence: 0.9 }],
+              candidates: [{ class_id: 0, confidence: 0.9 }],
+            })
+        }),
+      )
+      .mockResolvedValue({
+        success: true,
+        ponies: ['TS'],
+        confidences: { TS: 0.9 },
+        detections: [{ class_id: 0, confidence: 0.9 }],
+        candidates: [{ class_id: 0, confidence: 0.9 }],
+      })
+    const { App } = await import('../../src/app/app')
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    const first = appendCaptcha('/captcha.png')
+    first.submitButton.click = vi.fn()
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+    await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(1))
+
+    const replacement = appendCaptcha('/captcha.png')
+    replacement.submitButton.click = vi.fn()
+    first.replaceWith(replacement)
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+    resolveFirstDetect?.()
+    await vi.runAllTimersAsync()
+
+    await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(2))
+    await vi.runAllTimersAsync()
+    expect(first.submitButton.click).not.toHaveBeenCalled()
+    expect(replacement.submitButton.click).toHaveBeenCalledTimes(1)
+  })
+
   it('rescans captcha when the image src changes after a solved captcha', async () => {
     detect.mockResolvedValue({
       success: true,
@@ -357,7 +404,7 @@ describe('App', () => {
     expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'))
   })
 
-  it('marks the captcha solved by the solver when content changes during prepare', async () => {
+  it('abandons a stale target and solves the replacement when content changes during prepare', async () => {
     let resolvePrepare: (() => void) | undefined
     prepare.mockReturnValueOnce(
       new Promise<Worker>((resolve) => {
@@ -388,6 +435,7 @@ describe('App', () => {
     await Promise.resolve()
     await vi.runAllTimersAsync()
 
-    expect(prepare).toHaveBeenCalledTimes(1)
+    expect(prepare).toHaveBeenCalledTimes(2)
+    expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'))
   })
 })

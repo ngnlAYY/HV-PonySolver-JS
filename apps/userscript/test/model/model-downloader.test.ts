@@ -91,6 +91,22 @@ describe('downloadModel', () => {
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('?key=')
   })
 
+  it('cancels every non-success response body before rejecting', async () => {
+    const cancel = vi.fn(async () => undefined)
+    const response = {
+      ok: false,
+      status: 503,
+      headers: new Headers(),
+      body: { cancel },
+    } as unknown as Response
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow(
+      '模型下载失败: HTTP 503',
+    )
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
   it('returns a typed quota error with Retry-After metadata for HTTP 429', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 429, headers: { 'retry-after': '3600' } }))
     vi.stubGlobal('fetch', fetchMock)
@@ -361,6 +377,72 @@ describe('downloadModel', () => {
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
       '下载模型大小校验失败: 2 != 3',
     )
+  })
+
+  it('releases the stream reader after a successful read', async () => {
+    const cancel = vi.fn(async () => undefined)
+    const releaseLock = vi.fn()
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array([1, 2, 3]) })
+      .mockResolvedValueOnce({ done: true, value: undefined })
+    const response = {
+      ok: true,
+      headers: new Headers({ 'content-length': '3' }),
+      body: { cancel: vi.fn(), getReader: () => ({ read, cancel, releaseLock }) },
+    } as unknown as Response
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    await expect(
+      downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
+    ).resolves.toBeInstanceOf(ArrayBuffer)
+    expect(cancel).not.toHaveBeenCalled()
+    expect(releaseLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels and releases the stream reader after a short read', async () => {
+    const cancel = vi.fn(async () => undefined)
+    const releaseLock = vi.fn()
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array([1, 2]) })
+      .mockResolvedValueOnce({ done: true, value: undefined })
+    const response = {
+      ok: true,
+      headers: new Headers({ 'content-length': '3' }),
+      body: { cancel: vi.fn(), getReader: () => ({ read, cancel, releaseLock }) },
+    } as unknown as Response
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    await expect(
+      downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
+    ).rejects.toThrow('下载模型大小校验失败: 2 != 3')
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(releaseLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves the primary read error when stream cleanup also fails', async () => {
+    const cancel = vi.fn(async () => {
+      throw new Error('cancel failed')
+    })
+    const releaseLock = vi.fn(() => {
+      throw new Error('release failed')
+    })
+    const read = vi.fn(async () => {
+      throw new Error('primary read failed')
+    })
+    const response = {
+      ok: true,
+      headers: new Headers(),
+      body: { cancel: vi.fn(), getReader: () => ({ read, cancel, releaseLock }) },
+    } as unknown as Response
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    await expect(
+      downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
+    ).rejects.toThrow('primary read failed')
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(releaseLock).toHaveBeenCalledTimes(1)
   })
 
   it('rejects streamed over-reads when content-length is smaller than the body', async () => {

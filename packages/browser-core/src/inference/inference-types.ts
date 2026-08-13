@@ -14,24 +14,24 @@ export type YoloParseResult = Readonly<{
 }>
 
 export interface DetectorService {
-  detect(blob: Blob): Promise<YoloParseResult>
-  prepare(): Promise<void>
+  detect(blob: Blob, signal?: AbortSignal): Promise<YoloParseResult>
+  prepare(signal?: AbortSignal): Promise<void>
   destroy(): void
 }
 
-export type WorkerInitRequest = Readonly<{
+export type WorkerInitRequestPayload = Readonly<{
   type: 'init'
-  requestId?: number
   modelBuffer: ArrayBuffer
 }>
 
-export type WorkerDetectRequest = Readonly<{
+export type WorkerDetectRequestPayload = Readonly<{
   type: 'detect'
-  requestId?: number
   imageBlob: Blob
-  size: number
 }>
 
+export type WorkerRequestPayload = WorkerInitRequestPayload | WorkerDetectRequestPayload
+export type WorkerInitRequest = WorkerInitRequestPayload & Readonly<{ requestId: number }>
+export type WorkerDetectRequest = WorkerDetectRequestPayload & Readonly<{ requestId: number }>
 export type WorkerRequest = WorkerInitRequest | WorkerDetectRequest
 
 export type WorkerResponse = Readonly<{

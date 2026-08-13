@@ -5,7 +5,7 @@ import { formatErrorMessage } from '../utils/errors'
 import { logError } from '../utils/logger'
 import type { AnswerMode } from './answer-mode-settings'
 import type { AnswerSubmissionService } from './answer-submitter'
-import { findCaptchaTarget } from './captcha-target'
+import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from './captcha-target'
 import type { ImageLoader } from './captcha-types'
 import { solverConfig } from './solver-config'
 
@@ -31,17 +31,17 @@ export class CaptchaSolver {
     return this.busy
   }
 
-  trigger(): Promise<SolveResult> {
+  trigger(target: CaptchaTarget | null = findCaptchaTarget()): Promise<SolveResult> {
     if (this.busy) {
       return Promise.resolve({ handled: false, captchaKey: null })
     }
     this.busy = true
-    return this.solve().finally(() => {
+    return this.solve(target).finally(() => {
       this.busy = false
     })
   }
 
-  private async solve(): Promise<SolveResult> {
+  private async solve(target: CaptchaTarget | null): Promise<SolveResult> {
     const startedAt = Date.now()
     const elapsed = (): number => Date.now() - startedAt
     let captchaKey: string | null = null
@@ -51,14 +51,15 @@ export class CaptchaSolver {
       this.panel.addError(message, elapsed())
     }
     const signal: AbortSignal | undefined = this.getAbortSignal?.()
-    const submitOptions = signal ? { signal } : undefined
+    const isCurrent = (): boolean =>
+      signal?.aborted !== true && target !== null && isSameCaptchaTarget(target, findCaptchaTarget())
+    const submitOptions = signal ? { signal, isCurrent } : { isCurrent }
 
     if (signal?.aborted) {
       return result(false)
     }
 
     try {
-      const target = findCaptchaTarget()
       if (!target) {
         failSubmit('未找到验证码')
         return result(false)
@@ -74,7 +75,7 @@ export class CaptchaSolver {
         return result(false)
       }
 
-      if (signal?.aborted) {
+      if (!isCurrent()) {
         return result(false)
       }
 
@@ -82,18 +83,18 @@ export class CaptchaSolver {
       this.panel.setStatus({ inference: '推理请求中' })
       let detectionResult: YoloParseResult
       try {
-        detectionResult = await this.detector.detect(blob)
+        detectionResult = await this.detector.detect(blob, signal)
       } catch (error) {
         failSubmit(`推理失败: ${formatErrorMessage(error)}`)
         return result(false)
       }
 
-      if (signal?.aborted) {
+      if (!isCurrent()) {
         return result(false)
       }
 
       const answerMode = await this.getAnswerMode()
-      if (signal?.aborted) {
+      if (!isCurrent()) {
         return result(false)
       }
 

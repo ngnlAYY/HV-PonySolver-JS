@@ -115,15 +115,15 @@ async function readModelResponse(
   try {
     declaredByteLength = parseDeclaredByteLength(contentLength)
   } catch (error) {
-    await response.body?.cancel()
+    await cancelResponseBody(response)
     throw error
   }
   if (expectedByteLength !== null && declaredByteLength !== null && declaredByteLength > expectedByteLength) {
-    await response.body?.cancel()
+    await cancelResponseBody(response)
     throw new Error(`下载模型大小校验失败: ${contentLength} != ${expectedByteLength}`)
   }
   if (declaredByteLength !== null && declaredByteLength > maxByteLength) {
-    await response.body?.cancel()
+    await cancelResponseBody(response)
     throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxByteLength}`)
   }
   if (!response.body) {
@@ -137,44 +137,56 @@ async function readModelResponse(
   const chunks: Uint8Array[] = []
   const bytes = expectedContentLength === null ? null : new Uint8Array(expectedContentLength)
   let totalBytes = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) {
-      break
-    }
-    const nextTotalBytes = totalBytes + value.byteLength
-    if (expectedContentLength !== null && nextTotalBytes > expectedContentLength) {
-      await reader.cancel()
-      throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedContentLength}`)
-    }
-    if (expectedByteLength !== null && nextTotalBytes > expectedByteLength) {
-      await reader.cancel()
-      throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedByteLength}`)
-    }
-    if (nextTotalBytes > maxByteLength) {
-      await reader.cancel()
-      throw new Error(`下载模型大小校验失败: ${nextTotalBytes} > ${maxByteLength}`)
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+      const nextTotalBytes = totalBytes + value.byteLength
+      if (expectedContentLength !== null && nextTotalBytes > expectedContentLength) {
+        throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedContentLength}`)
+      }
+      if (expectedByteLength !== null && nextTotalBytes > expectedByteLength) {
+        throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedByteLength}`)
+      }
+      if (nextTotalBytes > maxByteLength) {
+        throw new Error(`下载模型大小校验失败: ${nextTotalBytes} > ${maxByteLength}`)
+      }
+      if (bytes) {
+        bytes.set(value, totalBytes)
+      } else {
+        chunks.push(value)
+      }
+      totalBytes = nextTotalBytes
     }
     if (bytes) {
-      bytes.set(value, totalBytes)
-    } else {
-      chunks.push(value)
+      if (totalBytes !== expectedContentLength) {
+        throw new Error(`下载模型大小校验失败: ${totalBytes} != ${expectedContentLength}`)
+      }
+      return bytes.buffer
     }
-    totalBytes = nextTotalBytes
-  }
-  if (bytes) {
-    if (totalBytes !== expectedContentLength) {
-      throw new Error(`下载模型大小校验失败: ${totalBytes} != ${expectedContentLength}`)
+    const mergedBytes = new Uint8Array(totalBytes)
+    let offset = 0
+    for (const chunk of chunks) {
+      mergedBytes.set(chunk, offset)
+      offset += chunk.byteLength
     }
-    return bytes.buffer
+    return mergedBytes.buffer
+  } catch (error) {
+    try {
+      await reader.cancel()
+    } catch {
+      // Preserve the read/validation error.
+    }
+    throw error
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      // Reader cleanup must not mask the primary result or error.
+    }
   }
-  const mergedBytes = new Uint8Array(totalBytes)
-  let offset = 0
-  for (const chunk of chunks) {
-    mergedBytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return mergedBytes.buffer
 }
 
 export async function downloadModel(
@@ -197,8 +209,8 @@ export async function downloadModel(
       createModelFetchInit(controller.signal, accessKey),
     )
     if (!response.ok) {
+      await cancelResponseBody(response)
       if (response.status === 429) {
-        await cancelResponseBody(response)
         throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
       }
       throw new Error(`模型下载失败: HTTP ${response.status}`)

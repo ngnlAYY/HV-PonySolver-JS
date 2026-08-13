@@ -7,6 +7,17 @@ export type CaptchaTarget = Readonly<{
   captchaKey: string
 }>
 
+export function isSameCaptchaTarget(left: CaptchaTarget | null, right: CaptchaTarget | null): boolean {
+  return (
+    left !== null &&
+    right !== null &&
+    left.master === right.master &&
+    left.form === right.form &&
+    left.image === right.image &&
+    left.captchaKey === right.captchaKey
+  )
+}
+
 function isSameOriginUrl(url: string): boolean {
   try {
     return new URL(url, location.href).origin === location.origin

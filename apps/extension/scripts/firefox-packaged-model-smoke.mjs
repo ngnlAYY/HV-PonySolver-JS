@@ -13,10 +13,21 @@ import { fileURLToPath } from 'node:url'
 
 import { firefox } from '@playwright/test'
 
+import {
+  assertSupportedBrowserVersion,
+  browserSupport,
+  firefoxArguments,
+  geckodriverArguments,
+  parseGeckodriverVersion,
+} from './browser-support.mjs'
+import { discoverPackagedArtifact } from './packaged-smoke-artifact.mjs'
+import { writePackagedE2eEvidence } from './packaged-e2e-evidence.mjs'
+
 const execFileAsync = promisify(execFile)
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const packageJson = JSON.parse(await readFile(path.join(extensionRoot, 'package.json'), 'utf8'))
-const archivePath = path.join(extensionRoot, 'dist', `hv-pony-solver-firefox-packaged-${packageJson.version}.zip`)
+const outputRoot = path.resolve(process.env.PACKAGED_EXTENSION_OUTPUT_ROOT || path.join(extensionRoot, 'dist'))
+const packagedArtifact = await discoverPackagedArtifact(outputRoot, 'firefox')
+const archivePath = packagedArtifact.archivePath
 const firefoxExecutable = process.env.FIREFOX_EXECUTABLE_PATH || firefox.executablePath()
 const packagedHint = '当前版本已内置模型，无需配置模型 Key。'
 const addonId = 'hv-pony-solver@ngnl.host'
@@ -159,7 +170,7 @@ async function waitForWebDriver(port, driver, output) {
 async function startWebDriver(executable) {
   const port = await reservePort()
   const output = []
-  const driver = spawn(executable, ['--port', String(port)], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const driver = spawn(executable, geckodriverArguments(port), { stdio: ['ignore', 'pipe', 'pipe'] })
   driver.stdout.on('data', (chunk) => output.push(String(chunk)))
   driver.stderr.on('data', (chunk) => output.push(String(chunk)))
   const stop = async () => {
@@ -221,7 +232,7 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
         },
         'moz:firefoxOptions': {
           binary: firefoxExecutable,
-          args: ['-headless', '-remote-allow-system-access'],
+          args: firefoxArguments(),
           prefs: {
             'extensions.webextensions.uuids': JSON.stringify({ [addonId]: extensionUuid }),
           },
@@ -320,6 +331,7 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
     assert.equal(inferenceResult.count, '1')
     assert.equal(inferenceResult.checked, 1)
     assert.match(inferenceResult.panel, /会话状态：已就绪/u)
+    assertSupportedBrowserVersion('firefox', session.capabilities.browserVersion)
     return session.capabilities.browserVersion
   } finally {
     await request('DELETE', sessionPath).catch(() => undefined)
@@ -333,6 +345,12 @@ try {
 } catch {
   throw new Error('geckodriver 不可用；请安装它或设置 GECKODRIVER_PATH')
 }
+const driverVersion = parseGeckodriverVersion((await execFileAsync(geckodriverExecutable, ['--version'])).stdout)
+assert.equal(
+  driverVersion,
+  browserSupport.geckodriver.version,
+  `Expected geckodriver ${browserSupport.geckodriver.version}, received ${driverVersion}`,
+)
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-packaged-firefox-'))
 let proxy
@@ -344,6 +362,13 @@ try {
   const firstVersion = await runInstalledArtifact(request, proxy.port, 1)
   const secondVersion = await runInstalledArtifact(request, proxy.port, 2)
   assert.equal(secondVersion, firstVersion)
+  await writePackagedE2eEvidence(
+    process.env.PACKAGED_E2E_EVIDENCE_DIR,
+    'firefox',
+    packagedArtifact,
+    firstVersion,
+    driverVersion,
+  )
   process.stdout.write(
     `Firefox ${firstVersion} packaged ZIP loaded, inferred, tore down, and initialized again without a Key.\n`,
   )

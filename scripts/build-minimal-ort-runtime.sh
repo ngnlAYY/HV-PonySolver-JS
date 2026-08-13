@@ -3,7 +3,9 @@ set -euo pipefail
 
 ORT_TAG=v1.27.0
 ORT_COMMIT=8f0278c77bf44b0cc83c098c6c722b92a36ac4b5
+PIP_VERSION=26.1.1
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+PYTHON_REQUIREMENTS="$ROOT_DIR/scripts/ort-runtime/requirements.txt"
 BUILD_ROOT="${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}"
 ORT_SOURCE="$BUILD_ROOT/onnxruntime"
 MODEL_INPUT="$BUILD_ROOT/model-input"
@@ -33,7 +35,11 @@ fi
 python3 -m venv "$BUILD_ROOT/venv"
 # shellcheck disable=SC1091
 source "$BUILD_ROOT/venv/bin/activate"
-python -m pip install 'onnxruntime==1.27.0' 'onnx==1.20.1' 'flatbuffers>=25,<26'
+python -m pip install --disable-pip-version-check "pip==$PIP_VERSION"
+python -m pip install --disable-pip-version-check --require-hashes -r "$PYTHON_REQUIREMENTS"
+python --version
+python -m pip --version
+sha256sum "$PYTHON_REQUIREMENTS"
 rm -rf "$MODEL_INPUT" "$MODEL_OUTPUT"
 mkdir -p "$MODEL_INPUT" "$MODEL_OUTPUT"
 cp "$ROOT_DIR/model/yolo26n-640.onnx" "$MODEL_INPUT/yolo26n-640.onnx"

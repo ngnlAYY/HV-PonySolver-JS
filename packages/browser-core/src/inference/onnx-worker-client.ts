@@ -1,12 +1,16 @@
-import type { DetectorService, WorkerRequest, WorkerResponse, YoloParseResult } from './inference-types'
-import { imagePreprocessConfig } from './inference-config'
+import type { DetectorService, WorkerRequestPayload, WorkerResponse, YoloParseResult } from './inference-types'
 import { WorkerRequestBridge } from './worker-request-bridge'
 import type { InferenceStatusSink } from '../status-panel/status-panel-types'
 
 export interface ModelRepository {
   getCached(): Promise<ArrayBuffer | null>
   download(signal?: AbortSignal, verifyIntegrity?: boolean, accessKeyOverride?: string): Promise<ArrayBuffer>
-  putCached(buffer: ArrayBuffer, verifyIntegrity?: boolean, skipIntegrityVerification?: boolean): Promise<void>
+  putCached(
+    buffer: ArrayBuffer,
+    verifyIntegrity?: boolean,
+    skipIntegrityVerification?: boolean,
+    signal?: AbortSignal,
+  ): Promise<void>
 }
 
 export type WorkerFactory = () => Worker
@@ -26,7 +30,8 @@ export class OnnxWorkerClient implements DetectorService {
     private readonly workerFactory: WorkerFactory,
   ) {}
 
-  async prepare(): Promise<void> {
+  async prepare(signal?: AbortSignal): Promise<void> {
+    this.assertRequestActive(signal)
     if (this.destroyed) {
       throw new Error('Worker 已关闭')
     }
@@ -34,7 +39,7 @@ export class OnnxWorkerClient implements DetectorService {
       return
     }
     if (this.preparePromise) {
-      return this.preparePromise
+      return this.waitForAbort(this.preparePromise, signal)
     }
     this.preparePromise = this.createWorker().catch((error) => {
       this.preparePromise = null
@@ -42,31 +47,46 @@ export class OnnxWorkerClient implements DetectorService {
       this.panel.setStatus({ session: '错误' })
       throw error
     })
-    return this.preparePromise
+    return this.waitForAbort(this.preparePromise, signal)
   }
 
-  detect(blob: Blob): Promise<YoloParseResult> {
-    const detectPromise = this.detectQueue.then(() => this.runDetect(blob))
+  detect(blob: Blob, signal?: AbortSignal): Promise<YoloParseResult> {
+    if (signal?.aborted) {
+      return Promise.reject(new Error('推理请求已取消'))
+    }
+    let workerPosted = false
+    const detectPromise = this.detectQueue.then(() =>
+      this.runDetect(blob, signal, () => {
+        workerPosted = true
+      }),
+    )
     this.detectQueue = detectPromise.then(
       () => undefined,
       () => undefined,
     )
-    return detectPromise
+    return this.waitForAbort(detectPromise, signal, () => workerPosted)
   }
 
-  private async runDetect(blob: Blob): Promise<YoloParseResult> {
-    await this.prepare()
+  private async runDetect(blob: Blob, signal: AbortSignal | undefined, onWorkerPosted: () => void): Promise<YoloParseResult> {
+    this.assertRequestActive(signal)
+    await this.prepare(signal)
+    this.assertRequestActive(signal)
     const startedAt = Date.now()
     this.panel.setStatus({ inference: '推理中' })
     try {
-      const response = await this.post({ type: 'detect', imageBlob: blob, size: imagePreprocessConfig.imageSize })
+      this.assertRequestActive(signal)
+      onWorkerPosted()
+      const response = await this.post({ type: 'detect', imageBlob: blob })
+      this.assertRequestActive(signal)
       if (response.type !== 'response' || !response.result) {
         throw new Error('ONNX Worker 返回无效结果')
       }
       this.panel.setStatus({ inference: `完成 ${Date.now() - startedAt}ms` })
       return response.result
     } catch (error) {
-      this.panel.setStatus({ inference: '错误' })
+      if (!signal?.aborted && !this.destroyed) {
+        this.panel.setStatus({ inference: '错误' })
+      }
       throw error
     }
   }
@@ -101,7 +121,7 @@ export class OnnxWorkerClient implements DetectorService {
       this.checkAbort(abortController)
       if (cacheBuffer) {
         try {
-          await this.modelCache.putCached(cacheBuffer, true, true)
+          await this.modelCache.putCached(cacheBuffer, true, true, abortController.signal)
         } catch {
           // 缓存写入失败不应阻止已初始化的 Worker 继续服务本次会话。
         }
@@ -183,7 +203,7 @@ export class OnnxWorkerClient implements DetectorService {
     }
   }
 
-  private post(message: WorkerRequest, transfer: Transferable[] = []): Promise<WorkerResponse> {
+  private post(message: WorkerRequestPayload, transfer: Transferable[] = []): Promise<WorkerResponse> {
     if (!this.requestBridge) {
       return Promise.reject(new Error('ONNX Worker 尚未创建'))
     }
@@ -207,5 +227,61 @@ export class OnnxWorkerClient implements DetectorService {
   private rejectPending(error: unknown): void {
     this.requestBridge?.rejectPending(error)
     this.requestBridge = null
+  }
+
+  private assertRequestActive(signal?: AbortSignal): void {
+    if (this.destroyed) {
+      throw new Error('Worker 已关闭')
+    }
+    if (signal?.aborted) {
+      throw new Error('推理请求已取消')
+    }
+  }
+
+  private waitForAbort<T>(
+    promise: Promise<T>,
+    signal?: AbortSignal,
+    mustWaitForSettlement: () => boolean = () => false,
+  ): Promise<T> {
+    if (!signal) {
+      return promise
+    }
+    if (signal.aborted && !mustWaitForSettlement()) {
+      return Promise.reject(new Error('推理请求已取消'))
+    }
+    return new Promise<T>((resolve, reject) => {
+      let settled = false
+      const cleanup = (): void => signal.removeEventListener('abort', onAbort)
+      const onAbort = (): void => {
+        if (settled || mustWaitForSettlement()) {
+          return
+        }
+        settled = true
+        cleanup()
+        reject(new Error('推理请求已取消'))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      promise.then(
+        (value) => {
+          if (settled) {
+            return
+          }
+          settled = true
+          cleanup()
+          resolve(value)
+        },
+        (error: unknown) => {
+          if (settled) {
+            return
+          }
+          settled = true
+          cleanup()
+          reject(error)
+        },
+      )
+      if (signal.aborted) {
+        onAbort()
+      }
+    })
   }
 }

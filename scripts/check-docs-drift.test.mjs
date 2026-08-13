@@ -32,6 +32,7 @@ async function createFixture() {
     'apps/userscript/package.json',
     'apps/extension/package.json',
     'apps/extension/scripts/build-extension.mjs',
+    'apps/extension/scripts/browser-support.mjs',
     'docs/browser-extension.md',
     'packages/browser-core/src/inference/inference-config.ts',
     'apps/userscript/src/inference/onnx-runtime-assets.ts',

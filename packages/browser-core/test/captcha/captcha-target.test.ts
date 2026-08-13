@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { findCaptchaTarget } from '../../src/captcha/captcha-target'
+import { findCaptchaTarget, isSameCaptchaTarget } from '../../src/captcha/captcha-target'
 
 function appendCandidate({ imageSrc, formAction }: { imageSrc: string, formAction?: string }): HTMLDivElement {
   const master = document.createElement('div')
@@ -41,5 +41,19 @@ describe('findCaptchaTarget', () => {
     appendCandidate({ imageSrc: '/captcha.png', formAction: 'https://example.invalid/submit' })
 
     expect(findCaptchaTarget()).toBeNull()
+  })
+
+  it('compares captcha identity by DOM references and normalized image URL', () => {
+    const master = appendCandidate({ imageSrc: '/captcha.png', formAction: '/submit' })
+    const first = findCaptchaTarget()
+    const second = findCaptchaTarget()
+
+    expect(isSameCaptchaTarget(first, second)).toBe(true)
+
+    const replacement = appendCandidate({ imageSrc: '/captcha.png', formAction: '/submit' })
+    master.replaceWith(replacement)
+
+    expect(isSameCaptchaTarget(first, findCaptchaTarget())).toBe(false)
+    expect(isSameCaptchaTarget(first, null)).toBe(false)
   })
 })

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseOnnxRuntimeAssetsManifest } from '../apps/userscript/scripts/onnx-runtime-assets.mjs'
 import { checkArchitectureGuardrails, checkUserscriptConfigDocs } from './docs-drift/architecture-docs.mjs'
 import { checkModelManifestDocs } from './docs-drift/model-manifest-docs.mjs'
@@ -54,7 +54,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     extensionPackageJson,
     readme,
     extensionDoc,
-    extensionBuildSource,
+    browserSupportModule,
     inferenceConfigSource,
     onnxRuntimeAssetsSource,
     modelWorkerRequestRouterSource,
@@ -67,7 +67,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     readJson(repoRoot, 'apps/extension/package.json'),
     readText(repoRoot, 'README.md'),
     readText(repoRoot, 'docs/browser-extension.md'),
-    readText(repoRoot, 'apps/extension/scripts/build-extension.mjs'),
+    importBrowserSupport(repoRoot),
     readText(repoRoot, 'packages/browser-core/src/inference/inference-config.ts'),
     readText(repoRoot, 'apps/userscript/src/inference/onnx-runtime-assets.ts'),
     readText(repoRoot, 'apps/model-worker/src/request-router.ts'),
@@ -89,7 +89,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     ...checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJson, readme),
     ...checkModelWorkerDocs(readme, modelWorkerHttpFacts),
     ...checkArchitectureGuardrails(readme),
-    ...checkExtensionDocs(extensionPackageJson, extensionBuildSource, readme, extensionDoc),
+    ...checkExtensionDocs(extensionPackageJson, browserSupportModule.browserSupport, readme, extensionDoc),
   ]
 }
 
@@ -99,6 +99,12 @@ async function readJson(repoRoot, relativePath) {
 
 async function readText(repoRoot, relativePath) {
   return readFile(resolve(repoRoot, relativePath), 'utf8')
+}
+
+async function importBrowserSupport(repoRoot) {
+  const url = pathToFileURL(resolve(repoRoot, 'apps/extension/scripts/browser-support.mjs'))
+  url.searchParams.set('repoRoot', repoRoot)
+  return import(url.href)
 }
 
 export { checkDocsDrift, parseModelManifest, parseOnnxRuntimeAssetsManifest, resolveRepoRoot }

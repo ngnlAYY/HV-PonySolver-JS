@@ -1,9 +1,4 @@
-import { registerBroker } from './broker'
 import { createPackagedInferenceHost } from '../host/packaged-inference-host'
-import { registerOpenOptionsAction } from '../platform/webextension'
+import { registerFirefoxBackground } from './firefox-bootstrap'
 
-const host = createPackagedInferenceHost()
-
-registerBroker((request) => host.handle(request), { allowOptions: false })
-registerOpenOptionsAction()
-globalThis.addEventListener('unload', () => host.destroy(), { once: true })
+registerFirefoxBackground(createPackagedInferenceHost, { allowOptions: false })

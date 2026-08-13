@@ -27,7 +27,7 @@ describe('WorkerRequestBridge', () => {
   it('resolves the matching worker response', async () => {
     const worker = new ManualWorker()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, () => undefined)
-    const promise = bridge.post({ type: 'init', wasmPath: '/wasm/', modelBuffer: new ArrayBuffer(1) }, [])
+    const promise = bridge.post({ type: 'init', modelBuffer: new ArrayBuffer(1) }, [])
 
     worker.onmessage?.({ data: { type: 'response', requestId: 1 } } as MessageEvent)
 
@@ -44,7 +44,7 @@ describe('WorkerRequestBridge', () => {
       throw new Error('postMessage failed')
     })
 
-    await expect(bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])).rejects.toThrow(
+    await expect(bridge.post({ type: 'detect', imageBlob: new Blob() }, [])).rejects.toThrow(
       'ONNX Worker 消息发送失败: Error: postMessage failed',
     )
     expect(onFailure).toHaveBeenCalledTimes(1)
@@ -59,7 +59,7 @@ describe('WorkerRequestBridge', () => {
   it('rejects error responses', async () => {
     const worker = new ManualWorker()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, () => undefined)
-    const promise = bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])
+    const promise = bridge.post({ type: 'detect', imageBlob: new Blob() }, [])
 
     worker.onmessage?.({ data: { type: 'error', requestId: 1, message: 'bad output' } } as MessageEvent)
 
@@ -69,7 +69,7 @@ describe('WorkerRequestBridge', () => {
   it('ignores unknown request ids', async () => {
     const worker = new ManualWorker()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, () => undefined)
-    const promise = bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])
+    const promise = bridge.post({ type: 'detect', imageBlob: new Blob() }, [])
 
     worker.onmessage?.({ data: { type: 'response', requestId: 999 } } as MessageEvent)
     worker.onmessage?.({ data: { type: 'response', requestId: 1, result: detectResult } } as MessageEvent)
@@ -82,7 +82,7 @@ describe('WorkerRequestBridge', () => {
     const worker = new ManualWorker()
     const onFailure = vi.fn()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
-    const promise = bridge.post({ type: 'init', wasmPath: '/wasm/', modelBuffer: new ArrayBuffer(1) }, [])
+    const promise = bridge.post({ type: 'init', modelBuffer: new ArrayBuffer(1) }, [])
 
     vi.advanceTimersByTime(inferenceTimeoutConfig.workerInitTimeoutMs)
 
@@ -96,7 +96,7 @@ describe('WorkerRequestBridge', () => {
     const worker = new ManualWorker()
     const onFailure = vi.fn()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
-    const promise = bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])
+    const promise = bridge.post({ type: 'detect', imageBlob: new Blob() }, [])
 
     vi.advanceTimersByTime(inferenceTimeoutConfig.workerDetectTimeoutMs)
     worker.onmessage?.({ data: { type: 'response', requestId: 1, result: detectResult } } as MessageEvent)
@@ -110,8 +110,8 @@ describe('WorkerRequestBridge', () => {
     const worker = new ManualWorker()
     const onFailure = vi.fn()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
-    const firstPromise = bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])
-    const secondPromise = bridge.post({ type: 'detect', imageBlob: new Blob(), size: 640 }, [])
+    const firstPromise = bridge.post({ type: 'detect', imageBlob: new Blob() }, [])
+    const secondPromise = bridge.post({ type: 'detect', imageBlob: new Blob() }, [])
 
     bridge.rejectPending(new Error('closed'))
     worker.onmessage?.({ data: { type: 'response', requestId: 1, result: detectResult } } as MessageEvent)

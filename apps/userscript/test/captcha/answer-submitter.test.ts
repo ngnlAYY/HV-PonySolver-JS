@@ -87,7 +87,7 @@ describe('AnswerSubmitter', () => {
         const submitPromise = new AnswerSubmitter().submit(form, ['TS', 'RA'], onError, onSubmitted, {
           signal: controller.signal,
         })
-        await flushMicrotasks()
+        await vi.waitFor(() => expect(checkboxClicks[0]).toHaveBeenCalledTimes(1))
 
         controller.abort()
         await submitPromise
@@ -176,6 +176,26 @@ describe('AnswerSubmitter', () => {
       expect(button.click).not.toHaveBeenCalled()
       expect(onSubmitted).not.toHaveBeenCalled()
       expect(onError).not.toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('does not click submit or record success when the captcha is no longer current', async () => {
+      const form = createForm(true)
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onSubmitted = vi.fn()
+      let current = true
+
+      const submitPromise = new AnswerSubmitter().submit(form, ['TS'], vi.fn(), onSubmitted, {
+        isCurrent: () => current,
+      })
+      await flushMicrotasks()
+      current = false
+      await vi.runAllTimersAsync()
+      await submitPromise
+
+      expect(button.click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
       expect(vi.getTimerCount()).toBe(0)
     })
   })

@@ -1,6 +1,7 @@
 import type * as Ort from 'onnxruntime-web/wasm'
 
 import { calculateLetterboxLayout, copyRgbaToChwFloat32 } from './image-preprocess'
+import type { WorkerMessage, WorkerRequest } from './inference-types'
 import { parseYoloOutput } from './yolo-output-parser'
 import { formatErrorMessage } from '../utils/errors'
 
@@ -8,15 +9,8 @@ const INPUT_SIZE = 640
 const INPUT_NAME = 'images'
 const OUTPUT_NAME = 'output0'
 
-type InitRequest = Readonly<{ type: 'init'; requestId: number; modelBuffer: ArrayBuffer }>
-type DetectRequest = Readonly<{ type: 'detect'; requestId: number; imageBlob: Blob }>
-type WorkerRequest = InitRequest | DetectRequest
-type WorkerResponse =
-  | Readonly<{ type: 'response'; requestId: number; result?: ReturnType<typeof parseYoloOutput> }>
-  | Readonly<{ type: 'error'; requestId: number; message: string }>
-
 type WorkerScope = Readonly<{
-  postMessage(message: WorkerResponse): void
+  postMessage(message: WorkerMessage): void
 }> & {
   onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null
 }

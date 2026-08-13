@@ -8,6 +8,8 @@ import { zipSync } from 'fflate'
 
 import { ORT_MODEL_FILENAME, ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared/ort-model'
 
+import { browserSupport } from './browser-support.mjs'
+
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const extensionRoot = path.resolve(scriptDirectory, '..')
 const repositoryRoot = path.resolve(extensionRoot, '../..')
@@ -30,6 +32,8 @@ const packagedModelIdentity = Object.freeze({
   sha256: ORT_MODEL_INTEGRITY.sha256,
 })
 const packagedModelSource = path.join(repositoryRoot, 'model', ORT_MODEL_FILENAME)
+const packagedModelIdentityModule = path.join(extensionRoot, 'src', 'host', 'packaged-model-identity.ts')
+const fixtureIdentityNamespace = 'fixture-packaged-model-identity'
 
 const contentMatches = ['https://hentaiverse.org/*', 'https://alt.hentaiverse.org/*']
 const contentExcludes = [
@@ -111,7 +115,7 @@ export function createManifest(target, options = {}) {
   if (target === 'chromium') {
     return {
       ...common,
-      minimum_chrome_version: '116',
+      minimum_chrome_version: browserSupport.chromium.manifestMinimumVersion,
       permissions: [...common.permissions, 'offscreen'],
       background: {
         service_worker: 'background.js',
@@ -127,7 +131,7 @@ export function createManifest(target, options = {}) {
       browser_specific_settings: {
         gecko: {
           id: 'hv-pony-solver@ngnl.host',
-          strict_min_version: '142.0',
+          strict_min_version: browserSupport.firefox.manifestMinimumVersion,
           data_collection_permissions: {
             required: [modelDelivery === 'remote' ? 'authenticationInfo' : 'none'],
           },
@@ -205,6 +209,32 @@ function extensionRuntimeGluePlugin() {
   }
 }
 
+function packagedModelIdentityPlugin(identity) {
+  assertPackagedModelIdentity(identity)
+  return {
+    name: fixtureIdentityNamespace,
+    setup(buildApi) {
+      buildApi.onResolve({ filter: /^\.\/packaged-model-identity$/ }, (args) => {
+        const resolved = path.resolve(args.resolveDir, `${args.path}.ts`)
+        if (resolved !== packagedModelIdentityModule) {
+          return undefined
+        }
+        return { path: 'identity', namespace: fixtureIdentityNamespace }
+      })
+      buildApi.onLoad({ filter: /.*/, namespace: fixtureIdentityNamespace }, () => ({
+        contents: [
+          `export const PACKAGED_MODEL_FILENAME = ${JSON.stringify(identity.filename)};`,
+          `export const PACKAGED_MODEL_INTEGRITY = Object.freeze(${JSON.stringify({
+            byteLength: identity.byteLength,
+            sha256: identity.sha256,
+          })});`,
+        ].join('\n'),
+        loader: 'js',
+      }))
+    },
+  }
+}
+
 async function assertRuntimeAssets() {
   const [wasmBytes, glueBytes] = await Promise.all([readFile(runtimeWasmSource), readFile(runtimeGlueSource)])
   if (sha256(wasmBytes) !== runtimeWasmSha256) {
@@ -256,7 +286,7 @@ const packagedForbiddenInputSuffixes = [
   'packages/shared/src/ort-assets.ts',
 ]
 
-function auditPackagedMetafiles(metafiles, target) {
+function auditPackagedMetafiles(metafiles, target, fixture = false) {
   const contributingInputs = new Set()
   for (const metafile of metafiles) {
     for (const output of Object.values(metafile.outputs ?? {})) {
@@ -275,6 +305,14 @@ function auditPackagedMetafiles(metafiles, target) {
     if (matched) {
       throw new Error(`${target} packaged-model build includes remote-only input: ${forbidden}`)
     }
+  }
+  const hasFixtureIdentity = [...contributingInputs].some((input) => input.includes(fixtureIdentityNamespace))
+  if (fixture !== hasFixtureIdentity) {
+    throw new Error(
+      fixture
+        ? `${target} fixture build did not use the fixture packaged-model identity`
+        : `${target} production build includes the fixture packaged-model identity`,
+    )
   }
 }
 
@@ -367,7 +405,7 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
       }
     }
     if (options.metafiles !== undefined) {
-      auditPackagedMetafiles(options.metafiles, target)
+      auditPackagedMetafiles(options.metafiles, target, options.fixture === true)
     }
   }
 }
@@ -380,18 +418,19 @@ function createBuildMetadata(modelDelivery, packagedModel, fixture) {
   }
 }
 
-function artifactBaseName(target, modelDelivery) {
+function artifactBaseName(target, modelDelivery, fixture = false) {
   const modeSuffix = modelDelivery === 'packaged' ? '-packaged' : ''
-  return `hv-pony-solver-${target}${modeSuffix}-${version}`
+  const fixtureSuffix = fixture ? '-fixture' : ''
+  return `hv-pony-solver-${target}${modeSuffix}${fixtureSuffix}-${version}`
 }
 
-async function createArchive(targetDirectory, outputRoot, target, modelDelivery) {
+async function createArchive(targetDirectory, outputRoot, target, modelDelivery, fixture) {
   const files = await walkFiles(targetDirectory)
   const entries = {}
   for (const file of files) {
     entries[file.relativePath] = [new Uint8Array(await readFile(file.absolutePath)), { mtime: deterministicZipTimestamp }]
   }
-  const archiveName = `${artifactBaseName(target, modelDelivery)}.zip`
+  const archiveName = `${artifactBaseName(target, modelDelivery, fixture)}.zip`
   const archiveBytes = zipSync(entries, { level: 9 })
   const archivePath = path.join(outputRoot, archiveName)
   await writeFile(archivePath, archiveBytes)
@@ -441,13 +480,17 @@ async function buildTarget(outputRoot, target, options = {}) {
     bundle: true,
     format: 'iife',
     platform: 'browser',
-    target: target === 'chromium' ? ['chrome116'] : ['firefox140'],
+    target: [browserSupport[target].esbuildTarget],
     minify: true,
     charset: 'utf8',
     legalComments: 'none',
     sourcemap: false,
     logLevel: 'warning',
     metafile: true,
+    plugins:
+      options.fixture === true && modelDelivery === 'packaged'
+        ? [packagedModelIdentityPlugin(packagedModel.identity)]
+        : [],
   })
   const workerBuild = await build({
     entryPoints: [path.join(extensionRoot, 'src', 'host', 'inference-worker-entry.ts')],
@@ -455,7 +498,7 @@ async function buildTarget(outputRoot, target, options = {}) {
     bundle: true,
     format: 'esm',
     platform: 'browser',
-    target: target === 'chromium' ? ['chrome116'] : ['firefox140'],
+    target: [browserSupport[target].esbuildTarget],
     minify: true,
     legalComments: 'none',
     sourcemap: false,
@@ -486,12 +529,14 @@ async function buildTarget(outputRoot, target, options = {}) {
     modelDelivery,
     model: packagedModel?.identity,
     metafiles: [extensionBuild.metafile, workerBuild.metafile],
+    fixture: options.fixture === true,
   })
   const metadata = createBuildMetadata(modelDelivery, packagedModel, options.fixture === true)
   const files = await writeBuildManifest(targetDirectory, target, metadata)
-  const archive = await createArchive(targetDirectory, outputRoot, target, modelDelivery)
+  const fixture = options.fixture === true
+  const archive = await createArchive(targetDirectory, outputRoot, target, modelDelivery, fixture)
   await writeFile(
-    path.join(outputRoot, `${artifactBaseName(target, modelDelivery)}.artifact.json`),
+    path.join(outputRoot, `${artifactBaseName(target, modelDelivery, fixture)}.artifact.json`),
     `${JSON.stringify({ target, version, ...metadata, archive, files }, null, 2)}\n`,
   )
 }
