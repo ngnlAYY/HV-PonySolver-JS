@@ -136,6 +136,9 @@ export function createManifest(target, options = {}) {
             required: [modelDelivery === 'remote' ? 'authenticationInfo' : 'none'],
           },
         },
+        gecko_android: {
+          strict_min_version: browserSupport.firefox.androidManifestMinimumVersion,
+        },
       },
     }
   }

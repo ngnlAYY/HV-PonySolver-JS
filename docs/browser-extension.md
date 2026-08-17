@@ -7,7 +7,7 @@
 | Artifact | Browsers | Minimum | Model delivery |
 | --- | --- | --- | --- |
 | Chromium MV3 | Chrome and Edge | Chromium 116 | `remote` or `packaged` |
-| Firefox MV3 | Firefox Desktop | Firefox 142 | `remote` or `packaged` |
+| Firefox MV3 | Firefox Desktop | Firefox 140 | `remote` or `packaged` |
 
 Safari, mobile browsers, Manifest V2, store signing, listing assets and publication are outside this build. The userscript remains independently buildable. Do not enable both editions in one browser profile: they observe the same captcha DOM and could submit the same form.
 

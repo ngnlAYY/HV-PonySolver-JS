@@ -27,13 +27,15 @@ test('manifest floor, build target and E2E floor share one source', () => {
     esbuildTarget: 'chrome116',
   })
   assert.deepEqual(browserSupport.firefox, {
-    manifestMinimumVersion: '142.0',
-    minimumMajor: 142,
-    esbuildTarget: 'firefox142',
+    manifestMinimumVersion: '140.0',
+    androidManifestMinimumVersion: '142.0',
+    minimumMajor: 140,
+    esbuildTarget: 'firefox140',
   })
   assert.equal(assertSupportedBrowserVersion('chromium', '116.0.1'), 116)
+  assert.equal(assertSupportedBrowserVersion('firefox', '140.13'), 140)
   assert.equal(assertSupportedBrowserVersion('firefox', '153.0'), 153)
-  assert.throws(() => assertSupportedBrowserVersion('firefox', '141.9'), /below the supported major 142/u)
+  assert.throws(() => assertSupportedBrowserVersion('firefox', '139.9'), /below the supported major 140/u)
 })
 
 test('driver owns the system-access flag and Firefox capabilities do not', () => {

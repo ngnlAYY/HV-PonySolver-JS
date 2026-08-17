@@ -255,9 +255,9 @@ ZIP 使用固定时间戳与稳定文件顺序；相同源码和工具链应产�
 | 产物 | 浏览器 | 最低版本 | 后台模型 |
 | --- | --- | --- | --- |
 | `chromium`（两种模型模式） | Chrome、Edge | Chromium 116 | MV3 service worker broker + Offscreen Document |
-| `firefox`（两种模型模式） | Firefox Desktop | Firefox 142 | MV3 background script，清单不写不受支持的 `persistent` |
+| `firefox`（两种模型模式） | Firefox Desktop | Firefox 140 | MV3 background script，清单不写不受支持的 `persistent` |
 
-Safari、移动浏览器和 Manifest V2 不在当前范围内。Firefox 142 下限用于 AMO 内建数据传输同意声明：远程模式声明 `authenticationInfo`，因为模型 Key 会作为 Bearer 凭据发送到 `models.ngnl.host`；内置模式声明 `none`。内置版本也移除模型服务 host permission；Chromium 仍保留 `offscreen`。验证码图片和识别结果不发送到模型服务，推理在浏览器本地完成。
+Safari、移动浏览器和 Manifest V2 不在当前范围内。Firefox 140 下限用于桌面版内建数据传输同意声明：远程模式声明 `authenticationInfo`，因为模型 Key 会作为 Bearer 凭据发送到 `models.ngnl.host`；内置模式声明 `none`。内置版本也移除模型服务 host permission；Chromium 仍保留 `offscreen`。验证码图片和识别结果不发送到模型服务，推理在浏览器本地完成。
 
 本地加载：
 

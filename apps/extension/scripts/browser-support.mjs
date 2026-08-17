@@ -5,9 +5,10 @@ export const browserSupport = Object.freeze({
     esbuildTarget: 'chrome116',
   }),
   firefox: Object.freeze({
-    manifestMinimumVersion: '142.0',
-    minimumMajor: 142,
-    esbuildTarget: 'firefox142',
+    manifestMinimumVersion: '140.0',
+    androidManifestMinimumVersion: '142.0',
+    minimumMajor: 140,
+    esbuildTarget: 'firefox140',
   }),
   geckodriver: Object.freeze({
     version: '0.37.1',
