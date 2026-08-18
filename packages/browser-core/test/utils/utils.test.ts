@@ -6,6 +6,7 @@ import { solverConfig } from '../../src/captcha/solver-config'
 import { timingConfig } from '../../src/captcha/timing-config'
 import {
   imagePreprocessConfig,
+  inferenceRecoveryConfig,
   inferenceTimeoutConfig,
   yoloOutputConfig,
 } from '../../src/inference/inference-config'
@@ -29,12 +30,16 @@ describe('config defaults', () => {
     expect(timingConfig.multiClickDelay).toEqual([1000, 1500])
     expect(solverConfig.randomOnFail).toBe(false)
     expect(imagePreprocessConfig.imageSize).toBe(640)
-    expect(yoloOutputConfig.confidenceThreshold).toBe(0.30)
+    expect(imagePreprocessConfig.maxEncodedBytes).toBe(2 * 1024 * 1024)
+    expect(imagePreprocessConfig.maxSourceSide).toBe(4096)
+    expect(imagePreprocessConfig.maxSourcePixels).toBe(16_000_000)
+    expect(yoloOutputConfig.confidenceThreshold).toBe(0.3)
     expect(yoloOutputConfig.maxDetections).toBe(16)
     expect(yoloOutputConfig.maxKinds).toBe(3)
     expect(yoloOutputConfig.rowSize).toBe(6)
     expect(yoloOutputConfig.confidenceIndex).toBe(4)
     expect(yoloOutputConfig.classIndex).toBe(5)
+    expect(yoloOutputConfig.maxOutputRows).toBe(100_000)
     expect(modelConfig.accessKey).toBe('')
     expect(modelConfig.urlBase).toBe('https://models.ngnl.host/yolo26n-640.ort')
     expect(modelConfig.cacheName).toBe('pony-solver-local')
@@ -43,7 +48,11 @@ describe('config defaults', () => {
     expect(modelConfig.verifyIntegrity).toBe(true)
     expect(inferenceTimeoutConfig.workerInitTimeoutMs).toBe(60000)
     expect(inferenceTimeoutConfig.workerDetectTimeoutMs).toBe(30000)
+    expect(inferenceTimeoutConfig.workerAbortGraceTimeoutMs).toBe(1000)
+    expect(inferenceTimeoutConfig.workerPrepareTimeoutMs).toBe(100000)
     expect(inferenceTimeoutConfig.modelDownloadTimeoutMs).toBe(30000)
+    expect(inferenceTimeoutConfig.modelCacheTimeoutMs).toBe(5000)
+    expect(inferenceRecoveryConfig.maxConsecutiveWorkerErrors).toBe(3)
   })
 })
 

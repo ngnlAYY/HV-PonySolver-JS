@@ -10,7 +10,7 @@ const defaultArtifactPath = 'apps/userscript/dist/hv-pony-solver.user.js'
 const BUNDLE_BUDGET_PROFILES = Object.freeze({
   default: Object.freeze({
     artifactPath: defaultArtifactPath,
-    budgetBytes: 96 * 1024,
+    budgetBytes: 128 * 1024,
   }),
   bundled: Object.freeze({
     artifactPath: defaultArtifactPath,

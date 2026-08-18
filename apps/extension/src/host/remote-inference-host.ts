@@ -19,13 +19,7 @@ function assertVerificationActive(signal: AbortSignal): void {
 
 export type RemoteKeyVerifierDependencies = Readonly<{
   download(signal: AbortSignal, verifyIntegrity: boolean, candidateKey: string): Promise<ArrayBuffer>
-  putCached(
-    buffer: ArrayBuffer,
-    verifyIntegrity: boolean,
-    skipIntegrityVerification: boolean,
-    signal: AbortSignal,
-  ): Promise<void>
-  prepare(signal: AbortSignal): Promise<void>
+  prepareFromVerifiedModel(modelBuffer: ArrayBuffer, signal: AbortSignal): Promise<void>
   set(key: string, value: string, signal: AbortSignal): Promise<void>
 }>
 
@@ -33,26 +27,23 @@ export function createRemoteKeyVerifier(
   dependencies: RemoteKeyVerifierDependencies,
 ): (candidateKey: string, signal: AbortSignal) => Promise<void> {
   return async (candidateKey, signal) => {
+    const normalizedKey = candidateKey.trim()
     assertVerificationActive(signal)
-    const modelBuffer = await dependencies.download(signal, true, candidateKey)
+    const modelBuffer = await dependencies.download(signal, true, normalizedKey)
     assertVerificationActive(signal)
-    await dependencies.putCached(modelBuffer, true, false, signal)
+    await dependencies.prepareFromVerifiedModel(modelBuffer, signal)
     assertVerificationActive(signal)
-    await dependencies.prepare(signal)
-    assertVerificationActive(signal)
-    await dependencies.set(MODEL_ACCESS_KEY_STORAGE_KEY, candidateKey.trim(), signal)
+    await dependencies.set(MODEL_ACCESS_KEY_STORAGE_KEY, normalizedKey, signal)
     assertVerificationActive(signal)
   }
 }
 
 export function createRemoteInferenceHost(): InferenceHost {
   const secretStorage = new IndexedDbStringStorage()
-  const modelCache = new ModelCache(
-    silentStatusSink,
-    (signal, options) =>
-      downloadModel(signal, options, {
-        getAccessKey: () => getModelAccessKey(secretStorage),
-      }),
+  const modelCache = new ModelCache(silentStatusSink, (signal, options) =>
+    downloadModel(signal, options, {
+      getAccessKey: () => getModelAccessKey(secretStorage),
+    }),
   )
   const detector = new OnnxWorkerClient(
     modelCache,
@@ -62,13 +53,11 @@ export function createRemoteInferenceHost(): InferenceHost {
   return new InferenceHost({
     detector,
     verifyKey: createRemoteKeyVerifier({
-      download: (signal, verifyIntegrity, candidateKey) =>
-        modelCache.download(signal, verifyIntegrity, candidateKey),
-      putCached: (buffer, verifyIntegrity, skipIntegrityVerification, signal) =>
-        modelCache.putCached(buffer, verifyIntegrity, skipIntegrityVerification, signal),
-      prepare: (signal) => detector.prepare(signal),
+      download: (signal, verifyIntegrity, candidateKey) => modelCache.download(signal, verifyIntegrity, candidateKey),
+      prepareFromVerifiedModel: (modelBuffer, signal) => detector.prepareFromVerifiedModel(modelBuffer, signal),
       set: (key, value, signal) => secretStorage.set(key, value, signal),
     }),
+    clearKey: (signal) => secretStorage.remove(MODEL_ACCESS_KEY_STORAGE_KEY, signal),
     close: async () => {
       modelCache.close()
       await secretStorage.close()

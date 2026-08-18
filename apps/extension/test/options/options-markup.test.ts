@@ -15,7 +15,7 @@ describe('options base markup', () => {
     expect(fieldset.contains(optionsElement('verify-key'))).toBe(true)
     expect(fieldset.contains(optionsElement('clear-key'))).toBe(true)
     expect(saveButton).not.toBeNull()
-    expect(saveButton?.disabled).toBe(false)
+    expect(saveButton?.disabled).toBe(true)
     expect(fieldset.contains(saveButton)).toBe(false)
     expect(fieldset.getAttribute('aria-describedby')).toBe(hint.id)
     expect(hint.hidden).toBe(true)

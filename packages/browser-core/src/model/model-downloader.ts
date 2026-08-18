@@ -13,8 +13,92 @@ export type ModelIntegrityOptions = Readonly<{
 
 export type ModelDownloadEnvironment = Readonly<{
   fetchImpl?: typeof fetch
-  getAccessKey?: () => Promise<string>
+  getAccessKey?: (signal?: AbortSignal) => Promise<string>
 }>
+
+type DownloadDeadline = Readonly<{
+  signal: AbortSignal
+  run<T>(operation: () => T | PromiseLike<T>): Promise<T>
+  runPromise<T>(promise: PromiseLike<T>): Promise<T>
+  throwIfExpired(): void
+  dispose(): void
+}>
+
+function createDownloadDeadline(callerSignal?: AbortSignal): DownloadDeadline {
+  const controller = new AbortController()
+  let reason: 'caller' | 'timeout' | null = null
+  const error = (): Error => (reason === 'timeout' ? new Error('模型下载超时') : new Error('模型下载已取消'))
+  const abortFromCaller = (): void => {
+    if (reason !== null) {
+      return
+    }
+    reason = 'caller'
+    controller.abort(error())
+  }
+  callerSignal?.addEventListener('abort', abortFromCaller, { once: true })
+  const timeoutId = setTimeout(() => {
+    if (reason !== null) {
+      return
+    }
+    reason = 'timeout'
+    controller.abort(error())
+  }, inferenceTimeoutConfig.modelDownloadTimeoutMs)
+  if (callerSignal?.aborted) {
+    abortFromCaller()
+  }
+
+  const throwIfExpired = (): void => {
+    if (controller.signal.aborted) {
+      throw error()
+    }
+  }
+
+  const runPromise = <T>(promise: PromiseLike<T>): Promise<T> => {
+    if (controller.signal.aborted) {
+      void Promise.resolve(promise).catch(() => undefined)
+      return Promise.reject(error())
+    }
+    return new Promise<T>((resolve, reject) => {
+      let settled = false
+      const cleanup = (): void => controller.signal.removeEventListener('abort', onAbort)
+      const finish = (callback: () => void): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        cleanup()
+        callback()
+      }
+      const onAbort = (): void => finish(() => reject(error()))
+      controller.signal.addEventListener('abort', onAbort, { once: true })
+      Promise.resolve(promise).then(
+        (value) => finish(() => resolve(value)),
+        (operationError: unknown) => finish(() => reject(operationError)),
+      )
+      if (controller.signal.aborted) {
+        onAbort()
+      }
+    })
+  }
+
+  return {
+    signal: controller.signal,
+    run<T>(operation: () => T | PromiseLike<T>): Promise<T> {
+      throwIfExpired()
+      try {
+        return runPromise(Promise.resolve(operation()))
+      } catch (operationError) {
+        return Promise.reject(operationError)
+      }
+    },
+    runPromise,
+    throwIfExpired,
+    dispose(): void {
+      clearTimeout(timeoutId)
+      callerSignal?.removeEventListener('abort', abortFromCaller)
+    },
+  }
+}
 
 function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): {
   integrity: ModelIntegrity
@@ -35,18 +119,14 @@ function getModelUrl(): string {
 
 async function getRequestAccessKey(
   accessKeyOverride: string | undefined,
-  getAccessKey: (() => Promise<string>) | undefined,
+  getAccessKey: ((signal?: AbortSignal) => Promise<string>) | undefined,
+  signal: AbortSignal,
 ): Promise<string> {
   const candidateAccessKey = accessKeyOverride?.trim()
   if (candidateAccessKey) {
     return candidateAccessKey
   }
-  let storedAccessKey: string
-  try {
-    storedAccessKey = getAccessKey ? await getAccessKey() : ''
-  } catch {
-    storedAccessKey = ''
-  }
+  const storedAccessKey = getAccessKey ? await getAccessKey(signal) : ''
   return storedAccessKey.trim() || modelConfig.accessKey.trim()
 }
 
@@ -68,11 +148,14 @@ function parseRetryAfterSeconds(value: string | null): number | null {
   return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : null
 }
 
-async function cancelResponseBody(response: Response): Promise<void> {
+async function cancelResponseBody(response: Response, deadline: DownloadDeadline): Promise<void> {
   try {
-    await response.body?.cancel()
+    const cancellation = response.body?.cancel()
+    if (cancellation) {
+      await deadline.runPromise(cancellation)
+    }
   } catch {
-    // The quota error remains authoritative even if the short error body cannot be cancelled.
+    // The primary HTTP/read error remains authoritative if cleanup fails or times out.
   }
 }
 
@@ -109,25 +192,26 @@ async function readModelResponse(
   response: Response,
   expectedByteLength: number | null,
   maxByteLength: number,
+  deadline: DownloadDeadline,
 ): Promise<ArrayBuffer> {
   const contentLength = response.headers.get('content-length')
   let declaredByteLength: number | null
   try {
     declaredByteLength = parseDeclaredByteLength(contentLength)
   } catch (error) {
-    await cancelResponseBody(response)
+    await cancelResponseBody(response, deadline)
     throw error
   }
   if (expectedByteLength !== null && declaredByteLength !== null && declaredByteLength > expectedByteLength) {
-    await cancelResponseBody(response)
+    await cancelResponseBody(response, deadline)
     throw new Error(`下载模型大小校验失败: ${contentLength} != ${expectedByteLength}`)
   }
   if (declaredByteLength !== null && declaredByteLength > maxByteLength) {
-    await cancelResponseBody(response)
+    await cancelResponseBody(response, deadline)
     throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxByteLength}`)
   }
   if (!response.body) {
-    const buffer = await response.arrayBuffer()
+    const buffer = await deadline.run(() => response.arrayBuffer())
     assertDeclaredByteLength(buffer.byteLength, declaredByteLength)
     assertModelByteLength(buffer, expectedByteLength, maxByteLength)
     return buffer
@@ -139,7 +223,7 @@ async function readModelResponse(
   let totalBytes = 0
   try {
     while (true) {
-      const { done, value } = await reader.read()
+      const { done, value } = await deadline.run(() => reader.read())
       if (done) {
         break
       }
@@ -175,9 +259,9 @@ async function readModelResponse(
     return mergedBytes.buffer
   } catch (error) {
     try {
-      await reader.cancel()
+      await deadline.runPromise(reader.cancel())
     } catch {
-      // Preserve the read/validation error.
+      // Preserve the read/validation/deadline error.
     }
     throw error
   } finally {
@@ -195,21 +279,18 @@ export async function downloadModel(
   environment: ModelDownloadEnvironment = {},
 ): Promise<ArrayBuffer> {
   const { integrity, verifyIntegrity } = resolveIntegrityOptions(options)
-  if (signal?.aborted) {
-    throw new Error('模型下载已取消')
-  }
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), inferenceTimeoutConfig.modelDownloadTimeoutMs)
-  const abort = (): void => controller.abort()
-  signal?.addEventListener('abort', abort, { once: true })
+  const deadline = createDownloadDeadline(signal)
   try {
-    const accessKey = await getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey)
-    const response = await (environment.fetchImpl ?? fetch)(
-      getModelUrl(),
-      createModelFetchInit(controller.signal, accessKey),
+    deadline.throwIfExpired()
+    const accessKey = await deadline.run(() =>
+      getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
+    )
+    const response = await deadline.run(() =>
+      (environment.fetchImpl ?? fetch)(getModelUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
     if (!response.ok) {
-      await cancelResponseBody(response)
+      await cancelResponseBody(response, deadline)
+      deadline.throwIfExpired()
       if (response.status === 429) {
         throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
       }
@@ -219,13 +300,14 @@ export async function downloadModel(
       response,
       verifyIntegrity ? integrity.byteLength : null,
       integrity.byteLength,
+      deadline,
     )
     if (verifyIntegrity) {
-      await verifyModelIntegrity(buffer, integrity, '下载模型')
+      await deadline.run(() => verifyModelIntegrity(buffer, integrity, '下载模型'))
     }
+    deadline.throwIfExpired()
     return buffer
   } finally {
-    clearTimeout(timeoutId)
-    signal?.removeEventListener('abort', abort)
+    deadline.dispose()
   }
 }

@@ -22,6 +22,7 @@ function dependencies(): InferenceHostDependencies {
   return {
     detector,
     verifyKey: vi.fn(async () => undefined),
+    clearKey: vi.fn(async () => undefined),
     close: vi.fn(),
   }
 }
@@ -106,6 +107,118 @@ describe('InferenceHost', () => {
         candidateKey: 'd'.repeat(64),
       }),
     ).resolves.toMatchObject({ ok: false, error: expect.stringContaining('不支持模型 Key') })
+  })
+
+  it('lets a clear intent from another options page supersede a late verification without side effects', async () => {
+    const deps = dependencies()
+    let resolveDownload: (() => void) | undefined
+    const sideEffects: string[] = []
+    vi.mocked(deps.verifyKey!).mockImplementationOnce(async (_candidateKey, signal) => {
+      await new Promise<void>((resolve) => {
+        resolveDownload = resolve
+      })
+      if (signal.aborted) {
+        throw new Error('模型 Key 验证已取消')
+      }
+      sideEffects.push('cache', 'session', 'key')
+    })
+    vi.mocked(deps.clearKey!).mockImplementationOnce(async () => {
+      sideEffects.push('clear')
+    })
+    const host = new InferenceHost(deps)
+    const staleVerification = host.handle({
+      protocol: PROTOCOL_VERSION,
+      type: 'verify-key',
+      requestId: 'verify-stale',
+      candidateKey: 'e'.repeat(64),
+    })
+    await vi.waitFor(() => expect(resolveDownload).toBeTypeOf('function'))
+
+    const clear = host.handle({
+      protocol: PROTOCOL_VERSION,
+      type: 'clear-key',
+      requestId: 'clear-newest',
+    })
+    resolveDownload?.()
+
+    await expect(staleVerification).resolves.toMatchObject({ ok: false })
+    await expect(clear).resolves.toMatchObject({ ok: true, requestId: 'clear-newest' })
+    expect(sideEffects).toEqual(['clear'])
+  })
+
+  it('serializes replacement intents and commits only the newest late verification', async () => {
+    const deps = dependencies()
+    let resolveFirstDownload: (() => void) | undefined
+    const committedKeys: string[] = []
+    vi.mocked(deps.verifyKey!).mockImplementation(async (candidateKey, signal) => {
+      if (candidateKey.startsWith('a')) {
+        await new Promise<void>((resolve) => {
+          resolveFirstDownload = resolve
+        })
+      }
+      if (signal.aborted) {
+        throw new Error('模型 Key 验证已取消')
+      }
+      committedKeys.push(candidateKey)
+    })
+    const host = new InferenceHost(deps)
+    const first = host.handle({
+      protocol: PROTOCOL_VERSION,
+      type: 'verify-key',
+      requestId: 'verify-first-page',
+      candidateKey: 'a'.repeat(64),
+    })
+    await vi.waitFor(() => expect(resolveFirstDownload).toBeTypeOf('function'))
+    const second = host.handle({
+      protocol: PROTOCOL_VERSION,
+      type: 'verify-key',
+      requestId: 'verify-second-page',
+      candidateKey: 'b'.repeat(64),
+    })
+
+    resolveFirstDownload?.()
+
+    await expect(first).resolves.toMatchObject({ ok: false })
+    await expect(second).resolves.toMatchObject({ ok: true, requestId: 'verify-second-page' })
+    expect(committedKeys).toEqual(['b'.repeat(64)])
+  })
+
+  it('fails closed when the host has no Key clearer', async () => {
+    const deps = dependencies()
+    const host = new InferenceHost({ detector: deps.detector, verifyKey: deps.verifyKey! })
+
+    await expect(
+      host.handle({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-unsupported' }),
+    ).resolves.toMatchObject({ ok: false, error: expect.stringContaining('不支持清除模型 Key') })
+  })
+
+  it('aborts an active Key intent when its caller disconnects', async () => {
+    const deps = dependencies()
+    let receivedSignal: AbortSignal | undefined
+    vi.mocked(deps.verifyKey!).mockImplementationOnce(
+      async (_candidateKey, signal) =>
+        new Promise<void>((_resolve, reject) => {
+          receivedSignal = signal
+          signal.addEventListener('abort', () => reject(new Error('模型 Key 验证已取消')), { once: true })
+        }),
+    )
+    const host = new InferenceHost(deps)
+    const controller = new AbortController()
+    const response = host.handle(
+      {
+        protocol: PROTOCOL_VERSION,
+        type: 'verify-key',
+        requestId: 'verify-disconnect',
+        candidateKey: 'f'.repeat(64),
+      },
+      controller.signal,
+    )
+    await vi.waitFor(() => expect(receivedSignal).toBeInstanceOf(AbortSignal))
+
+    controller.abort()
+
+    expect(receivedSignal?.aborted).toBe(true)
+    await expect(response).resolves.toMatchObject({ ok: false, requestId: 'verify-disconnect' })
   })
 
   it('destroys the detector and closes extra dependencies', () => {

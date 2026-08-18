@@ -39,6 +39,7 @@ export function rawExtensionApi(): RawExtensionApi {
     },
     offscreen: {
       createDocument: vi.fn(async () => undefined),
+      closeDocument: vi.fn(async () => undefined),
     },
     action: {
       onClicked: extensionEvent(),

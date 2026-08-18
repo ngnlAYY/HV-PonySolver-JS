@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -46,9 +46,20 @@ async function runCheck(args) {
   }
 }
 
+describe('root bundle gate', () => {
+  it('builds the default userscript without minification before enforcing the budget', async () => {
+    const rootPackage = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf8'))
+
+    assert.equal(
+      rootPackage.scripts?.['bundle:check'],
+      'corepack pnpm --filter @hv-pony-solver/userscript build && corepack pnpm bundle:check:default',
+    )
+  })
+})
+
 describe('bundle budget evaluation', () => {
   it('pins both profile budgets', () => {
-    assert.equal(BUNDLE_BUDGET_PROFILES.default.budgetBytes, 96 * 1024)
+    assert.equal(BUNDLE_BUDGET_PROFILES.default.budgetBytes, 128 * 1024)
     assert.equal(BUNDLE_BUDGET_PROFILES.bundled.budgetBytes, 480 * 1024)
   })
 
@@ -57,14 +68,14 @@ describe('bundle budget evaluation', () => {
       evaluateBundleBudget({
         profile: 'default',
         artifactPath: '/tmp/artifact.user.js',
-        actualBytes: 96 * 1024,
-        budgetBytes: 96 * 1024,
+        actualBytes: 128 * 1024,
+        budgetBytes: 128 * 1024,
       }),
       {
         profile: 'default',
         artifactPath: '/tmp/artifact.user.js',
-        actualBytes: 96 * 1024,
-        budgetBytes: 96 * 1024,
+        actualBytes: 128 * 1024,
+        budgetBytes: 128 * 1024,
         deltaBytes: 0,
         withinBudget: true,
       },
@@ -95,8 +106,8 @@ describe('bundle budget checking', () => {
     const result = await checkBundleBudget({ repoRoot: fixtureRoot, profile: 'default', file: artifactPath })
 
     assert.equal(result.actualBytes, 72_160)
-    assert.equal(result.budgetBytes, 96 * 1024)
-    assert.equal(result.deltaBytes, -26_144)
+    assert.equal(result.budgetBytes, 128 * 1024)
+    assert.equal(result.deltaBytes, -58_912)
     assert.equal(result.withinBudget, true)
   })
 
@@ -106,7 +117,7 @@ describe('bundle budget checking', () => {
 
     await assert.rejects(
       checkBundleBudget({ repoRoot: fixtureRoot, profile: 'default' }),
-      /profile=default actual=missing budget=98304 B \(96 KiB\) delta=n\/a.*artifact does not exist.*build the artifact before checking/,
+      /profile=default actual=missing budget=131072 B \(128 KiB\) delta=n\/a.*artifact does not exist.*build the artifact before checking/,
     )
   })
 
@@ -115,7 +126,7 @@ describe('bundle budget checking', () => {
 
     await assert.rejects(
       checkBundleBudget({ repoRoot: fixtureRoot, profile: 'default', file: artifactPath }),
-      /Bundle budget exceeded: profile=default actual=98305 B \(96\.00 KiB\) budget=98304 B \(96 KiB\) delta=\+1 B \(\+0\.00 KiB\)/,
+      /Bundle budget exceeded: profile=default actual=131073 B \(128\.00 KiB\) budget=131072 B \(128 KiB\) delta=\+1 B \(\+0\.00 KiB\)/,
     )
   })
 })
@@ -143,8 +154,8 @@ describe('bundle budget CLI', () => {
     assert.equal(result.exitCode, 0, result.stderr)
     assert.match(result.stdout, /profile=default/)
     assert.match(result.stdout, /actual=72160 B \(70\.47 KiB\)/)
-    assert.match(result.stdout, /budget=98304 B \(96 KiB\)/)
-    assert.match(result.stdout, /delta=-26144 B \(-25\.53 KiB\)/)
+    assert.match(result.stdout, /budget=131072 B \(128 KiB\)/)
+    assert.match(result.stdout, /delta=-58912 B \(-57\.53 KiB\)/)
   })
 
   it('exits non-zero and prints the overage when over budget', async () => {

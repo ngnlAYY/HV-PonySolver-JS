@@ -23,7 +23,10 @@ describe('webextension offscreen and action adapters', () => {
       justification: 'test',
     })
 
+    await offscreen.closeDocument()
+
     expect(api.offscreen?.createDocument).toHaveBeenCalledTimes(1)
+    expect(api.offscreen?.closeDocument).toHaveBeenCalledTimes(1)
   })
 
   it('registers and removes the Chromium options action callback', () => {

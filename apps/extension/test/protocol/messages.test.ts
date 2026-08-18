@@ -7,6 +7,8 @@ import {
   encodeImage,
   isHostRequest,
   isHostResponse,
+  isOffscreenCancelRequest,
+  isOffscreenRequest,
 } from '../../src/protocol/messages'
 
 describe('extension protocol', () => {
@@ -68,6 +70,40 @@ describe('extension protocol', () => {
         type: 'prepare',
         requestId: 'request-5',
         arbitraryUrl: 'https://evil.invalid/',
+      }),
+    ).toBe(false)
+  })
+
+  it('validates exact clear-key and offscreen request/cancel operation schemas', () => {
+    const clearRequest = {
+      protocol: PROTOCOL_VERSION,
+      type: 'clear-key',
+      requestId: 'clear-1',
+    } as const
+    expect(isHostRequest(clearRequest)).toBe(true)
+    expect(isHostRequest({ ...clearRequest, candidateKey: 'a'.repeat(64) })).toBe(false)
+
+    expect(
+      isOffscreenRequest({
+        type: 'hv-pony-solver:offscreen-request',
+        operation: 'request',
+        requestId: 'offscreen-1',
+        request: clearRequest,
+      }),
+    ).toBe(true)
+    expect(
+      isOffscreenCancelRequest({
+        type: 'hv-pony-solver:offscreen-request',
+        operation: 'cancel',
+        requestId: 'offscreen-1',
+      }),
+    ).toBe(true)
+    expect(
+      isOffscreenCancelRequest({
+        type: 'hv-pony-solver:offscreen-request',
+        operation: 'cancel',
+        requestId: 'offscreen-1',
+        request: clearRequest,
       }),
     ).toBe(false)
   })

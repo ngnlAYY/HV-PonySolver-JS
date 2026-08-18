@@ -4,11 +4,13 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:
 import os from 'node:os'
 import path from 'node:path'
 import { TextDecoder } from 'node:util'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import { unzipSync } from 'fflate'
 
 import {
+  assertSafeBuildOutputRoot,
   auditBuiltExtension,
   buildExtensions,
   buildPackagedFixtureExtensions,
@@ -17,7 +19,14 @@ import {
   verifyPackagedModelFile,
 } from './build-extension.mjs'
 
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
+const extensionRoot = path.resolve(scriptDirectory, '..')
+const repositoryRoot = path.resolve(extensionRoot, '../..')
 const modelFilename = 'yolo26n-640.ort'
+const contentHosts = ['https://hentaiverse.org/*', 'https://alt.hentaiverse.org/*']
+const remoteCsp =
+  "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self' https://models.ngnl.host"
+const packagedCsp = "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'"
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -32,7 +41,9 @@ function assertArchiveIntegrity({ archive, archiveBytes, archiveName, artifact, 
   assert.equal(artifact.archive.byteLength, archiveBytes.byteLength)
   assert.equal(artifact.archive.sha256, checksumMatch[1])
 
-  const archiveFiles = Object.keys(archive).filter((name) => name !== 'build-manifest.json').sort()
+  const archiveFiles = Object.keys(archive)
+    .filter((name) => name !== 'build-manifest.json')
+    .sort()
   assert.deepEqual(Object.keys(buildManifest.files).sort(), archiveFiles)
   assert.deepEqual(artifact.files, buildManifest.files)
   assert.equal('build-manifest.json' in buildManifest.files, false)
@@ -53,18 +64,26 @@ test('creates the exact remote and packaged manifest matrix without a WAR', () =
   assert.equal(remoteChromium.minimum_chrome_version, '116')
   assert.equal(remoteChromium.background.service_worker, 'background.js')
   assert.deepEqual(remoteChromium.permissions, ['storage', 'offscreen'])
-  assert.ok(remoteChromium.host_permissions.includes('https://models.ngnl.host/*'))
+  assert.deepEqual(remoteChromium.host_permissions, [...contentHosts, 'https://models.ngnl.host/*'])
+  assert.equal(remoteChromium.content_security_policy.extension_pages, remoteCsp)
   assert.deepEqual(remoteFirefox.background.scripts, ['background.js'])
+  assert.deepEqual(remoteFirefox.permissions, ['storage'])
+  assert.deepEqual(remoteFirefox.host_permissions, [...contentHosts, 'https://models.ngnl.host/*'])
+  assert.equal(remoteFirefox.content_security_policy.extension_pages, remoteCsp)
   assert.equal(remoteFirefox.browser_specific_settings.gecko.strict_min_version, '140.0')
   assert.equal(remoteFirefox.browser_specific_settings.gecko_android.strict_min_version, '142.0')
-  assert.deepEqual(remoteFirefox.browser_specific_settings.gecko.data_collection_permissions.required, ['authenticationInfo'])
+  assert.deepEqual(remoteFirefox.browser_specific_settings.gecko.data_collection_permissions.required, [
+    'authenticationInfo',
+  ])
   assert.equal('service_worker' in remoteFirefox.background, false)
   assert.equal('persistent' in remoteFirefox.background, false)
 
   assert.deepEqual(packagedChromium.permissions, ['storage', 'offscreen'])
-  assert.equal(packagedChromium.host_permissions.includes('https://models.ngnl.host/*'), false)
+  assert.deepEqual(packagedChromium.host_permissions, contentHosts)
+  assert.equal(packagedChromium.content_security_policy.extension_pages, packagedCsp)
   assert.deepEqual(packagedFirefox.permissions, ['storage'])
-  assert.equal(packagedFirefox.host_permissions.includes('https://models.ngnl.host/*'), false)
+  assert.deepEqual(packagedFirefox.host_permissions, contentHosts)
+  assert.equal(packagedFirefox.content_security_policy.extension_pages, packagedCsp)
   assert.deepEqual(packagedFirefox.browser_specific_settings.gecko.data_collection_permissions.required, ['none'])
   assert.equal('persistent' in packagedFirefox.background, false)
   for (const manifest of [remoteChromium, remoteFirefox, packagedChromium, packagedFirefox]) {
@@ -87,10 +106,58 @@ test('parses only one exact model-delivery selector in either CLI form', () => {
   assert.throws(() => parseBuildArguments(['--model-mode=other']), /Unsupported extension model delivery mode/u)
   assert.throws(() => parseBuildArguments(['--unknown']), /Unknown extension build argument/u)
   assert.throws(() => parseBuildArguments(['packaged']), /Unknown extension build argument/u)
-  assert.throws(
-    () => parseBuildArguments(['--model-mode=remote', '--model-mode', 'packaged']),
-    /only once/u,
-  )
+  assert.throws(() => parseBuildArguments(['--model-mode=remote', '--model-mode', 'packaged']), /only once/u)
+})
+
+test('guards recursive build cleanup with canonical allowed roots', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-output-guard-'))
+  try {
+    const safeOutput = path.join(temporaryRoot, 'nested-output')
+    assert.equal(await assertSafeBuildOutputRoot(safeOutput), safeOutput)
+
+    for (const dangerousPath of [
+      process.cwd(),
+      repositoryRoot,
+      os.homedir(),
+      path.parse(repositoryRoot).root,
+      os.tmpdir(),
+      path.join(extensionRoot, 'src', 'generated-output'),
+    ]) {
+      await assert.rejects(
+        assertSafeBuildOutputRoot(dangerousPath),
+        /Refusing to recursively remove|outside allowed build roots/u,
+      )
+    }
+
+    const escapingParent = path.join(temporaryRoot, 'source-link')
+    await symlink(repositoryRoot, escapingParent, 'dir')
+    await assert.rejects(assertSafeBuildOutputRoot(path.join(escapingParent, 'escaped-output')), /source tree path/u)
+
+    const externalParent = path.join(temporaryRoot, 'external-link')
+    await symlink(os.homedir(), externalParent, 'dir')
+    await assert.rejects(assertSafeBuildOutputRoot(path.join(externalParent, 'escaped-output')), /outside allowed/u)
+
+    const outputLink = path.join(temporaryRoot, 'output-link')
+    await symlink(safeOutput, outputLink, 'dir')
+    await assert.rejects(assertSafeBuildOutputRoot(outputLink), /must not be a symbolic link/u)
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
+})
+
+test('coverage gate includes every security-critical Node script without exclusions', async () => {
+  const packageJson = JSON.parse(await readFile(path.join(extensionRoot, 'package.json'), 'utf8'))
+  const coverageCommand = packageJson.scripts['test:coverage']
+  for (const script of [
+    'scripts/browser-support.mjs',
+    'scripts/build-extension.mjs',
+    'scripts/download-canonical-model.mjs',
+    'scripts/install-geckodriver.mjs',
+    'scripts/release-gate.mjs',
+  ]) {
+    assert.match(coverageCommand, new RegExp(`--test-coverage-include=${script.replaceAll('.', '\\.')}(?:\\s|$)`, 'u'))
+  }
+  assert.doesNotMatch(coverageCommand, /--test-coverage-exclude/u)
 })
 
 test('validates packaged model file type, length, and SHA-256', async () => {
@@ -138,7 +205,10 @@ test('keeps default and explicit remote builds deterministic and model-free', as
     await buildExtensions({ outputRoot: comparisonRoot, modelDelivery: 'remote' })
 
     const rootFiles = await readdir(temporaryRoot)
-    assert.equal(rootFiles.some((name) => name.includes('-packaged-')), false)
+    assert.equal(
+      rootFiles.some((name) => name.includes('-packaged-')),
+      false,
+    )
     for (const target of ['chromium', 'firefox']) {
       await auditBuiltExtension(path.join(temporaryRoot, target), target)
       const archiveName = `hv-pony-solver-${target}-0.1.0.zip`
@@ -148,7 +218,10 @@ test('keeps default and explicit remote builds deterministic and model-free', as
       assert.ok(archive['manifest.json'])
       assert.ok(archive['inference-worker.js'])
       assert.ok(Object.keys(archive).some((name) => name.startsWith('runtime/') && name.endsWith('.wasm')))
-      assert.equal(Object.keys(archive).some((name) => name.endsWith('.ort')), false)
+      assert.equal(
+        Object.keys(archive).some((name) => name.endsWith('.ort')),
+        false,
+      )
       assert.equal('offscreen.html' in archive, target === 'chromium')
       assert.equal('offscreen.js' in archive, target === 'chromium')
 
@@ -174,12 +247,17 @@ test('keeps default and explicit remote builds deterministic and model-free', as
   }
 })
 
-test('builds deterministic private packaged-model fixtures with distinct names and graphs', async () => {
+test('builds deterministic packaged-model fixtures with distinct names and graphs', async () => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-packaged-'))
   const comparisonRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-packaged-repeat-'))
   const bytes = Uint8Array.from([1, 2, 3, 4])
   const fixtureModelFilename = 'fixture-model.ort'
-  const model = { filename: fixtureModelFilename, byteLength: bytes.byteLength, sha256: sha256(bytes) }
+  const model = {
+    filename: fixtureModelFilename,
+    byteLength: bytes.byteLength,
+    sha256: sha256(bytes),
+    expected: { classId: 0, confidence: 0.95 },
+  }
   try {
     await buildPackagedFixtureExtensions({ outputRoot: temporaryRoot, modelBytes: bytes, model })
     await buildPackagedFixtureExtensions({ outputRoot: comparisonRoot, modelBytes: bytes, model })
@@ -227,7 +305,10 @@ test('builds deterministic private packaged-model fixtures with distinct names a
         sha256: model.sha256,
       })
       const artifact = JSON.parse(
-        await readFile(path.join(temporaryRoot, `hv-pony-solver-${target}-packaged-fixture-0.1.0.artifact.json`), 'utf8'),
+        await readFile(
+          path.join(temporaryRoot, `hv-pony-solver-${target}-packaged-fixture-0.1.0.artifact.json`),
+          'utf8',
+        ),
       )
       assert.equal(artifact.modelDelivery, 'packaged')
       assert.equal(artifact.fixture, true)
@@ -243,11 +324,12 @@ test('builds deterministic private packaged-model fixtures with distinct names a
 
 test('rejects invalid fixture input and targets before replacing existing output', async () => {
   for (const runInvalidBuild of [
-    (outputRoot) => buildPackagedFixtureExtensions({
-      outputRoot,
-      modelBytes: Uint8Array.from([1, 2, 3]),
-      model: { filename: modelFilename, byteLength: 3, sha256: '0'.repeat(64) },
-    }),
+    (outputRoot) =>
+      buildPackagedFixtureExtensions({
+        outputRoot,
+        modelBytes: Uint8Array.from([1, 2, 3]),
+        model: { filename: modelFilename, byteLength: 3, sha256: '0'.repeat(64) },
+      }),
     (outputRoot) => buildExtensions({ outputRoot, targets: ['fireofx'] }),
     (outputRoot) => buildExtensions({ outputRoot, targets: ['chromium', 'chromium'] }),
     (outputRoot) => buildExtensions({ outputRoot, targets: [] }),

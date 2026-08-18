@@ -148,12 +148,10 @@ describe('App', () => {
       resolveFirst = () => resolve({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
     })
     const harness = createHarness()
-    harness.trigger
-      .mockReturnValueOnce(firstResult)
-      .mockImplementation(async (target?: CaptchaTarget) => ({
-        handled: true,
-        captchaKey: target?.captchaKey ?? null,
-      }))
+    harness.trigger.mockReturnValueOnce(firstResult).mockImplementation(async (target?: CaptchaTarget) => ({
+      handled: true,
+      captchaKey: target?.captchaKey ?? null,
+    }))
     apps.push(harness.app)
     harness.app.init()
     const first = appendCaptcha('/captcha.png')
@@ -190,9 +188,11 @@ describe('App', () => {
     let resolvePrepare: (() => void) | undefined
     const harness = createHarness()
     vi.mocked(harness.detector.prepare)
-      .mockReturnValueOnce(new Promise<void>((resolve) => {
-        resolvePrepare = resolve
-      }))
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolvePrepare = resolve
+        }),
+      )
       .mockResolvedValue(undefined)
     apps.push(harness.app)
     harness.app.init()
@@ -231,12 +231,49 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(1)
   })
 
+  it('retries transient prepare failures with backoff without requiring a DOM mutation', async () => {
+    appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare)
+      .mockRejectedValueOnce(new Error('first prepare failure'))
+      .mockRejectedValueOnce(new Error('second prepare failure'))
+      .mockResolvedValue(undefined)
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+  })
+
+  it('caps prepare retries for one target and does not restart them after unrelated mutations', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare).mockRejectedValue(new Error('persistent prepare failure'))
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
+    expect(harness.trigger).not.toHaveBeenCalled()
+
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
+    expect(harness.trigger).not.toHaveBeenCalled()
+  })
+
   it('aborts and suppresses late work during destroy, then can initialize a fresh lifecycle', async () => {
     let resolvePrepare: (() => void) | undefined
     const harness = createHarness()
-    vi.mocked(harness.detector.prepare).mockReturnValueOnce(new Promise<void>((resolve) => {
-      resolvePrepare = resolve
-    }))
+    vi.mocked(harness.detector.prepare).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolvePrepare = resolve
+      }),
+    )
     const captcha = appendCaptcha('/captcha.png')
     harness.app.init()
     await settleDom()

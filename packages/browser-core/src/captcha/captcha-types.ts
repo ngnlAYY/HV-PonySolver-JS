@@ -1,3 +1,3 @@
 export interface ImageLoader {
-  get(url: string): Promise<Blob>
+  get(url: string, signal?: AbortSignal): Promise<Blob>
 }

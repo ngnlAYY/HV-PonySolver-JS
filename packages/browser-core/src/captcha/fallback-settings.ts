@@ -3,10 +3,13 @@ import type { SettingsStorage } from '../platform/storage'
 export const RANDOM_ON_FAIL_STORAGE_KEY = 'hvPonySolverRandomOnFail'
 export const DEFAULT_RANDOM_ON_FAIL = true
 
+export function parseRandomOnFail(value: unknown): boolean {
+  return value === '1' ? true : value === '0' ? false : DEFAULT_RANDOM_ON_FAIL
+}
+
 export function getRandomOnFailSync(storage: SettingsStorage): boolean {
   try {
-    const saved = storage.getSync(RANDOM_ON_FAIL_STORAGE_KEY)
-    return saved === '1' ? true : saved === '0' ? false : DEFAULT_RANDOM_ON_FAIL
+    return parseRandomOnFail(storage.getSync(RANDOM_ON_FAIL_STORAGE_KEY))
   } catch {
     return DEFAULT_RANDOM_ON_FAIL
   }
@@ -14,8 +17,7 @@ export function getRandomOnFailSync(storage: SettingsStorage): boolean {
 
 export async function getRandomOnFail(storage: SettingsStorage): Promise<boolean> {
   try {
-    const saved = await storage.get(RANDOM_ON_FAIL_STORAGE_KEY)
-    return saved === '1' ? true : saved === '0' ? false : DEFAULT_RANDOM_ON_FAIL
+    return parseRandomOnFail(await storage.get(RANDOM_ON_FAIL_STORAGE_KEY))
   } catch {
     return DEFAULT_RANDOM_ON_FAIL
   }

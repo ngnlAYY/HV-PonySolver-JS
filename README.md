@@ -59,7 +59,7 @@ Hentaiverse 内容脚本
                                                                 v
                                                扩展推理 Host
                                                |-- remote: Key + 下载/缓存模型
-                                               |-- packaged: 私有包内 .ort
+                                               |-- packaged: 包内 .ort（完整性校验、非机密）
                                                |
                                                v
                                                module Worker
@@ -74,48 +74,48 @@ Cloudflare Model Worker
 
 本文使用以下名称区分两类 Worker：
 
-| 名称 | 含义 |
-| --- | --- |
-| ONNX 推理 Worker | 用户脚本或扩展推理 Host 创建的浏览器 Web Worker |
-| 扩展推理 Host | Chromium Offscreen Document 或 Firefox background script；远程模式负责 Key/下载/缓存，内置模式只读取包内模型，两者都管理推理会话 |
-| Model Worker | `apps/model-worker` 中部署到 Cloudflare 的服务 |
+| 名称             | 含义                                                                                                                             |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| ONNX 推理 Worker | 用户脚本或扩展推理 Host 创建的浏览器 Web Worker                                                                                  |
+| 扩展推理 Host    | Chromium Offscreen Document 或 Firefox background script；远程模式负责 Key/下载/缓存，内置模式只读取包内模型，两者都管理推理会话 |
+| Model Worker     | `apps/model-worker` 中部署到 Cloudflare 的服务                                                                                   |
 
 ## 仓库结构
 
-| 路径 | 作用 |
-| --- | --- |
-| `apps/userscript` | 用户脚本、ONNX 推理 Worker、构建器和浏览器测试 |
-| `apps/extension` | Chromium/Firefox 扩展入口、消息协议、设置页、构建器和浏览器测试 |
-| `apps/model-worker` | Cloudflare Model Worker、Wrangler 配置和部署契约检查 |
-| `packages/browser-core` | 用户脚本与扩展共用的标准浏览器 DOM、答题、推理、模型和渲染逻辑 |
-| `packages/shared` | 用户脚本和 Model Worker 共用的模型、令牌及 ORT 资产契约 |
-| `config/onnxruntime` | 精简 ONNX Runtime 所需的算子与类型配置 |
-| `docs` | 运行时、运维和架构补充文档 |
-| `other` | 可供人工上传或归档的精简运行时生成物 |
-| `scripts` | 仓库级构建、校验、文档漂移和发布辅助脚本 |
-| `.github/workflows` | 验证、安全扫描和 Model Worker 部署工作流 |
+| 路径                    | 作用                                                            |
+| ----------------------- | --------------------------------------------------------------- |
+| `apps/userscript`       | 用户脚本、ONNX 推理 Worker、构建器和浏览器测试                  |
+| `apps/extension`        | Chromium/Firefox 扩展入口、消息协议、设置页、构建器和浏览器测试 |
+| `apps/model-worker`     | Cloudflare Model Worker、Wrangler 配置和部署契约检查            |
+| `packages/browser-core` | 用户脚本与扩展共用的标准浏览器 DOM、答题、推理、模型和渲染逻辑  |
+| `packages/shared`       | 用户脚本和 Model Worker 共用的模型、令牌及 ORT 资产契约         |
+| `config/onnxruntime`    | 精简 ONNX Runtime 所需的算子与类型配置                          |
+| `docs`                  | 运行时、运维和架构补充文档                                      |
+| `other`                 | 可供人工上传或归档的精简运行时生成物                            |
+| `scripts`               | 仓库级构建、校验、文档漂移和发布辅助脚本                        |
+| `.github/workflows`     | 验证、安全扫描和 Model Worker 部署工作流                        |
 
 ## 模型格式与兼容关系
 
 新版和旧版客户端由请求路径区分，不在用户脚本中做格式探测或兼容回退。
 
-| 客户端 | 请求路径 | 模型格式 | 状态 |
-| --- | --- | --- | --- |
-| 新版用户脚本 | `/yolo26n-640.ort` | ORT | 当前默认 |
-| 浏览器扩展（默认远程模型） | `/yolo26n-640.ort` | ORT | Key 鉴权下载，本地打包运行时 |
-| 浏览器扩展（显式内置模型） | `model/yolo26n-640.ort` | ORT | 无需 Key，模型与运行时均在扩展包内 |
-| 旧版用户脚本 | `/yolo26n-640.onnx` | ONNX | 继续保留 |
+| 客户端                     | 请求路径                | 模型格式 | 状态                               |
+| -------------------------- | ----------------------- | -------- | ---------------------------------- |
+| 新版用户脚本               | `/yolo26n-640.ort`      | ORT      | 当前默认                           |
+| 浏览器扩展（默认远程模型） | `/yolo26n-640.ort`      | ORT      | Key 鉴权下载，本地打包运行时       |
+| 浏览器扩展（显式内置模型） | `model/yolo26n-640.ort` | ORT      | 无需 Key，模型与运行时均在扩展包内 |
+| 旧版用户脚本               | `/yolo26n-640.onnx`     | ONNX     | 继续保留                           |
 
 新版模型契约：
 
-| 字段 | 值 |
-| --- | --- |
-| 文件名 | `yolo26n-640.ort` |
-| 公开 URL | `https://models.ngnl.host/yolo26n-640.ort` |
-| R2 对象键 | `real/yolo26n-640.ort` |
-| 字节长度 | `9,914,448` |
-| 版本 | `yolo26n-640-2026-05-14` |
-| 完整性来源 | `packages/shared/src/ort-assets.ts` |
+| 字段       | 值                                         |
+| ---------- | ------------------------------------------ |
+| 文件名     | `yolo26n-640.ort`                          |
+| 公开 URL   | `https://models.ngnl.host/yolo26n-640.ort` |
+| R2 对象键  | `real/yolo26n-640.ort`                     |
+| 字节长度   | `9,914,448`                                |
+| 版本       | `yolo26n-640-2026-05-14`                   |
+| 完整性来源 | `packages/shared/src/ort-assets.ts`        |
 
 远程模型下载器和内置模型构建器都使用固定长度和 SHA-256 契约验证 `.ort` 内容。远程模型 URL、对象键、长度和哈希必须一起更新，不能只替换 R2 对象；内置构建的输入路径固定为仓库根目录的 `model/yolo26n-640.ort`。
 
@@ -123,15 +123,17 @@ Cloudflare Model Worker
 
 以下运行时 profile 只适用于用户脚本，并由构建命令决定，不由运行时配置自动选择。扩展版始终使用随包分发的精简 glue 和 WASM，没有外部运行时 profile。
 
-| 项目 | 默认外部完整版 | 显式内置精简版 |
-| --- | --- | --- |
-| profile 名称 | `external` | `bundled` |
-| 构建命令 | `build` | `build:bundled-runtime` |
-| JS 运行时 | 从 jsDelivr 加载 `ort.min.js` | 构建时内置精简 glue |
-| WASM | 从 jsDelivr `dist/` 加载完整版 WASM | 从 `models.ngnl.host` 下载内容寻址 WASM |
-| WASM 校验 | 依赖固定版本 CDN | 最大长度、精确长度和 SHA-256 |
-| 自动回退 | 无 | 无 |
-| 包体预算 | `96 KiB` | `480 KiB` |
+| 项目         | 默认外部完整版                      | 显式内置精简版                          |
+| ------------ | ----------------------------------- | --------------------------------------- |
+| profile 名称 | `external`                          | `bundled`                               |
+| 构建命令     | `build`                             | `build:bundled-runtime`                 |
+| JS 运行时    | 从 jsDelivr 加载 `ort.min.js`       | 构建时内置精简 glue                     |
+| WASM         | 从 jsDelivr `dist/` 加载完整版 WASM | 从 `models.ngnl.host` 下载内容寻址 WASM |
+| WASM 校验    | 依赖固定版本 CDN                    | 最大长度、精确长度和 SHA-256            |
+| 自动回退     | 无                                  | 无                                      |
+| 包体预算     | `128 KiB`                           | `480 KiB`                               |
+
+根 `bundle:check` 对不带 `--minify` 的默认 profile 产物执行 `128 KiB` 门禁；显式压缩的发布构建不能替代这项未压缩门禁。
 
 ### 默认外部完整版
 
@@ -160,11 +162,11 @@ apps/userscript/vendor/onnxruntime/ort.wasm.bundle.min.mjs
 
 glue 在构建前校验：
 
-| 字段 | 值 |
-| --- | --- |
-| 字节长度 | `56,993` |
-| SHA-256 | `a63d4f08e70220c0f721fabfd4e4b958aa127334a19038b2732d07e919f32554` |
-| 最大长度 | `96,000` |
+| 字段     | 值                                                                 |
+| -------- | ------------------------------------------------------------------ |
+| 字节长度 | `56,993`                                                           |
+| SHA-256  | `a63d4f08e70220c0f721fabfd4e4b958aa127334a19038b2732d07e919f32554` |
+| 最大长度 | `96,000`                                                           |
 
 运行时下载以下精简 WASM：
 
@@ -174,13 +176,13 @@ https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262a
 
 精简 WASM 契约：
 
-| 字段 | 值 |
-| --- | --- |
-| 文件名 | `ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` |
+| 字段      | 值                                                                                            |
+| --------- | --------------------------------------------------------------------------------------------- |
+| 文件名    | `ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`         |
 | R2 对象键 | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` |
-| 字节长度 | `1,267,937` |
-| SHA-256 | `25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa` |
-| 最大长度 | `2,000,000` |
+| 字节长度  | `1,267,937`                                                                                   |
+| SHA-256   | `25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa`                            |
+| 最大长度  | `2,000,000`                                                                                   |
 
 下载使用 `cache: force-cache` 和 `redirect: error`。响应必须同时通过最大长度、精确长度和 SHA-256 校验，否则推理初始化失败，不会回退到 CDN 完整版。
 
@@ -188,12 +190,12 @@ https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262a
 
 当前精简运行时固定以下上游信息：
 
-| 字段 | 值 |
-| --- | --- |
-| npm 包 | `onnxruntime-web@1.27.0` |
-| ONNX Runtime 提交 | `8f0278c77bf44b0cc83c098c6c722b92a36ac4b5` |
-| emsdk | `4.0.23` |
-| 算子配置 SHA-256 | `2abe2e2987496ab518de97a7f4b157cec1bd1817c621d3523073034fb47591fe` |
+| 字段              | 值                                                                 |
+| ----------------- | ------------------------------------------------------------------ |
+| npm 包            | `onnxruntime-web@1.27.0`                                           |
+| ONNX Runtime 提交 | `8f0278c77bf44b0cc83c098c6c722b92a36ac4b5`                         |
+| emsdk             | `4.0.23`                                                           |
+| 算子配置 SHA-256  | `2abe2e2987496ab518de97a7f4b157cec1bd1817c621d3523073034fb47591fe` |
 
 权威配置位于：
 
@@ -206,10 +208,10 @@ config/onnxruntime/required_operators_and_types.config
 
 ## 环境要求
 
-| 工具 | 要求 |
-| --- | --- |
-| Node.js | `>= 24.15.0` |
-| pnpm | `11.21.0` |
+| 工具     | 要求                         |
+| -------- | ---------------------------- |
+| Node.js  | `>= 24.15.0`                 |
+| pnpm     | `11.21.0`                    |
 | Corepack | 推荐启用，用于固定 pnpm 版本 |
 
 安装依赖：
@@ -252,12 +254,13 @@ ZIP 使用固定时间戳与稳定文件顺序；相同源码和工具链应产�
 
 支持范围：
 
-| 产物 | 浏览器 | 最低版本 | 后台模型 |
-| --- | --- | --- | --- |
-| `chromium`（两种模型模式） | Chrome、Edge | Chromium 116 | MV3 service worker broker + Offscreen Document |
-| `firefox`（两种模型模式） | Firefox Desktop | Firefox 140 | MV3 background script，清单不写不受支持的 `persistent` |
+| 产物                       | 浏览器          | 最低版本            | 后台模型                                               | 执行门禁                                     |
+| -------------------------- | --------------- | ------------------- | ------------------------------------------------------ | -------------------------------------------- |
+| `chromium`（两种模型模式） | Chrome、Edge    | Chromium 116        | MV3 service worker broker + Offscreen Document         | CI 在真实 Chromium 116 上执行                |
+| `firefox`（两种模型模式）  | Firefox Desktop | Firefox 140         | MV3 background script，清单不写不受支持的 `persistent` | CI 在真实 Firefox 140 上执行                 |
+| `firefox`（同一 ZIP）      | Firefox Android | Firefox Android 142 | MV3 background script                                  | 当前 runner 无法自动化；发布必须提供外部证据 |
 
-Safari、移动浏览器和 Manifest V2 不在当前范围内。Firefox 140 下限用于桌面版内建数据传输同意声明：远程模式声明 `authenticationInfo`，因为模型 Key 会作为 Bearer 凭据发送到 `models.ngnl.host`；内置模式声明 `none`。内置版本也移除模型服务 host permission；Chromium 仍保留 `offscreen`。验证码图片和识别结果不发送到模型服务，推理在浏览器本地完成。
+Safari、其他移动浏览器和 Manifest V2 不在当前范围内。Firefox Desktop 140 与 Firefox Android 142 是不同下限；“当前桌面版本 >= 下限”不能作为任一最低版本执行证据，也不能代表 Android 覆盖。数据传输同意声明中，远程模式声明 `authenticationInfo`，因为模型 Key 会作为 Bearer 凭据发送到 `models.ngnl.host`；内置模式声明 `none`。内置版本也移除模型服务 host permission；Chromium 仍保留 `offscreen`。验证码图片和识别结果不发送到模型服务，推理在浏览器本地完成。
 
 本地加载：
 
@@ -295,12 +298,12 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 
 构建器支持以下输出环境变量：
 
-| 环境变量 | 作用 |
-| --- | --- |
-| `HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH` | 用户脚本输出路径 |
-| `HV_PONY_SOLVER_METAFILE_PATH` | esbuild metafile 输出路径 |
-| `HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH` | 构建产物清单路径 |
-| `HV_PONY_SOLVER_ARTIFACT_SHA256_PATH` | 构建产物 SHA-256 文件路径 |
+| 环境变量                                | 作用                      |
+| --------------------------------------- | ------------------------- |
+| `HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH` | 用户脚本输出路径          |
+| `HV_PONY_SOLVER_METAFILE_PATH`          | esbuild metafile 输出路径 |
+| `HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH` | 构建产物清单路径          |
+| `HV_PONY_SOLVER_ARTIFACT_SHA256_PATH`   | 构建产物 SHA-256 文件路径 |
 
 构建产物清单记录文件名、字节长度、SHA-256、是否压缩以及 `bundledRuntime` 标志。
 
@@ -308,34 +311,38 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 
 ### 仓库级命令
 
-| 命令 | 作用 |
-| --- | --- |
-| `pnpm build` | 构建所有工作区包，用户脚本使用默认外部 profile |
-| `pnpm lint` | 执行 ESLint |
-| `pnpm typecheck` | 对所有工作区执行 TypeScript 类型检查 |
-| `pnpm test` | 执行工作区和仓库级测试 |
-| `pnpm test:coverage` | 生成覆盖率报告 |
-| `pnpm docs:check` | 检查 README 与源码、配置和资产清单的漂移 |
-| `pnpm architecture:check` | 检查跨层和跨应用导入边界 |
-| `pnpm browser-sinks:check` | 检查浏览器危险调用白名单 |
-| `pnpm bundle:check` | 构建默认 profile 并检查 `96 KiB` 预算 |
-| `pnpm bundle:check:default` | 检查当前产物的默认 profile 预算 |
-| `pnpm bundle:check:bundled` | 检查当前产物的内置 profile 预算 |
-| `pnpm benchmark:inference` | 执行推理预处理和解析基准，不作为 CI 性能门槛 |
-| `pnpm test:e2e` | 执行用户脚本 Playwright Chromium 测试 |
-| `pnpm test:e2e:extension:content` | 加载临时 Chromium 扩展并执行确定性内容脚本整链 fixture |
-| `pnpm test:e2e:extension:chromium` | 加载生产 Chromium 产物；提供 `KvKey` 时还验证真实模型与本地运行时 |
-| `pnpm test:e2e:extension:firefox` | 用 Playwright Firefox 临时加载并重载生产 Firefox 产物 |
-| `pnpm --filter @hv-pony-solver/extension test:e2e:packaged` | 在真实 Chromium 和 Firefox 中验证内置模型、无 Key 推理及会话重建 |
-| `pnpm check:userscript` | 执行用户脚本聚合检查 |
-| `pnpm check:browser-core` | 执行共用浏览器核心的类型、单元和契约检查 |
-| `pnpm check:extension` | 执行扩展类型、测试、双目标构建和 Firefox 严格 lint |
-| `pnpm extension:package-check` | 重新生成扩展双目标产物，并执行 Firefox 严格 lint |
-| `pnpm check:model-worker` | 执行 Model Worker 聚合检查 |
-| `pnpm check:quick` | 依次执行 `lint`、`typecheck`、`test`、`docs:check`、`architecture:check`、`browser-sinks:check`、`extension:package-check` 和 `bundle:check` |
-| `pnpm check` | 先执行 `check:quick`，再执行 `test:coverage` 和 `build` |
-| `pnpm build:onnx-runtime` | 从固定上游构建精简 ONNX Runtime |
-| `pnpm verify:onnx-runtime` | 校验已纳入仓库的精简 glue |
+| 命令                                                        | 作用                                                                                                                                         |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm build`                                                | 构建所有工作区包，用户脚本使用默认外部 profile                                                                                               |
+| `pnpm lint`                                                 | 执行 ESLint                                                                                                                                  |
+| `pnpm typecheck`                                            | 对所有工作区执行 TypeScript 类型检查                                                                                                         |
+| `pnpm test`                                                 | 执行工作区和仓库级测试                                                                                                                       |
+| `pnpm test:coverage`                                        | 生成覆盖率报告                                                                                                                               |
+| `pnpm docs:check`                                           | 检查 README 与源码、配置和资产清单的漂移                                                                                                     |
+| `pnpm architecture:check`                                   | 检查跨层和跨应用导入边界                                                                                                                     |
+| `pnpm browser-sinks:check`                                  | 检查浏览器危险调用白名单                                                                                                                     |
+| `pnpm bundle:check`                                         | 构建未压缩的默认 profile 并检查 `128 KiB` 预算                                                                                               |
+| `pnpm bundle:check:default`                                 | 检查当前产物的默认 profile 预算                                                                                                              |
+| `pnpm bundle:check:bundled`                                 | 检查当前产物的内置 profile 预算                                                                                                              |
+| `pnpm benchmark:inference`                                  | 执行推理预处理和解析基准，不作为 CI 性能门槛                                                                                                 |
+| `pnpm benchmark:extension`                                  | 执行默认代表性浏览器 transport microbenchmark；不宣称扩展 remote/packaged、cold/warm 或推理性能                                              |
+| `pnpm benchmark:extension:quick`                            | 执行降低采样的 Chromium transport smoke；不能作为性能比较证据                                                                                |
+| `pnpm benchmark:extension:exhaustive`                       | 显式执行完整 transport 尺寸矩阵；成本显著高于默认代表性矩阵                                                                                  |
+| `pnpm test:e2e`                                             | 执行用户脚本 Playwright Chromium 测试                                                                                                        |
+| `pnpm test:e2e:extension:content`                           | 加载临时 Chromium 扩展并执行确定性内容脚本整链 fixture                                                                                       |
+| `pnpm test:e2e:extension:chromium:load-only`                | 加载生产远程 Chromium 产物，仅验证加载与普通设置，不声称已验证远程模型                                                                       |
+| `pnpm test:e2e:extension:chromium:authenticated`            | 从受保护环境读取 `KvKey`，验证真实模型后至少执行一次 `detect`；缺少 Key 时 fail closed                                                       |
+| `pnpm test:e2e:extension:firefox:load-only`                 | 用 Firefox 临时加载并重载生产远程产物，不声称已执行鉴权推理                                                                                  |
+| `pnpm --filter @hv-pony-solver/extension test:e2e:packaged` | 在真实 Chromium 和 Firefox 中验证内置模型、无 Key 推理及会话重建                                                                             |
+| `pnpm check:userscript`                                     | 执行用户脚本聚合检查                                                                                                                         |
+| `pnpm check:browser-core`                                   | 执行共用浏览器核心的类型、单元和契约检查                                                                                                     |
+| `pnpm check:extension`                                      | 执行扩展类型、测试、双目标构建和 Firefox 严格 lint                                                                                           |
+| `pnpm extension:package-check`                              | 重新生成扩展双目标产物，并执行 Firefox 严格 lint                                                                                             |
+| `pnpm check:model-worker`                                   | 执行 Model Worker 聚合检查                                                                                                                   |
+| `pnpm check:quick`                                          | 依次执行 `lint`、`typecheck`、`test`、`docs:check`、`architecture:check`、`browser-sinks:check`、`extension:package-check` 和 `bundle:check` |
+| `pnpm check`                                                | 先执行 `check:quick`，再执行 `test:coverage` 和 `build`                                                                                      |
+| `pnpm build:onnx-runtime`                                   | 从固定上游构建精简 ONNX Runtime                                                                                                              |
+| `pnpm verify:onnx-runtime`                                  | 校验已纳入仓库的精简 glue                                                                                                                    |
 
 ### 用户脚本命令
 
@@ -351,6 +358,10 @@ pnpm --filter @hv-pony-solver/userscript verify:onnx-runtime
 ### 浏览器扩展命令
 
 ```bash
+pnpm --filter @hv-pony-solver/extension benchmark
+pnpm --filter @hv-pony-solver/extension benchmark:quick
+pnpm --filter @hv-pony-solver/extension benchmark:exhaustive
+pnpm --filter @hv-pony-solver/extension benchmark:compare -- BASELINE_JSON CANDIDATE_JSON [OUTPUT_JSON]
 pnpm --filter @hv-pony-solver/extension typecheck
 pnpm --filter @hv-pony-solver/extension test
 pnpm --filter @hv-pony-solver/extension test:coverage
@@ -358,13 +369,17 @@ pnpm --filter @hv-pony-solver/extension build
 pnpm --filter @hv-pony-solver/extension build:packaged
 pnpm --filter @hv-pony-solver/extension lint:firefox
 pnpm --filter @hv-pony-solver/extension test:e2e:content
-pnpm --filter @hv-pony-solver/extension test:e2e:chromium
+pnpm --filter @hv-pony-solver/extension test:e2e:chromium:load-only
+pnpm --filter @hv-pony-solver/extension test:e2e:chromium:authenticated
+pnpm --filter @hv-pony-solver/extension test:e2e:firefox:load-only
 pnpm --filter @hv-pony-solver/extension test:e2e:packaged:chromium
 pnpm --filter @hv-pony-solver/extension test:e2e:packaged:firefox
 pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 ```
 
-`test:e2e:content` 使用只存在于临时测试构建中的确定性推理 Host，不访问真实模型服务。`test:e2e:chromium` 不设置 `KvKey` 时只证明生产远程版本可加载和设置可持久化；以安全方式提供 `KvKey` 后，才会额外验证真实鉴权下载、模型完整性、IndexedDB 缓存、Offscreen Host、打包 Worker 和本地 WASM 会话初始化。内置模型门禁不读取 Key：Chromium 门禁加载解压目录，Firefox 门禁用标准 WebDriver 安装实际 ZIP（需要 `geckodriver` 与 `openssl`），两者都运行真实模型/WASM 推理并在销毁后重新初始化。各种证据不能互相替代。
+`test:e2e:content` 使用只存在于临时测试构建中的确定性推理 Host，不访问真实模型服务。`test:e2e:chromium:load-only` 只证明生产远程版本可加载和设置可持久化，明确不验证远程模型。只有受保护的 `test:e2e:chromium:authenticated` 才读取 `KvKey`；它在鉴权下载和完整性校验后必须至少完成一次真实 `detect`，不能停在 `prepare`，缺少 Key 时直接失败。内置模型门禁不读取 Key 并显式关闭随机回退：Chromium 先校验实际 ZIP 与 artifact，再解压到临时目录并只加载该目录；Firefox 用标准 WebDriver 安装已校验的实际 ZIP（需要 `geckodriver` 与 `openssl`）。两者都断言成功类型、准确 checkbox index 和 confidence，证据绑定 archive SHA-256 与解压 tree；确定性 fixture 还必须匹配 artifact 中的 `expected.classId`/`expected.confidence`。各种证据不能互相替代。
+
+CI 的独立最低版本任务下载并实际运行 Chromium 116 与 Firefox Desktop 140，同时设置 `REQUIRE_EXACT_MINIMUM_BROWSER=true`；更高的当前浏览器会被拒绝，不能冒充最低版本覆盖。GitHub runner 当前不能真实自动化 Firefox Android 142。发布扩展时必须把 `firefox_android_e2e_run_id` 指向一个成功的外部测试 run；该 run 的命名 artifact 必须包含对同一 Firefox ZIP（名称、长度、SHA-256）的 Android 142 成功推理证据。缺失证据、版本不是 142、使用随机回退或 archive 不一致都会使 release preflight 失败。完整格式与受保护 CI 环境配置见 [`docs/browser-extension.md`](docs/browser-extension.md)。
 
 校验本地 `.ort` 模型：
 
@@ -440,24 +455,24 @@ apps/model-worker/wrangler.template.toml
 
 ### 绑定
 
-| 绑定 | 类型 | 作用 |
-| --- | --- | --- |
-| `MODEL_KEYS` | Cloudflare KV | 保存允许访问真实模型的 token 标记 |
-| `MODEL_BUCKET` | Cloudflare R2 | 保存真实模型、诱饵模型和精简 WASM |
+| 绑定                    | 类型                         | 作用                                              |
+| ----------------------- | ---------------------------- | ------------------------------------------------- |
+| `MODEL_KEYS`            | Cloudflare KV                | 保存允许访问真实模型的 token 标记                 |
+| `MODEL_BUCKET`          | Cloudflare R2                | 保存真实模型、诱饵模型和精简 WASM                 |
 | `MODEL_DOWNLOAD_QUOTAS` | SQLite-backed Durable Object | 按规范化 Key 的 SHA-256 标识保存 UTC 月度下载次数 |
 
 ### 运行时变量
 
-| 变量 | 作用 |
-| --- | --- |
-| `PUBLIC_MODEL_PATH` | 旧版 ONNX 公开路径，默认 `/yolo26n-640.onnx` |
-| `REAL_MODEL_OBJECT_KEY` | 旧版真实 ONNX 的 R2 对象键，必填 |
-| `DECOY_MODEL_OBJECT_KEY` | 鉴权失败时使用的诱饵对象键，必填 |
-| `PUBLIC_ORT_MODEL_PATH` | 新版 ORT 公开路径，默认 `/yolo26n-640.ort` |
-| `REAL_ORT_MODEL_OBJECT_KEY` | 新版真实 ORT 的 R2 对象键，默认来自共享契约 |
-| `PUBLIC_RUNTIME_WASM_PATH` | 精简 WASM 公开路径，默认来自共享契约 |
-| `RUNTIME_WASM_OBJECT_KEY` | 精简 WASM 的 R2 对象键，默认来自共享契约 |
-| `INVALID_KEY_MODE` | 无效 token 策略，只允许 `decoy` 或 `error` |
+| 变量                        | 作用                                         |
+| --------------------------- | -------------------------------------------- |
+| `PUBLIC_MODEL_PATH`         | 旧版 ONNX 公开路径，默认 `/yolo26n-640.onnx` |
+| `REAL_MODEL_OBJECT_KEY`     | 旧版真实 ONNX 的 R2 对象键，必填             |
+| `DECOY_MODEL_OBJECT_KEY`    | 鉴权失败时使用的诱饵对象键，必填             |
+| `PUBLIC_ORT_MODEL_PATH`     | 新版 ORT 公开路径，默认 `/yolo26n-640.ort`   |
+| `REAL_ORT_MODEL_OBJECT_KEY` | 新版真实 ORT 的 R2 对象键，默认来自共享契约  |
+| `PUBLIC_RUNTIME_WASM_PATH`  | 精简 WASM 公开路径，默认来自共享契约         |
+| `RUNTIME_WASM_OBJECT_KEY`   | 精简 WASM 的 R2 对象键，默认来自共享契约     |
+| `INVALID_KEY_MODE`          | 无效 token 策略，只允许 `decoy` 或 `error`   |
 
 ### 生成 Wrangler 配置
 
@@ -476,11 +491,11 @@ pnpm --filter @hv-pony-solver/model-worker validate-wrangler-config
 
 ### 路由
 
-| 路径 | 鉴权 | R2 对象 | 缓存策略 |
-| --- | --- | --- | --- |
-| `/yolo26n-640.onnx` | Bearer token | 旧版真实模型或诱饵对象 | `no-store` |
-| `/yolo26n-640.ort` | Bearer token | 新版真实模型或诱饵对象 | `no-store` |
-| `/runtime/ort-wasm-simd-<sha256>.wasm` | 公开 | 精简 WASM | 一年、`immutable` |
+| 路径                                   | 鉴权         | R2 对象                | 缓存策略          |
+| -------------------------------------- | ------------ | ---------------------- | ----------------- |
+| `/yolo26n-640.onnx`                    | Bearer token | 旧版真实模型或诱饵对象 | `no-store`        |
+| `/yolo26n-640.ort`                     | Bearer token | 新版真实模型或诱饵对象 | `no-store`        |
+| `/runtime/ort-wasm-simd-<sha256>.wasm` | 公开         | 精简 WASM              | 一年、`immutable` |
 
 支持的方法：
 
@@ -498,14 +513,14 @@ GET, HEAD, OPTIONS
 
 ### 响应矩阵
 
-| 请求或情况 | HTTP 契约 |
-| --- | --- |
-| `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200` 真实模型，模型响应使用 `Cache-Control: no-store`；`GET /yolo26n-640.ort` 使用相同契约 |
-| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200`，只读取 R2 元数据且不返回响应体；`HEAD /yolo26n-640.ort` 使用相同契约 |
-| `OPTIONS /yolo26n-640.onnx` | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`；`OPTIONS /yolo26n-640.ort` 使用相同契约 |
-| 非 `GET` / `HEAD` / `OPTIONS` 方法 | `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS` |
-| 同一 Key 当月第 6 次及后续真实模型 `GET` | `429 Too Many Requests`，包含到下个 UTC 月的 `Retry-After`，并通过 `Access-Control-Expose-Headers` 暴露该响应头 |
-| 选中的 R2 object 缺失 | `500 Internal Server Error` |
+| 请求或情况                                                                           | HTTP 契约                                                                                                                                                   |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中  | `200` 真实模型，模型响应使用 `Cache-Control: no-store`；`GET /yolo26n-640.ort` 使用相同契约                                                                 |
+| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200`，只读取 R2 元数据且不返回响应体；`HEAD /yolo26n-640.ort` 使用相同契约                                                                                 |
+| `OPTIONS /yolo26n-640.onnx`                                                          | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`；`OPTIONS /yolo26n-640.ort` 使用相同契约 |
+| 非 `GET` / `HEAD` / `OPTIONS` 方法                                                   | `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`                                                                                                       |
+| 同一 Key 当月第 6 次及后续真实模型 `GET`                                             | `429 Too Many Requests`，包含到下个 UTC 月的 `Retry-After`，并通过 `Access-Control-Expose-Headers` 暴露该响应头                                             |
+| 选中的 R2 object 缺失                                                                | `500 Internal Server Error`                                                                                                                                 |
 
 选中的 R2 object 缺失时不会回退到其他对象。
 
@@ -530,10 +545,10 @@ query-string key 不授权真实模型；按缺少 Bearer token 处理。只有�
 
 无效或缺失 token 的处理由 `INVALID_KEY_MODE` 决定：
 
-| 模式 | 行为 |
-| --- | --- |
+| 模式    | 行为                               |
+| ------- | ---------------------------------- |
 | `decoy` | 返回诱饵对象和 `200`，这是默认策略 |
-| `error` | 返回 `403` |
+| `error` | 返回 `403`                         |
 
 ### CORS
 
@@ -558,12 +573,12 @@ CORS 只控制浏览器读取权限，不构成真实模型鉴权。
 
 部署前至少确认以下对象存在：
 
-| 对象 | R2 对象键 | 是否公开 |
-| --- | --- | --- |
-| 旧版真实 ONNX | `REAL_MODEL_OBJECT_KEY` 配置值 | 否 |
-| 诱饵模型 | `DECOY_MODEL_OBJECT_KEY` 配置值 | 否 |
-| 新版真实 ORT | `real/yolo26n-640.ort` | 否 |
-| 精简 WASM | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 是 |
+| 对象          | R2 对象键                                                                                     | 是否公开 |
+| ------------- | --------------------------------------------------------------------------------------------- | -------- |
+| 旧版真实 ONNX | `REAL_MODEL_OBJECT_KEY` 配置值                                                                | 否       |
+| 诱饵模型      | `DECOY_MODEL_OBJECT_KEY` 配置值                                                               | 否       |
+| 新版真实 ORT  | `real/yolo26n-640.ort`                                                                        | 否       |
+| 精简 WASM     | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 是       |
 
 上传精简 WASM 的示例：
 
@@ -649,9 +664,9 @@ pnpm verify:onnx-runtime
 - 默认和内置用户脚本包体预算。
 - 扩展消息解码、来源检查、队列上限、超时/断连/重连、Key 隔离、双清单和可重复压缩包。
 - Chromium 扩展 fixture 的自动/手动答题、一次原生提交、状态/历史和排除路由。
-- 远程/内置模型四种扩展清单、私有包内模型、无 Key 设置页，以及真实 Chromium/Firefox 的内置模型推理和会话重建。
+- 远程/内置模型四种扩展清单、包内模型、无 Key 设置页，以及真实 Chromium/Firefox 的内置模型推理和会话重建。
 
-默认 Playwright E2E 使用本地 fixture，不访问真实 Hentaiverse 网站，也不证明线上 Model Worker 或 R2 状态。只有显式提供有效 `KvKey` 的远程扩展 Chromium smoke 才会发起真实模型下载；内置模型门禁只读取扩展私有资源。两者都不等同于 Chrome Web Store、Edge Add-ons 或 AMO 发布验收。
+默认 Playwright E2E 使用本地 fixture，不访问真实 Hentaiverse 网站，也不证明线上 Model Worker 或 R2 状态。只有显式提供有效 `KvKey` 的远程扩展 Chromium smoke 才会发起真实模型下载；内置模型门禁只读取扩展包内资源。两者都不等同于 Chrome Web Store、Edge Add-ons 或 AMO 发布验收。
 
 ## CI 与发布
 
@@ -663,7 +678,7 @@ pnpm verify:onnx-runtime
 - 依赖审计、ESLint 和 TypeScript 类型检查。
 - 文档漂移、架构边界和浏览器危险调用检查。
 - 工作区测试与覆盖率。
-- 默认外部 profile 构建及 `96 KiB` 预算。
+- 默认外部 profile 构建及 `128 KiB` 预算。
 - 显式内置 profile 构建及 `480 KiB` 预算。
 - 按条件执行的 Playwright Chromium E2E。
 - 双目标扩展构建、Firefox `web-ext` 严格 lint 和 Chromium 扩展整链 fixture。
@@ -692,7 +707,7 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - `@connect` 和 CORS 只允许网络访问，不代替 token 鉴权。
 - 默认外部 profile 信任固定版本的 jsDelivr 运行时资源。
 - 内置 profile 只对首方精简 WASM 执行内容完整性校验。
-- 扩展产物不加载远程 JS/WASM；ORT glue、module Worker 和内容寻址 WASM 均随包分发。远程 `.ort` 下载和私有包内 `.ort` 都按固定长度与 SHA-256 校验。
+- 扩展产物不加载远程 JS/WASM；ORT glue、module Worker 和内容寻址 WASM 均随包分发。远程 `.ort` 下载和包内 `.ort` 都按固定长度与 SHA-256 校验；包内模型不加密，也不具备机密性。
 - 扩展内容脚本不接收模型 Key 或模型字节。远程版本只有设置页可发起 Key 验证请求；内置版本不构建 Key 存储、验证或远程下载能力。
 - 验证码图片为兼容扩展 JSON 消息边界继续使用有上限的 Base64；模型从 Host 以一次可转移的二进制 `ArrayBuffer` 交给推理 Worker，不使用 Base64 或分片。
 - 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致。
@@ -742,7 +757,7 @@ pnpm verify:onnx-runtime
 ```bash
 pnpm --filter @hv-pony-solver/extension build
 pnpm --filter @hv-pony-solver/extension lint:firefox
-pnpm --filter @hv-pony-solver/extension test:e2e:chromium
+pnpm --filter @hv-pony-solver/extension test:e2e:chromium:load-only
 ```
 
 扩展不从 R2 下载 WASM；它读取包内 `runtime/ort-wasm-simd-<sha256>.wasm`。若出现 Emscripten import/link 错误，优先确认构建器使用的定制 glue 与包内 WASM 哈希是一对匹配资产。

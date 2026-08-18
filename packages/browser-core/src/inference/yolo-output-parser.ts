@@ -45,6 +45,62 @@ function buildDetections(classIds: number[], confidences: number[]): Detection[]
   return detections
 }
 
+export type YoloOutputTensor = Readonly<{
+  data: unknown
+  dims: readonly number[]
+}>
+
+function validateTensorDimensions(dims: readonly number[], dataLength: number): number {
+  let rows: number
+  if (dims.length === 2) {
+    const [rowCount, rowWidth] = dims
+    if (rowCount === undefined || rowWidth !== rowSize) {
+      throw new Error('模型输出维度无效')
+    }
+    rows = rowCount
+  } else if (dims.length === 3) {
+    const [batch, rowCount, rowWidth] = dims
+    if (batch !== 1 || rowCount === undefined || rowWidth !== rowSize) {
+      throw new Error('模型输出维度无效')
+    }
+    rows = rowCount
+  } else {
+    throw new Error('模型输出维度无效')
+  }
+  if (!Number.isSafeInteger(rows) || rows < 1 || rows > yoloOutputConfig.maxOutputRows) {
+    throw new Error('模型输出行数无效')
+  }
+  if (rows * rowSize !== dataLength) {
+    throw new Error('模型输出数据长度与维度不匹配')
+  }
+  return rows
+}
+
+/** Strict Worker boundary validation before the permissive ranking parser. */
+export function parseYoloOutputTensor(output: YoloOutputTensor): YoloParseResult {
+  if (!(output.data instanceof Float32Array) || !Array.isArray(output.dims)) {
+    throw new Error('模型输出格式无效')
+  }
+  const rows = validateTensorDimensions(output.dims, output.data.length)
+  for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
+    const base = rowIndex * rowSize
+    for (let column = 0; column < rowSize; column += 1) {
+      if (!Number.isFinite(output.data[base + column])) {
+        throw new Error(`模型输出第 ${rowIndex + 1} 行包含无效数值`)
+      }
+    }
+    const confidence = output.data[base + confidenceIndex]
+    const classId = output.data[base + classIndex]
+    if (confidence === undefined || confidence < 0 || confidence > 1) {
+      throw new Error(`模型输出第 ${rowIndex + 1} 行置信度无效`)
+    }
+    if (classId === undefined || !Number.isInteger(classId) || !answerCodeForClassId(classId)) {
+      throw new Error(`模型输出第 ${rowIndex + 1} 行类别无效`)
+    }
+  }
+  return parseYoloOutput(output.data)
+}
+
 export function parseYoloOutput(data: Float32Array): YoloParseResult {
   const detectionClassIds: number[] = []
   const detectionConfidences: number[] = []

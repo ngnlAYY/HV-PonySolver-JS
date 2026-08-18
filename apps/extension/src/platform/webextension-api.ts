@@ -55,6 +55,7 @@ export type RawExtensionApi = Readonly<{
   }>
   offscreen?: Readonly<{
     createDocument(options: Readonly<{ url: string; reasons: string[]; justification: string }>): Promise<void>
+    closeDocument(): Promise<void>
   }>
   action: Readonly<{
     onClicked: ExtensionEvent<() => void>

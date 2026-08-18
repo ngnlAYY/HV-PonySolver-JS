@@ -1,6 +1,7 @@
 import { ANSWER_CODES } from '@hv-pony-solver/shared/answer'
 import type { DetectorService, YoloParseResult } from '../inference/inference-types'
 import type { StatusPanel } from '../status-panel/status-panel-types'
+import { sleep } from '../utils/delay'
 import { formatErrorMessage } from '../utils/errors'
 import { logError } from '../utils/logger'
 import type { AnswerMode } from './answer-mode-settings'
@@ -8,6 +9,39 @@ import type { AnswerSubmissionService } from './answer-submitter'
 import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from './captcha-target'
 import type { ImageLoader } from './captcha-types'
 import { solverConfig } from './solver-config'
+
+const TRANSIENT_RETRY_DELAYS_MS = [250, 750] as const
+
+type RetryOutcome<T> =
+  | Readonly<{ state: 'success'; value: T }>
+  | Readonly<{ state: 'cancelled' }>
+  | Readonly<{ state: 'failed'; error: unknown }>
+
+async function retryTransient<T>(
+  operation: () => Promise<T>,
+  isCurrent: () => boolean,
+  signal?: AbortSignal,
+): Promise<RetryOutcome<T>> {
+  for (let attempt = 0; attempt <= TRANSIENT_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (!isCurrent()) {
+      return { state: 'cancelled' }
+    }
+    try {
+      const value = await operation()
+      return isCurrent() ? { state: 'success', value } : { state: 'cancelled' }
+    } catch (error) {
+      if (!isCurrent()) {
+        return { state: 'cancelled' }
+      }
+      const retryDelay = TRANSIENT_RETRY_DELAYS_MS[attempt]
+      if (retryDelay === undefined) {
+        return { state: 'failed', error }
+      }
+      await sleep(retryDelay, signal)
+    }
+  }
+  return { state: 'cancelled' }
+}
 
 export type SolveResult = Readonly<{
   handled: boolean
@@ -46,13 +80,18 @@ export class CaptchaSolver {
     const elapsed = (): number => Date.now() - startedAt
     let captchaKey: string | null = null
     const result = (handled: boolean): SolveResult => ({ handled, captchaKey })
-    const failSubmit = (message: string): void => {
-      this.panel.setStatus({ inference: `错误: ${message}` })
-      this.panel.addError(message, elapsed())
-    }
     const signal: AbortSignal | undefined = this.getAbortSignal?.()
     const isCurrent = (): boolean =>
       signal?.aborted !== true && target !== null && isSameCaptchaTarget(target, findCaptchaTarget())
+    const canRecordError = (): boolean =>
+      signal?.aborted !== true && (target === null || isSameCaptchaTarget(target, findCaptchaTarget()))
+    const failSubmit = (message: string): void => {
+      if (!canRecordError()) {
+        return
+      }
+      this.panel.setStatus({ inference: `错误: ${message}` })
+      this.panel.addError(message, elapsed())
+    }
     const submitOptions = signal ? { signal, isCurrent } : { isCurrent }
 
     if (signal?.aborted) {
@@ -67,31 +106,34 @@ export class CaptchaSolver {
 
       this.panel.setStatus({ inference: '获取图片' })
       captchaKey = target.captchaKey
-      let blob: Blob
-      try {
-        blob = await this.imageLoader.get(captchaKey)
-      } catch (error) {
-        failSubmit(`图片获取失败: ${formatErrorMessage(error)}`)
+      const imageOutcome = await retryTransient(
+        () =>
+          signal && this.imageLoader.get.length >= 2
+            ? this.imageLoader.get(target.captchaKey, signal)
+            : this.imageLoader.get(target.captchaKey),
+        isCurrent,
+        signal,
+      )
+      if (imageOutcome.state === 'cancelled') {
         return result(false)
       }
-
-      if (!isCurrent()) {
+      if (imageOutcome.state === 'failed') {
+        failSubmit(`图片获取失败: ${formatErrorMessage(imageOutcome.error)}`)
         return result(false)
       }
+      const blob = imageOutcome.value
 
       this.panel.setStatus({ inference: `图片获取完成 ${elapsed()}ms` })
       this.panel.setStatus({ inference: '推理请求中' })
-      let detectionResult: YoloParseResult
-      try {
-        detectionResult = await this.detector.detect(blob, signal)
-      } catch (error) {
-        failSubmit(`推理失败: ${formatErrorMessage(error)}`)
+      const detectionOutcome = await retryTransient(() => this.detector.detect(blob, signal), isCurrent, signal)
+      if (detectionOutcome.state === 'cancelled') {
         return result(false)
       }
-
-      if (!isCurrent()) {
+      if (detectionOutcome.state === 'failed') {
+        failSubmit(`推理失败: ${formatErrorMessage(detectionOutcome.error)}`)
         return result(false)
       }
+      const detectionResult: YoloParseResult = detectionOutcome.value
 
       const answerMode = await this.getAnswerMode()
       if (!isCurrent()) {
@@ -110,6 +152,9 @@ export class CaptchaSolver {
           detectionResult.ponies,
           failSubmit,
           () => {
+            if (!isCurrent()) {
+              return
+            }
             submitted = true
             this.panel.addSuccess(detectionResult.ponies, detectionResult.confidences, elapsed())
           },
@@ -134,6 +179,9 @@ export class CaptchaSolver {
         [pony],
         failSubmit,
         () => {
+          if (!isCurrent()) {
+            return
+          }
           submitted = true
           this.panel.addRandomFailure(pony, elapsed())
         },
@@ -141,6 +189,9 @@ export class CaptchaSolver {
       )
       return result(submitted)
     } catch (error) {
+      if (!canRecordError()) {
+        return result(false)
+      }
       const message = `答题异常: ${formatErrorMessage(error)}`
       this.panel.setStatus({ inference: `错误: ${message}` })
       this.panel.addError(message, elapsed())

@@ -1,8 +1,13 @@
 import type * as Ort from 'onnxruntime-web/wasm'
 
-import { calculateLetterboxLayout, copyRgbaToChwFloat32 } from './image-preprocess'
+import {
+  assertInferenceImageDimensions,
+  calculateLetterboxLayout,
+  copyRgbaToChwFloat32,
+  validateInferenceImageBeforeDecode,
+} from './image-preprocess'
 import type { WorkerMessage, WorkerRequest } from './inference-types'
-import { parseYoloOutput } from './yolo-output-parser'
+import { parseYoloOutputTensor } from './yolo-output-parser'
 import { formatErrorMessage } from '../utils/errors'
 
 const INPUT_SIZE = 640
@@ -18,6 +23,13 @@ type WorkerScope = Readonly<{
 type OnnxRuntime = typeof Ort
 type RuntimeInitializer = (runtime: OnnxRuntime) => void | Promise<void>
 
+class FatalInferenceError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause })
+    this.name = 'FatalInferenceError'
+  }
+}
+
 export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: RuntimeInitializer): void {
   const workerScope = globalThis as unknown as WorkerScope
   let session: Ort.InferenceSession | undefined
@@ -29,6 +41,7 @@ export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: Runtime
   }
 
   async function createInputTensor(imageBlob: Blob): Promise<Ort.Tensor> {
+    await validateInferenceImageBeforeDecode(imageBlob)
     let bitmap: ImageBitmap
     try {
       bitmap = await createImageBitmap(imageBlob)
@@ -36,9 +49,9 @@ export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: Runtime
       throw new Error(`验证码图片解码失败: ${formatErrorMessage(error)}`, { cause: error })
     }
     try {
-      if (bitmap.width < 1 || bitmap.height < 1) {
-        throw new Error('验证码图片尺寸无效')
-      }
+      // This fallback protects formats whose dimensions cannot be read from the
+      // encoded header; preflight checks already ran for PNG/GIF/JPEG/WebP.
+      assertInferenceImageDimensions(bitmap.width, bitmap.height)
       const canvas = new OffscreenCanvas(INPUT_SIZE, INPUT_SIZE)
       const context = canvas.getContext('2d', { willReadFrequently: true })
       if (!context) {
@@ -58,31 +71,52 @@ export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: Runtime
     }
   }
 
+  async function releaseSession(target: Ort.InferenceSession | undefined = session): Promise<void> {
+    if (session === target) {
+      session = undefined
+    }
+    if (!target) {
+      return
+    }
+    try {
+      await target.release()
+    } catch {
+      // A failed session is already unusable; preserve the primary inference error.
+    }
+  }
+
   async function initializeSession(modelBuffer: ArrayBuffer): Promise<void> {
     await ensureRuntimeInitialized()
-    await session?.release()
+    await releaseSession()
     session = await runtime.InferenceSession.create(modelBuffer, {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'disabled',
     })
   }
 
-  async function detect(imageBlob: Blob): Promise<ReturnType<typeof parseYoloOutput>> {
-    if (!session) {
-      throw new Error('ONNX Worker 尚未初始化')
+  async function detect(imageBlob: Blob): Promise<ReturnType<typeof parseYoloOutputTensor>> {
+    const activeSession = session
+    if (!activeSession) {
+      throw new FatalInferenceError('ONNX Worker 尚未初始化')
     }
     const input = await createInputTensor(imageBlob)
     let outputs: Awaited<ReturnType<Ort.InferenceSession['run']>>
     try {
-      outputs = await session.run({ [INPUT_NAME]: input })
+      outputs = await activeSession.run({ [INPUT_NAME]: input })
     } catch (error) {
-      throw new Error(`ONNX 推理执行失败: ${formatErrorMessage(error)}`, { cause: error })
+      await releaseSession(activeSession)
+      throw new FatalInferenceError(`ONNX 推理执行失败: ${formatErrorMessage(error)}`, error)
     }
     const output = outputs[OUTPUT_NAME]
-    if (!output || !(output.data instanceof Float32Array)) {
-      throw new Error('模型输出格式无效')
+    try {
+      if (!output) {
+        throw new Error('缺少 output0')
+      }
+      return parseYoloOutputTensor(output)
+    } catch (error) {
+      await releaseSession(activeSession)
+      throw new FatalInferenceError(`模型输出格式无效: ${formatErrorMessage(error)}`, error)
     }
-    return parseYoloOutput(output.data)
   }
 
   workerScope.onmessage = (event): void => {
@@ -101,6 +135,7 @@ export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: Runtime
           type: 'error',
           requestId: request.requestId,
           message: error instanceof Error ? error.message : String(error),
+          ...(error instanceof FatalInferenceError ? { fatal: true } : {}),
         })
       }
     })()

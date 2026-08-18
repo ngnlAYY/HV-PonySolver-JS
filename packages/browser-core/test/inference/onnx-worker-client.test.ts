@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
-import {
-  OnnxWorkerClient as CoreOnnxWorkerClient,
-  type ModelRepository,
-} from '../../src/inference/onnx-worker-client'
+import { inferenceRecoveryConfig, inferenceTimeoutConfig } from '../../src/inference/inference-config'
+import { OnnxWorkerClient as CoreOnnxWorkerClient, type ModelRepository } from '../../src/inference/onnx-worker-client'
 import type { ModelCache } from '../../src/model/model-cache'
+import { downloadModel } from '../../src/model/model-downloader'
 import type { InferenceStatusSink } from '../../src/status-panel/status-panel-types'
 import { createMockPanel } from '../helpers/mock-panel'
 import { FailingWorker, SuccessfulWorker, TimeoutThenSuccessfulWorker } from '../helpers/mock-worker'
@@ -33,6 +31,7 @@ describe('OnnxWorkerClient', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 
   it('does not cache a downloaded model when worker init fails', async () => {
@@ -48,6 +47,98 @@ describe('OnnxWorkerClient', () => {
 
     expect(modelCache.download).toHaveBeenCalledTimes(1)
     expect(modelCache.putCached).not.toHaveBeenCalled()
+  })
+
+  it('initializes directly from an already-verified buffer without reading IndexedDB', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    let cachedBytes: number[] = []
+    const modelCache = {
+      getCached: vi.fn(),
+      download: vi.fn(),
+      putCached: vi.fn(async (buffer: ArrayBuffer) => {
+        cachedBytes = [...new Uint8Array(buffer)]
+      }),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+
+    await client.prepareFromVerifiedModel(modelBuffer)
+
+    expect(modelCache.getCached).not.toHaveBeenCalled()
+    expect(modelCache.download).not.toHaveBeenCalled()
+    expect(modelBuffer.byteLength).toBe(0)
+    expect(cachedBytes).toEqual([1, 2, 3, 4])
+    expect(modelCache.putCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true, true, expect.any(AbortSignal))
+    expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init' })
+  })
+
+  it('does not cache a verified buffer when direct session initialization fails', async () => {
+    const modelCache = {
+      getCached: vi.fn(),
+      download: vi.fn(),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+
+    await expect(client.prepareFromVerifiedModel(new ArrayBuffer(8))).rejects.toThrow('init failed')
+
+    expect(modelCache.getCached).not.toHaveBeenCalled()
+    expect(modelCache.download).not.toHaveBeenCalled()
+    expect(modelCache.putCached).not.toHaveBeenCalled()
+  })
+
+  it('bounds best-effort cache persistence after direct session initialization', async () => {
+    vi.useFakeTimers()
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelCache = {
+      getCached: vi.fn(),
+      download: vi.fn(),
+      putCached: vi.fn(() => new Promise<void>(() => {})),
+    } as unknown as ModelCache
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(modelCache, panel)
+    const preparePromise = client.prepareFromVerifiedModel(new Uint8Array([1, 2, 3, 4]).buffer)
+    await vi.waitFor(() => expect(modelCache.putCached).toHaveBeenCalledTimes(1))
+
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelCacheTimeoutMs)
+
+    await expect(preparePromise).resolves.toBeUndefined()
+    expect(panel.setSessionReady).toHaveBeenCalledTimes(1)
+  })
+
+  it('hashes a downloaded model only once before direct verified-buffer preparation', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const digestBytes = Uint8Array.from(
+      '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81'
+        .match(/../g)!
+        .map((hex) => Number.parseInt(hex, 16)),
+    )
+    const digest = vi.fn(async () => digestBytes.buffer)
+    vi.stubGlobal('crypto', { subtle: { digest } })
+    const modelBuffer = await downloadModel(
+      undefined,
+      {
+        integrity: {
+          byteLength: 3,
+          sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+        },
+      },
+      {
+        fetchImpl: vi.fn(async () => new Response(new Uint8Array([1, 2, 3]))),
+        getAccessKey: async () => '',
+      },
+    )
+    const modelCache = {
+      getCached: vi.fn(),
+      download: vi.fn(),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+
+    await client.prepareFromVerifiedModel(modelBuffer)
+
+    expect(digest).toHaveBeenCalledTimes(1)
+    expect(modelCache.putCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true, true, expect.any(AbortSignal))
   })
 
   it('sends a fixed init message shape when worker init succeeds', async () => {
@@ -182,6 +273,92 @@ describe('OnnxWorkerClient', () => {
     expect(SuccessfulWorker.messages.filter((message) => message.type === 'init')).toHaveLength(1)
   })
 
+  it('keeps shared initialization alive while at least one caller still owns it', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    let resolveCached!: (buffer: ArrayBuffer) => void
+    let repositorySignal: AbortSignal | undefined
+    const modelCache = {
+      getCached: vi.fn((signal?: AbortSignal) => {
+        repositorySignal = signal
+        return new Promise<ArrayBuffer>((resolve) => {
+          resolveCached = resolve
+        })
+      }),
+      download: vi.fn(),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+
+    const first = client.prepare(firstController.signal)
+    const second = client.prepare(secondController.signal)
+    await vi.waitFor(() => expect(modelCache.getCached).toHaveBeenCalledTimes(1))
+    firstController.abort()
+
+    await expect(first).rejects.toThrow('推理请求已取消')
+    expect(repositorySignal?.aborted).toBe(false)
+    resolveCached(new Uint8Array([1, 2, 3, 4]).buffer)
+    await expect(second).resolves.toBeUndefined()
+    expect(SuccessfulWorker.messages.filter((message) => message.type === 'init')).toHaveLength(1)
+  })
+
+  it('cancels uncooperative shared initialization after its last owner leaves and permits retry', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const repositorySignals: AbortSignal[] = []
+    let callCount = 0
+    const modelCache = {
+      getCached: vi.fn((signal?: AbortSignal) => {
+        if (signal) {
+          repositorySignals.push(signal)
+        }
+        callCount += 1
+        return callCount === 1
+          ? new Promise<ArrayBuffer | null>(() => {})
+          : Promise.resolve(new Uint8Array([1, 2, 3, 4]).buffer)
+      }),
+      download: vi.fn(),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+    const controller = new AbortController()
+    const abandoned = client.prepare(controller.signal)
+    await vi.waitFor(() => expect(modelCache.getCached).toHaveBeenCalledTimes(1))
+
+    controller.abort()
+
+    await expect(abandoned).rejects.toThrow('推理请求已取消')
+    expect(repositorySignals[0]?.aborted).toBe(true)
+    await expect(client.prepare()).resolves.toBeUndefined()
+    expect(modelCache.getCached).toHaveBeenCalledTimes(2)
+  })
+
+  it('bounds uncooperative shared initialization and permits a fresh retry', async () => {
+    vi.useFakeTimers()
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    let callCount = 0
+    const modelCache = {
+      getCached: vi.fn(() => {
+        callCount += 1
+        return callCount === 1
+          ? new Promise<ArrayBuffer | null>(() => {})
+          : Promise.resolve(new Uint8Array([1, 2, 3, 4]).buffer)
+      }),
+      download: vi.fn(),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+    const timedOut = client.prepare()
+    const rejection = expect(timedOut).rejects.toThrow('ONNX Worker 初始化超时')
+    await vi.waitFor(() => expect(modelCache.getCached).toHaveBeenCalledTimes(1))
+
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.workerPrepareTimeoutMs)
+
+    await rejection
+    await expect(client.prepare()).resolves.toBeUndefined()
+    expect(modelCache.getCached).toHaveBeenCalledTimes(2)
+  })
+
   it('serializes overlapping detect requests', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     SuccessfulWorker.autoRespond = false
@@ -280,6 +457,100 @@ describe('OnnxWorkerClient', () => {
     SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[1]?.requestId)
     await expect(detectPromise).rejects.toThrow('推理请求已取消')
     expect(settled).toBe(true)
+  })
+
+  it('terminates a Worker that does not settle within the running-abort grace period and recreates it', async () => {
+    vi.useFakeTimers()
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    const modelCache = {
+      getCached: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      download: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+    const preparePromise = client.prepare()
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+    await preparePromise
+
+    const controller = new AbortController()
+    const detectPromise = client.detect({} as Blob, controller.signal)
+    await vi.waitFor(() =>
+      expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1),
+    )
+    controller.abort()
+    const rejection = expect(detectPromise).rejects.toThrow('推理请求已取消')
+
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.workerAbortGraceTimeoutMs)
+
+    await rejection
+    expect(SuccessfulWorker.terminateCount).toBe(1)
+    SuccessfulWorker.autoRespond = true
+    await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true, ponies: ['TS'] })
+    expect(SuccessfulWorker.instances).toHaveLength(2)
+  })
+
+  it('rebuilds the Worker immediately after a fatal response', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    const modelCache = {
+      getCached: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      download: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+    const preparePromise = client.prepare()
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+    await preparePromise
+
+    const failedDetect = client.detect({} as Blob)
+    await vi.waitFor(() =>
+      expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1),
+    )
+    const detectRequest = SuccessfulWorker.messages.find((message) => message.type === 'detect')
+    SuccessfulWorker.instances[0]?.onmessage?.({
+      data: { type: 'error', requestId: detectRequest?.requestId, message: 'session run failed', fatal: true },
+    } as MessageEvent)
+
+    await expect(failedDetect).rejects.toThrow('session run failed')
+    expect(SuccessfulWorker.terminateCount).toBe(1)
+    SuccessfulWorker.autoRespond = true
+    await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true, ponies: ['TS'] })
+    expect(SuccessfulWorker.instances).toHaveLength(2)
+  })
+
+  it('rebuilds the Worker after repeated nonfatal inference errors', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    const modelCache = {
+      getCached: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      download: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelCache
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+    const preparePromise = client.prepare()
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+    await preparePromise
+
+    for (let index = 0; index < inferenceRecoveryConfig.maxConsecutiveWorkerErrors; index += 1) {
+      const failedDetect = client.detect({} as Blob)
+      await vi.waitFor(() =>
+        expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(index + 1),
+      )
+      const detectMessages = SuccessfulWorker.messages.filter((message) => message.type === 'detect')
+      SuccessfulWorker.instances[0]?.onmessage?.({
+        data: { type: 'error', requestId: detectMessages[index]?.requestId, message: `detect failed ${index}` },
+      } as MessageEvent)
+      await expect(failedDetect).rejects.toThrow(`detect failed ${index}`)
+    }
+
+    expect(SuccessfulWorker.terminateCount).toBe(1)
+    SuccessfulWorker.autoRespond = true
+    await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true, ponies: ['TS'] })
+    expect(SuccessfulWorker.instances).toHaveLength(2)
   })
 
   it('does not cache or mark ready when destroyed before worker init response', async () => {

@@ -6,7 +6,10 @@ function createSubmitter(
   submitDelay: readonly [number, number] = [1000, 1000],
   multiClickDelay: readonly [number, number] = [500, 500],
 ): AnswerSubmitter {
-  return new AnswerSubmitter(async () => submitDelay, async () => multiClickDelay)
+  return new AnswerSubmitter(
+    async () => submitDelay,
+    async () => multiClickDelay,
+  )
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -121,10 +124,7 @@ describe('AnswerSubmitter', () => {
       const onSubmitted = vi.fn()
       const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
 
-      const submitPromise = createSubmitter(
-        [2500, 2500],
-        [700, 700],
-      ).submit(form, ['TS', 'RA'], vi.fn(), onSubmitted)
+      const submitPromise = createSubmitter([2500, 2500], [700, 700]).submit(form, ['TS', 'RA'], vi.fn(), onSubmitted)
       await vi.waitFor(() => expect(setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 700))
       await vi.runOnlyPendingTimersAsync()
       await flushMicrotasks()
@@ -201,6 +201,118 @@ describe('AnswerSubmitter', () => {
       expect(button.click).not.toHaveBeenCalled()
       expect(onSubmitted).not.toHaveBeenCalled()
       expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('does not submit through controls replaced while timing settings are pending', async () => {
+      const form = createForm(true)
+      const oldButton = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      oldButton.click = vi.fn()
+      const onSubmitted = vi.fn()
+      let resolveSubmitDelay!: (range: readonly [number, number]) => void
+      const submitter = new AnswerSubmitter(
+        () =>
+          new Promise((resolve) => {
+            resolveSubmitDelay = resolve
+          }),
+        async () => [500, 500],
+      )
+
+      const submitPromise = submitter.submit(form, ['TS'], vi.fn(), onSubmitted)
+      await flushMicrotasks()
+
+      const oldAnswer = form.querySelector<HTMLInputElement>('input[name="riddleanswer[]"]')!
+      oldAnswer.replaceWith(oldAnswer.cloneNode(true))
+      const newButton = oldButton.cloneNode(true) as HTMLInputElement
+      newButton.click = vi.fn()
+      oldButton.replaceWith(newButton)
+      resolveSubmitDelay([1000, 1000])
+
+      await vi.runAllTimersAsync()
+      await submitPromise
+
+      expect(oldButton.click).not.toHaveBeenCalled()
+      expect(newButton.click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
+    })
+
+    it('does not submit when the captured form is disconnected during the delay', async () => {
+      const form = createForm(true)
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onSubmitted = vi.fn()
+
+      const submitPromise = createSubmitter().submit(form, ['TS'], vi.fn(), onSubmitted)
+      await flushMicrotasks()
+      form.remove()
+
+      await vi.runAllTimersAsync()
+      await submitPromise
+
+      expect(button.click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
+    })
+
+    it('does not click a submit button disabled during the delay', async () => {
+      const form = createForm(true)
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onSubmitted = vi.fn()
+
+      const submitPromise = createSubmitter().submit(form, ['TS'], vi.fn(), onSubmitted)
+      await flushMicrotasks()
+      button.disabled = true
+
+      await vi.runAllTimersAsync()
+      await submitPromise
+
+      expect(button.click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
+    })
+
+    it('does not submit when an answer control is disabled during the delay', async () => {
+      const form = createForm(true)
+      const checkbox = form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')[0]!
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onSubmitted = vi.fn()
+
+      const submitPromise = createSubmitter().submit(form, ['TS'], vi.fn(), onSubmitted)
+      await flushMicrotasks()
+      checkbox.disabled = true
+
+      await vi.runAllTimersAsync()
+      await submitPromise
+
+      expect(button.click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
+    })
+
+    it('stops before later clicks when answer controls are reordered during a multi-click delay', async () => {
+      const form = createForm(true)
+      const checkboxes = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]'))
+      for (const checkbox of checkboxes) {
+        checkbox.checked = false
+      }
+      const checkboxClicks = checkboxes.map((checkbox) => vi.spyOn(checkbox, 'click'))
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onSubmitted = vi.fn()
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99)
+
+      try {
+        const submitPromise = createSubmitter().submit(form, ['TS', 'RA'], vi.fn(), onSubmitted)
+        await vi.waitFor(() => expect(checkboxClicks[0]).toHaveBeenCalledTimes(1))
+        form.appendChild(checkboxes[0]!)
+
+        await vi.runAllTimersAsync()
+        await submitPromise
+      } finally {
+        randomSpy.mockRestore()
+      }
+
+      expect(checkboxClicks[1]).not.toHaveBeenCalled()
+      expect(button.click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
     })
   })
 })

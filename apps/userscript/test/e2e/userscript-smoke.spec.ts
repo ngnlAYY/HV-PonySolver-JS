@@ -32,7 +32,7 @@ test('userscript app solves a local captcha with mocked browser detector', async
       sourcefile: 'e2e-userscript-entry.ts',
     },
     alias: {
-      '@hv-pony-solver/shared': path.join(repoRoot, 'packages/shared/src/index.ts'),
+      '@hv-pony-solver/shared': path.join(repoRoot, 'packages/shared/src'),
     },
   })
   const bundleText = browserBundle.outputFiles[0]?.text

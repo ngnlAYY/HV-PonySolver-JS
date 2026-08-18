@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
@@ -11,6 +12,13 @@ import {
   execBoundedNode,
   verifyPatchedDependencies,
 } from './verify-patched-dependencies.mjs'
+
+test('audit gate resolves the pinned pnpm exclusively through Corepack', async () => {
+  const packageJson = JSON.parse(await readFile(new globalThis.URL('../package.json', import.meta.url), 'utf8'))
+  const command = packageJson.scripts['audit:high']
+  assert.equal(command, 'corepack pnpm verify:patched-dependencies && corepack pnpm audit --audit-level high')
+  assert.doesNotMatch(command, /(?:^|&&\s*)pnpm\s/u)
+})
 
 test('audit gate names only the locally patched image-size advisories', () => {
   assert.deepEqual(PATCHED_GHSA_IDS, ['GHSA-w3rx-r6r6-pgpr', 'GHSA-5p2g-fcmc-qvqq'])

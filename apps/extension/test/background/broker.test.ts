@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as WebExtensionModule from '../../src/platform/webextension'
 
 const platformMocks = vi.hoisted(() => ({
@@ -19,18 +19,28 @@ vi.mock('../../src/platform/webextension', async (importOriginal) => {
 })
 
 import {
+  BROKER_DEFAULT_TIMEOUT_MS,
   MAX_GLOBAL_DETECT_REQUESTS,
+  MAX_GLOBAL_VERIFY_KEY_REQUESTS,
   MAX_PORT_DETECT_REQUESTS,
+  MAX_PORT_VERIFY_KEY_REQUESTS,
   isTrustedPort,
   registerBroker,
 } from '../../src/background/broker'
-import { CONTENT_PORT_NAME, OPTIONS_PORT_NAME, PROTOCOL_VERSION, type HostResponse } from '../../src/protocol/messages'
+import {
+  CONTENT_PORT_NAME,
+  OPTIONS_PORT_NAME,
+  PROTOCOL_VERSION,
+  type HostRequest,
+  type HostResponse,
+} from '../../src/protocol/messages'
 import type { ExtensionPort, ExtensionSender } from '../../src/platform/webextension'
 
-type TestPort = ExtensionPort & Readonly<{
-  emitMessage(message: unknown): void
-  emitDisconnect(): void
-}>
+type TestPort = ExtensionPort &
+  Readonly<{
+    emitMessage(message: unknown): void
+    emitDisconnect(): void
+  }>
 
 function port(name: string, sender: ExtensionSender): TestPort {
   let messageListener: ((message: unknown) => void) | undefined
@@ -67,8 +77,22 @@ function detectRequest(index: number): Record<string, unknown> {
   }
 }
 
+function verifyKeyRequest(index: number): Record<string, unknown> {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: 'verify-key',
+    requestId: `verify-${index}`,
+    candidateKey: index.toString(16).padStart(64, '0'),
+  }
+}
+
 beforeEach(() => {
+  vi.useRealTimers()
   platformMocks.connectListener = undefined
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('broker sender validation', () => {
@@ -76,15 +100,47 @@ describe('broker sender validation', () => {
   const optionsUrl = 'moz-extension://extension-id/options.html'
 
   it('accepts only the declared HentaiVerse content origins', () => {
-    expect(isTrustedPort(port(CONTENT_PORT_NAME, { id: extensionId, url: 'https://hentaiverse.org/?s=Battle' }), extensionId, optionsUrl)).toBe(true)
-    expect(isTrustedPort(port(CONTENT_PORT_NAME, { id: extensionId, url: 'https://alt.hentaiverse.org/isekai/' }), extensionId, optionsUrl)).toBe(true)
-    expect(isTrustedPort(port(CONTENT_PORT_NAME, { id: extensionId, url: 'https://hentaiverse.org.evil.invalid/' }), extensionId, optionsUrl)).toBe(false)
-    expect(isTrustedPort(port(CONTENT_PORT_NAME, { id: 'other-id', url: 'https://hentaiverse.org/' }), extensionId, optionsUrl)).toBe(false)
+    expect(
+      isTrustedPort(
+        port(CONTENT_PORT_NAME, { id: extensionId, url: 'https://hentaiverse.org/?s=Battle' }),
+        extensionId,
+        optionsUrl,
+      ),
+    ).toBe(true)
+    expect(
+      isTrustedPort(
+        port(CONTENT_PORT_NAME, { id: extensionId, url: 'https://alt.hentaiverse.org/isekai/' }),
+        extensionId,
+        optionsUrl,
+      ),
+    ).toBe(true)
+    expect(
+      isTrustedPort(
+        port(CONTENT_PORT_NAME, { id: extensionId, url: 'https://hentaiverse.org.evil.invalid/' }),
+        extensionId,
+        optionsUrl,
+      ),
+    ).toBe(false)
+    expect(
+      isTrustedPort(
+        port(CONTENT_PORT_NAME, { id: 'other-id', url: 'https://hentaiverse.org/' }),
+        extensionId,
+        optionsUrl,
+      ),
+    ).toBe(false)
   })
 
   it('accepts the extension options page but rejects unrelated extension pages', () => {
-    expect(isTrustedPort(port(OPTIONS_PORT_NAME, { id: extensionId, url: `${optionsUrl}#key` }), extensionId, optionsUrl)).toBe(true)
-    expect(isTrustedPort(port(OPTIONS_PORT_NAME, { id: extensionId, url: 'moz-extension://extension-id/untrusted.html' }), extensionId, optionsUrl)).toBe(false)
+    expect(
+      isTrustedPort(port(OPTIONS_PORT_NAME, { id: extensionId, url: `${optionsUrl}#key` }), extensionId, optionsUrl),
+    ).toBe(true)
+    expect(
+      isTrustedPort(
+        port(OPTIONS_PORT_NAME, { id: extensionId, url: 'moz-extension://extension-id/untrusted.html' }),
+        extensionId,
+        optionsUrl,
+      ),
+    ).toBe(false)
     expect(isTrustedPort(port('unknown', { id: extensionId, url: optionsUrl }), extensionId, optionsUrl)).toBe(false)
   })
 })
@@ -108,7 +164,11 @@ describe('broker queue and privilege boundaries', () => {
 
     expect(invokeHost).toHaveBeenCalledTimes(MAX_PORT_DETECT_REQUESTS)
     expect(client.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: `detect-${MAX_PORT_DETECT_REQUESTS}`, ok: false, error: expect.stringContaining('繁忙') }),
+      expect.objectContaining({
+        requestId: `detect-${MAX_PORT_DETECT_REQUESTS}`,
+        ok: false,
+        error: expect.stringContaining('繁忙'),
+      }),
     )
 
     resolvers.shift()?.({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'detect-0', ok: true })
@@ -125,10 +185,7 @@ describe('broker queue and privilege boundaries', () => {
   })
 
   it('keeps disconnected running work admitted until Host settlement and releases exactly once', async () => {
-    const pending = new Map<
-      string,
-      Readonly<{ resolve: (response: HostResponse) => void; signal: AbortSignal }>
-    >()
+    const pending = new Map<string, Readonly<{ resolve: (response: HostResponse) => void; signal: AbortSignal }>>()
     const invokeHost = vi.fn(
       (request: { requestId: string }, signal: AbortSignal) =>
         new Promise<HostResponse>((resolve) => {
@@ -173,6 +230,87 @@ describe('broker queue and privilege boundaries', () => {
     }
   })
 
+  it('applies independent per-Port and global verify-key limits and releases capacity', async () => {
+    const pending = new Map<string, (response: HostResponse) => void>()
+    const invokeHost = vi.fn(
+      (request: { requestId: string }) =>
+        new Promise<HostResponse>((resolve) => {
+          pending.set(request.requestId, resolve)
+        }),
+    )
+    registerBroker(invokeHost)
+    const clients = Array.from({ length: MAX_GLOBAL_VERIFY_KEY_REQUESTS + 1 }, () =>
+      port(OPTIONS_PORT_NAME, {
+        id: 'extension-id',
+        url: 'moz-extension://extension-id/options.html',
+      }),
+    )
+    for (const client of clients) {
+      platformMocks.connectListener?.(client)
+    }
+
+    clients[0]!.emitMessage(verifyKeyRequest(0))
+    clients[0]!.emitMessage(verifyKeyRequest(100))
+    expect(MAX_PORT_VERIFY_KEY_REQUESTS).toBe(1)
+    expect(clients[0]!.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'verify-100', ok: false, error: expect.stringContaining('繁忙') }),
+    )
+
+    for (let index = 1; index < MAX_GLOBAL_VERIFY_KEY_REQUESTS; index += 1) {
+      clients[index]!.emitMessage(verifyKeyRequest(index))
+    }
+    clients[MAX_GLOBAL_VERIFY_KEY_REQUESTS]!.emitMessage(verifyKeyRequest(200))
+    expect(invokeHost).toHaveBeenCalledTimes(MAX_GLOBAL_VERIFY_KEY_REQUESTS)
+    expect(clients[MAX_GLOBAL_VERIFY_KEY_REQUESTS]!.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'verify-200', ok: false, error: expect.stringContaining('繁忙') }),
+    )
+
+    pending.get('verify-0')?.({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'verify-0',
+      ok: true,
+    })
+    await vi.waitFor(() =>
+      expect(clients[0]!.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: 'verify-0', ok: true }),
+      ),
+    )
+    clients[MAX_GLOBAL_VERIFY_KEY_REQUESTS]!.emitMessage(verifyKeyRequest(201))
+    expect(invokeHost).toHaveBeenCalledTimes(MAX_GLOBAL_VERIFY_KEY_REQUESTS + 1)
+
+    for (const [requestId, resolve] of pending) {
+      resolve({ protocol: PROTOCOL_VERSION, type: 'result', requestId, ok: true })
+    }
+  })
+
+  it('aborts and releases a timed-out verify entry even when the Host never settles', async () => {
+    vi.useFakeTimers()
+    let receivedSignal: AbortSignal | undefined
+    const invokeHost = vi.fn(
+      (_request: HostRequest, signal: AbortSignal) =>
+        new Promise<HostResponse>(() => {
+          receivedSignal = signal
+        }),
+    )
+    registerBroker(invokeHost)
+    const client = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(client)
+    client.emitMessage(verifyKeyRequest(300))
+
+    await vi.advanceTimersByTimeAsync(BROKER_DEFAULT_TIMEOUT_MS)
+
+    expect(receivedSignal?.aborted).toBe(true)
+    expect(client.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'verify-300', ok: false, error: expect.stringContaining('超时') }),
+    )
+    client.emitMessage(verifyKeyRequest(301))
+    expect(invokeHost).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects malformed or mismatched Host responses using the original request ID', async () => {
     const invokeHost = vi.fn(async (): Promise<HostResponse> => ({
       protocol: PROTOCOL_VERSION,
@@ -199,15 +337,17 @@ describe('broker queue and privilege boundaries', () => {
 
   it('treats a delivery throw as disconnect without recursively posting another error', async () => {
     let signal: AbortSignal | undefined
-    const invokeHost = vi.fn(async (request: { requestId: string }, requestSignal: AbortSignal): Promise<HostResponse> => {
-      signal = requestSignal
-      return {
-        protocol: PROTOCOL_VERSION,
-        type: 'result',
-        requestId: request.requestId,
-        ok: true,
-      }
-    })
+    const invokeHost = vi.fn(
+      async (request: { requestId: string }, requestSignal: AbortSignal): Promise<HostResponse> => {
+        signal = requestSignal
+        return {
+          protocol: PROTOCOL_VERSION,
+          type: 'result',
+          requestId: request.requestId,
+          ok: true,
+        }
+      },
+    )
     registerBroker(invokeHost)
     const client = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
     vi.mocked(client.postMessage).mockImplementation(() => {

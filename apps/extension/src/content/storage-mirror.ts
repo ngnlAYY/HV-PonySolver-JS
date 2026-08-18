@@ -1,4 +1,4 @@
-import type { SettingsStorage, TextStorage } from '@hv-pony-solver/browser-core/platform/storage'
+import type { EnumerableTextStorage, SettingsStorage } from '@hv-pony-solver/browser-core/platform/storage'
 
 import {
   addStorageChangeListener,
@@ -8,24 +8,51 @@ import {
   type StorageChanges,
 } from '../platform/webextension'
 
-export class ExtensionStorageMirror implements SettingsStorage, TextStorage {
+type StoredValue = string | null
+
+type PendingMutation = {
+  readonly id: number
+  readonly value: StoredValue
+  writeRevision: number
+}
+
+type MutationState = {
+  committedValue: StoredValue
+  committedRevision: number
+  readonly pending: PendingMutation[]
+  tail: Promise<void>
+}
+
+export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextStorage {
   private readonly values = new Map<string, string>()
+  private readonly mutationStates = new Map<string, MutationState>()
+  private readonly bufferedChanges: StorageChanges[] = []
   private removeChangeListener: (() => void) | null = null
+  private initializing = true
+  private destroyed = false
+  private nextMutationId = 0
 
   static async create(): Promise<ExtensionStorageMirror> {
     const mirror = new ExtensionStorageMirror()
-    const stored = await storageGetAll()
-    for (const [key, value] of Object.entries(stored)) {
-      if (typeof value === 'string') {
-        mirror.values.set(key, value)
-      }
-    }
     mirror.removeChangeListener = addStorageChangeListener((changes, areaName) => {
-      if (areaName === 'local') {
-        mirror.applyChanges(changes)
+      if (areaName !== 'local' || mirror.destroyed) {
+        return
       }
+      if (mirror.initializing) {
+        mirror.bufferedChanges.push(changes)
+        return
+      }
+      mirror.applyChanges(changes)
     })
-    return mirror
+
+    try {
+      const stored = await storageGetAll()
+      mirror.finishInitialization(stored)
+      return mirror
+    } catch (error) {
+      mirror.destroy()
+      throw error
+    }
   }
 
   getSync(key: string): string | null {
@@ -36,42 +63,140 @@ export class ExtensionStorageMirror implements SettingsStorage, TextStorage {
     return Promise.resolve(this.getSync(key))
   }
 
-  async set(key: string, value: string): Promise<void> {
-    this.values.set(key, value)
-    await storageSet({ [key]: value })
+  set(key: string, value: string): Promise<void> {
+    return this.mutate(key, value, () => storageSet({ [key]: value }))
   }
 
-  async remove(key: string): Promise<void> {
-    this.values.delete(key)
-    await storageRemove(key)
+  remove(key: string): Promise<void> {
+    return this.mutate(key, null, () => storageRemove(key))
   }
 
   getItem(key: string): string | null {
     return this.getSync(key)
   }
 
-  setItem(key: string, value: string): void {
-    this.values.set(key, value)
-    void storageSet({ [key]: value }).catch(() => undefined)
+  setItem(key: string, value: string): Promise<void> {
+    return this.set(key, value)
   }
 
-  removeItem(key: string): void {
-    this.values.delete(key)
-    void storageRemove(key).catch(() => undefined)
+  removeItem(key: string): Promise<void> {
+    return this.remove(key)
+  }
+
+  getItemsByPrefix(prefix: string): ReadonlyArray<readonly [key: string, value: string]> {
+    return Array.from(this.values.entries()).filter(([key]) => key.startsWith(prefix))
   }
 
   destroy(): void {
+    if (this.destroyed) {
+      return
+    }
+    this.destroyed = true
+    this.initializing = false
     this.removeChangeListener?.()
     this.removeChangeListener = null
+    this.bufferedChanges.length = 0
+    this.mutationStates.clear()
+    this.values.clear()
+  }
+
+  private finishInitialization(stored: Record<string, unknown>): void {
+    if (this.destroyed) {
+      return
+    }
+    for (const [key, value] of Object.entries(stored)) {
+      if (typeof value === 'string') {
+        this.setCommittedValue(key, value)
+      }
+    }
+    this.initializing = false
+    for (const changes of this.bufferedChanges.splice(0)) {
+      this.applyChanges(changes)
+    }
   }
 
   private applyChanges(changes: StorageChanges): void {
+    if (this.destroyed) {
+      return
+    }
     for (const [key, change] of Object.entries(changes)) {
-      if (typeof change.newValue === 'string') {
-        this.values.set(key, change.newValue)
-      } else {
-        this.values.delete(key)
-      }
+      this.setCommittedValue(key, typeof change.newValue === 'string' ? change.newValue : null)
+    }
+  }
+
+  private setCommittedValue(key: string, value: StoredValue): void {
+    const state = this.getMutationState(key)
+    state.committedValue = value
+    state.committedRevision += 1
+    this.refreshVisibleValue(key, state)
+  }
+
+  private mutate(key: string, value: StoredValue, persist: () => Promise<void>): Promise<void> {
+    if (this.destroyed) {
+      return Promise.reject(new Error('扩展存储镜像已销毁'))
+    }
+
+    const state = this.getMutationState(key)
+    const mutation: PendingMutation = {
+      id: ++this.nextMutationId,
+      value,
+      writeRevision: state.committedRevision,
+    }
+    state.pending.push(mutation)
+    this.refreshVisibleValue(key, state)
+
+    const operation = state.tail.then(() => {
+      mutation.writeRevision = state.committedRevision
+      return persist()
+    })
+    const settled = operation.then(
+      () => this.settleMutation(key, state, mutation, true),
+      (error: unknown) => {
+        this.settleMutation(key, state, mutation, false)
+        throw error
+      },
+    )
+    state.tail = settled.catch(() => undefined)
+    return settled
+  }
+
+  private settleMutation(key: string, state: MutationState, mutation: PendingMutation, succeeded: boolean): void {
+    if (this.destroyed || this.mutationStates.get(key) !== state) {
+      return
+    }
+    const index = state.pending.findIndex(({ id }) => id === mutation.id)
+    if (index >= 0) {
+      state.pending.splice(index, 1)
+    }
+    if (succeeded && state.committedRevision === mutation.writeRevision) {
+      state.committedValue = mutation.value
+      state.committedRevision += 1
+    }
+    this.refreshVisibleValue(key, state)
+  }
+
+  private getMutationState(key: string): MutationState {
+    const existing = this.mutationStates.get(key)
+    if (existing) {
+      return existing
+    }
+    const state: MutationState = {
+      committedValue: this.values.get(key) ?? null,
+      committedRevision: 0,
+      pending: [],
+      tail: Promise.resolve(),
+    }
+    this.mutationStates.set(key, state)
+    return state
+  }
+
+  private refreshVisibleValue(key: string, state: MutationState): void {
+    const latestMutation = state.pending.at(-1)
+    const value = latestMutation ? latestMutation.value : state.committedValue
+    if (value === null) {
+      this.values.delete(key)
+    } else {
+      this.values.set(key, value)
     }
   }
 }

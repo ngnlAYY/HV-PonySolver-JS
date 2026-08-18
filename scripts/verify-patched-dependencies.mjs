@@ -22,7 +22,7 @@ const EXPECTED_ADDONS_LINTER_VERSION = '10.10.0'
 const PROBE_TIMEOUT_MS = 3_000
 const PATCH_RELATIVE_PATH = 'patches/image-size@2.0.2.patch'
 const EXPECTED_VERIFY_COMMAND = 'node scripts/verify-patched-dependencies.mjs'
-const EXPECTED_AUDIT_COMMAND = 'pnpm verify:patched-dependencies && pnpm audit --audit-level high'
+const EXPECTED_AUDIT_COMMAND = 'corepack pnpm verify:patched-dependencies && corepack pnpm audit --audit-level high'
 
 // Provenance: image-size/image-size#439 at
 // bdbe560bfd98af6feab93b46aed67f2f0a77e4d5. The exact local patch also applies

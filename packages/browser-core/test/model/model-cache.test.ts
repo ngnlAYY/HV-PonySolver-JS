@@ -12,6 +12,7 @@ vi.mock('../../src/model/model-integrity', async (importOriginal) => {
   }
 })
 
+import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import { createCachedModelRow, ModelCache, readCachedModelBuffer } from '../../src/model/model-cache'
 import { downloadModel } from '../../src/model/model-downloader'
 import { verifyModelIntegrity } from '../../src/model/model-integrity'
@@ -37,6 +38,7 @@ type TestRequest = {
   error: DOMException | null
 }
 type TestOpenRequest = TestRequest & {
+  onblocked: ((event: Event) => void) | null
   onupgradeneeded: ((event: IDBVersionChangeEvent) => void) | null
   result: IDBDatabase
 }
@@ -72,13 +74,7 @@ function stubIndexedDb(
   database: TestDatabase
   transactions: TestTransaction[]
 }> {
-  const {
-    cachedRow,
-    readError,
-    openError,
-    deferOpenSuccess = false,
-    deferTransactionCompletion = false,
-  } = options
+  const { cachedRow, readError, openError, deferOpenSuccess = false, deferTransactionCompletion = false } = options
   const transactions: TestTransaction[] = []
   const readRequest: TestRequest = {
     onerror: null,
@@ -124,6 +120,7 @@ function stubIndexedDb(
   const request: TestOpenRequest = {
     onerror: null,
     onsuccess: null,
+    onblocked: null,
     onupgradeneeded: null,
     result: database as IDBDatabase,
     error: openError ?? null,
@@ -150,6 +147,7 @@ function stubIndexedDb(
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -275,6 +273,75 @@ describe('ModelCache', () => {
     expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^缓存读取失败 \d+ms，准备下载$/) })
   })
 
+  it('falls back immediately when IndexedDB open is blocked and closes a late database', async () => {
+    const { request, database } = stubIndexedDb({ deferOpenSuccess: true })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const cache = new ModelCache(createStatusPanel())
+    const promise = cache.getCached()
+
+    request.onblocked?.(new Event('blocked'))
+
+    await expect(promise).resolves.toBeNull()
+    request.onsuccess?.(new Event('success'))
+    expect(database.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes an IndexedDB database delivered after the caller deadline', async () => {
+    const { request, database } = stubIndexedDb({ deferOpenSuccess: true })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const cache = new ModelCache(createStatusPanel())
+    const promise = cache.getCached(undefined, Date.now() + 20)
+
+    await expect(promise).resolves.toBeNull()
+    request.onupgradeneeded?.(new Event('upgradeneeded') as IDBVersionChangeEvent)
+    request.onsuccess?.(new Event('success'))
+
+    expect(database.createObjectStore).toHaveBeenCalledTimes(1)
+    expect(database.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('bounds a hung IndexedDB open and closes a database delivered after the timeout', async () => {
+    vi.useFakeTimers()
+    const { request, database } = stubIndexedDb({ deferOpenSuccess: true })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const cache = new ModelCache(createStatusPanel())
+    const promise = cache.getCached()
+
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelCacheTimeoutMs)
+
+    await expect(promise).resolves.toBeNull()
+    request.onsuccess?.(new Event('success'))
+    expect(database.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an aborted IndexedDB open without waiting for the open request', async () => {
+    const { request, database } = stubIndexedDb({ deferOpenSuccess: true })
+    const cache = new ModelCache(createStatusPanel())
+    const controller = new AbortController()
+    const promise = cache.getCached(controller.signal)
+
+    controller.abort()
+
+    await expect(promise).rejects.toThrow('模型缓存操作已取消')
+    request.onsuccess?.(new Event('success'))
+    expect(database.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a shared IndexedDB open alive while another caller still owns it', async () => {
+    const { request, database } = stubIndexedDb({ deferOpenSuccess: true })
+    const cache = new ModelCache(createStatusPanel())
+    const controller = new AbortController()
+    const abandoned = cache.getCached(controller.signal)
+    const remaining = cache.getCached()
+
+    controller.abort()
+    await expect(abandoned).rejects.toThrow('模型缓存操作已取消')
+    request.onsuccess?.(new Event('success'))
+
+    await expect(remaining).resolves.toBeNull()
+    expect(database.close).not.toHaveBeenCalled()
+  })
+
   it('rejects stale open requests after close', async () => {
     const { request, database } = stubIndexedDb({ deferOpenSuccess: true })
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -298,6 +365,43 @@ describe('ModelCache', () => {
     database.onversionchange?.(new Event('versionchange'))
 
     expect(database.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts a pending cache read when its caller is cancelled', async () => {
+    const { transactions } = stubIndexedDb({ deferTransactionCompletion: true })
+    const cache = new ModelCache(createStatusPanel())
+    const controller = new AbortController()
+    const promise = cache.getCached(controller.signal)
+    await vi.waitFor(() => expect(transactions).toHaveLength(1))
+
+    controller.abort()
+
+    await expect(promise).rejects.toThrow('模型缓存操作已取消')
+    expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
+  })
+
+  it('bounds a pending cache read by the caller deadline', async () => {
+    const { transactions } = stubIndexedDb({ deferTransactionCompletion: true })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const cache = new ModelCache(createStatusPanel())
+    const promise = cache.getCached(undefined, Date.now() + 30)
+    await vi.waitFor(() => expect(transactions).toHaveLength(1))
+
+    await expect(promise).resolves.toBeNull()
+    expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
+  })
+
+  it('settles and aborts a pending cache read when close is called', async () => {
+    const { transactions } = stubIndexedDb({ deferTransactionCompletion: true })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const cache = new ModelCache(createStatusPanel())
+    const promise = cache.getCached()
+    await vi.waitFor(() => expect(transactions).toHaveLength(1))
+
+    cache.close()
+
+    await expect(promise).resolves.toBeNull()
+    expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
   })
 
   it('reports elapsed time when download completes', async () => {

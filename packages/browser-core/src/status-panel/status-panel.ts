@@ -2,6 +2,7 @@ import type { AnswerCode } from '@hv-pony-solver/shared/answer'
 import type { SettingsStorage } from '../platform/storage'
 import type { HistoryStore } from '../persistence/answer-history-store'
 import type { HistoryRecord, World } from '../persistence/answer-history-types'
+import { formatErrorMessage } from '../utils/errors'
 import type { PanelStatus, StatusPanel as StatusPanelContract } from './status-panel-types'
 import {
   getPanelHistoryLimit,
@@ -25,6 +26,9 @@ export class StatusPanel implements StatusPanelContract {
   private historyLimit: number
   private renderQueued = false
   private lastRenderKey = ''
+  private persistenceError: string | null = null
+  private lifecycleGeneration = 0
+  private historyMutationGeneration = 0
   private status: PanelStatus = {
     model: '未开始',
     session: '未开始',
@@ -42,6 +46,8 @@ export class StatusPanel implements StatusPanelContract {
     if (this.el) {
       return
     }
+    this.lifecycleGeneration += 1
+    this.persistenceError = null
     this.records = this.history.get(this.world)
     this.compactMode = isPanelCompactModeSync(this.settingsStorage)
     this.el = document.createElement('div')
@@ -80,47 +86,74 @@ export class StatusPanel implements StatusPanelContract {
   }
 
   addSuccess(ponies: AnswerCode[], confidences: Partial<Record<AnswerCode, number>>, elapsed: number): void {
-    this.records = this.history.add(this.world, {
+    this.addHistoryRecord({
       type: 'success',
       answers: formatAnswers(ponies, confidences),
       elapsed,
     })
-    this.scheduleRender()
   }
 
   addManualResult(ponies: AnswerCode[], confidences: Partial<Record<AnswerCode, number>>, elapsed: number): void {
-    this.records = this.history.add(this.world, {
+    this.addHistoryRecord({
       type: 'manual',
       answers: formatAnswers(ponies, confidences),
       elapsed,
     })
-    this.scheduleRender()
   }
 
   addRandomFailure(pony: AnswerCode, elapsed: number): void {
-    this.records = this.history.add(this.world, {
+    this.addHistoryRecord({
       type: 'random',
       answers: pony,
       elapsed,
       message: `识别失败，随机选择 ${pony}`,
     })
-    this.scheduleRender()
   }
 
   addError(message: string, elapsed = 0): void {
-    this.records = this.history.add(this.world, {
+    this.addHistoryRecord({
       type: 'error',
       elapsed,
       message,
     })
-    this.scheduleRender()
   }
 
   destroy(): void {
+    this.lifecycleGeneration += 1
     this.renderQueued = false
     this.lastRenderKey = ''
     this.el?.remove()
     this.el = null
+  }
+
+  private addHistoryRecord(record: HistoryRecord): void {
+    const mutationGeneration = ++this.historyMutationGeneration
+    const lifecycleGeneration = this.lifecycleGeneration
+    const mutation = this.history.add(this.world, record)
+    this.records = mutation.records
+    this.persistenceError = null
+    this.scheduleRender()
+
+    void mutation.persisted.then(
+      (records) => {
+        if (!this.el || lifecycleGeneration !== this.lifecycleGeneration) {
+          return
+        }
+        this.records = records
+        if (mutationGeneration === this.historyMutationGeneration) {
+          this.persistenceError = null
+        }
+        this.scheduleRender()
+      },
+      (error: unknown) => {
+        if (!this.el || lifecycleGeneration !== this.lifecycleGeneration) {
+          return
+        }
+        this.records = this.history.get(this.world)
+        this.persistenceError = `历史记录保存失败：${formatErrorMessage(error)}`
+        this.scheduleRender()
+      },
+    )
   }
 
   private scheduleRender(): void {
@@ -140,11 +173,26 @@ export class StatusPanel implements StatusPanelContract {
     if (!this.el) {
       return
     }
-    const renderKey = JSON.stringify([this.world, this.status, this.records, this.compactMode, this.historyLimit])
+    const renderKey = JSON.stringify([
+      this.world,
+      this.status,
+      this.records,
+      this.compactMode,
+      this.historyLimit,
+      this.persistenceError,
+    ])
     if (renderKey === this.lastRenderKey) {
       return
     }
     this.lastRenderKey = renderKey
-    renderStatusPanelInto(this.el, this.world, this.status, this.records, this.compactMode, this.historyLimit)
+    renderStatusPanelInto(
+      this.el,
+      this.world,
+      this.status,
+      this.records,
+      this.compactMode,
+      this.historyLimit,
+      this.persistenceError,
+    )
   }
 }

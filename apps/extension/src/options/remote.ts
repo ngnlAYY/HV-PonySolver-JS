@@ -1,6 +1,3 @@
-import { MODEL_ACCESS_KEY_STORAGE_KEY } from '@hv-pony-solver/browser-core/model/model-settings'
-
-import { IndexedDbStringStorage } from '../host/indexeddb-string-storage'
 import { runtimeConnect } from '../platform/webextension'
 import {
   OPTIONS_PORT_NAME,
@@ -9,7 +6,7 @@ import {
   isModelAccessKey,
   type HostResponse,
   type HostSuccessResponse,
-  type VerifyKeyRequest,
+  type KeyIntentRequest,
 } from '../protocol/messages'
 import {
   createOptionsStatus,
@@ -25,7 +22,6 @@ const packagedModelHint = optionsElement<HTMLParagraphElement>('packaged-model-h
 const modelKey = optionsElement<HTMLInputElement>('model-key')
 const verifyKeyButton = optionsElement<HTMLButtonElement>('verify-key')
 const clearKeyButton = optionsElement<HTMLButtonElement>('clear-key')
-const secretStorage = new IndexedDbStringStorage()
 let requestSequence = 0
 let keyGeneration = 0
 let keyOperationTail: Promise<void> = Promise.resolve()
@@ -37,12 +33,13 @@ function nextRequestId(): string {
 }
 
 export function requestHost(
-  request: VerifyKeyRequest,
+  request: KeyIntentRequest,
   options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }> = {},
 ): Promise<HostSuccessResponse> {
   const { signal, timeoutMs = 95_000 } = options
+  const operationName = request.type === 'verify-key' ? 'Key 验证' : 'Key 清除'
   if (signal?.aborted) {
-    return Promise.reject(new Error('Key 验证已取消'))
+    return Promise.reject(new Error(`${operationName}已取消`))
   }
   return new Promise<HostResponse>((resolve, reject) => {
     const port = runtimeConnect(OPTIONS_PORT_NAME)
@@ -74,7 +71,7 @@ export function requestHost(
       disconnect()
       callback()
     }
-    const onAbort = (): void => settle(() => reject(new Error('Key 验证已取消')))
+    const onAbort = (): void => settle(() => reject(new Error(`${operationName}已取消`)))
     const onMessage = (message: unknown): void => {
       if (!isHostResponse(message) || message.requestId !== request.requestId) {
         return
@@ -87,10 +84,10 @@ export function requestHost(
       }
       settled = true
       cleanup()
-      reject(new Error('Key 验证连接已断开'))
+      reject(new Error(`${operationName}连接已断开`))
     }
     const timeoutId = setTimeout(() => {
-      settle(() => reject(new Error('Key 验证超时')))
+      settle(() => reject(new Error(`${operationName}超时`)))
     }, timeoutMs)
     signal?.addEventListener('abort', onAbort, { once: true })
     port.onMessage.addListener(onMessage)
@@ -117,7 +114,7 @@ function isCurrentOperation(generation: number, signal: AbortSignal): boolean {
 
 function assertCurrentOperation(generation: number, signal: AbortSignal): void {
   if (!isCurrentOperation(generation, signal)) {
-    throw new Error('Key 验证已取消')
+    throw new Error('Key 操作已取消')
   }
 }
 
@@ -155,9 +152,7 @@ function enqueueKeyOperation(
 
 verifyKeyButton.addEventListener('click', () => {
   enqueueKeyOperation(async (signal, generation) => {
-    const storedKey = await secretStorage.get(MODEL_ACCESS_KEY_STORAGE_KEY, signal)
-    assertCurrentOperation(generation, signal)
-    const candidateKey = modelKey.value.trim() || storedKey?.trim() || ''
+    const candidateKey = modelKey.value.trim()
     if (!candidateKey) {
       throw new Error('请先输入模型 Key')
     }
@@ -183,15 +178,19 @@ verifyKeyButton.addEventListener('click', () => {
 })
 
 clearKeyButton.addEventListener('click', () => {
-  enqueueKeyOperation(
-    async (signal, generation) => {
-      await secretStorage.remove(MODEL_ACCESS_KEY_STORAGE_KEY, signal)
-      assertCurrentOperation(generation, signal)
-      modelKey.value = ''
-      status.set('模型 Key 已清除')
-    },
-    '正在清除模型 Key…',
-  )
+  enqueueKeyOperation(async (signal, generation) => {
+    await requestHost(
+      {
+        protocol: PROTOCOL_VERSION,
+        type: 'clear-key',
+        requestId: nextRequestId(),
+      },
+      { signal },
+    )
+    assertCurrentOperation(generation, signal)
+    modelKey.value = ''
+    status.set('模型 Key 已清除')
+  }, '正在清除模型 Key…')
 })
 
 // Install every Key handler before exposing the controls to remote-artifact users.
@@ -204,16 +203,15 @@ globalThis.addEventListener(
     keyGeneration += 1
     activeKeyController?.abort()
     activeKeyController = null
-    keyOperationTail = keyOperationTail.catch(() => undefined).then(() => secretStorage.close())
   },
   { once: true },
 )
 const initialKeyGeneration = keyGeneration
-void ordinarySettings.load()
-  .then(async () => {
-    const hasKey = ((await secretStorage.get(MODEL_ACCESS_KEY_STORAGE_KEY)) ?? '').trim().length > 0
+void ordinarySettings
+  .load()
+  .then(() => {
     if (keyGeneration === initialKeyGeneration) {
-      status.set(hasKey ? '已配置模型 Key（不会回显）' : '尚未配置模型 Key')
+      status.set('模型 Key 不会回显，可验证新 Key 或清除已保存 Key')
     }
   })
   .catch((error: unknown) => {

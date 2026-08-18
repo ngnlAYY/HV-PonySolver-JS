@@ -41,12 +41,16 @@ export function renderStatusPanelInto(
   records: HistoryRecord[],
   compactMode: boolean,
   historyLimit: number,
+  persistenceError: string | null = null,
 ): void {
   const worldName = WORLD_NAMES[world] || '未知'
   const recentError = records.find((record) => record.type === 'error')?.message || '无'
   const lines: Array<string | Node> = ['HV-PonySolver', '运行: 本地 ONNX']
   if (!compactMode) {
     lines.push(`模型状态：${status.model}`, `会话状态：${status.session}`, `推理状态：${status.inference}`)
+  }
+  if (persistenceError) {
+    lines.push(persistenceError)
   }
   lines.push(`最近错误：${recentError}`)
   const worldLine = document.createDocumentFragment()
@@ -74,6 +78,7 @@ export function renderStatusPanel(
   records: HistoryRecord[],
   compactMode: boolean,
   historyLimit: number,
+  persistenceError: string | null = null,
 ): string {
   const worldName = WORLD_NAMES[world] || '未知'
   const visibleRecords = records.slice(0, historyLimit)
@@ -90,6 +95,7 @@ export function renderStatusPanel(
     'HV-PonySolver',
     '运行: 本地 ONNX',
     ...statusRows,
+    ...(persistenceError ? [escapeHtml(persistenceError)] : []),
     `最近错误：${escapeHtml(recentError)}`,
     `当前处于<strong>${escapeHtml(worldName)}</strong>`,
     `${escapeHtml(worldName)}最近答题:`,

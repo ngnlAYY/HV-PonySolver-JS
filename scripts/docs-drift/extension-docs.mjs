@@ -2,8 +2,13 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
   const errors = []
   const chromeMinimum = browserSupport?.chromium?.manifestMinimumVersion ?? null
   const firefoxMinimum = browserSupport?.firefox?.manifestMinimumVersion ?? null
+  const firefoxAndroidMinimum = browserSupport?.['firefox-android']?.manifestMinimumVersion ?? null
   if (!chromeMinimum) errors.push('extension browser support minimum_chrome_version is unreadable')
-  if (!firefoxMinimum) errors.push('extension browser support strict_min_version is unreadable')
+  if (!firefoxMinimum) errors.push('extension browser support Firefox Desktop strict_min_version is unreadable')
+  if (!firefoxAndroidMinimum) errors.push('extension browser support Firefox Android strict_min_version is unreadable')
+  if (firefoxAndroidMinimum && browserSupport?.firefox?.androidManifestMinimumVersion !== firefoxAndroidMinimum) {
+    errors.push('extension browser support Firefox Android minimum versions disagree')
+  }
 
   const requiredScripts = [
     'build',
@@ -24,11 +29,25 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
 
   for (const [label, value] of [
     ['Chromium minimum version', chromeMinimum],
-    ['Firefox minimum version', firefoxMinimum],
+    ['Firefox Desktop minimum version', firefoxMinimum],
+    ['Firefox Android minimum version', firefoxAndroidMinimum],
   ]) {
     const displayValue = value?.endsWith('.0') ? value.slice(0, -2) : value
-    if (value && !readme.includes(value) && !extensionDoc.includes(value) && !readme.includes(displayValue) && !extensionDoc.includes(displayValue)) {
+    if (
+      value &&
+      !readme.includes(value) &&
+      !extensionDoc.includes(value) &&
+      !readme.includes(displayValue) &&
+      !extensionDoc.includes(displayValue)
+    ) {
       errors.push(`extension documentation omits ${label} ${value}`)
+    }
+  }
+
+  const requiredCspDirectives = ["object-src 'none'", "worker-src 'self'"]
+  for (const directive of requiredCspDirectives) {
+    if (!extensionDoc.includes(directive)) {
+      errors.push(`extension documentation omits ${directive}`)
     }
   }
 
@@ -36,7 +55,6 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
     'apps/extension/dist/chromium',
     'apps/extension/dist/firefox',
     'authenticationInfo',
-    '`none`',
     'storage.local',
     'IndexedDB',
     '--model-mode packaged',

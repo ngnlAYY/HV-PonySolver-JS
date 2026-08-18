@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { cp, lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -18,14 +19,24 @@ const version = packageJson.version
 const runtimeWasmFilename = 'ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm'
 const runtimeWasmSha256 = '25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa'
 const runtimeWasmSource = path.join(repositoryRoot, 'other', runtimeWasmFilename)
-const runtimeGlueSource = path.join(repositoryRoot, 'apps', 'userscript', 'vendor', 'onnxruntime', 'ort.wasm.bundle.min.mjs')
+const runtimeGlueSource = path.join(
+  repositoryRoot,
+  'apps',
+  'userscript',
+  'vendor',
+  'onnxruntime',
+  'ort.wasm.bundle.min.mjs',
+)
 const runtimeGlueSha256 = 'a63d4f08e70220c0f721fabfd4e4b958aa127334a19038b2732d07e919f32554'
 const deterministicZipTimestamp = new Date('1980-01-01T00:00:00.000Z')
 const dynamicRuntimeImport = 'import(/*webpackIgnore:true*/ /*@vite-ignore*/t)'
-const disabledDynamicRuntimeImport = 'Promise.reject(new Error("Dynamic ONNX runtime modules are disabled in the extension build"))'
+const disabledDynamicRuntimeImport =
+  'Promise.reject(new Error("Dynamic ONNX runtime modules are disabled in the extension build"))'
 const modelDeliveryModes = new Set(['remote', 'packaged'])
 const extensionTargets = new Set(['chromium', 'firefox'])
-const remoteModelHost = 'https://models.ngnl.host/*'
+const remoteModelOrigin = 'https://models.ngnl.host'
+const remoteModelHost = `${remoteModelOrigin}/*`
+const defaultOutputRoot = path.join(extensionRoot, 'dist')
 const packagedModelIdentity = Object.freeze({
   filename: ORT_MODEL_FILENAME,
   byteLength: ORT_MODEL_INTEGRITY.byteLength,
@@ -42,6 +53,100 @@ const contentExcludes = [
   'https://hentaiverse.org/equip/*',
   'https://hentaiverse.org/isekai/equip/*',
 ]
+
+function isPathWithin(candidate, root) {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+}
+
+async function canonicalizePotentialPath(candidate) {
+  const resolved = path.resolve(candidate)
+  const missingSegments = []
+  let current = resolved
+  while (true) {
+    try {
+      const canonicalParent = await realpath(current)
+      return path.join(canonicalParent, ...missingSegments.reverse())
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw new Error(`Unable to canonicalize extension output path: ${resolved}`, { cause: error })
+      }
+      const parent = path.dirname(current)
+      if (parent === current) {
+        throw new Error(`Unable to canonicalize extension output path: ${resolved}`, { cause: error })
+      }
+      missingSegments.push(path.basename(current))
+      current = parent
+    }
+  }
+}
+
+export async function assertSafeBuildOutputRoot(requestedOutputRoot) {
+  if (typeof requestedOutputRoot !== 'string' || requestedOutputRoot.trim() === '') {
+    throw new TypeError('Extension output root must be a non-empty path')
+  }
+  const resolvedOutputRoot = path.resolve(requestedOutputRoot)
+  try {
+    const stats = await lstat(resolvedOutputRoot)
+    if (stats.isSymbolicLink()) {
+      throw new Error(`Extension output root must not be a symbolic link: ${resolvedOutputRoot}`)
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      throw error
+    }
+  }
+
+  const rootCandidates = [extensionRoot, os.tmpdir(), process.cwd(), os.homedir(), repositoryRoot]
+  if (process.env.RUNNER_TEMP) {
+    rootCandidates.push(process.env.RUNNER_TEMP)
+  }
+  const [
+    canonicalOutputRoot,
+    canonicalExtensionRoot,
+    canonicalTemporaryRoot,
+    canonicalCwd,
+    canonicalHome,
+    canonicalRepository,
+    canonicalRunnerRoot,
+  ] = await Promise.all([
+    canonicalizePotentialPath(resolvedOutputRoot),
+    ...rootCandidates.map((candidate) => canonicalizePotentialPath(candidate)),
+  ])
+  const filesystemRoot = path.parse(canonicalOutputRoot).root
+  if ([filesystemRoot, canonicalCwd, canonicalHome, canonicalRepository].includes(canonicalOutputRoot)) {
+    throw new Error(`Refusing to recursively remove protected path: ${canonicalOutputRoot}`)
+  }
+
+  const canonicalDefaultRoot = path.join(canonicalExtensionRoot, 'dist')
+  const isDefaultBuildOutput = isPathWithin(canonicalOutputRoot, canonicalDefaultRoot)
+  if (isPathWithin(canonicalOutputRoot, canonicalRepository) && !isDefaultBuildOutput) {
+    throw new Error(`Refusing to recursively remove source tree path: ${canonicalOutputRoot}`)
+  }
+
+  const isUsableTemporaryRoot = (candidate) =>
+    candidate !== path.parse(candidate).root &&
+    ![canonicalCwd, canonicalHome, canonicalRepository].includes(candidate) &&
+    !isPathWithin(candidate, canonicalRepository)
+  const isTemporaryOutput =
+    isUsableTemporaryRoot(canonicalTemporaryRoot) &&
+    canonicalOutputRoot !== canonicalTemporaryRoot &&
+    isPathWithin(canonicalOutputRoot, canonicalTemporaryRoot)
+  const isRunnerTemporaryOutput =
+    canonicalRunnerRoot !== undefined &&
+    isUsableTemporaryRoot(canonicalRunnerRoot) &&
+    canonicalOutputRoot !== canonicalRunnerRoot &&
+    isPathWithin(canonicalOutputRoot, canonicalRunnerRoot)
+  if (!isDefaultBuildOutput && !isTemporaryOutput && !isRunnerTemporaryOutput) {
+    throw new Error(`Extension output root is outside allowed build roots: ${canonicalOutputRoot}`)
+  }
+  return canonicalOutputRoot
+}
+
+function extensionContentSecurityPolicy(modelDelivery) {
+  const connectSources = modelDelivery === 'remote' ? `'self' ${remoteModelOrigin}` : "'self'"
+  return `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src ${connectSources}`
+}
 
 function normalizeModelDelivery(value = 'remote') {
   if (!modelDeliveryModes.has(value)) {
@@ -104,7 +209,7 @@ function commonManifest(modelDelivery = 'remote') {
       open_in_tab: true,
     },
     content_security_policy: {
-      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+      extension_pages: extensionContentSecurityPolicy(modelDelivery),
     },
   }
 }
@@ -167,7 +272,9 @@ function verifyPackagedModelBytes(bytes, identity) {
     throw new Error('Packaged model bytes must be a Uint8Array')
   }
   if (bytes.byteLength !== identity.byteLength) {
-    throw new Error(`Packaged model byte length mismatch: expected ${identity.byteLength}, received ${bytes.byteLength}`)
+    throw new Error(
+      `Packaged model byte length mismatch: expected ${identity.byteLength}, received ${bytes.byteLength}`,
+    )
   }
   const actualSha256 = sha256(bytes)
   if (actualSha256 !== identity.sha256) {
@@ -325,12 +432,14 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
   }
   const modelDelivery = normalizeModelDelivery(options.modelDelivery)
   const manifest = JSON.parse(await readFile(path.join(targetDirectory, 'manifest.json'), 'utf8'))
-  const expectedBackground = target === 'chromium' ? manifest.background?.service_worker : manifest.background?.scripts?.[0]
+  const expectedBackground =
+    target === 'chromium' ? manifest.background?.service_worker : manifest.background?.scripts?.[0]
   if (expectedBackground !== 'background.js') {
     throw new Error(`${target} background declaration is invalid`)
   }
-  if (!manifest.content_security_policy?.extension_pages.includes("script-src 'self'")) {
-    throw new Error(`${target} extension CSP does not restrict scripts to the package`)
+  const expectedCsp = extensionContentSecurityPolicy(modelDelivery)
+  if (manifest.content_security_policy?.extension_pages !== expectedCsp) {
+    throw new Error(`${target} extension CSP does not match the ${modelDelivery} security policy`)
   }
   const expectedPermissions = target === 'chromium' ? ['offscreen', 'storage'] : ['storage']
   if ([...manifest.permissions].sort().join(',') !== expectedPermissions.join(',')) {
@@ -352,7 +461,14 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
   }
   const files = await walkFiles(targetDirectory)
   const relativeFiles = new Set(files.map((file) => file.relativePath))
-  for (const required of ['background.js', 'content.js', 'inference-worker.js', 'options.html', 'options.js', `runtime/${runtimeWasmFilename}`]) {
+  for (const required of [
+    'background.js',
+    'content.js',
+    'inference-worker.js',
+    'options.html',
+    'options.js',
+    `runtime/${runtimeWasmFilename}`,
+  ]) {
     if (!relativeFiles.has(required)) {
       throw new Error(`${target} package is missing ${required}`)
     }
@@ -400,7 +516,8 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
     }
   }
   if (modelDelivery === 'packaged') {
-    const remoteCapability = /https:\/\/models\.ngnl\.host|hvPonySolverExtensionSecrets|hvPonySolverModelAccessKey|Bearer /u
+    const remoteCapability =
+      /https:\/\/models\.ngnl\.host|hvPonySolverExtensionSecrets|hvPonySolverModelAccessKey|Bearer /u
     for (const [relativePath, source] of javascriptSources) {
       const matched = source.match(remoteCapability)?.[0]
       if (matched) {
@@ -431,7 +548,10 @@ async function createArchive(targetDirectory, outputRoot, target, modelDelivery,
   const files = await walkFiles(targetDirectory)
   const entries = {}
   for (const file of files) {
-    entries[file.relativePath] = [new Uint8Array(await readFile(file.absolutePath)), { mtime: deterministicZipTimestamp }]
+    entries[file.relativePath] = [
+      new Uint8Array(await readFile(file.absolutePath)),
+      { mtime: deterministicZipTimestamp },
+    ]
   }
   const archiveName = `${artifactBaseName(target, modelDelivery, fixture)}.zip`
   const archiveBytes = zipSync(entries, { level: 9 })
@@ -554,9 +674,10 @@ function validateTargets(targets) {
 }
 
 async function buildVerifiedExtensions(options) {
-  const outputRoot = options.outputRoot ?? path.join(extensionRoot, 'dist')
+  const requestedOutputRoot = options.outputRoot ?? defaultOutputRoot
   const targets = options.targets ?? ['chromium', 'firefox']
   validateTargets(targets)
+  const outputRoot = await assertSafeBuildOutputRoot(requestedOutputRoot)
   await rm(outputRoot, { recursive: true, force: true })
   await mkdir(outputRoot, { recursive: true })
   for (const target of targets) {
@@ -578,9 +699,8 @@ export async function buildExtensions(options = {}) {
   if (modelDelivery === 'packaged' && fixtureHost) {
     throw new Error('Packaged model builds do not support the remote content Host fixture')
   }
-  const packagedModel = modelDelivery === 'packaged'
-    ? await verifyPackagedModelFile(packagedModelSource, packagedModelIdentity)
-    : undefined
+  const packagedModel =
+    modelDelivery === 'packaged' ? await verifyPackagedModelFile(packagedModelSource, packagedModelIdentity) : undefined
   await assertRuntimeAssets()
   return buildVerifiedExtensions({
     outputRoot: options.outputRoot,

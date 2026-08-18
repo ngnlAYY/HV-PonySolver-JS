@@ -27,6 +27,12 @@ export default defineConfig({
           functions: 80,
           lines: 80,
         },
+        'src/content/storage-mirror.ts': {
+          statements: 80,
+          branches: 70,
+          functions: 80,
+          lines: 80,
+        },
         'src/host/indexeddb-string-storage.ts': {
           statements: 80,
           branches: 70,
@@ -34,6 +40,12 @@ export default defineConfig({
           lines: 80,
         },
         'src/host/inference-host.ts': {
+          statements: 80,
+          branches: 70,
+          functions: 80,
+          lines: 80,
+        },
+        'src/host/remote-inference-host.ts': {
           statements: 80,
           branches: 70,
           functions: 80,

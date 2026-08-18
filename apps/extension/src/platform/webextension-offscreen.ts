@@ -3,6 +3,7 @@ import { resolveRawExtensionApi } from './webextension-api'
 export type ChromiumOffscreenApi = Readonly<{
   getContexts(filter: Readonly<{ contextTypes: string[]; documentUrls: string[] }>): Promise<unknown[]>
   createDocument(options: Readonly<{ url: string; reasons: string[]; justification: string }>): Promise<void>
+  closeDocument(): Promise<void>
 }>
 
 export function getChromiumOffscreenApi(): ChromiumOffscreenApi {
@@ -13,5 +14,6 @@ export function getChromiumOffscreenApi(): ChromiumOffscreenApi {
   return {
     getContexts: (filter) => api.runtime.getContexts!(filter),
     createDocument: (options) => api.offscreen!.createDocument(options),
+    closeDocument: () => api.offscreen!.closeDocument(),
   }
 }

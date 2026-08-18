@@ -1,11 +1,41 @@
 import { captchaSelectors } from './captcha-selectors'
 
+export type CaptchaControlsSnapshot = Readonly<{
+  answers: readonly HTMLInputElement[]
+  answerDisabled: readonly boolean[]
+  submit: HTMLInputElement | null
+  submitDisabled: boolean
+}>
+
 export type CaptchaTarget = Readonly<{
   master: Element
   form: HTMLFormElement
   image: HTMLImageElement
+  controls: CaptchaControlsSnapshot
   captchaKey: string
 }>
+
+function captureControls(form: HTMLFormElement): CaptchaControlsSnapshot {
+  const answers = Array.from(form.querySelectorAll<HTMLInputElement>(captchaSelectors.answers))
+  const submit = form.querySelector<HTMLInputElement>(captchaSelectors.submit)
+  return {
+    answers,
+    answerDisabled: answers.map((answer) => answer.disabled),
+    submit,
+    submitDisabled: submit?.disabled ?? false,
+  }
+}
+
+function isSameControls(left: CaptchaControlsSnapshot, right: CaptchaControlsSnapshot): boolean {
+  return (
+    left.submit === right.submit &&
+    left.submitDisabled === right.submitDisabled &&
+    left.answers.length === right.answers.length &&
+    left.answers.every(
+      (answer, index) => answer === right.answers[index] && left.answerDisabled[index] === right.answerDisabled[index],
+    )
+  )
+}
 
 export function isSameCaptchaTarget(left: CaptchaTarget | null, right: CaptchaTarget | null): boolean {
   return (
@@ -14,6 +44,7 @@ export function isSameCaptchaTarget(left: CaptchaTarget | null, right: CaptchaTa
     left.master === right.master &&
     left.form === right.form &&
     left.image === right.image &&
+    isSameControls(left.controls, right.controls) &&
     left.captchaKey === right.captchaKey
   )
 }
@@ -39,7 +70,7 @@ export function findCaptchaTarget(): CaptchaTarget | null {
     const form = master.querySelector<HTMLFormElement>(captchaSelectors.form)
     const captchaKey = image?.currentSrc || image?.src || ''
     if (form && image && captchaKey && isSameOriginUrl(captchaKey) && isSameOriginForm(form)) {
-      return { master, form, image, captchaKey }
+      return { master, form, image, controls: captureControls(form), captchaKey }
     }
   }
   return null

@@ -263,30 +263,159 @@ describe('CaptchaSolver', () => {
     expect(panel.addManualResult).not.toHaveBeenCalled()
   })
 
-  it('reports image loading failures with an image stage prefix', async () => {
+  it('reports image loading failures after the bounded retry limit', async () => {
+    vi.useFakeTimers()
+    try {
+      appendCaptcha()
+      const { solver, panel, detector, imageLoader, answerSubmitter } = createSolver({
+        imageLoader: { get: vi.fn(async () => Promise.reject(new Error('网络断开'))) },
+      })
+
+      const resultPromise = solver.trigger()
+      await vi.runAllTimersAsync()
+      const result = await resultPromise
+
+      expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+      expect(imageLoader.get).toHaveBeenCalledTimes(3)
+      expectPanelError(panel, '图片获取失败: Error: 网络断开')
+      expect(panel.addError).toHaveBeenCalledTimes(1)
+      expect(detector.detect).not.toHaveBeenCalled()
+      expect(answerSubmitter.submit).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports detector rejections after the bounded retry limit', async () => {
+    vi.useFakeTimers()
+    try {
+      appendCaptcha()
+      const detector = createDetector(vi.fn(async () => Promise.reject('模型离线')))
+      const { solver, panel, answerSubmitter } = createSolver({ detector })
+
+      const resultPromise = solver.trigger()
+      await vi.runAllTimersAsync()
+      const result = await resultPromise
+
+      expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+      expect(detector.detect).toHaveBeenCalledTimes(3)
+      expectPanelError(panel, '推理失败: 模型离线')
+      expect(panel.addError).toHaveBeenCalledTimes(1)
+      expect(answerSubmitter.submit).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+  it('retries a transient image failure without a DOM mutation and records no error after recovery', async () => {
+    vi.useFakeTimers()
+    try {
+      appendCaptcha()
+      const imageLoader: ImageLoader = {
+        get: vi
+          .fn()
+          .mockRejectedValueOnce(new Error('temporary image failure'))
+          .mockResolvedValue(new Blob(['captcha'])),
+      }
+      const detector = createDetector(
+        vi.fn(async () => ({
+          success: true,
+          ponies: ['RA'],
+          confidences: { RA: 0.95 },
+          detections: [],
+          candidates: [],
+        })),
+      )
+      const { solver, panel } = createSolver({
+        detector,
+        imageLoader,
+        getAnswerMode: vi.fn(async () => 'manual'),
+      })
+
+      const resultPromise = solver.trigger()
+      await vi.runAllTimersAsync()
+      const result = await resultPromise
+
+      expect(result.handled).toBe(true)
+      expect(imageLoader.get).toHaveBeenCalledTimes(2)
+      expect(detector.detect).toHaveBeenCalledTimes(1)
+      expect(panel.addError).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('retries a transient inference failure without a DOM mutation and records no error after recovery', async () => {
+    vi.useFakeTimers()
+    try {
+      appendCaptcha()
+      const detector = createDetector(
+        vi
+          .fn()
+          .mockRejectedValueOnce(new Error('temporary inference failure'))
+          .mockResolvedValue({
+            success: true,
+            ponies: ['RA'],
+            confidences: { RA: 0.95 },
+            detections: [],
+            candidates: [],
+          }),
+      )
+      const { solver, panel, imageLoader } = createSolver({
+        detector,
+        getAnswerMode: vi.fn(async () => 'manual'),
+      })
+
+      const resultPromise = solver.trigger()
+      await vi.runAllTimersAsync()
+      const result = await resultPromise
+
+      expect(result.handled).toBe(true)
+      expect(imageLoader.get).toHaveBeenCalledTimes(1)
+      expect(detector.detect).toHaveBeenCalledTimes(2)
+      expect(panel.addError).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not retry or record an error when inference is cancelled', async () => {
     appendCaptcha()
-    const { solver, panel, detector, answerSubmitter } = createSolver({
-      imageLoader: { get: vi.fn(async () => Promise.reject(new Error('网络断开'))) },
+    const abortController = new AbortController()
+    const detector = createDetector(
+      vi.fn(async () => {
+        abortController.abort()
+        throw new Error('cancelled inference')
+      }),
+    )
+    const { solver, panel, answerSubmitter } = createSolver({
+      detector,
+      getAbortSignal: () => abortController.signal,
     })
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
-    expectPanelError(panel, '图片获取失败: Error: 网络断开')
-    expect(detector.detect).not.toHaveBeenCalled()
+    expect(result.handled).toBe(false)
+    expect(detector.detect).toHaveBeenCalledTimes(1)
+    expect(panel.addError).not.toHaveBeenCalled()
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
   })
 
-  it('reports detector rejections with an inference stage prefix', async () => {
+  it('does not retry or record an error when navigation makes an image failure stale', async () => {
     appendCaptcha()
-    const detector = createDetector(vi.fn(async () => Promise.reject('模型离线')))
-    const { solver, panel, answerSubmitter } = createSolver({ detector })
+    const imageLoader: ImageLoader = {
+      get: vi.fn(async () => {
+        appendCaptcha()
+        throw new Error('stale image failure')
+      }),
+    }
+    const { solver, panel, detector } = createSolver({ imageLoader })
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
-    expectPanelError(panel, '推理失败: 模型离线')
-    expect(answerSubmitter.submit).not.toHaveBeenCalled()
+    expect(result.handled).toBe(false)
+    expect(imageLoader.get).toHaveBeenCalledTimes(1)
+    expect(detector.detect).not.toHaveBeenCalled()
+    expect(panel.addError).not.toHaveBeenCalled()
   })
 
   it('reports image loading and detector stages before failed detection results', async () => {
@@ -308,11 +437,11 @@ describe('CaptchaSolver', () => {
     appendCaptcha()
     const abortController = new AbortController()
     const detector = createDetector(vi.fn(async () => emptyDetectionResult(true)))
-    const { solver, panel } = createSolver({
+    const { solver, panel, imageLoader } = createSolver({
       detector,
       getAbortSignal: () => abortController.signal,
       imageLoader: {
-        get: vi.fn(async () => {
+        get: vi.fn(async (_url: string, _signal?: AbortSignal) => {
           abortController.abort()
           return new Blob(['captcha'])
         }),
@@ -324,6 +453,8 @@ describe('CaptchaSolver', () => {
     expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: '获取图片' })
     expect(panel.setStatus).not.toHaveBeenCalledWith({ inference: expect.stringMatching(/^图片获取完成 \d+ms$/) })
+    expect(panel.addError).not.toHaveBeenCalled()
+    expect(imageLoader.get).toHaveBeenCalledWith('http://localhost:3000/captcha.png', abortController.signal)
     expect(detector.detect).not.toHaveBeenCalled()
   })
 

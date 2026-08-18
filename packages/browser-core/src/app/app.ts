@@ -1,8 +1,11 @@
 import { captchaSelectors } from '../captcha/captcha-selectors'
 import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from '../captcha/captcha-target'
+import { sleep } from '../utils/delay'
 import { formatErrorMessage } from '../utils/errors'
 import { warn } from '../utils/logger'
 import type { AppDependencies } from './app-dependencies'
+
+const PREPARE_RETRY_DELAYS_MS = [250, 750] as const
 
 export class App {
   private readonly panel: AppDependencies['panel']
@@ -123,23 +126,55 @@ export class App {
     })
   }
 
+  private isTargetCurrent(target: CaptchaTarget, signal?: AbortSignal): boolean {
+    return !this.destroyed && signal?.aborted !== true && isSameCaptchaTarget(target, findCaptchaTarget())
+  }
+
+  private async prepareTarget(target: CaptchaTarget, signal?: AbortSignal): Promise<boolean> {
+    for (let attempt = 0; attempt <= PREPARE_RETRY_DELAYS_MS.length; attempt += 1) {
+      if (!this.isTargetCurrent(target, signal)) {
+        return false
+      }
+      try {
+        await this.detector.prepare(signal)
+        return this.isTargetCurrent(target, signal)
+      } catch (error) {
+        if (!this.isTargetCurrent(target, signal)) {
+          return false
+        }
+        const retryDelay = PREPARE_RETRY_DELAYS_MS[attempt]
+        if (retryDelay === undefined) {
+          warn('启动 ONNX 失败:', formatErrorMessage(error))
+          return false
+        }
+        await sleep(retryDelay, signal)
+      }
+    }
+    return false
+  }
+
   private async runSolve(): Promise<void> {
+    let target: CaptchaTarget | null = null
+    const signal = this.solveAbortController?.signal
     try {
-      const target = findCaptchaTarget()
+      target = findCaptchaTarget()
       if (this.destroyed || this.solver.isBusy || !target || isSameCaptchaTarget(target, this.lastCaptchaTarget)) {
         return
       }
-      const signal = this.solveAbortController?.signal
-      await this.detector.prepare(signal)
-      if (this.destroyed || signal?.aborted || !isSameCaptchaTarget(target, findCaptchaTarget())) {
+      const prepared = await this.prepareTarget(target, signal)
+      if (!prepared) {
+        if (this.isTargetCurrent(target, signal)) {
+          this.lastCaptchaTarget = target
+        }
         return
       }
       const result = await this.solver.trigger(target)
-      if (result.handled && !this.destroyed && isSameCaptchaTarget(target, findCaptchaTarget())) {
+      if (result.handled && this.isTargetCurrent(target, signal)) {
         this.lastCaptchaTarget = target
       }
     } catch (error) {
-      if (!this.destroyed) {
+      if (target && this.isTargetCurrent(target, signal)) {
+        this.lastCaptchaTarget = target
         warn('启动 ONNX 失败:', formatErrorMessage(error))
       }
     } finally {

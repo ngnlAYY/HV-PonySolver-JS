@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { yoloOutputConfig } from '../../src/inference/inference-config'
-import { parseYoloOutput } from '../../src/inference/yolo-output-parser'
+import { parseYoloOutput, parseYoloOutputTensor } from '../../src/inference/yolo-output-parser'
 
 function yoloRow(confidence: number, classId: number): number[] {
   const row = Array.from({ length: yoloOutputConfig.rowSize }, () => 0)
@@ -204,5 +204,41 @@ describe('parseYoloOutput', () => {
 
     const uniqueKinds = new Set(result.ponies)
     expect(uniqueKinds.size).toBe(result.ponies.length)
+  })
+})
+
+describe('parseYoloOutputTensor', () => {
+  it('accepts the exact ONNX [1, rows, 6] tensor layout', () => {
+    const data = new Float32Array([...yoloRow(0.8, 0), ...yoloRow(0.7, 2)])
+
+    expect(parseYoloOutputTensor({ data, dims: [1, 2, yoloOutputConfig.rowSize] })).toMatchObject({
+      success: true,
+      ponies: ['TS', 'FS'],
+    })
+  })
+
+  it.each([
+    { dims: [1, 1, 5], data: new Float32Array(6), message: '模型输出维度无效' },
+    { dims: [1, 6], data: new Float32Array(5), message: '模型输出数据长度与维度不匹配' },
+    { dims: [0, 6], data: new Float32Array(), message: '模型输出行数无效' },
+    { dims: [1, 1, 1, 6], data: new Float32Array(6), message: '模型输出维度无效' },
+  ])('rejects malformed tensor dimensions without accepting partial rows', ({ dims, data, message }) => {
+    expect(() => parseYoloOutputTensor({ data, dims })).toThrow(message)
+  })
+
+  it('requires Float32 tensor data', () => {
+    expect(() => parseYoloOutputTensor({ data: new Float64Array(6), dims: [1, 6] })).toThrow('模型输出格式无效')
+  })
+
+  it.each([
+    { confidence: -0.01, classId: 0, message: '置信度无效' },
+    { confidence: 1.01, classId: 0, message: '置信度无效' },
+    { confidence: Number.NaN, classId: 0, message: '包含无效数值' },
+    { confidence: 0.8, classId: 2.5, message: '类别无效' },
+    { confidence: 0.8, classId: 999, message: '类别无效' },
+  ])('rejects invalid confidence and exact class values', ({ confidence, classId, message }) => {
+    const data = new Float32Array(yoloRow(confidence, classId))
+
+    expect(() => parseYoloOutputTensor({ data, dims: [1, 6] })).toThrow(message)
   })
 })

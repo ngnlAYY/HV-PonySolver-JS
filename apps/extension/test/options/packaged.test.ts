@@ -111,7 +111,7 @@ describe('packaged options entry', () => {
       [PANEL_HISTORY_LIMIT_STORAGE_KEY]: '8',
       [RANDOM_ON_FAIL_STORAGE_KEY]: '0',
     })
-    expect(platformMocks.storageRemove).toHaveBeenCalledTimes(1)
+    expect(platformMocks.storageRemove).not.toHaveBeenCalled()
     expect(platformMocks.runtimeConnect).not.toHaveBeenCalled()
     expect(forbiddenModuleMocks.indexedDbStorageConstructed).not.toHaveBeenCalled()
     await vi.waitFor(() => {

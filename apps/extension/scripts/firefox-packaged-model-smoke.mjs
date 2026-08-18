@@ -14,18 +14,21 @@ import { fileURLToPath } from 'node:url'
 import { firefox } from '@playwright/test'
 
 import {
-  assertSupportedBrowserVersion,
+  assertBrowserVersionForRun,
   browserSupport,
   firefoxArguments,
   geckodriverArguments,
   parseGeckodriverVersion,
 } from './browser-support.mjs'
-import { discoverPackagedArtifact } from './packaged-smoke-artifact.mjs'
-import { writePackagedE2eEvidence } from './packaged-e2e-evidence.mjs'
+import { validatePackagedInferenceObservation, writePackagedE2eEvidence } from './packaged-e2e-evidence.mjs'
+import { discoverPackagedArtifact, verifyPackagedArchive } from './packaged-smoke-artifact.mjs'
 
 const execFileAsync = promisify(execFile)
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outputRoot = path.resolve(process.env.PACKAGED_EXTENSION_OUTPUT_ROOT || path.join(extensionRoot, 'dist'))
+const evidenceDirectory = path.resolve(
+  process.env.PACKAGED_E2E_EVIDENCE_DIR || path.join(outputRoot, 'packaged-e2e-evidence'),
+)
 const packagedArtifact = await discoverPackagedArtifact(outputRoot, 'firefox')
 const archivePath = packagedArtifact.archivePath
 const firefoxExecutable = process.env.FIREFOX_EXECUTABLE_PATH || firefox.executablePath()
@@ -98,12 +101,21 @@ async function startFixtureProxy(temporaryRoot) {
   const keyPath = path.join(temporaryRoot, 'fixture-key.pem')
   const certificatePath = path.join(temporaryRoot, 'fixture-cert.pem')
   await execFileAsync('openssl', [
-    'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
-    '-keyout', keyPath,
-    '-out', certificatePath,
-    '-days', '1',
-    '-subj', '/CN=hentaiverse.org',
-    '-addext', 'subjectAltName=DNS:hentaiverse.org',
+    'req',
+    '-x509',
+    '-newkey',
+    'rsa:2048',
+    '-nodes',
+    '-keyout',
+    keyPath,
+    '-out',
+    certificatePath,
+    '-days',
+    '1',
+    '-subj',
+    '/CN=hentaiverse.org',
+    '-addext',
+    'subjectAltName=DNS:hentaiverse.org',
   ])
   const secureContext = tls.createSecureContext({
     key: await readFile(keyPath),
@@ -291,11 +303,18 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
           hvPonySolverSubmitDelay: '0',
           hvPonySolverMultiClickDelay: '0',
           hvPonySolverAnswerMode: 'auto',
-        }).then(() => done({ ok: true }), (error) => done({ error: String(error) }))
+          hvPonySolverRandomOnFail: '0',
+        }).then(
+          () => browser.storage.local.get('hvPonySolverRandomOnFail'),
+          (error) => Promise.reject(error),
+        ).then(
+          (values) => done({ ok: true, randomOnFail: values.hvPonySolverRandomOnFail }),
+          (error) => done({ error: String(error) }),
+        )
       `,
       args: [],
     })
-    assert.deepEqual(storageResult, { ok: true })
+    assert.deepEqual(storageResult, { ok: true, randomOnFail: '0' })
     await request('POST', `${sessionPath}/url`, { url: `https://hentaiverse.org/fixture?run=${runIndex}` })
     const inferenceResult = await request('POST', `${sessionPath}/execute/async`, {
       script: `
@@ -308,8 +327,12 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
             done({
               ok: true,
               count,
-              checked: document.querySelectorAll('input[name="riddleanswer[]"]:checked').length,
+              checkedIndexes: Array.from(
+                document.querySelectorAll('input[name="riddleanswer[]"]'),
+                (input, index) => input.checked ? index : -1,
+              ).filter((index) => index >= 0),
               panel,
+              randomFallbackDisabled: true,
             })
             return
           }
@@ -329,16 +352,26 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
     })
     assert.equal(inferenceResult.ok, true, JSON.stringify(inferenceResult))
     assert.equal(inferenceResult.count, '1')
-    assert.equal(inferenceResult.checked, 1)
+    const observation = {
+      checkedIndexes: inferenceResult.checkedIndexes,
+      panel: inferenceResult.panel,
+      randomFallbackDisabled: inferenceResult.randomFallbackDisabled,
+    }
+    validatePackagedInferenceObservation(
+      observation,
+      packagedArtifact.oracle,
+      `Firefox packaged inference run ${runIndex}`,
+    )
     assert.match(inferenceResult.panel, /会话状态：已就绪/u)
-    assertSupportedBrowserVersion('firefox', session.capabilities.browserVersion)
-    return session.capabilities.browserVersion
+    assertBrowserVersionForRun('firefox', session.capabilities.browserVersion)
+    return { browserVersion: session.capabilities.browserVersion, observation }
   } finally {
     await request('DELETE', sessionPath).catch(() => undefined)
   }
 }
 
 await Promise.all([access(archivePath), access(firefoxExecutable)])
+const archiveVerification = await verifyPackagedArchive(packagedArtifact)
 const geckodriverExecutable = await findExecutable(process.env.GECKODRIVER_PATH || 'geckodriver')
 try {
   await access(geckodriverExecutable, constants.X_OK)
@@ -359,18 +392,19 @@ try {
   proxy = await startFixtureProxy(temporaryRoot)
   driver = await startWebDriver(geckodriverExecutable)
   const request = createWebDriverClient(driver.port)
-  const firstVersion = await runInstalledArtifact(request, proxy.port, 1)
-  const secondVersion = await runInstalledArtifact(request, proxy.port, 2)
-  assert.equal(secondVersion, firstVersion)
-  await writePackagedE2eEvidence(
-    process.env.PACKAGED_E2E_EVIDENCE_DIR,
-    'firefox',
+  const firstRun = await runInstalledArtifact(request, proxy.port, 1)
+  const secondRun = await runInstalledArtifact(request, proxy.port, 2)
+  assert.equal(secondRun.browserVersion, firstRun.browserVersion)
+  await writePackagedE2eEvidence(evidenceDirectory, {
+    target: 'firefox',
     packagedArtifact,
-    firstVersion,
+    archiveVerification,
+    browserVersion: firstRun.browserVersion,
     driverVersion,
-  )
+    observations: [firstRun.observation, secondRun.observation],
+  })
   process.stdout.write(
-    `Firefox ${firstVersion} packaged ZIP loaded, inferred, tore down, and initialized again without a Key.\n`,
+    `Firefox ${firstRun.browserVersion} installed the verified packaged ZIP, completed two successful inference runs, tore down, and initialized again without a Key or random fallback.\n`,
   )
 } finally {
   await driver?.stop().catch(() => undefined)

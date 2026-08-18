@@ -1,5 +1,22 @@
-import { describe, expect, it } from 'vitest'
-import { calculateLetterboxLayout, copyRgbaToChwFloat32 } from '../../src/inference/image-preprocess'
+import { describe, expect, it, vi } from 'vitest'
+import { imagePreprocessConfig } from '../../src/inference/inference-config'
+import {
+  assertInferenceImageDimensions,
+  calculateLetterboxLayout,
+  copyRgbaToChwFloat32,
+  inspectEncodedImageDimensions,
+  validateInferenceImageBeforeDecode,
+} from '../../src/inference/image-preprocess'
+
+function createPngHeader(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(24)
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0)
+  bytes.set([0x49, 0x48, 0x44, 0x52], 12)
+  const view = new DataView(bytes.buffer)
+  view.setUint32(16, width)
+  view.setUint32(20, height)
+  return bytes
+}
 
 describe('image preprocessing helpers', () => {
   it('calculates centered letterbox layout for wide images', () => {
@@ -57,14 +74,47 @@ describe('image preprocessing helpers', () => {
   })
 
   it('copies RGBA image data into CHW float32 RGB planes', () => {
-    const rgba = new Uint8ClampedArray([
-      255, 0, 0, 255,
-      0, 128, 255, 255,
-    ])
+    const rgba = new Uint8ClampedArray([255, 0, 0, 255, 0, 128, 255, 255])
     const output = new Float32Array(6)
 
     copyRgbaToChwFloat32(rgba, output, 2)
 
     expect([...output]).toEqual([1, 0, 0, expect.closeTo(128 / 255), 0, 1])
+  })
+
+  it('reads PNG dimensions from encoded bytes before decode', async () => {
+    const bytes = createPngHeader(320, 160)
+
+    expect(inspectEncodedImageDimensions(bytes)).toEqual({ width: 320, height: 160 })
+    await expect(validateInferenceImageBeforeDecode(new Blob([bytes]))).resolves.toEqual({
+      width: 320,
+      height: 160,
+    })
+  })
+
+  it('rejects encoded image bytes above the configured limit before reading them', async () => {
+    const blob = new Blob([new Uint8Array(imagePreprocessConfig.maxEncodedBytes + 1)])
+    const arrayBuffer = vi.fn()
+    Object.defineProperty(blob, 'arrayBuffer', { value: arrayBuffer })
+
+    await expect(validateInferenceImageBeforeDecode(blob)).rejects.toThrow('验证码图片数据超过限制')
+    expect(arrayBuffer).not.toHaveBeenCalled()
+  })
+
+  it('rejects an encoded PNG side length above the configured limit before decode', async () => {
+    const blob = new Blob([createPngHeader(imagePreprocessConfig.maxSourceSide + 1, 1)])
+
+    await expect(validateInferenceImageBeforeDecode(blob)).rejects.toThrow('验证码图片边长超过限制')
+  })
+
+  it('rejects encoded PNG total source pixels above the configured limit before decode', async () => {
+    const blob = new Blob([createPngHeader(4_001, 4_000)])
+
+    await expect(validateInferenceImageBeforeDecode(blob)).rejects.toThrow('验证码图片像素总数超过限制')
+  })
+
+  it('rejects empty and non-integral source dimensions', async () => {
+    await expect(validateInferenceImageBeforeDecode(new Blob([]))).rejects.toThrow('验证码图片数据为空')
+    expect(() => assertInferenceImageDimensions(10.5, 10)).toThrow('验证码图片尺寸无效')
   })
 })

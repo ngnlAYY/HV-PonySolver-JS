@@ -7,7 +7,10 @@ import { StatusPanel } from '../../src/status-panel/status-panel'
 function createHistoryStore(records: HistoryRecord[] = []): HistoryStore {
   return {
     get: vi.fn(() => records),
-    add: vi.fn((_world: World, record: HistoryRecord) => [record, ...records]),
+    add: vi.fn((_world: World, record: HistoryRecord) => ({
+      records: [record, ...records],
+      persisted: Promise.resolve([record, ...records]),
+    })),
   } as unknown as HistoryStore
 }
 

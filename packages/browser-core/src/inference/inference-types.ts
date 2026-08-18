@@ -19,6 +19,14 @@ export interface DetectorService {
   destroy(): void
 }
 
+export interface VerifiedModelDetectorService extends DetectorService {
+  /**
+   * Takes ownership of a model buffer whose canonical length and SHA-256 were
+   * already verified. The buffer may be transferred and become detached.
+   */
+  prepareFromVerifiedModel(modelBuffer: ArrayBuffer, signal?: AbortSignal): Promise<void>
+}
+
 export type WorkerInitRequestPayload = Readonly<{
   type: 'init'
   modelBuffer: ArrayBuffer
@@ -44,6 +52,7 @@ export type WorkerErrorResponse = Readonly<{
   type: 'error'
   requestId: number
   message: string
+  fatal?: boolean
 }>
 
 export type WorkerMessage = WorkerResponse | WorkerErrorResponse

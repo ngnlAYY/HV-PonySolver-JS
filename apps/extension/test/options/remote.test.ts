@@ -10,40 +10,13 @@ const platformMocks = vi.hoisted(() => ({
   storageRemove: vi.fn(),
   storageSet: vi.fn(),
 }))
-const secretStorageMocks = vi.hoisted(() => ({
-  close: vi.fn(),
-  constructed: vi.fn(),
-  get: vi.fn(),
-  remove: vi.fn(),
-  set: vi.fn(),
-}))
 
 vi.mock('../../src/platform/webextension', () => platformMocks)
-vi.mock('../../src/host/indexeddb-string-storage', () => ({
-  IndexedDbStringStorage: class {
-    constructor() {
-      secretStorageMocks.constructed()
-    }
 
-    get(key: string, _signal?: AbortSignal): Promise<string | null> {
-      return secretStorageMocks.get(key)
-    }
-
-    set(key: string, value: string, _signal?: AbortSignal): Promise<void> {
-      return secretStorageMocks.set(key, value)
-    }
-
-    remove(key: string, _signal?: AbortSignal): Promise<void> {
-      return secretStorageMocks.remove(key)
-    }
-
-    close(): Promise<void> {
-      return secretStorageMocks.close()
-    }
-  },
-}))
-
-function successfulHostPort(): Readonly<{ postMessage: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> &
+function successfulHostPort(): Readonly<{
+  postMessage: ReturnType<typeof vi.fn>
+  disconnect: ReturnType<typeof vi.fn>
+}> &
   Record<string, unknown> {
   let messageListener: MessageListener | undefined
   return {
@@ -113,15 +86,10 @@ function controlledHostPort(): Readonly<{
 beforeEach(() => {
   vi.useRealTimers()
   vi.resetModules()
-  platformMocks.runtimeConnect.mockReset().mockReturnValue(successfulHostPort())
+  platformMocks.runtimeConnect.mockReset().mockImplementation(() => successfulHostPort())
   platformMocks.storageGetAll.mockReset().mockResolvedValue({})
   platformMocks.storageRemove.mockReset().mockResolvedValue(undefined)
   platformMocks.storageSet.mockReset().mockResolvedValue(undefined)
-  secretStorageMocks.close.mockReset().mockResolvedValue(undefined)
-  secretStorageMocks.constructed.mockReset()
-  secretStorageMocks.get.mockReset().mockResolvedValue('a'.repeat(64))
-  secretStorageMocks.remove.mockReset().mockResolvedValue(undefined)
-  secretStorageMocks.set.mockReset().mockResolvedValue(undefined)
   installOptionsPageMarkup()
 })
 
@@ -131,80 +99,79 @@ afterEach(() => {
 })
 
 describe('default remote options entry', () => {
-  it('installs Key handlers before enabling the fieldset and preserves Key actions', async () => {
+  it('enables Key controls and sends verify and clear intents without opening secret storage', async () => {
     await import('../../src/options/main')
 
     expect(optionsElement<HTMLFieldSetElement>('model-key-fieldset').disabled).toBe(false)
     expect(optionsElement<HTMLParagraphElement>('packaged-model-hint').hidden).toBe(true)
-    expect(secretStorageMocks.constructed).toHaveBeenCalledTimes(1)
     await vi.waitFor(() => {
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('已配置模型 Key（不会回显）')
+      expect(optionsElement<HTMLOutputElement>('status').textContent).toContain('不会回显')
     })
 
     const candidateKey = 'b'.repeat(64)
     optionsElement<HTMLInputElement>('model-key').value = candidateKey
     optionsElement<HTMLButtonElement>('verify-key').click()
 
-    await vi.waitFor(() => expect(platformMocks.runtimeConnect).toHaveBeenCalledWith('hv-pony-solver:options'))
-    const port = platformMocks.runtimeConnect.mock.results[0]?.value as { postMessage: ReturnType<typeof vi.fn> }
-    expect(port.postMessage).toHaveBeenCalledWith(expect.objectContaining({
-      protocol: 'hv-pony-solver/1',
-      type: 'verify-key',
-      candidateKey,
-    }))
+    await vi.waitFor(() => expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(1))
+    const verifyPort = platformMocks.runtimeConnect.mock.results[0]?.value as {
+      postMessage: ReturnType<typeof vi.fn>
+    }
+    expect(verifyPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: 'hv-pony-solver/1',
+        type: 'verify-key',
+        candidateKey,
+      }),
+    )
     await vi.waitFor(() => {
       expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 验证成功并已安全保存')
     })
-    expect(optionsElement<HTMLInputElement>('model-key').value).toBe('')
 
     optionsElement<HTMLButtonElement>('clear-key').click()
-    await vi.waitFor(() => expect(secretStorageMocks.remove).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(2))
+    const clearPort = platformMocks.runtimeConnect.mock.results[1]?.value as {
+      postMessage: ReturnType<typeof vi.fn>
+    }
+    expect(clearPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ protocol: 'hv-pony-solver/1', type: 'clear-key' }),
+    )
     await vi.waitFor(() => {
       expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 已清除')
     })
-
-    globalThis.dispatchEvent(new Event('pagehide'))
-    await vi.waitFor(() => expect(secretStorageMocks.close).toHaveBeenCalledTimes(1))
   })
 
-  it('makes verify then clear latest-operation-wins with no late success mutation', async () => {
-    const hostPort = controlledHostPort()
-    platformMocks.runtimeConnect.mockReturnValue(hostPort)
+  it('makes verify then clear latest-operation-wins with no late page mutation', async () => {
+    const verifyPort = controlledHostPort()
+    const clearPort = successfulHostPort()
+    platformMocks.runtimeConnect.mockReset().mockReturnValueOnce(verifyPort).mockReturnValueOnce(clearPort)
     await import('../../src/options/main')
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('已配置模型 Key（不会回显）'),
-    )
-    optionsElement<HTMLInputElement>('model-key').value = 'b'.repeat(64)
+    const input = optionsElement<HTMLInputElement>('model-key')
+    input.value = 'b'.repeat(64)
     optionsElement<HTMLButtonElement>('verify-key').click()
-    await vi.waitFor(() => expect(hostPort.postMessage).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(verifyPort.postMessage).toHaveBeenCalledTimes(1))
 
     optionsElement<HTMLButtonElement>('clear-key').click()
 
-    await vi.waitFor(() => expect(secretStorageMocks.remove).toHaveBeenCalledTimes(1))
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 已清除'),
-    )
-    expect(hostPort.disconnect).toHaveBeenCalledTimes(1)
-    const request = hostPort.postMessage.mock.calls[0]![0] as { requestId: string }
-    hostPort.emitMessage({
+    await vi.waitFor(() => expect(verifyPort.disconnect).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(clearPort.postMessage).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 已清除'))
+    const staleRequest = verifyPort.postMessage.mock.calls[0]![0] as { requestId: string }
+    verifyPort.emitMessage({
       protocol: 'hv-pony-solver/1',
       type: 'result',
-      requestId: request.requestId,
+      requestId: staleRequest.requestId,
       ok: true,
     })
     await Promise.resolve()
     expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 已清除')
-    expect(optionsElement<HTMLInputElement>('model-key').value).toBe('')
+    expect(input.value).toBe('')
   })
 
-  it('commits only the newest verify request and generates collision-safe IDs', async () => {
+  it('supersedes an older verification and generates collision-safe intent IDs', async () => {
     const firstPort = controlledHostPort()
     const secondPort = successfulHostPort()
-    platformMocks.runtimeConnect.mockReturnValueOnce(firstPort).mockReturnValueOnce(secondPort)
+    platformMocks.runtimeConnect.mockReset().mockReturnValueOnce(firstPort).mockReturnValueOnce(secondPort)
     await import('../../src/options/main')
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('已配置模型 Key（不会回显）'),
-    )
     const input = optionsElement<HTMLInputElement>('model-key')
     input.value = 'b'.repeat(64)
     optionsElement<HTMLButtonElement>('verify-key').click()
@@ -214,50 +181,19 @@ describe('default remote options entry', () => {
     optionsElement<HTMLButtonElement>('verify-key').click()
 
     await vi.waitFor(() => expect(secondPort.postMessage).toHaveBeenCalledTimes(1))
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 验证成功并已安全保存'),
-    )
     const firstRequest = firstPort.postMessage.mock.calls[0]![0] as { requestId: string }
     const secondRequest = secondPort.postMessage.mock.calls[0]![0] as { requestId: string }
     expect(firstRequest.requestId).not.toBe(secondRequest.requestId)
     expect(firstPort.disconnect).toHaveBeenCalledTimes(1)
-    expect(input.value).toBe('')
-  })
-
-  it('does not let a superseded clear erase the input or status of a later verify', async () => {
-    let resolveRemove: (() => void) | undefined
-    secretStorageMocks.remove.mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        resolveRemove = resolve
-      }),
-    )
-    platformMocks.runtimeConnect.mockReturnValue(successfulHostPort())
-    await import('../../src/options/main')
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('已配置模型 Key（不会回显）'),
-    )
-    const input = optionsElement<HTMLInputElement>('model-key')
-    optionsElement<HTMLButtonElement>('clear-key').click()
-    await vi.waitFor(() => expect(secretStorageMocks.remove).toHaveBeenCalledTimes(1))
-    input.value = 'd'.repeat(64)
-    optionsElement<HTMLButtonElement>('verify-key').click()
-
-    resolveRemove?.()
-
-    await vi.waitFor(() => expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(1))
     await vi.waitFor(() =>
       expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 验证成功并已安全保存'),
     )
-    expect(input.value).toBe('')
   })
 
-  it('cancels page-owned verification before closing storage', async () => {
+  it('cancels page-owned verification on pagehide', async () => {
     const hostPort = controlledHostPort()
-    platformMocks.runtimeConnect.mockReturnValue(hostPort)
+    platformMocks.runtimeConnect.mockReset().mockReturnValue(hostPort)
     await import('../../src/options/main')
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('已配置模型 Key（不会回显）'),
-    )
     optionsElement<HTMLInputElement>('model-key').value = 'e'.repeat(64)
     optionsElement<HTMLButtonElement>('verify-key').click()
     await vi.waitFor(() => expect(hostPort.postMessage).toHaveBeenCalledTimes(1))
@@ -265,22 +201,21 @@ describe('default remote options entry', () => {
     globalThis.dispatchEvent(new Event('pagehide'))
 
     await vi.waitFor(() => expect(hostPort.disconnect).toHaveBeenCalledTimes(1))
-    await vi.waitFor(() => expect(secretStorageMocks.close).toHaveBeenCalledTimes(1))
     expect(optionsElement<HTMLOutputElement>('status').textContent).not.toBe('模型 Key 验证成功并已安全保存')
   })
 
-  it('keeps cancellation and timeout errors distinct and disconnects once', async () => {
+  it('keeps cancellation and timeout errors distinct for verify and clear intents', async () => {
     vi.useFakeTimers()
     const timeoutPort = controlledHostPort()
-    platformMocks.runtimeConnect.mockReturnValue(timeoutPort)
+    platformMocks.runtimeConnect.mockReset().mockReturnValue(timeoutPort)
     const { requestHost } = await import('../../src/options/remote')
-    const request = {
+    const verifyRequest = {
       protocol: 'hv-pony-solver/1',
       type: 'verify-key',
       requestId: 'timeout-request',
       candidateKey: 'f'.repeat(64),
     } as const
-    const timeoutPromise = requestHost(request, { timeoutMs: 10 })
+    const timeoutPromise = requestHost(verifyRequest, { timeoutMs: 10 })
     const timeoutRejection = expect(timeoutPromise).rejects.toThrow('Key 验证超时')
     await vi.advanceTimersByTimeAsync(10)
     await timeoutRejection
@@ -289,9 +224,12 @@ describe('default remote options entry', () => {
     const abortPort = controlledHostPort()
     platformMocks.runtimeConnect.mockReturnValue(abortPort)
     const controller = new AbortController()
-    const abortPromise = requestHost({ ...request, requestId: 'abort-request' }, { signal: controller.signal })
+    const clearPromise = requestHost(
+      { protocol: 'hv-pony-solver/1', type: 'clear-key', requestId: 'abort-clear' },
+      { signal: controller.signal },
+    )
     controller.abort()
-    await expect(abortPromise).rejects.toThrow('Key 验证已取消')
+    await expect(clearPromise).rejects.toThrow('Key 清除已取消')
     expect(abortPort.disconnect).toHaveBeenCalledTimes(1)
   })
 
@@ -300,18 +238,23 @@ describe('default remote options entry', () => {
     controller.abort()
     const { requestHost } = await import('../../src/options/remote')
 
-    await expect(requestHost({
-      protocol: 'hv-pony-solver/1',
-      type: 'verify-key',
-      requestId: 'already-aborted',
-      candidateKey: 'a'.repeat(64),
-    }, { signal: controller.signal })).rejects.toThrow('Key 验证已取消')
+    await expect(
+      requestHost(
+        {
+          protocol: 'hv-pony-solver/1',
+          type: 'verify-key',
+          requestId: 'already-aborted',
+          candidateKey: 'a'.repeat(64),
+        },
+        { signal: controller.signal },
+      ),
+    ).rejects.toThrow('Key 验证已取消')
     expect(platformMocks.runtimeConnect).not.toHaveBeenCalled()
   })
 
   it('ignores unrelated messages and surfaces a matching Host failure', async () => {
     const port = controlledHostPort()
-    platformMocks.runtimeConnect.mockReturnValue(port)
+    platformMocks.runtimeConnect.mockReset().mockReturnValue(port)
     const { requestHost } = await import('../../src/options/remote')
     const request = {
       protocol: 'hv-pony-solver/1',
@@ -337,7 +280,7 @@ describe('default remote options entry', () => {
 
   it('distinguishes Port disconnect and post failures and cleans up once', async () => {
     const disconnectPort = controlledHostPort()
-    platformMocks.runtimeConnect.mockReturnValueOnce(disconnectPort)
+    platformMocks.runtimeConnect.mockReset().mockReturnValueOnce(disconnectPort)
     const { requestHost } = await import('../../src/options/remote')
     const request = {
       protocol: 'hv-pony-solver/1',
@@ -361,33 +304,11 @@ describe('default remote options entry', () => {
     expect(postPort.disconnect).toHaveBeenCalledTimes(1)
   })
 
-  it('shows unconfigured and initial-load failures without exposing a Key', async () => {
-    secretStorageMocks.get.mockResolvedValueOnce(null)
-    await import('../../src/options/main')
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('尚未配置模型 Key'),
-    )
-
-    vi.resetModules()
-    installOptionsPageMarkup()
-    secretStorageMocks.get.mockRejectedValueOnce(new Error('密钥库读取失败'))
-    await import('../../src/options/main')
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('密钥库读取失败'),
-    )
-  })
-
   it('validates missing and malformed Keys before contacting the Host', async () => {
-    secretStorageMocks.get.mockResolvedValue(null)
     await import('../../src/options/main')
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('尚未配置模型 Key'),
-    )
 
     optionsElement<HTMLButtonElement>('verify-key').click()
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('请先输入模型 Key'),
-    )
+    await vi.waitFor(() => expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('请先输入模型 Key'))
     optionsElement<HTMLInputElement>('model-key').value = 'not-a-key'
     optionsElement<HTMLButtonElement>('verify-key').click()
     await vi.waitFor(() =>
@@ -396,18 +317,12 @@ describe('default remote options entry', () => {
     expect(platformMocks.runtimeConnect).not.toHaveBeenCalled()
   })
 
-  it('reports the newest clear failure and preserves page-owned state on teardown', async () => {
-    secretStorageMocks.remove.mockRejectedValueOnce(new Error('密钥库删除失败'))
-    await import('../../src/options/main')
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('已配置模型 Key（不会回显）'),
-    )
+  it('reports ordinary-settings load failures without reading or exposing a Key', async () => {
+    platformMocks.storageGetAll.mockRejectedValueOnce(new Error('设置读取失败'))
 
-    optionsElement<HTMLButtonElement>('clear-key').click()
-    await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('密钥库删除失败'),
-    )
-    globalThis.dispatchEvent(new Event('pagehide'))
-    await vi.waitFor(() => expect(secretStorageMocks.close).toHaveBeenCalledTimes(1))
+    await import('../../src/options/main')
+
+    await vi.waitFor(() => expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('设置读取失败'))
+    expect(platformMocks.runtimeConnect).not.toHaveBeenCalled()
   })
 })

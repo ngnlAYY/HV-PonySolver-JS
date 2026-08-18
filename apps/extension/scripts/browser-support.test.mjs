@@ -2,11 +2,15 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  assertBrowserVersionForRun,
+  assertExactMinimumBrowserVersion,
   assertSupportedBrowserVersion,
   browserSupport,
   firefoxArguments,
   geckodriverArguments,
+  parseFirefoxVersion,
   parseGeckodriverVersion,
+  resolvePackagedChromiumHeadless,
 } from './browser-support.mjs'
 
 test('driver URL, version and checksum are pinned', () => {
@@ -20,7 +24,7 @@ test('driver URL, version and checksum are pinned', () => {
   assert.throws(() => parseGeckodriverVersion('unknown'), /Unable to parse/u)
 })
 
-test('manifest floor, build target and E2E floor share one source', () => {
+test('desktop and Android browser floors remain distinct and executable', () => {
   assert.deepEqual(browserSupport.chromium, {
     manifestMinimumVersion: '116',
     minimumMajor: 116,
@@ -30,12 +34,46 @@ test('manifest floor, build target and E2E floor share one source', () => {
     manifestMinimumVersion: '140.0',
     androidManifestMinimumVersion: '142.0',
     minimumMajor: 140,
+    androidMinimumMajor: 142,
     esbuildTarget: 'firefox140',
   })
-  assert.equal(assertSupportedBrowserVersion('chromium', '116.0.1'), 116)
-  assert.equal(assertSupportedBrowserVersion('firefox', '140.13'), 140)
+  assert.deepEqual(browserSupport['firefox-android'], {
+    manifestMinimumVersion: '142.0',
+    minimumMajor: 142,
+  })
+  assert.equal(assertSupportedBrowserVersion('chromium', '116.0.5845.96'), 116)
   assert.equal(assertSupportedBrowserVersion('firefox', '153.0'), 153)
   assert.throws(() => assertSupportedBrowserVersion('firefox', '139.9'), /below the supported major 140/u)
+  assert.throws(() => assertSupportedBrowserVersion('firefox-android', '141.9'), /below the supported major 142/u)
+})
+
+test('exact-minimum mode cannot be satisfied by a newer current browser', () => {
+  assert.equal(assertExactMinimumBrowserVersion('chromium', '116.0.5845.96'), 116)
+  assert.equal(assertExactMinimumBrowserVersion('firefox', '140.0.4'), 140)
+  assert.equal(assertExactMinimumBrowserVersion('firefox-android', '142.0'), 142)
+  assert.throws(() => assertExactMinimumBrowserVersion('chromium', '140.0'), /not the executable minimum major 116/u)
+  assert.throws(
+    () => assertBrowserVersionForRun('firefox', '153.0', { REQUIRE_EXACT_MINIMUM_BROWSER: 'true' }),
+    /not the executable minimum major 140/u,
+  )
+  assert.equal(assertBrowserVersionForRun('firefox', '153.0', { REQUIRE_EXACT_MINIMUM_BROWSER: 'false' }), 153)
+  assert.throws(
+    () => assertBrowserVersionForRun('firefox', '140.0', { REQUIRE_EXACT_MINIMUM_BROWSER: 'yes' }),
+    /must be true or false/u,
+  )
+})
+
+test('packaged Chromium headed mode is explicit and fails closed', () => {
+  assert.equal(resolvePackagedChromiumHeadless({}), true)
+  assert.equal(resolvePackagedChromiumHeadless({ PACKAGED_E2E_HEADLESS: 'true' }), true)
+  assert.equal(resolvePackagedChromiumHeadless({ PACKAGED_E2E_HEADLESS: 'false' }), false)
+  assert.throws(() => resolvePackagedChromiumHeadless({ PACKAGED_E2E_HEADLESS: 'yes' }), /must be true or false/u)
+})
+
+test('Firefox version parsing accepts release output and fails closed', () => {
+  assert.equal(parseFirefoxVersion('Mozilla Firefox 140.0.4\n'), '140.0.4')
+  assert.equal(parseFirefoxVersion('Firefox 142.0'), '142.0')
+  assert.throws(() => parseFirefoxVersion('Mozilla browser'), /Unable to parse Firefox version/u)
 })
 
 test('driver owns the system-access flag and Firefox capabilities do not', () => {

@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { IndexedDbStringStorage } from '../../src/host/indexeddb-string-storage'
+import { INDEXED_DB_OPEN_TIMEOUT_MS, IndexedDbStringStorage } from '../../src/host/indexeddb-string-storage'
 
 type TestTransaction = {
   abort: ReturnType<typeof vi.fn>
@@ -11,12 +11,14 @@ type TestTransaction = {
   onerror: ((event: Event) => void) | null
 }
 
-function installIndexedDb(options: Readonly<{
-  deferredOpen?: boolean
-  getValue?: string
-  storeExists?: boolean
-  autoGetSuccess?: boolean
-}> = {}): Readonly<{
+function installIndexedDb(
+  options: Readonly<{
+    deferredOpen?: boolean
+    getValue?: string
+    storeExists?: boolean
+    autoGetSuccess?: boolean
+  }> = {},
+): Readonly<{
   database: IDBDatabase
   objectStore: IDBObjectStore
   openRequest: IDBOpenDBRequest
@@ -88,7 +90,12 @@ function complete(transaction: TestTransaction): void {
   transaction.oncomplete?.(new Event('complete'))
 }
 
+beforeEach(() => {
+  vi.useRealTimers()
+})
+
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -147,6 +154,35 @@ describe('IndexedDbStringStorage', () => {
     await expect(closePromise).resolves.toBeUndefined()
     expect(database.close).toHaveBeenCalledTimes(1)
     expect(database.transaction).not.toHaveBeenCalled()
+  })
+
+  it('closes a database delivered after blocked, aborted, or timed-out open settlement', async () => {
+    const blocked = installIndexedDb({ deferredOpen: true })
+    const blockedStorage = new IndexedDbStringStorage()
+    const blockedRead = blockedStorage.get('key')
+    blocked.openRequest.onblocked?.(new Event('blocked') as IDBVersionChangeEvent)
+    await expect(blockedRead).rejects.toThrow('扩展 Key 数据库升级被阻止')
+    blocked.openRequest.onsuccess?.(new Event('success'))
+    expect(blocked.database.close).toHaveBeenCalledTimes(1)
+
+    const aborted = installIndexedDb({ deferredOpen: true })
+    const abortedStorage = new IndexedDbStringStorage()
+    const controller = new AbortController()
+    const abortedRead = abortedStorage.get('key', controller.signal)
+    controller.abort()
+    await expect(abortedRead).rejects.toThrow('扩展 Key 存储操作已取消')
+    aborted.openRequest.onsuccess?.(new Event('success'))
+    expect(aborted.database.close).toHaveBeenCalledTimes(1)
+
+    vi.useFakeTimers()
+    const timedOut = installIndexedDb({ deferredOpen: true })
+    const timedOutStorage = new IndexedDbStringStorage()
+    const timedOutRead = timedOutStorage.get('key')
+    const timedOutRejection = expect(timedOutRead).rejects.toThrow('IndexedDB 打开超时')
+    await vi.advanceTimersByTimeAsync(INDEXED_DB_OPEN_TIMEOUT_MS)
+    await timedOutRejection
+    timedOut.openRequest.onsuccess?.(new Event('success'))
+    expect(timedOut.database.close).toHaveBeenCalledTimes(1)
   })
 
   it('aborts a writable transaction when its signal is cancelled', async () => {

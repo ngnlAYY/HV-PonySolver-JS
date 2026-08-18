@@ -5,8 +5,10 @@ import config from '../vitest.config'
 const criticalFiles = [
   'src/background/broker.ts',
   'src/content/remote-detector-client.ts',
+  'src/content/storage-mirror.ts',
   'src/host/indexeddb-string-storage.ts',
   'src/host/inference-host.ts',
+  'src/host/remote-inference-host.ts',
   'src/options/remote.ts',
 ] as const
 

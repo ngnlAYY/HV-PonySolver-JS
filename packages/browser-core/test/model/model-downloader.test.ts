@@ -1,10 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import type { ModelDownloadQuotaExceededError } from '../../src/model/model-download-error'
-import {
-  downloadModel as downloadCoreModel,
-  type ModelIntegrityOptions,
-} from '../../src/model/model-downloader'
+import { downloadModel as downloadCoreModel, type ModelIntegrityOptions } from '../../src/model/model-downloader'
 
 const getModelAccessKey = vi.fn(async () => '')
 
@@ -27,6 +25,11 @@ describe('downloadModel', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     getModelAccessKey.mockResolvedValue('')
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 
   it('passes abort signal to fetch without token query or empty Authorization', async () => {
@@ -101,11 +104,12 @@ describe('downloadModel', () => {
       headers: new Headers(),
       body: { cancel },
     } as unknown as Response
-    vi.stubGlobal('fetch', vi.fn(async () => response))
-
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow(
-      '模型下载失败: HTTP 503',
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
     )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('模型下载失败: HTTP 503')
     expect(cancel).toHaveBeenCalledTimes(1)
   })
 
@@ -139,16 +143,14 @@ describe('downloadModel', () => {
     expect(new Headers(init.headers).get('authorization')).toBeNull()
   })
 
-  it('continues without Authorization when saved key storage fails', async () => {
+  it('preserves saved key storage failures and does not misreport them as HTTP failures', async () => {
     getModelAccessKey.mockRejectedValue(new Error('storage unavailable'))
-    const response = new Response(new Uint8Array([1, 2, 3]))
-    const fetchMock = vi.fn(async () => response)
+    const fetchMock = vi.fn(async () => new Response(null, { status: 401 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await downloadModel(undefined, { integrity: TEST_INTEGRITY })
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('storage unavailable')
 
-    const [, init] = getFetchCall(fetchMock)
-    expect(new Headers(init.headers).get('authorization')).toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('uses a candidate model access key before saving settings', async () => {
@@ -194,6 +196,120 @@ describe('downloadModel', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('aborts an uncooperative saved key getter without starting fetch', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn()
+    let getterSignal: AbortSignal | undefined
+    const promise = downloadCoreModel(
+      controller.signal,
+      { integrity: TEST_INTEGRITY },
+      {
+        fetchImpl: fetchMock,
+        getAccessKey: (signal) => {
+          getterSignal = signal
+          return new Promise<string>(() => {})
+        },
+      },
+    )
+    await Promise.resolve()
+
+    controller.abort()
+
+    await expect(promise).rejects.toThrow('模型下载已取消')
+    expect(getterSignal?.aborted).toBe(true)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('times out an uncooperative saved key getter', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+    const promise = downloadCoreModel(
+      undefined,
+      { integrity: TEST_INTEGRITY },
+      {
+        fetchImpl: fetchMock,
+        getAccessKey: () => new Promise<string>(() => {}),
+      },
+    )
+    const rejection = expect(promise).rejects.toThrow('模型下载超时')
+
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelDownloadTimeoutMs)
+
+    await rejection
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('times out an uncooperative fetch with the same deadline', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}))
+    const promise = downloadCoreModel(
+      undefined,
+      { integrity: TEST_INTEGRITY },
+      {
+        fetchImpl: fetchMock,
+        getAccessKey: async () => '',
+      },
+    )
+    const rejection = expect(promise).rejects.toThrow('模型下载超时')
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelDownloadTimeoutMs)
+
+    await rejection
+  })
+
+  it('uses one cutoff across saved key retrieval and response body reading', async () => {
+    vi.useFakeTimers()
+    const arrayBuffer = vi.fn(() => new Promise<ArrayBuffer>(() => {}))
+    const response = {
+      ok: true,
+      headers: new Headers(),
+      body: null,
+      arrayBuffer,
+    } as unknown as Response
+    const fetchMock = vi.fn(async () => response)
+    const promise = downloadCoreModel(
+      undefined,
+      { integrity: TEST_INTEGRITY },
+      {
+        fetchImpl: fetchMock,
+        getAccessKey: () =>
+          new Promise<string>((resolve) => {
+            setTimeout(() => resolve('saved-token'), inferenceTimeoutConfig.modelDownloadTimeoutMs - 1_000)
+          }),
+      },
+    )
+    const rejection = expect(promise).rejects.toThrow('模型下载超时')
+
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelDownloadTimeoutMs - 1_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(arrayBuffer).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    await rejection
+  })
+
+  it('applies the same cutoff while SHA-256 hashing is pending', async () => {
+    vi.useFakeTimers()
+    const digest = vi.fn(() => new Promise<ArrayBuffer>(() => {}))
+    vi.stubGlobal('crypto', { subtle: { digest } })
+    const response = new Response(new Uint8Array([1, 2, 3]))
+    const promise = downloadCoreModel(
+      undefined,
+      { integrity: TEST_INTEGRITY },
+      {
+        fetchImpl: vi.fn(async () => response),
+        getAccessKey: async () => '',
+      },
+    )
+    const rejection = expect(promise).rejects.toThrow('模型下载超时')
+    await vi.waitFor(() => expect(digest).toHaveBeenCalledTimes(1))
+
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelDownloadTimeoutMs)
+
+    await rejection
+  })
+
   it('aborts while reading the response body', async () => {
     const controller = new AbortController()
     const fetchMock = vi.fn(
@@ -221,7 +337,7 @@ describe('downloadModel', () => {
     })
     controller.abort()
 
-    await expect(downloadPromise).rejects.toThrow('body aborted')
+    await expect(downloadPromise).rejects.toThrow('模型下载已取消')
   })
 
   it('rejects and cancels responses whose content length is larger than expected by default', async () => {
@@ -393,7 +509,10 @@ describe('downloadModel', () => {
       headers: new Headers({ 'content-length': '3' }),
       body: { cancel: vi.fn(), getReader: () => ({ read, cancel, releaseLock }) },
     } as unknown as Response
-    vi.stubGlobal('fetch', vi.fn(async () => response))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
 
     await expect(
       downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
@@ -414,11 +533,14 @@ describe('downloadModel', () => {
       headers: new Headers({ 'content-length': '3' }),
       body: { cancel: vi.fn(), getReader: () => ({ read, cancel, releaseLock }) },
     } as unknown as Response
-    vi.stubGlobal('fetch', vi.fn(async () => response))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
 
-    await expect(
-      downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
-    ).rejects.toThrow('下载模型大小校验失败: 2 != 3')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+      '下载模型大小校验失败: 2 != 3',
+    )
     expect(cancel).toHaveBeenCalledTimes(1)
     expect(releaseLock).toHaveBeenCalledTimes(1)
   })
@@ -438,11 +560,14 @@ describe('downloadModel', () => {
       headers: new Headers(),
       body: { cancel: vi.fn(), getReader: () => ({ read, cancel, releaseLock }) },
     } as unknown as Response
-    vi.stubGlobal('fetch', vi.fn(async () => response))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
 
-    await expect(
-      downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
-    ).rejects.toThrow('primary read failed')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+      'primary read failed',
+    )
     expect(cancel).toHaveBeenCalledTimes(1)
     expect(releaseLock).toHaveBeenCalledTimes(1)
   })

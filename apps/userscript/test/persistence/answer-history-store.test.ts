@@ -61,15 +61,19 @@ describe('HistoryStore', () => {
     expect(records).toEqual([])
   })
 
-  it('keeps up to fifty records when adding answers', () => {
+  it('keeps up to fifty records when adding answers', async () => {
     const store = new HistoryStore()
+    const persisted: Promise<HistoryRecord[]>[] = []
     for (let index = 0; index < 51; index += 1) {
-      store.add('main', {
-        type: 'success',
-        answers: `P${index}`,
-        elapsed: index,
-      })
+      persisted.push(
+        store.add('main', {
+          type: 'success',
+          answers: `P${index}`,
+          elapsed: index,
+        }).persisted,
+      )
     }
+    await Promise.all(persisted)
 
     const records = store.get('main')
 
@@ -78,7 +82,7 @@ describe('HistoryStore', () => {
     expect(records[49]).toMatchObject({ answers: 'P1' })
   })
 
-  it('drops invalid existing records when adding a new record', () => {
+  it('drops invalid existing records when adding a new record', async () => {
     localStorage.setItem(
       HISTORY_KEY,
       JSON.stringify({
@@ -91,7 +95,9 @@ describe('HistoryStore', () => {
       elapsed: 99,
     }
 
-    const records = new HistoryStore().add('main', newRecord)
+    const mutation = new HistoryStore().add('main', newRecord)
+    const records = mutation.records
+    await mutation.persisted
 
     expect(records).toHaveLength(2)
     expect(records[0]).toMatchObject(newRecord)

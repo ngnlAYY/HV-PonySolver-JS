@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CachedImageLoader } from '../../src/captcha/captcha-image-loader'
 
@@ -34,6 +34,10 @@ describe('CachedImageLoader', () => {
     vi.clearAllMocks()
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('仅缓存命中时直接返回 blob，不触发第二次 fetch，也无 warn 日志', async () => {
     const fetchStub = vi.fn().mockResolvedValueOnce(makeOkResponse(FAKE_BLOB))
     globalThis.fetch = fetchStub
@@ -64,10 +68,7 @@ describe('CachedImageLoader', () => {
 
   it('仅缓存抛 TypeError，回退普通 fetch 成功时返回 blob 并记录 warn', async () => {
     const networkError = new TypeError('Failed to fetch')
-    const fetchStub = vi
-      .fn()
-      .mockRejectedValueOnce(networkError)
-      .mockResolvedValueOnce(makeOkResponse(FAKE_BLOB))
+    const fetchStub = vi.fn().mockRejectedValueOnce(networkError).mockResolvedValueOnce(makeOkResponse(FAKE_BLOB))
     globalThis.fetch = fetchStub
 
     const loader = new CachedImageLoader()
@@ -79,10 +80,7 @@ describe('CachedImageLoader', () => {
   })
 
   it('两次 fetch 均失败时 reject，错误消息包含 "图片缓存不可用" 和 "回退也失败"', async () => {
-    const fetchStub = vi
-      .fn()
-      .mockResolvedValueOnce(makeFailResponse(504))
-      .mockResolvedValueOnce(makeFailResponse(503))
+    const fetchStub = vi.fn().mockResolvedValueOnce(makeFailResponse(504)).mockResolvedValueOnce(makeFailResponse(503))
     globalThis.fetch = fetchStub
 
     const loader = new CachedImageLoader()
@@ -96,6 +94,70 @@ describe('CachedImageLoader', () => {
     const message = (caughtError as Error).message
     expect(message).toContain('图片缓存不可用')
     expect(message).toContain('回退也失败')
+  })
+
+  it('falls back when a cache hit fails while reading its blob', async () => {
+    const blobError = new Error('cached body failed')
+    const cachedResponse = {
+      ...makeOkResponse(FAKE_BLOB),
+      blob: vi.fn(async () => Promise.reject(blobError)),
+    } as unknown as Response
+    const fetchStub = vi.fn().mockResolvedValueOnce(cachedResponse).mockResolvedValueOnce(makeOkResponse(FAKE_BLOB))
+    globalThis.fetch = fetchStub
+
+    const result = await new CachedImageLoader().get(FAKE_URL)
+
+    expect(result).toBe(FAKE_BLOB)
+    expect(fetchStub).toHaveBeenCalledTimes(2)
+    expect(logger.warn).toHaveBeenCalledWith('仅缓存读取失败，使用网络回退', 'cached body failed')
+  })
+
+  it('passes a signal to fetch and aborts a pending request without falling back', async () => {
+    const fetchStub = vi.fn(() => new Promise<Response>(() => undefined))
+    globalThis.fetch = fetchStub
+    const controller = new AbortController()
+
+    const loadPromise = new CachedImageLoader().get(FAKE_URL, controller.signal)
+    const requestSignal = (fetchStub.mock.calls[0]?.[1] as RequestInit | undefined)?.signal
+    controller.abort()
+
+    await expect(loadPromise).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requestSignal).toBeInstanceOf(AbortSignal)
+    expect(requestSignal?.aborted).toBe(true)
+    expect(fetchStub).toHaveBeenCalledTimes(1)
+    expect(logger.warn).not.toHaveBeenCalled()
+  })
+
+  it('aborts a pending blob read when the caller signal is cancelled', async () => {
+    const readBlob = vi.fn(() => new Promise<Blob>(() => undefined))
+    const fetchStub = vi.fn(async () => ({ ok: true, status: 200, blob: readBlob }) as unknown as Response)
+    globalThis.fetch = fetchStub
+    const controller = new AbortController()
+
+    const loadPromise = new CachedImageLoader().get(FAKE_URL, controller.signal)
+    await vi.waitFor(() => expect(readBlob).toHaveBeenCalledTimes(1))
+    controller.abort()
+
+    await expect(loadPromise).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchStub).toHaveBeenCalledTimes(1)
+    expect(logger.warn).not.toHaveBeenCalled()
+  })
+
+  it('enforces one deadline across fetch and blob reads', async () => {
+    vi.useFakeTimers()
+    const fetchStub = vi.fn(() => new Promise<Response>(() => undefined))
+    globalThis.fetch = fetchStub
+
+    const loadPromise = new CachedImageLoader(100).get(FAKE_URL)
+    const rejection = expect(loadPromise).rejects.toMatchObject({ name: 'TimeoutError' })
+    const requestSignal = (fetchStub.mock.calls[0]?.[1] as RequestInit | undefined)?.signal
+    await vi.advanceTimersByTimeAsync(100)
+
+    await rejection
+    expect(requestSignal?.aborted).toBe(true)
+    expect(fetchStub).toHaveBeenCalledTimes(1)
+    expect(logger.warn).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('第一次 fetch 使用 only-if-cached，第二次使用 default，两次均为 same-origin + credentials', async () => {

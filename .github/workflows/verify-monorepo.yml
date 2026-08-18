@@ -22,8 +22,14 @@ on:
         type: boolean
         required: true
         default: false
+      firefox_android_e2e_run_id:
+        description: 'Successful external Firefox Android 142 evidence run ID (required for extension publication)'
+        type: string
+        required: false
+        default: ''
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -250,11 +256,109 @@ jobs:
       - name: Extension content E2E smoke
         run: pnpm test:e2e:extension:content
 
-      - name: Chromium production extension load smoke
-        run: pnpm test:e2e:extension:chromium
+      - name: Chromium production remote extension load-only smoke
+        run: pnpm test:e2e:extension:chromium:load-only
 
-      - name: Firefox production extension load smoke
-        run: pnpm test:e2e:extension:firefox
+      - name: Firefox production remote extension load-only smoke
+        run: pnpm test:e2e:extension:firefox:load-only
+
+  extension-remote-authenticated-e2e:
+    needs: validate-inputs
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact) }}
+    runs-on: ubuntu-latest
+    environment: production-model-smoke
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps chromium
+
+      - name: Authenticated production remote-model detect
+        env:
+          KvKey: ${{ secrets.KV_KEY }}
+        run: pnpm test:e2e:extension:chromium:authenticated
+
+  extension-minimum-versions-e2e:
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install exact Chromium 116
+        id: chromium-116
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: '116.0.5845.96'
+          install-dependencies: true
+
+      - name: Install Firefox 140 release
+        id: firefox-140
+        uses: browser-actions/setup-firefox@v1
+        with:
+          firefox-version: '140.0'
+
+      - name: Install pinned geckodriver
+        id: geckodriver
+        run: node apps/extension/scripts/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
+
+      - name: Build deterministic packaged fixture
+        run: pnpm --filter @hv-pony-solver/extension build:packaged:fixture
+
+      - name: Lint minimum-version Firefox fixture
+        run: pnpm --filter @hv-pony-solver/extension lint:firefox
+
+      - name: Execute packaged fixture in Chromium 116
+        env:
+          CHROMIUM_PATH: ${{ steps.chromium-116.outputs.chrome-path }}
+          PACKAGED_E2E_EVIDENCE_DIR: ${{ runner.temp }}/minimum-version-evidence
+          PACKAGED_E2E_HEADLESS: 'false'
+          REQUIRE_EXACT_MINIMUM_BROWSER: 'true'
+        run: xvfb-run -a pnpm --filter @hv-pony-solver/extension test:e2e:packaged:chromium
+
+      - name: Execute packaged fixture in Firefox 140
+        env:
+          FIREFOX_EXECUTABLE_PATH: ${{ steps.firefox-140.outputs.firefox-path }}
+          GECKODRIVER_PATH: ${{ steps.geckodriver.outputs.path }}
+          PACKAGED_E2E_EVIDENCE_DIR: ${{ runner.temp }}/minimum-version-evidence
+          REQUIRE_EXACT_MINIMUM_BROWSER: 'true'
+        run: pnpm --filter @hv-pony-solver/extension test:e2e:packaged:firefox
+
+      - name: Upload exact-minimum execution evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: hv-pony-solver-extension-minimum-version-evidence
+          path: ${{ runner.temp }}/minimum-version-evidence/*.json
+          if-no-files-found: error
 
   extension-packaged-e2e:
     needs: validate-inputs
@@ -383,12 +487,10 @@ jobs:
           PACKAGED_E2E_EVIDENCE_DIR: ${{ runner.temp }}/canonical-e2e-evidence
         run: pnpm --filter @hv-pony-solver/extension test:e2e:packaged:firefox
 
-      - name: Attest and preflight canonical gate
+      - name: Create canonical desktop E2E attestation
         run: |
           node apps/extension/scripts/release-gate.mjs attest \
             --evidence-dir "$RUNNER_TEMP/canonical-e2e-evidence" \
-            --attestation apps/extension/dist/canonical-gate-attestation.json
-          node apps/extension/scripts/release-gate.mjs preflight \
             --attestation apps/extension/dist/canonical-gate-attestation.json
 
       - name: Transfer canonical products to publication job
@@ -400,6 +502,80 @@ jobs:
             apps/extension/dist/*.zip.sha256
             apps/extension/dist/*.artifact.json
             apps/extension/dist/canonical-gate-attestation.json
+          if-no-files-found: error
+          retention-days: 1
+
+  firefox-android-142-release-gate:
+    needs: extension-canonical-packaged-e2e
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs['extension-canonical-packaged-e2e'].result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download canonical desktop gate products
+        uses: actions/download-artifact@v7
+        with:
+          name: hv-pony-solver-extension-canonical-gate
+          path: apps/extension/dist
+
+      - name: Download successful external Firefox Android 142 evidence
+        env:
+          ANDROID_EVIDENCE_RUN_ID: ${{ inputs.firefox_android_e2e_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$ANDROID_EVIDENCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo 'A numeric firefox_android_e2e_run_id is required for extension publication.' >&2
+            exit 1
+          fi
+          if [[ "$ANDROID_EVIDENCE_RUN_ID" == "$GITHUB_RUN_ID" ]]; then
+            echo 'Firefox Android evidence must come from a completed external run.' >&2
+            exit 1
+          fi
+          conclusion="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$ANDROID_EVIDENCE_RUN_ID" --jq '.conclusion')"
+          if [[ "$conclusion" != 'success' ]]; then
+            echo "Firefox Android evidence run did not conclude successfully: $conclusion" >&2
+            exit 1
+          fi
+          gh run download "$ANDROID_EVIDENCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name hv-pony-solver-firefox-android-142-evidence \
+            --dir "$RUNNER_TEMP/firefox-android-evidence"
+          test -f "$RUNNER_TEMP/firefox-android-evidence/firefox-android-142-evidence.json"
+          cp "$RUNNER_TEMP/firefox-android-evidence/firefox-android-142-evidence.json" \
+            apps/extension/dist/firefox-android-142-evidence.json
+
+      - name: Fail-closed desktop and Firefox Android release preflight
+        env:
+          PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL }}
+          PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
+          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
+        run: node apps/extension/scripts/release-gate.mjs preflight
+
+      - name: Transfer complete extension release gate
+        uses: actions/upload-artifact@v7
+        with:
+          name: hv-pony-solver-extension-complete-release-gate
+          path: |
+            apps/extension/dist/*.zip
+            apps/extension/dist/*.zip.sha256
+            apps/extension/dist/*.artifact.json
+            apps/extension/dist/canonical-gate-attestation.json
+            apps/extension/dist/firefox-android-142-evidence.json
           if-no-files-found: error
           retention-days: 1
 
@@ -461,7 +637,10 @@ jobs:
       - extension-e2e
       - extension-packaged-e2e
       - extension-canonical-packaged-e2e
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].result == 'success' }}
+      - extension-minimum-versions-e2e
+      - extension-remote-authenticated-e2e
+      - firefox-android-142-release-gate
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].result == 'success' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['firefox-android-142-release-gate'].result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -481,10 +660,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Download canonical gate products
+      - name: Download complete extension release gate
         uses: actions/download-artifact@v7
         with:
-          name: hv-pony-solver-extension-canonical-gate
+          name: hv-pony-solver-extension-complete-release-gate
           path: apps/extension/dist
 
       - name: Fail-closed release preflight

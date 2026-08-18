@@ -1,10 +1,10 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>HV Pony Solver 设置</title>
-    <link rel="stylesheet" href="options.css">
+    <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <main>
@@ -20,36 +20,36 @@
         </label>
         <label>
           提交延迟（毫秒或范围）
-          <input id="submit-delay" inputmode="numeric" autocomplete="off">
+          <input id="submit-delay" inputmode="numeric" autocomplete="off" />
         </label>
         <label>
           多选点击间隔（毫秒或范围）
-          <input id="multi-click-delay" inputmode="numeric" autocomplete="off">
+          <input id="multi-click-delay" inputmode="numeric" autocomplete="off" />
         </label>
         <label>
           面板位置（top,left）
-          <input id="panel-position" autocomplete="off">
+          <input id="panel-position" autocomplete="off" />
         </label>
         <label>
           历史记录显示条数
-          <input id="history-limit" type="number" min="1" max="50">
+          <input id="history-limit" type="number" min="1" max="50" />
         </label>
         <label class="checkbox">
-          <input id="panel-compact" type="checkbox">
+          <input id="panel-compact" type="checkbox" />
           使用紧凑面板
         </label>
         <label class="checkbox">
-          <input id="random-on-fail" type="checkbox">
+          <input id="random-on-fail" type="checkbox" />
           识别失败时随机选择一个答案
         </label>
         <div class="actions">
-          <button type="submit">保存设置</button>
+          <button type="submit" disabled>保存设置</button>
         </div>
         <fieldset id="model-key-fieldset" class="key-settings" aria-describedby="packaged-model-hint" disabled>
           <legend>模型 Key</legend>
           <label>
             模型 Key
-            <input id="model-key" type="password" autocomplete="off" placeholder="留空则保持现有 Key">
+            <input id="model-key" type="password" autocomplete="off" placeholder="留空则保持现有 Key" />
           </label>
           <div class="actions">
             <button id="verify-key" type="button">验证并保存 Key</button>

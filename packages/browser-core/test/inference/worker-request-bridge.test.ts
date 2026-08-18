@@ -66,6 +66,32 @@ describe('WorkerRequestBridge', () => {
     await expect(promise).rejects.toThrow('bad output')
   })
 
+  it('marks fatal Worker responses and invokes recovery', async () => {
+    const worker = new ManualWorker()
+    const onFailure = vi.fn()
+    const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
+    const promise = bridge.post({ type: 'detect', imageBlob: new Blob() }, [])
+
+    worker.onmessage?.({
+      data: { type: 'error', requestId: 1, message: 'session unusable', fatal: true },
+    } as MessageEvent)
+
+    await expect(promise).rejects.toMatchObject({ message: 'session unusable', fatal: true })
+    expect(onFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a malformed matching Worker message as fatal', async () => {
+    const worker = new ManualWorker()
+    const onFailure = vi.fn()
+    const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
+    const promise = bridge.post({ type: 'detect', imageBlob: new Blob() }, [])
+
+    worker.onmessage?.({ data: { type: 'unexpected', requestId: 1 } } as MessageEvent)
+
+    await expect(promise).rejects.toMatchObject({ message: 'ONNX Worker 返回无效消息', fatal: true })
+    expect(onFailure).toHaveBeenCalledTimes(1)
+  })
+
   it('ignores unknown request ids', async () => {
     const worker = new ManualWorker()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, () => undefined)

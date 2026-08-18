@@ -21,7 +21,9 @@ export type DetectRequest = RequestBase &
     mimeType: string
   }>
 export type VerifyKeyRequest = RequestBase & Readonly<{ type: 'verify-key'; candidateKey: string }>
-export type HostRequest = PrepareRequest | DetectRequest | VerifyKeyRequest
+export type ClearKeyRequest = RequestBase & Readonly<{ type: 'clear-key' }>
+export type KeyIntentRequest = VerifyKeyRequest | ClearKeyRequest
+export type HostRequest = PrepareRequest | DetectRequest | KeyIntentRequest
 
 export type HostSuccessResponse = RequestBase &
   Readonly<{
@@ -39,8 +41,18 @@ export type HostResponse = HostSuccessResponse | HostErrorResponse
 
 export type OffscreenRequest = Readonly<{
   type: typeof OFFSCREEN_MESSAGE_TYPE
+  operation: 'request'
+  requestId: string
   request: HostRequest
 }>
+
+export type OffscreenCancelRequest = Readonly<{
+  type: typeof OFFSCREEN_MESSAGE_TYPE
+  operation: 'cancel'
+  requestId: string
+}>
+
+export type OffscreenMessage = OffscreenRequest | OffscreenCancelRequest
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -95,14 +107,19 @@ function isYoloResult(value: unknown): value is YoloParseResult {
       return false
     }
   }
-  return Array.isArray(value.detections) && value.detections.every(isDetection) && Array.isArray(value.candidates) && value.candidates.every(isDetection)
+  return (
+    Array.isArray(value.detections) &&
+    value.detections.every(isDetection) &&
+    Array.isArray(value.candidates) &&
+    value.candidates.every(isDetection)
+  )
 }
 
 export function isHostRequest(value: unknown): value is HostRequest {
   if (!isRecord(value) || value.protocol !== PROTOCOL_VERSION || !isRequestId(value.requestId)) {
     return false
   }
-  if (value.type === 'prepare') {
+  if (value.type === 'prepare' || value.type === 'clear-key') {
     return hasOnlyKeys(value, ['protocol', 'type', 'requestId'])
   }
   if (value.type === 'detect') {
@@ -145,10 +162,26 @@ export function isHostResponse(value: unknown): value is HostResponse {
 export function isOffscreenRequest(value: unknown): value is OffscreenRequest {
   return (
     isRecord(value) &&
-    hasOnlyKeys(value, ['type', 'request']) &&
+    hasOnlyKeys(value, ['type', 'operation', 'requestId', 'request']) &&
     value.type === OFFSCREEN_MESSAGE_TYPE &&
+    value.operation === 'request' &&
+    isRequestId(value.requestId) &&
     isHostRequest(value.request)
   )
+}
+
+export function isOffscreenCancelRequest(value: unknown): value is OffscreenCancelRequest {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ['type', 'operation', 'requestId']) &&
+    value.type === OFFSCREEN_MESSAGE_TYPE &&
+    value.operation === 'cancel' &&
+    isRequestId(value.requestId)
+  )
+}
+
+export function isOffscreenMessage(value: unknown): value is OffscreenMessage {
+  return isOffscreenRequest(value) || isOffscreenCancelRequest(value)
 }
 
 export function errorResponse(requestId: string, error: string): HostErrorResponse {

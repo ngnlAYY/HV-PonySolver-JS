@@ -5,6 +5,7 @@ export const PANEL_COMPACT_MODE_STORAGE_KEY = 'hvPonySolverPanelCompact'
 export const PANEL_HISTORY_LIMIT_STORAGE_KEY = 'hvPonySolverHistoryLimit'
 export const DEFAULT_PANEL_POSITION: PanelPosition = { top: 150, left: 1240 }
 export const DEFAULT_PANEL_HISTORY_LIMIT = 5
+export const MAX_PANEL_POSITION = 1_000_000
 const INVALID_POSITION_MESSAGE = '面板位置格式无效，请输入非负整数 top,left，例如 150,1240'
 const INVALID_HISTORY_LIMIT_MESSAGE = '答题记录条数无效，请输入 1 到 50 之间的整数'
 
@@ -13,15 +14,27 @@ export type PanelPosition = Readonly<{
   left: number
 }>
 
+function isValidPanelCoordinate(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0 && value <= MAX_PANEL_POSITION
+}
+
 export function parsePanelPosition(value: string): PanelPosition {
   const match = /^\s*(\d+)\s*,\s*(\d+)\s*$/.exec(value)
   if (!match) {
     throw new Error(INVALID_POSITION_MESSAGE)
   }
-  return { top: Number(match[1]), left: Number(match[2]) }
+  const top = Number(match[1])
+  const left = Number(match[2])
+  if (!isValidPanelCoordinate(top) || !isValidPanelCoordinate(left)) {
+    throw new Error(INVALID_POSITION_MESSAGE)
+  }
+  return { top, left }
 }
 
 export function serializePanelPosition(position: PanelPosition): string {
+  if (!isValidPanelCoordinate(position.top) || !isValidPanelCoordinate(position.left)) {
+    throw new Error(INVALID_POSITION_MESSAGE)
+  }
   return `${position.top},${position.left}`
 }
 

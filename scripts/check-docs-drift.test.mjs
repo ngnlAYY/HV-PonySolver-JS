@@ -42,10 +42,12 @@ async function createFixture() {
     'packages/shared/src/model.ts',
   ]
 
-  await Promise.all(files.map(async (file) => {
-    await mkdir(join(fixtureRoot, dirname(file)), { recursive: true })
-    await copyFile(join(repoRoot, file), join(fixtureRoot, file))
-  }))
+  await Promise.all(
+    files.map(async (file) => {
+      await mkdir(join(fixtureRoot, dirname(file)), { recursive: true })
+      await copyFile(join(repoRoot, file), join(fixtureRoot, file))
+    }),
+  )
   return fixtureRoot
 }
 
@@ -64,18 +66,26 @@ test('current repository README is in sync with source facts', async () => {
   assert.match(result.stdout, /Docs drift check passed/)
 })
 
-test('fails clearly when extension docs omit the generated Firefox minimum version', async () => {
-  await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
-    const extensionDocPath = join(fixtureRoot, 'docs/browser-extension.md')
-    await writeFile(readmePath, (await readFile(readmePath, 'utf8')).replaceAll('142', 'current Firefox'))
-    await writeFile(extensionDocPath, (await readFile(extensionDocPath, 'utf8')).replaceAll('142', 'current Firefox'))
+for (const [browser, minimum, errorLabel] of [
+  ['Firefox Desktop', '140', 'Firefox Desktop minimum version 140\\.0'],
+  ['Firefox Android', '142', 'Firefox Android minimum version 142\\.0'],
+]) {
+  test(`fails clearly when extension docs omit the generated ${browser} minimum version`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const readmePath = join(fixtureRoot, 'README.md')
+      const extensionDocPath = join(fixtureRoot, 'docs/browser-extension.md')
+      await writeFile(readmePath, (await readFile(readmePath, 'utf8')).replaceAll(minimum, `current ${browser}`))
+      await writeFile(
+        extensionDocPath,
+        (await readFile(extensionDocPath, 'utf8')).replaceAll(minimum, `current ${browser}`),
+      )
 
-    const result = await runCheck(fixtureRoot)
-    assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /extension documentation omits Firefox minimum version 142\.0/)
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      assert.match(result.stderr, new RegExp(`extension documentation omits ${errorLabel}`))
+    })
   })
-})
+}
 
 for (const [fact, replacement] of [
   ['--model-mode packaged', '--model-mode local'],
@@ -94,7 +104,29 @@ for (const [fact, replacement] of [
 
       const result = await runCheck(fixtureRoot)
       assert.notEqual(result.exitCode, 0)
-      assert.match(result.stderr, new RegExp(`extension documentation omits ${fact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+      assert.match(
+        result.stderr,
+        new RegExp(`extension documentation omits ${fact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+      )
+    })
+  })
+}
+
+for (const [directive, replacement] of [
+  ["object-src 'none'", "object-src 'self'"],
+  ["worker-src 'self'", "worker-src 'none'"],
+]) {
+  test(`fails clearly when extension docs mutate CSP directive ${directive}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const extensionDocPath = join(fixtureRoot, 'docs/browser-extension.md')
+      const extensionDoc = await readFile(extensionDocPath, 'utf8')
+      assert.ok(extensionDoc.includes(directive), `fixture should mention ${directive}`)
+      await writeFile(extensionDocPath, extensionDoc.replaceAll(directive, replacement))
+
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      const escapedDirective = directive.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      assert.match(result.stderr, new RegExp(`extension documentation omits ${escapedDirective}`))
     })
   })
 }
@@ -186,7 +218,10 @@ test('fails clearly when README omits verify-model-integrity and MODEL_FILE', as
   await withFixture(async (fixtureRoot) => {
     const readmePath = join(fixtureRoot, 'README.md')
     const readme = await readFile(readmePath, 'utf8')
-    await writeFile(readmePath, readme.replaceAll('verify-model-integrity', 'verify model integrity').replaceAll('MODEL_FILE', 'MODEL PATH'))
+    await writeFile(
+      readmePath,
+      readme.replaceAll('verify-model-integrity', 'verify model integrity').replaceAll('MODEL_FILE', 'MODEL PATH'),
+    )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
@@ -368,7 +403,11 @@ test('fails clearly when README OPTIONS row headers are masked by explanatory te
   await withFixture(async (fixtureRoot) => {
     const readmePath = join(fixtureRoot, 'README.md')
     const readme = await readFile(readmePath, 'utf8')
-    assert.ok(readme.includes('`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`'))
+    assert.ok(
+      readme.includes(
+        '`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`',
+      ),
+    )
     await writeFile(
       readmePath,
       `${readme.replace(
@@ -392,7 +431,10 @@ test('fails clearly when README 405 row Allow header is masked by explanatory te
     await writeFile(
       readmePath,
       readme
-        .replace('### HTTP 行为\n\n', '### HTTP 行为\n\n附注：405 Method Not Allowed 响应会发送 `Allow: GET, HEAD, OPTIONS`。\n')
+        .replace(
+          '### HTTP 行为\n\n',
+          '### HTTP 行为\n\n附注：405 Method Not Allowed 响应会发送 `Allow: GET, HEAD, OPTIONS`。\n',
+        )
         .replace(
           '`405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`',
           '`405 Method Not Allowed`，Allow header documented elsewhere',
@@ -413,7 +455,10 @@ test('fails clearly when README selected R2 missing row is masked by explanatory
     await writeFile(
       readmePath,
       readme
-        .replace('### HTTP 行为\n\n', '### HTTP 行为\n\n附注：selected R2 object missing 会返回 `500 Internal Server Error`。\n')
+        .replace(
+          '### HTTP 行为\n\n',
+          '### HTTP 行为\n\n附注：selected R2 object missing 会返回 `500 Internal Server Error`。\n',
+        )
         .replace(
           /\| 选中的 R2 object 缺失\s+\| `500 Internal Server Error`\s+\|/,
           '| R2 对象缺失                                                   | 内部错误，状态码见附注                         |',
@@ -434,8 +479,17 @@ test('fails clearly when Model Worker source allowed methods drift from README',
     const responseSource = await readFile(responsePath, 'utf8')
     assert.ok(routerSource.includes("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'"))
     assert.ok(responseSource.includes("const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'"))
-    await writeFile(routerPath, routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'"))
-    await writeFile(responsePath, responseSource.replace("const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'", "const CORS_ALLOW_METHODS = 'GET, HEAD'"))
+    await writeFile(
+      routerPath,
+      routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'"),
+    )
+    await writeFile(
+      responsePath,
+      responseSource.replace(
+        "const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'",
+        "const CORS_ALLOW_METHODS = 'GET, HEAD'",
+      ),
+    )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
@@ -464,7 +518,10 @@ test('fails clearly when Model Worker source auth and response facts drift from 
       responsePath,
       responseSource
         .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'private, no-cache'")
-        .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404'),
+        .replace(
+          'textResponse(request, INTERNAL_ERROR_MESSAGE, 500',
+          'textResponse(request, INTERNAL_ERROR_MESSAGE, 404',
+        ),
     )
 
     const result = await runCheck(fixtureRoot)
@@ -514,7 +571,10 @@ test('fails clearly when Model Worker string facts use runtime expressions', asy
       responsePath,
       responseSource
         .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'no-store' + ', max-age=86400'")
-        .replace("const CORS_ALLOW_HEADERS = 'Authorization'", "const CORS_ALLOW_HEADERS = 'Authorization'.toLowerCase()"),
+        .replace(
+          "const CORS_ALLOW_HEADERS = 'Authorization'",
+          "const CORS_ALLOW_HEADERS = 'Authorization'.toLowerCase()",
+        ),
     )
 
     const result = await runCheck(fixtureRoot)
@@ -532,13 +592,19 @@ test('accepts Model Worker string facts with TypeScript-only annotations', async
     const responseSource = await readFile(responsePath, 'utf8')
     await writeFile(
       routerPath,
-      routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS: string = 'GET, HEAD, OPTIONS' as const"),
+      routerSource.replace(
+        "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'",
+        "const ALLOWED_METHODS: string = 'GET, HEAD, OPTIONS' as const",
+      ),
     )
     await writeFile(
       responsePath,
       responseSource
         .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL: string = 'no-store' as const")
-        .replace("const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'", "const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS' satisfies string"),
+        .replace(
+          "const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'",
+          "const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS' satisfies string",
+        ),
     )
 
     const result = await runCheck(fixtureRoot)
@@ -554,11 +620,17 @@ test('accepts Model Worker string facts with combined TypeScript-only suffixes',
     const responseSource = await readFile(responsePath, 'utf8')
     await writeFile(
       routerPath,
-      routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS' as const satisfies string"),
+      routerSource.replace(
+        "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'",
+        "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS' as const satisfies string",
+      ),
     )
     await writeFile(
       responsePath,
-      responseSource.replace("const CORS_ALLOW_HEADERS = 'Authorization'", "const CORS_ALLOW_HEADERS = 'Authorization' as const satisfies string"),
+      responseSource.replace(
+        "const CORS_ALLOW_HEADERS = 'Authorization'",
+        "const CORS_ALLOW_HEADERS = 'Authorization' as const satisfies string",
+      ),
     )
 
     const result = await runCheck(fixtureRoot)
@@ -573,7 +645,10 @@ test('fails clearly when Model Worker response header use-sites bypass source fa
     await writeFile(
       responsePath,
       responseSource
-        .replace("'access-control-allow-headers': CORS_ALLOW_HEADERS", "'access-control-allow-headers': 'X-Model-Token'")
+        .replace(
+          "'access-control-allow-headers': CORS_ALLOW_HEADERS",
+          "'access-control-allow-headers': 'X-Model-Token'",
+        )
         .replace("'access-control-allow-methods': CORS_ALLOW_METHODS", "'access-control-allow-methods': 'GET, HEAD'")
         .replaceAll("'cache-control': CACHE_CONTROL", "'cache-control': 'private, no-cache'"),
     )
@@ -593,7 +668,10 @@ test('fails clearly when Model Worker response header use-site drift is masked b
     await writeFile(
       responsePath,
       responseSource
-        .replace("'access-control-allow-headers': CORS_ALLOW_HEADERS", "'access-control-allow-headers': 'X-Model-Token'")
+        .replace(
+          "'access-control-allow-headers': CORS_ALLOW_HEADERS",
+          "'access-control-allow-headers': 'X-Model-Token'",
+        )
         .replace("'access-control-allow-methods': CORS_ALLOW_METHODS", "'access-control-allow-methods': 'GET, HEAD'")
         .replace(
           'export function preflightResponse(request: Request): Response {\n  const headers',
@@ -615,7 +693,10 @@ test('fails clearly when selected R2 miss status is masked by an earlier decoy b
     await writeFile(
       responsePath,
       responseSource
-        .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404')
+        .replace(
+          'textResponse(request, INTERNAL_ERROR_MESSAGE, 500',
+          'textResponse(request, INTERNAL_ERROR_MESSAGE, 404',
+        )
         .replace(
           'export async function createModelResponse',
           `function decoySelectedObjectMissingStatus(object: unknown, request: Request): Response | null {
@@ -664,8 +745,14 @@ test('fails clearly when selected R2 miss status is masked by nested dead decoy 
     await writeFile(
       responsePath,
       responseSource
-        .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404')
-        .replace('const object = await env.modelBucket.get(objectKey)', 'const object = await env.modelBucket.get(objectKey)\n  if (false) { if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) } }'),
+        .replace(
+          'textResponse(request, INTERNAL_ERROR_MESSAGE, 500',
+          'textResponse(request, INTERNAL_ERROR_MESSAGE, 404',
+        )
+        .replace(
+          'const object = await env.modelBucket.get(objectKey)',
+          'const object = await env.modelBucket.get(objectKey)\n  if (false) { if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) } }',
+        ),
     )
 
     const result = await runCheck(fixtureRoot)
@@ -790,8 +877,14 @@ test('fails clearly when stale top-level Bearer pattern is unused by token parse
     await writeFile(
       accessPath,
       `${accessSource
-        .replace("const BEARER_AUTHORIZATION_PATTERN = /^Bearer\\s+([^\\s]+)$/i", "const BEARER_AUTHORIZATION_PATTERN = /^Bearer\\s+([^\\s]+)$/i\nconst TOKEN_AUTHORIZATION_PATTERN = /^Token\\s+([^\\s]+)$/i")
-        .replace('BEARER_AUTHORIZATION_PATTERN.exec(authorization.trim())', 'TOKEN_AUTHORIZATION_PATTERN.exec(authorization.trim())')}
+        .replace(
+          'const BEARER_AUTHORIZATION_PATTERN = /^Bearer\\s+([^\\s]+)$/i',
+          'const BEARER_AUTHORIZATION_PATTERN = /^Bearer\\s+([^\\s]+)$/i\nconst TOKEN_AUTHORIZATION_PATTERN = /^Token\\s+([^\\s]+)$/i',
+        )
+        .replace(
+          'BEARER_AUTHORIZATION_PATTERN.exec(authorization.trim())',
+          'TOKEN_AUTHORIZATION_PATTERN.exec(authorization.trim())',
+        )}
 if (false) {
   BEARER_AUTHORIZATION_PATTERN.exec('Bearer decoy')
 }
@@ -812,7 +905,7 @@ test('fails clearly when Bearer token parser is unused by model access selection
       accessPath,
       accessSource.replace(
         'const lookupKeys = getModelAccessTokenLookupKeys(getRequestAccessToken(request))',
-        'const lookupKeys = getModelAccessTokenLookupKeys(request.headers.get(\'x-model-token\'))',
+        "const lookupKeys = getModelAccessTokenLookupKeys(request.headers.get('x-model-token'))",
       ),
     )
 
@@ -963,7 +1056,10 @@ test('does not reject query-string key English denial wording as real model acce
   await withFixture(async (fixtureRoot) => {
     const readmePath = join(fixtureRoot, 'README.md')
     const readme = await readFile(readmePath, 'utf8')
-    await writeFile(readmePath, `${readme}\nquery string key cannot return the real model; treat it as missing Bearer token.\n`)
+    await writeFile(
+      readmePath,
+      `${readme}\nquery string key cannot return the real model; treat it as missing Bearer token.\n`,
+    )
 
     const result = await runCheck(fixtureRoot)
     assert.equal(result.exitCode, 0, result.stderr)
@@ -985,10 +1081,7 @@ for (const queryKeyDenialWording of [
       const readmePath = join(fixtureRoot, 'README.md')
       const readme = await readFile(readmePath, 'utf8')
       assert.ok(readme.includes('不授权真实模型；按缺少 Bearer token 处理'))
-      await writeFile(
-        readmePath,
-        readme.replace('不授权真实模型；按缺少 Bearer token 处理', queryKeyDenialWording),
-      )
+      await writeFile(readmePath, readme.replace('不授权真实模型；按缺少 Bearer token 处理', queryKeyDenialWording))
 
       const result = await runCheck(fixtureRoot)
       assert.equal(result.exitCode, 0, result.stderr)
@@ -1070,7 +1163,10 @@ test('fails clearly when README 405 docs omit OPTIONS from the Allow header row'
     assert.ok(readme.includes('`405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`'))
     await writeFile(
       readmePath,
-      readme.replace('`405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`', '`405 Method Not Allowed`，`Allow: GET, HEAD`'),
+      readme.replace(
+        '`405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`',
+        '`405 Method Not Allowed`，`Allow: GET, HEAD`',
+      ),
     )
 
     const result = await runCheck(fixtureRoot)
@@ -1109,12 +1205,7 @@ test('fails clearly when README selected R2 miss row omits Internal Server Error
   })
 })
 
-const architectureGuardrailTerms = [
-  'architecture:check',
-  'inferenceTimeoutConfig',
-  'StatusPanel',
-  'Model Worker Core',
-]
+const architectureGuardrailTerms = ['architecture:check', 'inferenceTimeoutConfig', 'StatusPanel', 'Model Worker Core']
 
 for (const requiredTerm of architectureGuardrailTerms) {
   test(`fails clearly when README guardrails omit ${requiredTerm}`, async () => {

@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { TextDecoder, isDeepStrictEqual } from 'node:util'
 import { chromium } from '@playwright/test'
+import { unzipSync } from 'fflate'
 
 import {
   benchmarkSchemaVersion,
@@ -21,9 +23,17 @@ const extensionRoot = path.resolve(scriptDirectory, '..')
 const repositoryRoot = path.resolve(extensionRoot, '..', '..')
 const defaultOutputDirectory = path.join(extensionRoot, '.tmp', 'benchmark')
 const defaultArtifactRoot = path.join(extensionRoot, 'dist')
+const transportWorkloadContract =
+  'browser Blob copy plus full-buffer digest only; extension transport, prepare, detect, mode, and cache are not measured'
+const profilerAvailabilityContract =
+  'jsHeapSnapshotBytes is an after-sample snapshot, not a peak; process and WASM peak fields are null when unsupported'
+const sha256Pattern = /^[a-f0-9]{64}$/u
 
 function splitList(value) {
-  return String(value).split(',').map((item) => item.trim()).filter(Boolean)
+  return String(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function parsePositiveInteger(value, label) {
@@ -34,17 +44,17 @@ function parsePositiveInteger(value, label) {
   return parsed
 }
 
-function parseArguments(argumentsList) {
+export function parseArguments(argumentsList) {
   const options = {
     ...requiredBenchmarkDefaults,
     browsers: [...requiredBenchmarkDefaults.browsers],
-    modes: [...requiredBenchmarkDefaults.modes],
-    caches: [...requiredBenchmarkDefaults.caches],
     imageBytes: [...requiredBenchmarkDefaults.imageBytes],
+    exhaustiveImageBytes: [...requiredBenchmarkDefaults.exhaustiveImageBytes],
     iterations: [...requiredBenchmarkDefaults.iterations],
     patterns: [...requiredBenchmarkDefaults.patterns],
     label: 'baseline',
     workload: 'transport',
+    matrixProfile: requiredBenchmarkDefaults.matrixProfile,
     outputDirectory: process.env.BENCHMARK_OUTPUT_DIR || defaultOutputDirectory,
     artifactRoot: process.env.PACKAGED_EXTENSION_OUTPUT_ROOT || defaultArtifactRoot,
     dryRun: false,
@@ -67,20 +77,17 @@ function parseArguments(argumentsList) {
       case '--browser':
         options.browsers = splitList(readValue())
         break
-      case '--mode':
-        options.modes = splitList(readValue())
-        break
-      case '--cache':
-        options.caches = splitList(readValue())
-        break
       case '--image-bytes':
         options.imageBytes = splitList(readValue()).map((value) => parsePositiveInteger(value, 'image byte size'))
+        options.matrixProfile = 'custom'
         break
       case '--iterations':
         options.iterations = splitList(readValue()).map((value) => parsePositiveInteger(value, 'iteration count'))
+        options.matrixProfile = 'custom'
         break
       case '--pattern':
         options.patterns = splitList(readValue())
+        options.matrixProfile = 'custom'
         break
       case '--invocations':
         options.invocations = parsePositiveInteger(readValue(), 'invocation count')
@@ -100,11 +107,15 @@ function parseArguments(argumentsList) {
           throw new Error('Only the transport benchmark workload is implemented')
         }
         break
+      case '--artifact-root':
+        options.artifactRoot = path.resolve(readValue())
+        break
       case '--output-dir':
         options.outputDirectory = path.resolve(readValue())
         break
-      case '--artifact-root':
-        options.artifactRoot = path.resolve(readValue())
+      case '--exhaustive':
+        options.imageBytes = [...requiredBenchmarkDefaults.exhaustiveImageBytes]
+        options.matrixProfile = 'exhaustive'
         break
       case '--dry-run':
         options.dryRun = true
@@ -112,11 +123,10 @@ function parseArguments(argumentsList) {
       case '--quick':
         Object.assign(options, {
           browsers: ['chromium'],
-          modes: ['remote'],
-          caches: ['warm'],
           imageBytes: [1_024],
           iterations: [100],
           patterns: ['sequential', 'burst'],
+          matrixProfile: 'representative',
           invocations: 1,
           warmups: 1,
           samples: 3,
@@ -146,20 +156,195 @@ async function optionalJson(filePath) {
   }
 }
 
-async function findArtifactIdentity(artifactRoot, browser, mode) {
-  const artifactPath = path.join(artifactRoot, `hv-pony-solver-${browser}-${mode}-0.1.0.artifact.json`)
-  const fixturePath = path.join(artifactRoot, `hv-pony-solver-${browser}-${mode}-fixture-0.1.0.artifact.json`)
-  const artifact = await optionalJson(artifactPath) ?? await optionalJson(fixturePath)
-  if (!artifact) {
+function assertSha256(value, label) {
+  if (!sha256Pattern.test(value ?? '')) {
+    throw new Error(`${label} must be a lowercase SHA-256`)
+  }
+}
+
+function assertArtifactFileRecord(record, label) {
+  if (!record || typeof record !== 'object' || !Number.isSafeInteger(record.byteLength) || record.byteLength < 1) {
+    throw new Error(`${label} has an invalid byte length`)
+  }
+  assertSha256(record.sha256, `${label} SHA-256`)
+}
+
+function assertSafeArchiveName(name, label) {
+  if (typeof name !== 'string' || path.basename(name) !== name || !/^[A-Za-z0-9._-]+\.zip$/u.test(name)) {
+    throw new Error(`${label} has an unsafe archive name`)
+  }
+}
+
+function decodeJson(bytes, label) {
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes))
+  } catch (error) {
+    throw new Error(`${label} is not valid JSON`, { cause: error })
+  }
+}
+
+async function verifyArtifactManifest(artifactRoot, artifact, artifactPath, browser) {
+  if (!artifact || typeof artifact !== 'object' || artifact.target !== browser) {
+    throw new Error(`Artifact ${artifactPath} does not identify target ${browser}`)
+  }
+  if (typeof artifact.version !== 'string' || artifact.version.trim().length === 0) {
+    throw new Error(`Artifact ${artifactPath} is missing its version`)
+  }
+  if (!['remote', 'packaged'].includes(artifact.modelDelivery)) {
+    throw new Error(`Artifact ${artifactPath} has an invalid model delivery`)
+  }
+  if (artifact.fixture !== undefined && typeof artifact.fixture !== 'boolean') {
+    throw new Error(`Artifact ${artifactPath} has an invalid fixture flag`)
+  }
+  if (!artifact.archive || typeof artifact.archive !== 'object') {
+    throw new Error(`Artifact ${artifactPath} is missing archive provenance`)
+  }
+  assertSafeArchiveName(artifact.archive.archiveName, `Artifact ${artifactPath}`)
+  if (!Number.isSafeInteger(artifact.archive.byteLength) || artifact.archive.byteLength < 1) {
+    throw new Error(`Artifact ${artifactPath} has an invalid archive byte length`)
+  }
+  assertSha256(artifact.archive.sha256, `Artifact ${artifactPath} archive`)
+  const archivePath = path.join(artifactRoot, artifact.archive.archiveName)
+  const archiveBytes = new Uint8Array(await readFile(archivePath))
+  const archiveHash = sha256(archiveBytes)
+  if (archiveBytes.byteLength !== artifact.archive.byteLength || archiveHash !== artifact.archive.sha256) {
+    throw new Error(`Artifact ${artifactPath} archive provenance does not match ${artifact.archive.archiveName}`)
+  }
+  const checksumText = await readFile(`${archivePath}.sha256`, 'utf8')
+  const checksumMatch = checksumText.match(/^([a-f0-9]{64}) {2}([^\n]+)\n?$/u)
+  if (!checksumMatch || checksumMatch[1] !== archiveHash || checksumMatch[2] !== artifact.archive.archiveName) {
+    throw new Error(`Artifact ${artifactPath} archive checksum sidecar is invalid`)
+  }
+
+  let archive
+  try {
+    archive = unzipSync(archiveBytes)
+  } catch (error) {
+    throw new Error(`Artifact ${artifactPath} archive is not a valid ZIP`, { cause: error })
+  }
+  const fileRecords = artifact.files
+  if (!fileRecords || typeof fileRecords !== 'object' || Array.isArray(fileRecords)) {
+    throw new Error(`Artifact ${artifactPath} is missing file provenance`)
+  }
+  for (const [name, record] of Object.entries(fileRecords)) {
+    if (name === 'build-manifest.json' || !(name in archive)) {
+      throw new Error(`Artifact ${artifactPath} file provenance is missing ${name}`)
+    }
+    assertArtifactFileRecord(record, `Artifact ${artifactPath} file ${name}`)
+    if (archive[name].byteLength !== record.byteLength || sha256(archive[name]) !== record.sha256) {
+      throw new Error(`Artifact ${artifactPath} file provenance does not match ${name}`)
+    }
+  }
+  const unrecordedFiles = Object.keys(archive).filter(
+    (name) => name !== 'build-manifest.json' && !(name in fileRecords),
+  )
+  if (unrecordedFiles.length > 0) {
+    throw new Error(`Artifact ${artifactPath} has unrecorded archive files: ${unrecordedFiles.join(', ')}`)
+  }
+  const buildManifest = decodeJson(archive['build-manifest.json'], `${artifactPath} build manifest`)
+  if (
+    buildManifest.target !== browser ||
+    buildManifest.version !== artifact.version ||
+    buildManifest.modelDelivery !== artifact.modelDelivery ||
+    (buildManifest.fixture === true) !== (artifact.fixture === true) ||
+    (artifact.modelDelivery === 'packaged' && !isDeepStrictEqual(buildManifest.model, artifact.model)) ||
+    (artifact.modelDelivery === 'remote' && 'model' in buildManifest) ||
+    !isDeepStrictEqual(buildManifest.files, fileRecords)
+  ) {
+    throw new Error(`Artifact ${artifactPath} build-manifest provenance does not match artifact metadata`)
+  }
+
+  const wasmEntries = Object.keys(archive).filter((name) => name.endsWith('.wasm'))
+  if (wasmEntries.length !== 1 || !fileRecords[wasmEntries[0]]) {
+    throw new Error(`Artifact ${artifactPath} must contain exactly one recorded WASM asset`)
+  }
+  const wasmPath = wasmEntries[0]
+  const wasmRecord = fileRecords[wasmPath]
+  assertArtifactFileRecord(wasmRecord, `Artifact ${artifactPath} WASM`)
+
+  const modelEntries = Object.keys(archive).filter((name) => name.endsWith('.ort'))
+  let model = null
+  if (artifact.modelDelivery === 'remote') {
+    if (artifact.model !== undefined || modelEntries.length !== 0) {
+      throw new Error(`Artifact ${artifactPath} remote provenance unexpectedly contains a model`)
+    }
+  } else {
+    if (
+      !artifact.model ||
+      typeof artifact.model !== 'object' ||
+      !/^[A-Za-z0-9._-]+\.ort$/u.test(artifact.model.filename ?? '')
+    ) {
+      throw new Error(`Artifact ${artifactPath} packaged provenance is missing model identity`)
+    }
+    if (!Number.isSafeInteger(artifact.model.byteLength) || artifact.model.byteLength < 1) {
+      throw new Error(`Artifact ${artifactPath} packaged model byte length is invalid`)
+    }
+    assertSha256(artifact.model.sha256, `Artifact ${artifactPath} model`)
+    const modelPath = `model/${artifact.model.filename}`
+    if (modelEntries.length !== 1 || modelEntries[0] !== modelPath || !fileRecords[modelPath]) {
+      throw new Error(`Artifact ${artifactPath} packaged model archive provenance is invalid`)
+    }
+    const modelBytes = archive[modelPath]
+    if (
+      modelBytes.byteLength !== artifact.model.byteLength ||
+      sha256(modelBytes) !== artifact.model.sha256 ||
+      fileRecords[modelPath].byteLength !== artifact.model.byteLength ||
+      fileRecords[modelPath].sha256 !== artifact.model.sha256
+    ) {
+      throw new Error(`Artifact ${artifactPath} model provenance does not match archive bytes`)
+    }
+    model = { ...artifact.model }
+  }
+
+  return {
+    target: browser,
+    version: artifact.version,
+    modelDelivery: artifact.modelDelivery,
+    fixture: artifact.fixture === true,
+    archive: {
+      archiveName: artifact.archive.archiveName,
+      byteLength: archiveBytes.byteLength,
+      sha256: archiveHash,
+    },
+    model,
+    wasm: {
+      path: wasmPath,
+      byteLength: wasmRecord.byteLength,
+      sha256: wasmRecord.sha256,
+    },
+  }
+}
+
+export async function findArtifactIdentity(artifactRoot, browser) {
+  let entries
+  try {
+    entries = await readdir(artifactRoot, { withFileTypes: true })
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return null
+    }
+    throw error
+  }
+  const candidates = []
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.artifact.json')) {
+      continue
+    }
+    const artifactPath = path.join(artifactRoot, entry.name)
+    const artifact = await optionalJson(artifactPath)
+    if (artifact?.target === browser) {
+      candidates.push({ artifactPath, artifact })
+    }
+  }
+  if (candidates.length === 0) {
     return null
   }
-  const wasmEntry = Object.entries(artifact.files ?? {}).find(([name]) => name.endsWith('.wasm'))
-  return {
-    fixture: artifact.fixture === true,
-    archiveSha256: artifact.archive?.sha256 ?? null,
-    modelSha256: artifact.model?.sha256 ?? null,
-    wasmSha256: wasmEntry?.[1]?.sha256 ?? null,
+  if (candidates.length !== 1) {
+    throw new Error(
+      `Artifact discovery for ${browser} is ambiguous; found ${candidates.map(({ artifactPath }) => artifactPath).join(', ')}`,
+    )
   }
+  return verifyArtifactManifest(artifactRoot, candidates[0].artifact, candidates[0].artifactPath, browser)
 }
 
 async function repositoryIdentity() {
@@ -169,22 +354,32 @@ async function repositoryIdentity() {
   }
 }
 
+async function configureInvocationPage(browser) {
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  await page.route('http://hv-benchmark.local/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      body: '<!doctype html><meta charset="utf-8"><title>HV transport benchmark</title>',
+    }),
+  )
+  await page.goto('http://hv-benchmark.local/', { waitUntil: 'domcontentloaded' })
+  return {
+    evaluate: (callback, argument) => page.evaluate(callback, argument),
+    close: () => context.close(),
+  }
+}
+
 async function launchChromium() {
   const executablePath = process.env.CHROMIUM_PATH || process.env.CHROME_PATH || undefined
   const browser = await chromium.launch({ executablePath, headless: true })
   const version = browser.version()
   assertSupportedBrowserVersion('chromium', version)
-  const page = await browser.newPage()
-  await page.route('http://hv-benchmark.local/**', (route) => route.fulfill({
-    status: 200,
-    contentType: 'text/html',
-    body: '<!doctype html><meta charset="utf-8"><title>HV benchmark</title>',
-  }))
-  await page.goto('http://hv-benchmark.local/', { waitUntil: 'domcontentloaded' })
   return {
     browserVersion: version,
+    newInvocation: () => configureInvocationPage(browser),
     close: () => browser.close(),
-    evaluate: (callback, argument) => page.evaluate(callback, argument),
   }
 }
 
@@ -194,17 +389,10 @@ async function launchFirefox() {
   const browser = await firefox.launch({ executablePath, headless: true })
   const version = browser.version()
   assertSupportedBrowserVersion('firefox', version)
-  const page = await browser.newPage()
-  await page.route('http://hv-benchmark.local/**', (route) => route.fulfill({
-    status: 200,
-    contentType: 'text/html',
-    body: '<!doctype html><meta charset="utf-8"><title>HV benchmark</title>',
-  }))
-  await page.goto('http://hv-benchmark.local/', { waitUntil: 'domcontentloaded' })
   return {
     browserVersion: version,
+    newInvocation: () => configureInvocationPage(browser),
     close: () => browser.close(),
-    evaluate: (callback, argument) => page.evaluate(callback, argument),
   }
 }
 
@@ -220,20 +408,12 @@ async function executeBrowserSample(adapter, scenario) {
         payload[index] = index % 251
       }
       const durations = []
-      const supportsMemory = typeof globalThis.performance.measureUserAgentSpecificMemory === 'function'
-      const beforeMemory = supportsMemory ? await globalThis.performance.measureUserAgentSpecificMemory() : null
-      let active = 0
-      let queueDepthMax = 0
-      let queueAgeMaxMs = 0
-      let digestCount = 0
-      let digestBytes = 0
       const digestPayload = async (bytes) => {
         if (globalThis.crypto?.subtle) {
           await globalThis.crypto.subtle.digest('SHA-256', bytes)
           return
         }
-        // Some locally installed browser builds disable SubtleCrypto on data: URLs.
-        // Keep the same bounded full-buffer read and record profiler availability.
+        // Some locally installed browser builds disable SubtleCrypto on this fixture host.
         const view = new Uint8Array(bytes)
         let accumulator = 2_166_136_261
         for (let index = 0; index < view.length; index += 1) {
@@ -242,10 +422,10 @@ async function executeBrowserSample(adapter, scenario) {
         globalThis.__hvBenchmarkDigest = accumulator >>> 0
       }
       const performOne = async (enqueuedAt) => {
-        queueAgeMaxMs = Math.max(queueAgeMaxMs, globalThis.performance.now() - enqueuedAt)
+        const startedAt = globalThis.performance.now()
+        queueAgeMaxMs = Math.max(queueAgeMaxMs, startedAt - enqueuedAt)
         active += 1
         queueDepthMax = Math.max(queueDepthMax, active)
-        const startedAt = globalThis.performance.now()
         const copied = (await new globalThis.Blob([payload]).arrayBuffer()).slice(0)
         await digestPayload(copied)
         digestCount += 1
@@ -253,6 +433,11 @@ async function executeBrowserSample(adapter, scenario) {
         durations.push(globalThis.performance.now() - startedAt)
         active -= 1
       }
+      let active = 0
+      let queueDepthMax = 0
+      let queueAgeMaxMs = 0
+      let digestCount = 0
+      let digestBytes = 0
       const startedAt = globalThis.performance.now()
       for (let offset = 0; offset < iterations; offset += concurrency) {
         const batch = []
@@ -262,7 +447,16 @@ async function executeBrowserSample(adapter, scenario) {
         await Promise.all(batch)
       }
       const durationMs = globalThis.performance.now() - startedAt
-      const afterMemory = supportsMemory ? await globalThis.performance.measureUserAgentSpecificMemory() : null
+      let jsHeapSnapshotBytes = null
+      let jsHeapMeasurementKind = 'unsupported'
+      if (typeof globalThis.performance.measureUserAgentSpecificMemory === 'function') {
+        try {
+          jsHeapSnapshotBytes = (await globalThis.performance.measureUserAgentSpecificMemory()).bytes
+          jsHeapMeasurementKind = 'snapshot'
+        } catch {
+          // Profiler availability is recorded explicitly instead of substituting a fake peak.
+        }
+      }
       return {
         durationMs,
         perOperationMs: durationMs / iterations,
@@ -276,10 +470,13 @@ async function executeBrowserSample(adapter, scenario) {
         queueAgeMaxMs,
         queueDepthMax,
         profiler: {
-          available: supportsMemory,
-          jsHeapPeakBytes: afterMemory?.bytes ?? beforeMemory?.bytes ?? null,
+          available: jsHeapMeasurementKind === 'snapshot',
+          jsHeapSnapshotBytes,
+          jsHeapMeasurementKind,
           processPeakBytes: null,
+          processMeasurementKind: 'unsupported',
           wasmMemoryPeakBytes: null,
+          wasmMeasurementKind: 'unsupported',
           gcCount: null,
         },
       }
@@ -288,22 +485,9 @@ async function executeBrowserSample(adapter, scenario) {
   )
 }
 
-async function executeInvocation(scenario, index, options) {
-  const adapter = await launchBrowser(scenario.browser)
+async function executeInvocation(session, scenario, index, options) {
+  const adapter = await session.newInvocation()
   try {
-    if (scenario.cache === 'cold') {
-      await adapter.evaluate(() => Promise.all([
-        typeof globalThis.caches === 'undefined'
-          ? Promise.resolve()
-          : globalThis.caches.keys().then((keys) => Promise.all(keys.map((key) => globalThis.caches.delete(key)))),
-        new Promise((resolve, reject) => {
-          const request = globalThis.indexedDB.deleteDatabase('hv-pony-solver')
-          request.onsuccess = () => resolve()
-          request.onerror = () => reject(request.error)
-          request.onblocked = () => resolve()
-        }),
-      ]))
-    }
     const warmupSamples = []
     for (let sampleIndex = 0; sampleIndex < options.warmups; sampleIndex += 1) {
       warmupSamples.push(await executeBrowserSample(adapter, scenario))
@@ -314,7 +498,7 @@ async function executeInvocation(scenario, index, options) {
     }
     return {
       index,
-      browserVersion: adapter.browserVersion,
+      browserVersion: session.browserVersion,
       driverVersion: scenario.browser === 'firefox' ? process.env.GECKODRIVER_VERSION || null : null,
       warmupSamples,
       measuredSamples,
@@ -325,14 +509,40 @@ async function executeInvocation(scenario, index, options) {
   }
 }
 
-async function main() {
-  const options = parseArguments(process.argv.slice(2))
+function resultConfig(options) {
+  return {
+    workload: options.workload,
+    workloadContract: transportWorkloadContract,
+    matrixProfile: options.matrixProfile,
+    browsers: [...options.browsers],
+    imageBytes: [...options.imageBytes],
+    iterations: [...options.iterations],
+    patterns: [...options.patterns],
+    burstConcurrency: options.burstConcurrency,
+    invocations: options.invocations,
+    warmups: options.warmups,
+    samples: options.samples,
+    allowReducedSampling: options.allowReducedSampling,
+    browserReuse: true,
+    browserReuseContract: 'one browser process per browser and one fresh browser context per invocation',
+    profilerAvailabilityContract,
+  }
+}
+
+export async function main(argumentsList = process.argv.slice(2)) {
+  const options = parseArguments(argumentsList)
   const matrix = buildScenarioMatrix(options)
   if (options.dryRun) {
-    process.stdout.write(`${JSON.stringify({ schemaVersion: benchmarkSchemaVersion, config: options, scenarios: matrix }, null, 2)}\n`)
+    process.stdout.write(
+      `${JSON.stringify({ schemaVersion: benchmarkSchemaVersion, config: resultConfig(options), scenarios: matrix }, null, 2)}\n`,
+    )
     return
   }
   const cpuList = os.cpus()
+  const artifactByBrowser = new Map()
+  for (const browser of options.browsers) {
+    artifactByBrowser.set(browser, await findArtifactIdentity(options.artifactRoot, browser))
+  }
   const result = {
     schemaVersion: benchmarkSchemaVersion,
     label: options.label,
@@ -347,30 +557,30 @@ async function main() {
       totalMemoryBytes: os.totalmem(),
       ...(await repositoryIdentity()),
     },
-    config: {
-      workload: options.workload,
-      workloadContract: 'browser Blob copy plus full-buffer digest; extension inference is not measured',
-      invocations: options.invocations,
-      warmups: options.warmups,
-      samples: options.samples,
-      profilerAvailabilityContract: 'unsupported fields are null',
-    },
+    config: resultConfig(options),
     scenarios: [],
   }
-  for (const scenario of matrix) {
-    const scenarioResult = {
-      ...scenario,
-      artifact: await findArtifactIdentity(options.artifactRoot, scenario.browser, scenario.mode),
-      invocations: [],
+  const sessions = new Map()
+  try {
+    for (const browser of options.browsers) {
+      sessions.set(browser, await launchBrowser(browser))
     }
-    for (let invocation = 0; invocation < options.invocations; invocation += 1) {
-      scenarioResult.invocations.push(await executeInvocation(scenario, invocation, options))
+    for (const scenario of matrix) {
+      const session = sessions.get(scenario.browser)
+      const scenarioResult = {
+        ...scenario,
+        artifact: artifactByBrowser.get(scenario.browser),
+        invocations: [],
+      }
+      for (let invocation = 0; invocation < options.invocations; invocation += 1) {
+        scenarioResult.invocations.push(await executeInvocation(session, scenario, invocation, options))
+      }
+      result.scenarios.push(scenarioResult)
     }
-    result.scenarios.push(scenarioResult)
+  } finally {
+    await Promise.all([...sessions.values()].map((session) => session.close()))
   }
-  if (!options.allowReducedSampling) {
-    validateBenchmarkResult(result)
-  }
+  validateBenchmarkResult(result, { allowReducedSampling: options.allowReducedSampling })
   await mkdir(options.outputDirectory, { recursive: true })
   const basename = `extension-${options.label.replaceAll(/[^a-zA-Z0-9._-]/gu, '-')}`
   const jsonPath = path.join(options.outputDirectory, `${basename}.json`)
@@ -380,6 +590,10 @@ async function main() {
     writeFile(csvPath, renderBenchmarkCsv(result)),
   ])
   process.stdout.write(`${jsonPath}\n${csvPath}\n`)
+  return result
 }
 
-await main()
+const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : ''
+if (invokedPath === import.meta.url) {
+  await main()
+}
