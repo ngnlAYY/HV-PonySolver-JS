@@ -24,7 +24,7 @@ test('userscript app solves a local captcha with mocked browser detector', async
         "export { App } from './src/app/app'",
         "export { CaptchaSolver } from './src/captcha/captcha-solver'",
         "export { AnswerSubmitter } from './src/captcha/answer-submitter'",
-        "export { timingConfig } from './src/captcha/timing-config'",
+        "export { timingConfig } from '@hv-pony-solver/browser-core'",
         "export { HistoryStore } from './src/persistence/answer-history-store'",
         "export { StatusPanel } from './src/status-panel/status-panel'",
       ].join('\n'),

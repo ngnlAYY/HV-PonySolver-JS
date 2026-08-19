@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ModelDownloadQuotaExceededError } from '../../src/model/model-download-error'
+import type { ModelDownloadQuotaExceededError } from '@hv-pony-solver/browser-core'
 
 const getModelAccessKey = vi.fn(async () => '')
 

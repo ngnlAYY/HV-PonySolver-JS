@@ -21,9 +21,7 @@ async function loadBenchmarkedFunctions() {
   await writeFile(
     entryPath,
     [
-      "import { copyRgbaToChwFloat32 } from '../../src/inference/image-preprocess'",
-      "import { imagePreprocessConfig, yoloOutputConfig } from '../../src/inference/inference-config'",
-      "import { parseYoloOutput } from '../../src/inference/yolo-output-parser'",
+      "import { copyRgbaToChwFloat32, imagePreprocessConfig, parseYoloOutput, yoloOutputConfig } from '@hv-pony-solver/browser-core'",
       'export { copyRgbaToChwFloat32, imagePreprocessConfig, parseYoloOutput, yoloOutputConfig }',
       '',
     ].join('\n'),

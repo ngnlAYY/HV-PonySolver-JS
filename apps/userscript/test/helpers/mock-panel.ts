@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 
-import type { StatusPanel } from '../../src/status-panel/status-panel-types'
+import type { StatusPanelContract as StatusPanel } from '@hv-pony-solver/browser-core'
 
 export function createMockPanel(): StatusPanel {
   return {

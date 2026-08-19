@@ -1,11 +1,11 @@
 import {
   ModelDownloadQuotaExceededError,
   clearModelAccessKey as clearCoreModelAccessKey,
+  formatErrorMessage,
   getModelAccessKey as getCoreModelAccessKey,
   setModelAccessKey as setCoreModelAccessKey,
 } from '@hv-pony-solver/browser-core'
 
-import { formatErrorMessage } from '../utils/errors'
 import { alertUser, promptUser, registerGmMenu, runMenuAction } from '../userscript/gm-bridge'
 import { gmSettingsStorage } from '../userscript/gm-storage'
 

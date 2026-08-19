@@ -1,11 +1,14 @@
 import { ANSWER_CODES } from '@hv-pony-solver/shared'
+import type {
+  DetectorService,
+  ImageLoader,
+  StatusPanelContract as StatusPanel,
+  YoloParseResult,
+} from '@hv-pony-solver/browser-core'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 import { CaptchaSolver } from '../../src/captcha/captcha-solver'
-import type { ImageLoader } from '../../src/captcha/captcha-types'
-import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
-import type { StatusPanel } from '../../src/status-panel/status-panel-types'
 
 function appendCaptcha(): HTMLDivElement {
   document.body.innerHTML = ''

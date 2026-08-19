@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { HISTORY_KEY } from '../../src/persistence/answer-history-config'
+import { HISTORY_KEY, type HistoryRecord } from '@hv-pony-solver/browser-core'
 import { HistoryStore } from '../../src/persistence/answer-history-store'
-import type { HistoryRecord } from '../../src/persistence/answer-history-types'
 
 const validSuccessRecord: HistoryRecord = {
   type: 'success',

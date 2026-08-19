@@ -15,7 +15,7 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
   const errors = []
   for (const configName of requiredConfigs) {
     if (!inferenceConfigSource.includes(`export const ${configName}`)) {
-      errors.push(`apps/userscript/src/inference/inference-config.ts is missing expected config export ${configName}`)
+      errors.push(`packages/browser-core/src/inference/inference-config.ts is missing expected config export ${configName}`)
       continue
     }
     if (!readme.includes(configName)) {
@@ -24,7 +24,7 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
   }
   for (const configName of requiredConfigNames) {
     if (!inferenceConfigSource.includes(`${configName}:`)) {
-      errors.push(`apps/userscript/src/inference/inference-config.ts is missing expected config ${configName}`)
+      errors.push(`packages/browser-core/src/inference/inference-config.ts is missing expected config ${configName}`)
       continue
     }
     if (!readme.includes(configName)) {

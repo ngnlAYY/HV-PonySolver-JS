@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
+import { inferenceTimeoutConfig } from '@hv-pony-solver/browser-core'
 import { OnnxWorkerClient } from '../../src/inference/onnx-worker-client'
 import type { ModelCache } from '../../src/model/model-cache'
 import { createMockPanel } from '../helpers/mock-panel'

@@ -95,7 +95,7 @@ describe('settings menu', () => {
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
-    const { ModelDownloadQuotaExceededError } = await import('../../src/model/model-download-error')
+    const { ModelDownloadQuotaExceededError } = await import('@hv-pony-solver/browser-core')
     const verify = vi.fn(async () => {
       throw new ModelDownloadQuotaExceededError(3600)
     })

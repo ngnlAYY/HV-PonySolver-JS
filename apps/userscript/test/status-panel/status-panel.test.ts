@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { HistoryRecord, World } from '@hv-pony-solver/browser-core'
 import type { HistoryStore } from '../../src/persistence/answer-history-store'
-import type { HistoryRecord, World } from '../../src/persistence/answer-history-types'
 import { StatusPanel } from '../../src/status-panel/status-panel'
 
 function createHistoryStore(records: HistoryRecord[] = []): HistoryStore {

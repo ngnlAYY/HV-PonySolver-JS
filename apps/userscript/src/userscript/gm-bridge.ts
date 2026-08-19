@@ -1,4 +1,4 @@
-import { formatErrorMessage } from '../utils/errors'
+import { formatErrorMessage } from '@hv-pony-solver/browser-core'
 
 export type MaybePromise<T> = T | Promise<T>
 

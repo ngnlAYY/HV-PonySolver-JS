@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AnswerCode } from '@hv-pony-solver/shared'
-import type { PanelStatus } from '../../src/status-panel/status-panel-types'
+import type { PanelStatus } from '@hv-pony-solver/browser-core'
 
 const prepare = vi.fn(async () => ({}) as Worker)
 const detect = vi.fn()
