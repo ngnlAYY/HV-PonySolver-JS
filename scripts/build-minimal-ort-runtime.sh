@@ -127,7 +127,6 @@ cp "$WASM_SOURCE" "$ARTIFACT_DIR/$WASM_FILENAME"
 cp "$ORT_SOURCE/js/web/dist/ort.wasm.bundle.min.mjs" "$ARTIFACT_DIR/"
 mkdir -p "$RUNTIME_OUTPUT_DIR"
 cp "$WASM_SOURCE" "$RUNTIME_OUTPUT_DIR/$WASM_FILENAME"
-cp "$ORT_SOURCE/js/web/dist/ort.wasm.bundle.min.mjs" "$RUNTIME_OUTPUT_DIR/"
 
 if [[ "$INSTALL" == 1 ]]; then
   install -Dm644 "$ARTIFACT_DIR/ort.wasm.bundle.min.mjs" \

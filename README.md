@@ -414,7 +414,6 @@ pnpm build:onnx-runtime
 脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。默认输出到 `other/`：
 
 ```text
-other/ort.wasm.bundle.min.mjs
 other/ort-wasm-simd-<sha256>.wasm
 ```
 
@@ -585,8 +584,6 @@ pnpm --filter @hv-pony-solver/model-worker exec wrangler r2 object put \
   "<bucket-name>/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm" \
   --file "other/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm"
 ```
-
-`other/ort.wasm.bundle.min.mjs` 不需要上传 R2。内置 profile 使用的是构建时打入 Worker 的 vendor glue。
 
 ## 部署 Model Worker
 
