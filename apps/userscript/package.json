@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build-userscript.mjs",
+    "build": "node scripts/build-userscript.mjs --runtime=external",
+    "build:external-runtime": "node scripts/build-userscript.mjs --runtime=external",
     "build:bundled-runtime": "node scripts/build-userscript.mjs --runtime=bundled",
     "benchmark:inference": "node scripts/benchmark-inference.mjs",
     "verify-model-integrity": "node scripts/verify-model-integrity.mjs",

@@ -90,6 +90,34 @@ describe('ModelDownloadQuota', () => {
     ).rejects.toThrow('Model download quota service returned an invalid response')
   })
 
+  it('accepts a valid internal quota response', async () => {
+    await expect(
+      consumeModelDownloadQuota(
+        responseQuotaNamespace(Response.json({ allowed: true, retryAfterSeconds: 60 })),
+        'token',
+      ),
+    ).resolves.toEqual({ allowed: true, retryAfterSeconds: 60 })
+  })
+
+  it('aborts a hanging internal quota request after its deadline', async () => {
+    vi.useFakeTimers()
+    const namespace = {
+      idFromName: (name: string) => ({ toString: () => name }) as DurableObjectId,
+      get: () => ({
+        fetch: (request: Request) =>
+          new Promise<Response>((_resolve, reject) => {
+            request.signal.addEventListener('abort', () => reject(new Error('quota request timed out')), {
+              once: true,
+            })
+          }),
+      }),
+    } as unknown as ModelDownloadQuotaNamespace
+
+    const pending = expect(consumeModelDownloadQuota(namespace, 'token')).rejects.toThrow('quota request timed out')
+    await vi.advanceTimersByTimeAsync(5_000)
+    await pending
+  })
+
   it('calculates UTC month and retry boundaries deterministically', () => {
     const now = new Date('2026-12-31T23:59:59.001Z')
     expect(utcMonthKey(now)).toBe('2026-12')

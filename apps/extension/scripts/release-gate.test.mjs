@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -21,6 +21,8 @@ const archiveHashes = {
   chromium: '1'.repeat(64),
   firefox: '2'.repeat(64),
 }
+const packagedContentSecurityPolicy =
+  "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'"
 
 function artifact(target, overrides = {}) {
   return {
@@ -200,7 +202,12 @@ test('CLI preflight hashes archives and requires external Android evidence', asy
       writeFile(path.join(outputRoot, `${target}.artifact.json`), `${JSON.stringify(record)}\n`),
       writeFile(path.join(outputRoot, archiveName), archiveBytes),
       writeFile(path.join(outputRoot, `${archiveName}.sha256`), `${archiveSha256}  ${archiveName}\n`),
+      mkdir(path.join(outputRoot, target), { recursive: true }),
     ])
+    await writeFile(
+      path.join(outputRoot, target, 'manifest.json'),
+      `${JSON.stringify({ content_security_policy: { extension_pages: packagedContentSecurityPolicy } })}\n`,
+    )
   }
   const attestation = createCanonicalAttestation({
     chromium: evidence('chromium', { archive: records[0].archive }),

@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { build } from 'esbuild'
 import { zipSync } from 'fflate'
+import { JSDOM } from 'jsdom'
 
 import { ORT_MODEL_FILENAME, ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared/ort-model'
 
@@ -34,6 +35,7 @@ const disabledDynamicRuntimeImport =
   'Promise.reject(new Error("Dynamic ONNX runtime modules are disabled in the extension build"))'
 const modelDeliveryModes = new Set(['remote', 'packaged'])
 const extensionTargets = new Set(['chromium', 'firefox'])
+const extensionImageResourcePattern = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)$/iu
 const remoteModelOrigin = 'https://models.ngnl.host'
 const remoteModelHost = `${remoteModelOrigin}/*`
 const defaultOutputRoot = path.join(extensionRoot, 'dist')
@@ -426,6 +428,25 @@ function auditPackagedMetafiles(metafiles, target, fixture = false) {
   }
 }
 
+function auditHtmlSource(source, relativePath) {
+  const dom = new JSDOM(source)
+  try {
+    for (const element of dom.window.document.querySelectorAll('script[src], link[href]')) {
+      const attribute = element.localName === 'script' ? 'src' : 'href'
+      if (/^https?:/iu.test(element.getAttribute(attribute) ?? '')) {
+        throw new Error(`${relativePath} references remote executable content`)
+      }
+    }
+    for (const script of dom.window.document.scripts) {
+      if (script.textContent?.trim()) {
+        throw new Error(`${relativePath} contains inline script content`)
+      }
+    }
+  } finally {
+    dom.window.close()
+  }
+}
+
 export async function auditBuiltExtension(targetDirectory, target, options = {}) {
   if (!extensionTargets.has(target)) {
     throw new Error(`Unsupported extension target: ${target}`)
@@ -460,6 +481,14 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
     throw new Error(`${target} package unexpectedly exposes a web-accessible resource`)
   }
   const files = await walkFiles(targetDirectory)
+  if (
+    'icons' in manifest ||
+    manifest.action?.default_icon !== undefined ||
+    manifest.browser_action?.default_icon !== undefined ||
+    files.some((file) => extensionImageResourcePattern.test(file.relativePath))
+  ) {
+    throw new Error(`${target} package must not contain image resources`)
+  }
   const relativeFiles = new Set(files.map((file) => file.relativePath))
   for (const required of [
     'background.js',
@@ -495,14 +524,7 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
   }
   for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.html'))) {
     const source = await readFile(file.absolutePath, 'utf8')
-    if (/<(?:script|link)\b[^>]+(?:src|href)=["']https?:/iu.test(source)) {
-      throw new Error(`${file.relativePath} references remote executable content`)
-    }
-    for (const match of source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/giu)) {
-      if (match[1]?.trim()) {
-        throw new Error(`${file.relativePath} contains inline script content`)
-      }
-    }
+    auditHtmlSource(source, file.relativePath)
   }
   const javascriptSources = []
   for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.js'))) {

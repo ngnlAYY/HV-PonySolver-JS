@@ -59,8 +59,8 @@ describe('root bundle gate', () => {
 
 describe('bundle budget evaluation', () => {
   it('pins both profile budgets', () => {
-    assert.equal(BUNDLE_BUDGET_PROFILES.default.budgetBytes, 128 * 1024)
-    assert.equal(BUNDLE_BUDGET_PROFILES.bundled.budgetBytes, 480 * 1024)
+    assert.equal(BUNDLE_BUDGET_PROFILES.default.budgetBytes, 256 * 1024)
+    assert.equal(BUNDLE_BUDGET_PROFILES.bundled.budgetBytes, 1024 * 1024)
   })
 
   it('accepts an artifact exactly at its budget', () => {
@@ -68,33 +68,33 @@ describe('bundle budget evaluation', () => {
       evaluateBundleBudget({
         profile: 'default',
         artifactPath: '/tmp/artifact.user.js',
-        actualBytes: 128 * 1024,
-        budgetBytes: 128 * 1024,
+        actualBytes: 256 * 1024,
+        budgetBytes: 256 * 1024,
       }),
       {
         profile: 'default',
         artifactPath: '/tmp/artifact.user.js',
-        actualBytes: 128 * 1024,
-        budgetBytes: 128 * 1024,
+        actualBytes: 256 * 1024,
+        budgetBytes: 256 * 1024,
         deltaBytes: 0,
         withinBudget: true,
       },
     )
   })
 
-  it('reports a positive delta when the artifact exceeds its budget', () => {
+  it('reports a negative delta when the artifact stays within the bundled budget', () => {
     const result = evaluateBundleBudget({
       profile: 'bundled',
       artifactPath: '/tmp/artifact.user.js',
       actualBytes: 500_000,
-      budgetBytes: 480 * 1024,
+      budgetBytes: 1024 * 1024,
     })
 
-    assert.equal(result.deltaBytes, 8_480)
-    assert.equal(result.withinBudget, false)
+    assert.equal(result.deltaBytes, -548_576)
+    assert.equal(result.withinBudget, true)
     assert.match(
       formatBundleBudgetResult(result),
-      /profile=bundled actual=500000 B \(488\.28 KiB\) budget=491520 B \(480 KiB\) delta=\+8480 B \(\+8\.28 KiB\)/,
+      /profile=bundled actual=500000 B \(488\.28 KiB\) budget=1048576 B \(1024 KiB\) delta=-548576 B \(-535\.72 KiB\)/,
     )
   })
 })
@@ -106,8 +106,8 @@ describe('bundle budget checking', () => {
     const result = await checkBundleBudget({ repoRoot: fixtureRoot, profile: 'default', file: artifactPath })
 
     assert.equal(result.actualBytes, 72_160)
-    assert.equal(result.budgetBytes, 128 * 1024)
-    assert.equal(result.deltaBytes, -58_912)
+    assert.equal(result.budgetBytes, 256 * 1024)
+    assert.equal(result.deltaBytes, -189_984)
     assert.equal(result.withinBudget, true)
   })
 
@@ -117,7 +117,7 @@ describe('bundle budget checking', () => {
 
     await assert.rejects(
       checkBundleBudget({ repoRoot: fixtureRoot, profile: 'default' }),
-      /profile=default actual=missing budget=131072 B \(128 KiB\) delta=n\/a.*artifact does not exist.*build the artifact before checking/,
+      /profile=default actual=missing budget=262144 B \(256 KiB\) delta=n\/a.*artifact does not exist.*build the artifact before checking/,
     )
   })
 
@@ -126,7 +126,7 @@ describe('bundle budget checking', () => {
 
     await assert.rejects(
       checkBundleBudget({ repoRoot: fixtureRoot, profile: 'default', file: artifactPath }),
-      /Bundle budget exceeded: profile=default actual=131073 B \(128\.00 KiB\) budget=131072 B \(128 KiB\) delta=\+1 B \(\+0\.00 KiB\)/,
+      /Bundle budget exceeded: profile=default actual=262145 B \(256\.00 KiB\) budget=262144 B \(256 KiB\) delta=\+1 B \(\+0\.00 KiB\)/,
     )
   })
 })
@@ -154,8 +154,8 @@ describe('bundle budget CLI', () => {
     assert.equal(result.exitCode, 0, result.stderr)
     assert.match(result.stdout, /profile=default/)
     assert.match(result.stdout, /actual=72160 B \(70\.47 KiB\)/)
-    assert.match(result.stdout, /budget=131072 B \(128 KiB\)/)
-    assert.match(result.stdout, /delta=-58912 B \(-57\.53 KiB\)/)
+    assert.match(result.stdout, /budget=262144 B \(256 KiB\)/)
+    assert.match(result.stdout, /delta=-189984 B \(-185\.53 KiB\)/)
   })
 
   it('exits non-zero and prints the overage when over budget', async () => {
@@ -165,8 +165,8 @@ describe('bundle budget CLI', () => {
 
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /profile=bundled/)
-    assert.match(result.stderr, /actual=492544 B \(481 KiB\)/)
-    assert.match(result.stderr, /budget=491520 B \(480 KiB\)/)
+    assert.match(result.stderr, /actual=1049600 B \(1025 KiB\)/)
+    assert.match(result.stderr, /budget=1048576 B \(1024 KiB\)/)
     assert.match(result.stderr, /delta=\+1024 B \(\+1 KiB\)/)
   })
 

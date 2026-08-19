@@ -152,7 +152,7 @@ describe('CaptchaSolver', () => {
     const result = await solver.trigger()
 
     expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
-    expect(imageLoader.get).toHaveBeenCalledWith('http://localhost:3000/captcha.png')
+    expect(imageLoader.get).toHaveBeenCalledWith('http://localhost:3000/captcha.png', undefined)
     expect(detector.detect).toHaveBeenCalledTimes(1)
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
     expect(panel.addManualResult).toHaveBeenCalledWith(['RA'], { RA: 0.97 }, expect.any(Number))

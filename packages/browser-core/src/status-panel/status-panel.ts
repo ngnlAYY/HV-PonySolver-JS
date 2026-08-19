@@ -29,6 +29,7 @@ export class StatusPanel implements StatusPanelContract {
   private persistenceError: string | null = null
   private lifecycleGeneration = 0
   private historyMutationGeneration = 0
+  private recordsVersion = 0
   private status: PanelStatus = {
     model: '未开始',
     session: '未开始',
@@ -49,6 +50,7 @@ export class StatusPanel implements StatusPanelContract {
     this.lifecycleGeneration += 1
     this.persistenceError = null
     this.records = this.history.get(this.world)
+    this.recordsVersion += 1
     this.compactMode = isPanelCompactModeSync(this.settingsStorage)
     this.el = document.createElement('div')
     this.el.className = 'ponyLog'
@@ -131,6 +133,7 @@ export class StatusPanel implements StatusPanelContract {
     const lifecycleGeneration = this.lifecycleGeneration
     const mutation = this.history.add(this.world, record)
     this.records = mutation.records
+    this.recordsVersion += 1
     this.persistenceError = null
     this.scheduleRender()
 
@@ -140,6 +143,7 @@ export class StatusPanel implements StatusPanelContract {
           return
         }
         this.records = records
+        this.recordsVersion += 1
         if (mutationGeneration === this.historyMutationGeneration) {
           this.persistenceError = null
         }
@@ -150,6 +154,7 @@ export class StatusPanel implements StatusPanelContract {
           return
         }
         this.records = this.history.get(this.world)
+        this.recordsVersion += 1
         this.persistenceError = `历史记录保存失败：${formatErrorMessage(error)}`
         this.scheduleRender()
       },
@@ -176,7 +181,7 @@ export class StatusPanel implements StatusPanelContract {
     const renderKey = JSON.stringify([
       this.world,
       this.status,
-      this.records,
+      this.recordsVersion,
       this.compactMode,
       this.historyLimit,
       this.persistenceError,

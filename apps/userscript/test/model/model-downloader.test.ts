@@ -222,6 +222,31 @@ describe('downloadModel', () => {
     await expect(downloadPromise).rejects.toThrow('body aborted')
   })
 
+  it('falls back to abort listeners when AbortSignal.any is unavailable', async () => {
+    const abortSignalConstructor = AbortSignal as typeof AbortSignal & { any?: typeof AbortSignal.any }
+    const originalAny = abortSignalConstructor.any
+    Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: undefined })
+
+    try {
+      const controller = new AbortController()
+      const fetchMock = vi.fn(
+        async (_url: string, options: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            options.signal?.addEventListener('abort', () => reject(new Error('body aborted')), { once: true })
+          }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const downloadPromise = downloadModel(controller.signal)
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      controller.abort()
+
+      await expect(downloadPromise).rejects.toThrow('body aborted')
+    } finally {
+      Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: originalAny })
+    }
+  })
+
   it('rejects and cancels responses whose content length is larger than expected by default', async () => {
     const arrayBuffer = vi.fn()
     const cancel = vi.fn()

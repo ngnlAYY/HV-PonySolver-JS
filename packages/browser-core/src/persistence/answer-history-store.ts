@@ -41,8 +41,12 @@ function isHistoryRecord(value: unknown): value is HistoryRecord {
 }
 
 function parseHistoryRoot(storage: TextStorage): Record<string, unknown> | null {
-  const parsed: unknown = JSON.parse(storage.getItem(HISTORY_KEY) || '{}')
-  return isRecordObject(parsed) ? parsed : null
+  try {
+    const parsed: unknown = JSON.parse(storage.getItem(HISTORY_KEY) || '{}')
+    return isRecordObject(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 function getWorldRecords(root: Record<string, unknown>, world: World): HistoryRecord[] {

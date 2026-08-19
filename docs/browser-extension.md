@@ -119,7 +119,6 @@ pnpm --filter @hv-pony-solver/extension typecheck
 pnpm --filter @hv-pony-solver/extension test
 pnpm --filter @hv-pony-solver/extension build
 pnpm --filter @hv-pony-solver/extension build:packaged
-pnpm --filter @hv-pony-solver/extension lint:firefox
 pnpm --filter @hv-pony-solver/extension test:e2e:content
 pnpm --filter @hv-pony-solver/extension test:e2e:chromium:load-only
 KvKey='<protected secret>' pnpm --filter @hv-pony-solver/extension test:e2e:chromium:authenticated
@@ -130,7 +129,6 @@ pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 | Check                             | Establishes                                                                                                                                                                      | Does not establish                                    |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | Unit/build tests                  | Protocol, policy, lifecycle, asset integrity, graph isolation, permission matrix and deterministic artifacts                                                                     | A browser executed the extension                      |
-| `lint:firefox`                    | Generated Firefox remote or packaged directory passes current Mozilla static lint                                                                                                | Browser execution or AMO acceptance                   |
 | `test:e2e:content`                | Deterministic Chromium page behavior and one native submit                                                                                                                       | Real model or ORT session                             |
 | `test:e2e:chromium:load-only`     | Production remote extension loads and ordinary settings persist                                                                                                                  | Authenticated model download, `prepare`, or inference |
 | `test:e2e:chromium:authenticated` | A protected Key downloads and verifies the production model and then executes at least one `detect` with random fallback disabled                                                | Packaged model or store publication                   |

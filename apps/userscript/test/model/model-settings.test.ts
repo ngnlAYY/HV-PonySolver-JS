@@ -35,6 +35,34 @@ describe('model settings', () => {
     await expect(getModelAccessKey()).resolves.toBe('')
   })
 
+  it('saves a prompted key immediately when verification is not configured', async () => {
+    const prompt = vi.fn(() => '  direct-key  ')
+    const alert = vi.fn()
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { getModelAccessKey, setModelAccessKeyFromPrompt } = await import('../../src/model/model-settings')
+
+    await setModelAccessKeyFromPrompt()
+
+    await expect(getModelAccessKey()).resolves.toBe('direct-key')
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 已保存')
+  })
+
+  it('reports verification errors when called directly', async () => {
+    const prompt = vi.fn(() => 'bad-key')
+    const alert = vi.fn()
+    const verify = vi.fn(async (_candidateKey: string) => {
+      throw new Error('HTTP 403')
+    })
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { setModelAccessKeyFromPrompt } = await import('../../src/model/model-settings')
+
+    await setModelAccessKeyFromPrompt(verify)
+
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
+  })
+
   it('uses GM storage when available', async () => {
     const getValue = vi.fn(async () => 'gm-key')
     const setValue = vi.fn(async () => undefined)

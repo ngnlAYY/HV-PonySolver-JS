@@ -13,7 +13,6 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
   const requiredScripts = [
     'build',
     'build:packaged',
-    'lint:firefox',
     'test:e2e:content',
     'test:e2e:chromium',
     'test:e2e:packaged',

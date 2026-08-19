@@ -284,7 +284,7 @@ describe('App', () => {
     await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(1))
     await vi.runAllTimersAsync()
 
-    expect(getImageBlob).toHaveBeenCalledWith(expect.stringContaining('/captcha.png'))
+    expect(getImageBlob).toHaveBeenCalledWith(expect.stringContaining('/captcha.png'), expect.any(AbortSignal))
     expect(externalSubmit.click).not.toHaveBeenCalled()
   })
 
@@ -326,7 +326,7 @@ describe('App', () => {
     await vi.runAllTimersAsync()
 
     await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(2))
-    expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'))
+    expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'), expect.any(AbortSignal))
   })
 
   it('treats a same-URL captcha node replacement as a new target', async () => {
@@ -401,7 +401,7 @@ describe('App', () => {
     await vi.runAllTimersAsync()
 
     await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(2))
-    expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'))
+    expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'), expect.any(AbortSignal))
   })
 
   it('abandons a stale target and solves the replacement when content changes during prepare', async () => {
@@ -436,6 +436,6 @@ describe('App', () => {
     await vi.runAllTimersAsync()
 
     expect(prepare).toHaveBeenCalledTimes(2)
-    expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'))
+    expect(getImageBlob).toHaveBeenLastCalledWith(expect.stringContaining('/captcha-b.png'), expect.any(AbortSignal))
   })
 })

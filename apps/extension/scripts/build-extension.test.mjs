@@ -345,3 +345,17 @@ test('rejects invalid fixture input and targets before replacing existing output
     }
   }
 })
+
+test('rejects image resources in extension packages', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-image-resource-'))
+  try {
+    await buildExtensions({ outputRoot: temporaryRoot })
+    await writeFile(path.join(temporaryRoot, 'chromium', 'unexpected.png'), Uint8Array.from([0, 1, 2]))
+    await assert.rejects(
+      auditBuiltExtension(path.join(temporaryRoot, 'chromium'), 'chromium'),
+      /chromium package must not contain image resources/u,
+    )
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
+})

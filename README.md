@@ -24,7 +24,7 @@ HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓
 - 对 `.ort` 模型和精简 WASM 执行长度与 SHA-256 校验。
 - 提供默认外部完整版和显式内置精简版两种运行时构建。
 - 提供文档漂移、架构边界、浏览器危险调用、包体预算和部署契约检查。
-- 提供可重复的远程/内置模型 Chromium/Firefox 扩展 ZIP、SHA-256、Firefox `web-ext` lint 和真实浏览器整链测试。
+- 提供可重复的远程/内置模型 Chromium/Firefox 扩展 ZIP、SHA-256、扩展资源审计和真实浏览器整链测试。
 
 ## 架构
 
@@ -131,9 +131,9 @@ Cloudflare Model Worker
 | WASM         | 从 jsDelivr `dist/` 加载完整版 WASM | 从 `models.ngnl.host` 下载内容寻址 WASM |
 | WASM 校验    | 依赖固定版本 CDN                    | 最大长度、精确长度和 SHA-256            |
 | 自动回退     | 无                                  | 无                                      |
-| 包体预算     | `128 KiB`                           | `480 KiB`                               |
+| 包体预算     | `256 KiB`                           | `1 MiB`                                 |
 
-根 `bundle:check` 对不带 `--minify` 的默认 profile 产物执行 `128 KiB` 门禁；显式压缩的发布构建不能替代这项未压缩门禁。
+根 `bundle:check` 对不带 `--minify` 的默认 profile 产物执行 `256 KiB` 门禁；显式压缩的发布构建不能替代这项未压缩门禁。
 
 ### 默认外部完整版
 
@@ -234,7 +234,6 @@ corepack pnpm install
 ```bash
 pnpm --filter @hv-pony-solver/extension build
 pnpm --filter @hv-pony-solver/extension build:packaged
-pnpm --filter @hv-pony-solver/extension lint:firefox
 ```
 
 `build` 默认等价于 `--model-mode remote`，需要 Key 下载模型；`build:packaged` 等价于 `--model-mode packaged`，只从固定的 `model/yolo26n-640.ort` 读取模型，不接受生产路径覆盖，也不在运行时回退到远程下载。每次构建都会清理并重新生成 `apps/extension/dist/`：
@@ -321,7 +320,7 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 | `pnpm docs:check`                                           | 检查 README 与源码、配置和资产清单的漂移                                                                                                     |
 | `pnpm architecture:check`                                   | 检查跨层和跨应用导入边界                                                                                                                     |
 | `pnpm browser-sinks:check`                                  | 检查浏览器危险调用白名单                                                                                                                     |
-| `pnpm bundle:check`                                         | 构建未压缩的默认 profile 并检查 `128 KiB` 预算                                                                                               |
+| `pnpm bundle:check`                                         | 构建未压缩的默认 profile 并检查 `256 KiB` 预算                                                                                               |
 | `pnpm bundle:check:default`                                 | 检查当前产物的默认 profile 预算                                                                                                              |
 | `pnpm bundle:check:bundled`                                 | 检查当前产物的内置 profile 预算                                                                                                              |
 | `pnpm benchmark:inference`                                  | 执行推理预处理和解析基准，不作为 CI 性能门槛                                                                                                 |
@@ -367,7 +366,6 @@ pnpm --filter @hv-pony-solver/extension test
 pnpm --filter @hv-pony-solver/extension test:coverage
 pnpm --filter @hv-pony-solver/extension build
 pnpm --filter @hv-pony-solver/extension build:packaged
-pnpm --filter @hv-pony-solver/extension lint:firefox
 pnpm --filter @hv-pony-solver/extension test:e2e:content
 pnpm --filter @hv-pony-solver/extension test:e2e:chromium:load-only
 pnpm --filter @hv-pony-solver/extension test:e2e:chromium:authenticated
@@ -674,14 +672,14 @@ pnpm verify:onnx-runtime
 
 `.github/workflows/verify-monorepo.yml` 在 Pull Request、`main` 推送和手动触发时执行：
 
-- Node.js 24 和冻结依赖安装。
+- 使用 runner 提供的 Node.js 运行时和冻结依赖安装。
 - 依赖审计、ESLint 和 TypeScript 类型检查。
 - 文档漂移、架构边界和浏览器危险调用检查。
 - 工作区测试与覆盖率。
-- 默认外部 profile 构建及 `128 KiB` 预算。
-- 显式内置 profile 构建及 `480 KiB` 预算。
+- 默认外部 profile 构建及 `256 KiB` 预算。
+- 显式内置 profile 构建及 `1 MiB` 预算。
 - 按条件执行的 Playwright Chromium E2E。
-- 双目标扩展构建、Firefox `web-ext` 严格 lint 和 Chromium 扩展整链 fixture。
+- 双目标扩展构建、扩展资源与安全契约审计和 Chromium 扩展整链 fixture。
 - 按手动输入发布的用户脚本构建产物。
 
 CI 中的 E2E 和用户脚本产物发布默认不是每次运行都执行。
@@ -756,7 +754,6 @@ pnpm verify:onnx-runtime
 
 ```bash
 pnpm --filter @hv-pony-solver/extension build
-pnpm --filter @hv-pony-solver/extension lint:firefox
 pnpm --filter @hv-pony-solver/extension test:e2e:chromium:load-only
 ```
 
@@ -774,7 +771,6 @@ model/yolo26n-640.ort
 
 ```bash
 pnpm --filter @hv-pony-solver/extension build:packaged
-pnpm --filter @hv-pony-solver/extension lint:firefox
 ```
 
 ### 模型请求返回诱饵内容或 `403`

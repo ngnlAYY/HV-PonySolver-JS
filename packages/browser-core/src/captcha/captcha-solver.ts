@@ -107,10 +107,7 @@ export class CaptchaSolver {
       this.panel.setStatus({ inference: '获取图片' })
       captchaKey = target.captchaKey
       const imageOutcome = await retryTransient(
-        () =>
-          signal && this.imageLoader.get.length >= 2
-            ? this.imageLoader.get(target.captchaKey, signal)
-            : this.imageLoader.get(target.captchaKey),
+        () => this.imageLoader.get(target.captchaKey, signal),
         isCurrent,
         signal,
       )

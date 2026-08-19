@@ -2,11 +2,18 @@ import { formatErrorMessage } from '../utils/errors'
 
 export type MaybePromise<T> = T | Promise<T>
 
+type ModernGmApi = {
+  getValue?: (key: string, defaultValue: string) => MaybePromise<unknown>
+  setValue?: (key: string, value: string) => MaybePromise<void>
+  deleteValue?: (key: string) => MaybePromise<void>
+}
+
 type UserscriptGlobal = typeof globalThis & {
   GM_getValue?: (key: string, defaultValue: string) => MaybePromise<string>
   GM_setValue?: (key: string, value: string) => MaybePromise<void>
   GM_deleteValue?: (key: string) => MaybePromise<void>
   GM_registerMenuCommand?: (caption: string, command: () => void | Promise<void>) => void
+  GM?: ModernGmApi
 }
 
 function getUserscriptGlobal(): UserscriptGlobal {
@@ -23,22 +30,35 @@ export const safeStorage = {
   },
   setItem(key: string, value: string): void {
     try {
-      globalThis.localStorage?.setItem(key, value)
-    } catch {
-      return
+      const storage = globalThis.localStorage
+      if (!storage) {
+        throw new Error('localStorage 不可用')
+      }
+      storage.setItem(key, value)
+    } catch (error) {
+      throw new Error(`本地存储写入失败: ${formatErrorMessage(error)}`, { cause: error })
     }
   },
   removeItem(key: string): void {
     try {
-      globalThis.localStorage?.removeItem(key)
-    } catch {
-      return
+      const storage = globalThis.localStorage
+      if (!storage) {
+        throw new Error('localStorage 不可用')
+      }
+      storage.removeItem(key)
+    } catch (error) {
+      throw new Error(`本地存储删除失败: ${formatErrorMessage(error)}`, { cause: error })
     }
   },
 }
 
 export async function getGmValue(key: string, defaultValue = ''): Promise<string> {
   const userscriptGlobal = getUserscriptGlobal()
+  const modernGm = userscriptGlobal.GM
+  if (typeof modernGm?.getValue === 'function') {
+    const value = await modernGm.getValue(key, defaultValue)
+    return String(value ?? defaultValue).trim()
+  }
   if (typeof userscriptGlobal.GM_getValue === 'function') {
     return String(await userscriptGlobal.GM_getValue(key, defaultValue)).trim()
   }
@@ -58,6 +78,11 @@ export function getGmValueSync(key: string, defaultValue = ''): string {
 
 export async function setGmValue(key: string, value: string): Promise<void> {
   const userscriptGlobal = getUserscriptGlobal()
+  const modernGm = userscriptGlobal.GM
+  if (typeof modernGm?.setValue === 'function') {
+    await modernGm.setValue(key, value)
+    return
+  }
   if (typeof userscriptGlobal.GM_setValue === 'function') {
     await userscriptGlobal.GM_setValue(key, value)
     return
@@ -67,6 +92,11 @@ export async function setGmValue(key: string, value: string): Promise<void> {
 
 export async function deleteGmValue(key: string): Promise<void> {
   const userscriptGlobal = getUserscriptGlobal()
+  const modernGm = userscriptGlobal.GM
+  if (typeof modernGm?.deleteValue === 'function') {
+    await modernGm.deleteValue(key)
+    return
+  }
   if (typeof userscriptGlobal.GM_deleteValue === 'function') {
     await userscriptGlobal.GM_deleteValue(key)
     return

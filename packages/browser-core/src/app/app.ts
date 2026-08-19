@@ -36,6 +36,11 @@ export class App {
   }
 
   init(): void {
+    this.solveAbortController?.abort()
+    if (this.startupTimeoutId !== null) {
+      clearTimeout(this.startupTimeoutId)
+      this.startupTimeoutId = null
+    }
     this.destroyed = false
     this.solveAbortController = new AbortController()
     this.panel.create()

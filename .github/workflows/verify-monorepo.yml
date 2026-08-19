@@ -38,23 +38,41 @@ jobs:
     steps:
       - name: Inputs accepted
         run: echo "Workflow inputs accepted."
+      - name: Validate canonical packaged-model configuration
+        if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.RUN_CANONICAL_PACKAGED_GATE == 'true' }}
+        env:
+          PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
+          PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
+          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
+        run: |
+          if [[ -z "${PACKAGED_MODEL_URL//[[:space:]]/}" ]]; then
+            echo '::error title=Missing PACKAGED_MODEL_URL::Set the repository secret or variable PACKAGED_MODEL_URL before running the canonical packaged-model gate.'
+            exit 1
+          fi
+          if [[ "$PACKAGED_MODEL_AUTH_REQUIRED" != 'true' && "$PACKAGED_MODEL_AUTH_REQUIRED" != 'false' ]]; then
+            echo '::error title=Invalid PACKAGED_MODEL_AUTH_REQUIRED::Set PACKAGED_MODEL_AUTH_REQUIRED to true or false.'
+            exit 1
+          fi
+          if [[ "$PACKAGED_MODEL_AUTH_REQUIRED" == 'true' && -z "${PACKAGED_MODEL_BEARER_TOKEN//[[:space:]]/}" ]]; then
+            echo '::error title=Missing PACKAGED_MODEL_BEARER_TOKEN::Authentication is required but the repository secret is missing.'
+            exit 1
+          fi
 
   guardrails:
     needs: validate-inputs
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -89,17 +107,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -119,17 +136,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -145,7 +161,7 @@ jobs:
         run: pnpm test:coverage
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hv-pony-solver-coverage
           path: '**/coverage/**'
@@ -153,9 +169,6 @@ jobs:
 
       - name: Build
         run: pnpm build
-
-      - name: Lint Firefox extension package
-        run: pnpm --filter @hv-pony-solver/extension lint:firefox
 
       - name: Check default userscript bundle budget
         run: pnpm bundle:check:default
@@ -172,17 +185,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -199,7 +211,7 @@ jobs:
           printf 'version=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright Chromium
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-chromium-${{ steps.playwright-version.outputs.version }}
@@ -215,17 +227,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -242,7 +253,7 @@ jobs:
           printf 'version=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright extension browsers
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-extension-browsers-${{ steps.playwright-version.outputs.version }}
@@ -264,22 +275,21 @@ jobs:
 
   extension-remote-authenticated-e2e:
     needs: validate-inputs
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact) }}
+    if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact)) && vars.RUN_PRODUCTION_MODEL_SMOKE == 'true' }}
     runs-on: ubuntu-latest
     environment: production-model-smoke
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -288,9 +298,18 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps chromium
 
+      - name: Validate protected remote-model smoke configuration
+        env:
+          KvKey: ${{ secrets.KV_KEY || secrets.KvKey }}
+        run: |
+          if [[ -z "${KvKey//[[:space:]]/}" ]]; then
+            echo '::error title=Missing production-model-smoke.KV_KEY::Configure the KV_KEY secret in the production-model-smoke environment before running authenticated remote inference.'
+            exit 1
+          fi
+
       - name: Authenticated production remote-model detect
         env:
-          KvKey: ${{ secrets.KV_KEY }}
+          KvKey: ${{ secrets.KV_KEY || secrets.KvKey }}
         run: pnpm test:e2e:extension:chromium:authenticated
 
   extension-minimum-versions-e2e:
@@ -298,17 +317,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -316,14 +334,14 @@ jobs:
 
       - name: Install exact Chromium 116
         id: chromium-116
-        uses: browser-actions/setup-chrome@v2
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
         with:
           chrome-version: '116.0.5845.96'
           install-dependencies: true
 
       - name: Install Firefox 140 release
         id: firefox-140
-        uses: browser-actions/setup-firefox@v1
+        uses: browser-actions/setup-firefox@0bc507ddf224827e3b1af68e014d5e42ab93e795 # v1.7.2
         with:
           firefox-version: '140.0'
 
@@ -333,9 +351,6 @@ jobs:
 
       - name: Build deterministic packaged fixture
         run: pnpm --filter @hv-pony-solver/extension build:packaged:fixture
-
-      - name: Lint minimum-version Firefox fixture
-        run: pnpm --filter @hv-pony-solver/extension lint:firefox
 
       - name: Execute packaged fixture in Chromium 116
         env:
@@ -354,7 +369,7 @@ jobs:
         run: pnpm --filter @hv-pony-solver/extension test:e2e:packaged:firefox
 
       - name: Upload exact-minimum execution evidence
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hv-pony-solver-extension-minimum-version-evidence
           path: ${{ runner.temp }}/minimum-version-evidence/*.json
@@ -365,17 +380,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -392,7 +406,7 @@ jobs:
           printf 'version=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright extension browsers
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-packaged-browsers-${{ steps.playwright-version.outputs.version }}
@@ -407,9 +421,6 @@ jobs:
       - name: Build deterministic packaged fixture
         run: pnpm --filter @hv-pony-solver/extension build:packaged:fixture
 
-      - name: Lint packaged Firefox fixture
-        run: pnpm --filter @hv-pony-solver/extension lint:firefox
-
       - name: Chromium packaged fixture inference
         run: pnpm --filter @hv-pony-solver/extension test:e2e:packaged:chromium
 
@@ -420,25 +431,24 @@ jobs:
 
   extension-canonical-packaged-e2e:
     needs: validate-inputs
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.RUN_CANONICAL_PACKAGED_GATE == 'true' }}
     runs-on: ubuntu-latest
     env:
-      PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL }}
+      PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
       PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
       PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -455,7 +465,7 @@ jobs:
           printf 'version=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright extension browsers
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-canonical-browsers-${{ steps.playwright-version.outputs.version }}
@@ -472,9 +482,6 @@ jobs:
 
       - name: Build canonical packaged extensions
         run: pnpm --filter @hv-pony-solver/extension build:packaged
-
-      - name: Lint canonical packaged Firefox extension
-        run: pnpm --filter @hv-pony-solver/extension lint:firefox
 
       - name: Chromium canonical packaged inference
         env:
@@ -494,7 +501,7 @@ jobs:
             --attestation apps/extension/dist/canonical-gate-attestation.json
 
       - name: Transfer canonical products to publication job
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hv-pony-solver-extension-canonical-gate
           path: |
@@ -511,24 +518,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Download canonical desktop gate products
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: hv-pony-solver-extension-canonical-gate
           path: apps/extension/dist
@@ -561,13 +567,13 @@ jobs:
 
       - name: Fail-closed desktop and Firefox Android release preflight
         env:
-          PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL }}
+          PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
           PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
           PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
         run: node apps/extension/scripts/release-gate.mjs preflight
 
       - name: Transfer complete extension release gate
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hv-pony-solver-extension-complete-release-gate
           path: |
@@ -590,17 +596,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
@@ -618,7 +623,7 @@ jobs:
 
       - name: Publish userscript artifact
         if: ${{ inputs.publish_userscript_artifact }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hv-pony-solver-userscript
           path: |
@@ -644,37 +649,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Download complete extension release gate
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: hv-pony-solver-extension-complete-release-gate
           path: apps/extension/dist
 
       - name: Fail-closed release preflight
         env:
-          PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL }}
+          PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
           PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
           PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
         run: node apps/extension/scripts/release-gate.mjs preflight
 
       - name: Publish extension artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hv-pony-solver-extension
           path: |

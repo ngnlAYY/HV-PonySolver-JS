@@ -175,7 +175,7 @@ describe('App solve smoke', () => {
     resolvePrepare?.({} as Worker)
     await vi.runAllTimersAsync()
 
-    expect(getImageBlob).toHaveBeenCalledWith(expect.stringContaining('/captcha.png'))
+    expect(getImageBlob).toHaveBeenCalledWith(expect.stringContaining('/captcha.png'), expect.any(AbortSignal))
     expect(detect).toHaveBeenCalledTimes(1)
     expect(captcha.checkboxes[0]?.checked).toBe(true)
     expect(captcha.checkboxes.slice(1).every((checkbox) => !checkbox.checked)).toBe(true)
@@ -195,7 +195,7 @@ describe('App solve smoke', () => {
     await vi.advanceTimersByTimeAsync(100)
     await vi.runAllTimersAsync()
 
-    expect(getImageBlob).toHaveBeenCalledWith(expect.stringContaining('/captcha-manual.png'))
+    expect(getImageBlob).toHaveBeenCalledWith(expect.stringContaining('/captcha-manual.png'), expect.any(AbortSignal))
     expect(detect).toHaveBeenCalledTimes(1)
     expect(captcha.checkboxes[0]?.checked).toBe(false)
     expect(captcha.checkboxes[2]?.checked).toBe(true)

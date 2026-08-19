@@ -63,9 +63,12 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
     }
     await cancelResponseBody(response)
     return quotaExceededResponse(request, quota.retryAfterSeconds)
-  } catch (error) {
+  } catch {
     await cancelResponseBody(response)
-    throw error
+    return textResponse(request, 'Service Unavailable', 503, {
+      'Cache-Control': 'no-store',
+      'Retry-After': '5',
+    })
   }
 }
 

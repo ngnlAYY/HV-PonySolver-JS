@@ -15,6 +15,8 @@ const canonicalIdentity = Object.freeze({
   sha256: ORT_MODEL_INTEGRITY.sha256,
 })
 const requiredTargets = ['chromium', 'firefox']
+const packagedContentSecurityPolicy =
+  "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'"
 
 function assertExactCanonicalIdentity(identity, label) {
   for (const key of ['filename', 'byteLength', 'sha256']) {
@@ -43,6 +45,19 @@ function assertSameArchive(actual, expected, label) {
     if (actual[key] !== expected[key]) {
       throw new Error(`${label} does not match the release archive ${key}`)
     }
+  }
+}
+
+async function assertPackagedManifestSecurity(outputRoot, target) {
+  const manifestPath = path.join(outputRoot, target, 'manifest.json')
+  let manifest
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  } catch (error) {
+    throw new Error(`${target} packaged manifest is missing or invalid`, { cause: error })
+  }
+  if (manifest?.content_security_policy?.extension_pages !== packagedContentSecurityPolicy) {
+    throw new Error(`${target} packaged manifest has an unexpected extension page CSP`)
   }
 }
 
@@ -242,6 +257,7 @@ async function discoverArtifacts(outputRoot) {
       if (sidecar !== expectedSidecar) {
         throw new Error(`${artifact.target} archive checksum sidecar is invalid`)
       }
+      await assertPackagedManifestSecurity(outputRoot, artifact.target)
       artifacts.push(artifact)
     }
   }

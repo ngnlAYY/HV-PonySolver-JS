@@ -936,7 +936,7 @@ describe('model worker', () => {
     expect(new Set((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).size).toBe(2)
   })
 
-  it('returns a generic 500 when quota storage fails', async () => {
+  it('returns a retryable 503 when quota storage fails', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(
       authorizedModelRequest(fixture, 'GET'),
@@ -946,8 +946,10 @@ describe('model worker', () => {
       }),
     )
 
-    expect(response.status).toBe(500)
-    expect(await response.text()).toBe('Internal Server Error')
+    expect(response.status).toBe(503)
+    expect(response.headers.get('Retry-After')).toBe('5')
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(await response.text()).toBe('Service Unavailable')
   })
 
   it('keeps concurrent real, decoy, and public runtime requests isolated', async () => {

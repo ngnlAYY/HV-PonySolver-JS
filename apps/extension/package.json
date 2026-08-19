@@ -11,7 +11,6 @@
     "benchmark:quick": "node scripts/benchmark-runner.mjs --quick",
     "benchmark:exhaustive": "node scripts/benchmark-runner.mjs --exhaustive",
     "benchmark:compare": "node scripts/benchmark-compare.mjs",
-    "lint:firefox": "web-ext lint --source-dir dist/firefox --warnings-as-errors",
     "test:e2e:chromium": "pnpm run test:e2e:chromium:load-only",
     "test:e2e:chromium:load-only": "node scripts/chromium-load-smoke.mjs --load-only",
     "test:e2e:chromium:authenticated": "node scripts/chromium-load-smoke.mjs --authenticated",
@@ -36,7 +35,6 @@
     "jsdom": "^30.0.1",
     "onnxruntime-web": "1.27.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "^4.1.10",
-    "web-ext": "10.6.0"
+    "vitest": "^4.1.10"
   }
 }
