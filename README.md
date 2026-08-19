@@ -383,14 +383,14 @@ CI 的独立最低版本任务下载并实际运行 Chromium 116 与 Firefox Des
 
 ```bash
 MODEL_FILE=/path/to/yolo26n-640.ort \
-pnpm --filter @hv-pony-solver/userscript verify:model
+pnpm --filter @hv-pony-solver/userscript verify-model-integrity
 ```
 
 ### Model Worker 命令
 
 ```bash
 pnpm --filter @hv-pony-solver/model-worker render-config
-pnpm --filter @hv-pony-solver/model-worker validate-wrangler-config
+pnpm --filter @hv-pony-solver/model-worker exec node scripts/validate-wrangler-config.mjs
 pnpm --filter @hv-pony-solver/model-worker dev
 pnpm --filter @hv-pony-solver/model-worker typecheck
 pnpm --filter @hv-pony-solver/model-worker test
@@ -480,7 +480,7 @@ MODEL_BUCKET_NAME=<r2-bucket-name> \
 INVALID_KEY_MODE=decoy \
 pnpm --filter @hv-pony-solver/model-worker render-config
 
-pnpm --filter @hv-pony-solver/model-worker validate-wrangler-config
+pnpm --filter @hv-pony-solver/model-worker exec node scripts/validate-wrangler-config.mjs
 ```
 
 部署模式会拒绝测试占位值。`INVALID_KEY_MODE` 省略时使用项目默认策略。
@@ -598,7 +598,7 @@ MODEL_BUCKET_NAME=<r2-bucket-name> \
 INVALID_KEY_MODE=decoy \
 pnpm --filter @hv-pony-solver/model-worker render-config
 
-pnpm --filter @hv-pony-solver/model-worker validate-wrangler-config
+pnpm --filter @hv-pony-solver/model-worker exec node scripts/validate-wrangler-config.mjs
 pnpm --filter @hv-pony-solver/model-worker run deploy
 ```
 
