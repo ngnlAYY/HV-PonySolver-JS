@@ -5,7 +5,7 @@ import type { AppDependencies, SolverService } from '../../src/app/app-dependenc
 import type { CaptchaTarget } from '../../src/captcha/captcha-target'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
-import { appendCaptcha } from '../helpers/captcha-fixture'
+import { appendCaptcha } from '../../../../test/support/captcha-fixture'
 
 function createPanel(): StatusPanel {
   return {

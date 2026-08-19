@@ -4,7 +4,7 @@ import { inferenceTimeoutConfig } from '@hv-pony-solver/browser-core'
 import { OnnxWorkerClient } from '../../src/inference/onnx-worker-client'
 import type { ModelCache } from '../../src/model/model-cache'
 import { createMockPanel } from '../helpers/mock-panel'
-import { FailingWorker, SuccessfulWorker, TimeoutThenSuccessfulWorker } from '../helpers/mock-worker'
+import { FailingWorker, SuccessfulWorker, TimeoutThenSuccessfulWorker } from '../../../../test/support/mock-worker'
 
 function stubWorker(worker: new (...args: unknown[]) => Worker): void {
   vi.stubGlobal('Worker', worker)

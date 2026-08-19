@@ -6,7 +6,7 @@ import type { ModelCache } from '../../src/model/model-cache'
 import { downloadModel } from '../../src/model/model-downloader'
 import type { InferenceStatusSink } from '../../src/status-panel/status-panel-types'
 import { createMockPanel } from '../helpers/mock-panel'
-import { FailingWorker, SuccessfulWorker, TimeoutThenSuccessfulWorker } from '../helpers/mock-worker'
+import { FailingWorker, SuccessfulWorker, TimeoutThenSuccessfulWorker } from '../../../../test/support/mock-worker'
 
 function stubWorker(worker: new (...args: unknown[]) => Worker): void {
   vi.stubGlobal('Worker', worker)

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { appendCaptcha } from '../helpers/captcha-fixture'
+import { appendCaptcha } from '../../../../test/support/captcha-fixture'
 
 const prepare = vi.fn(async () => ({}) as Worker)
 const detect = vi.fn()
