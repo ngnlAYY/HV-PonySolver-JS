@@ -5,12 +5,7 @@ import {
   getAnswerMode,
   setAnswerMode,
 } from '../../src/captcha/answer-mode-settings'
-import {
-  DEFAULT_RANDOM_ON_FAIL,
-  getRandomOnFail,
-  getRandomOnFailSync,
-  setRandomOnFail,
-} from '../../src/captcha/fallback-settings'
+import { DEFAULT_RANDOM_ON_FAIL, getRandomOnFailSync } from '../../src/captcha/fallback-settings'
 import { timingConfig } from '../../src/captcha/timing-config'
 import {
   getMultiClickDelayRange,
@@ -57,16 +52,13 @@ describe('portable captcha settings', () => {
     await expect(getAnswerMode(store)).resolves.toBe(DEFAULT_ANSWER_MODE)
   })
 
-  it('preserves the random fallback default and explicit opt-out', async () => {
+  it('preserves the random fallback default and explicit opt-out', () => {
     const store = storage()
     expect(getRandomOnFailSync(store)).toBe(DEFAULT_RANDOM_ON_FAIL)
-    await expect(getRandomOnFail(store)).resolves.toBe(DEFAULT_RANDOM_ON_FAIL)
-    await setRandomOnFail(store, false)
+    store.values.set('hvPonySolverRandomOnFail', '0')
     expect(getRandomOnFailSync(store)).toBe(false)
-    await expect(getRandomOnFail(store)).resolves.toBe(false)
     store.values.set('hvPonySolverRandomOnFail', 'invalid')
     expect(getRandomOnFailSync(store)).toBe(DEFAULT_RANDOM_ON_FAIL)
-    await expect(getRandomOnFail(store)).resolves.toBe(DEFAULT_RANDOM_ON_FAIL)
   })
 
   it('reads, normalizes, and writes both timing ranges', async () => {

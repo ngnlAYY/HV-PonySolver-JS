@@ -14,15 +14,3 @@ export function getRandomOnFailSync(storage: SettingsStorage): boolean {
     return DEFAULT_RANDOM_ON_FAIL
   }
 }
-
-export async function getRandomOnFail(storage: SettingsStorage): Promise<boolean> {
-  try {
-    return parseRandomOnFail(await storage.get(RANDOM_ON_FAIL_STORAGE_KEY))
-  } catch {
-    return DEFAULT_RANDOM_ON_FAIL
-  }
-}
-
-export async function setRandomOnFail(storage: SettingsStorage, enabled: boolean): Promise<void> {
-  await storage.set(RANDOM_ON_FAIL_STORAGE_KEY, enabled ? '1' : '0')
-}

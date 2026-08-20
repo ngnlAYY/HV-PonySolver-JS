@@ -14,7 +14,7 @@ import {
   type PanelPosition,
 } from '@hv-pony-solver/browser-core'
 
-import { alertUser, promptUser, registerGmMenu, runMenuAction } from '../userscript/gm-bridge'
+import { alertUser, promptUser } from '../userscript/gm-bridge'
 import { gmSettingsStorage } from '../userscript/gm-storage'
 
 export type { PanelPosition }
@@ -65,14 +65,6 @@ export function setPanelHistoryLimit(value: string): Promise<void> {
 
 export function clearPanelHistoryLimit(): Promise<void> {
   return clearCorePanelHistoryLimit(gmSettingsStorage)
-}
-
-export function registerPanelSettingsMenu(): void {
-  registerGmMenu('设置面板位置', () => runMenuAction(setPanelPositionFromPrompt, '面板位置设置失败'))
-  registerGmMenu('重置面板位置', () => runMenuAction(clearSavedPanelPosition, '面板位置设置失败'))
-  registerGmMenu('开启精简版', () => runMenuAction(enablePanelCompactMode, '精简版设置失败'))
-  registerGmMenu('关闭精简版', () => runMenuAction(disablePanelCompactMode, '精简版设置失败'))
-  registerGmMenu('设置答题记录显示条数', () => runMenuAction(setPanelHistoryLimitFromPrompt, '答题记录显示条数设置失败'))
 }
 
 export async function setPanelPositionFromPrompt(): Promise<void> {

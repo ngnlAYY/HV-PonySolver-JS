@@ -1,7 +1,6 @@
 import type { AnswerCode } from '@hv-pony-solver/shared/answer'
 import type { HistoryRecord, World } from '../persistence/answer-history-types'
 import { WORLD_NAMES } from '../persistence/answer-history-config'
-import { escapeHtml } from '../utils/html'
 import type { PanelStatus } from './status-panel-types'
 
 export function formatAnswers(ponies: AnswerCode[], confidences: Partial<Record<AnswerCode, number>>): string {
@@ -14,10 +13,6 @@ export function formatAnswers(ponies: AnswerCode[], confidences: Partial<Record<
       return pony
     })
     .join(',')
-}
-
-export function formatRecord(record: HistoryRecord): string {
-  return escapeHtml(formatRecordText(record))
 }
 
 function formatRecordText(record: HistoryRecord): string {
@@ -70,35 +65,4 @@ export function renderStatusPanelInto(
     fragment.append(line)
   })
   element.replaceChildren(fragment)
-}
-
-export function renderStatusPanel(
-  world: World,
-  status: PanelStatus,
-  records: HistoryRecord[],
-  compactMode: boolean,
-  historyLimit: number,
-  persistenceError: string | null = null,
-): string {
-  const worldName = WORLD_NAMES[world] || '未知'
-  const visibleRecords = records.slice(0, historyLimit)
-  const rows = visibleRecords.length ? visibleRecords.map((record) => formatRecord(record)).join('<br>') : '暂无记录'
-  const recentError = records.find((record) => record.type === 'error')?.message || '无'
-  const statusRows = compactMode
-    ? []
-    : [
-        `模型状态：${escapeHtml(status.model)}`,
-        `会话状态：${escapeHtml(status.session)}`,
-        `推理状态：${escapeHtml(status.inference)}`,
-      ]
-  return [
-    'HV-PonySolver',
-    '运行: 本地 ONNX',
-    ...statusRows,
-    ...(persistenceError ? [escapeHtml(persistenceError)] : []),
-    `最近错误：${escapeHtml(recentError)}`,
-    `当前处于<strong>${escapeHtml(worldName)}</strong>`,
-    `${escapeHtml(worldName)}最近答题:`,
-    rows,
-  ].join('<br>')
 }

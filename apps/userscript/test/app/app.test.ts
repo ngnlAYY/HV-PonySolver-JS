@@ -7,8 +7,6 @@ const detect = vi.fn()
 const destroyDetector = vi.fn()
 const getImageBlob = vi.fn()
 const registerSettingsMenu = vi.fn()
-const registerModelSettingsMenu = vi.fn()
-const registerPanelSettingsMenu = vi.fn()
 const modelDownload = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
 const modelPutCached = vi.fn(async () => undefined)
 const modelClose = vi.fn()
@@ -32,22 +30,8 @@ vi.mock('../../src/captcha/captcha-image-loader', () => ({
   }),
 }))
 
-vi.mock('../../src/model/model-settings', () => ({
-  registerModelSettingsMenu,
-}))
-
 vi.mock('../../src/userscript/settings-menu', () => ({
   registerSettingsMenu,
-}))
-
-vi.mock('../../src/status-panel/panel-settings', () => ({
-  getPanelHistoryLimit: vi.fn(async () => 5),
-  getPanelHistoryLimitSync: vi.fn(() => 5),
-  getPanelPosition: vi.fn(async () => ({ top: 150, left: 1240 })),
-  getPanelPositionSync: vi.fn(() => ({ top: 150, left: 1240 })),
-  isPanelCompactMode: vi.fn(async () => false),
-  isPanelCompactModeSync: vi.fn(() => false),
-  registerPanelSettingsMenu,
 }))
 
 vi.mock('../../src/model/model-cache', () => ({

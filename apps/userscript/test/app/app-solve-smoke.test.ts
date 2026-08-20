@@ -6,7 +6,6 @@ const prepare = vi.fn(async () => ({}) as Worker)
 const detect = vi.fn()
 const destroyDetector = vi.fn()
 const getImageBlob = vi.fn()
-const registerModelSettingsMenu = vi.fn()
 const modelDownload = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
 const modelPutCached = vi.fn(async () => undefined)
 const modelClose = vi.fn()
@@ -99,10 +98,6 @@ vi.mock('../../src/captcha/captcha-image-loader', () => ({
       get: getImageBlob,
     }
   }),
-}))
-
-vi.mock('../../src/model/model-settings', () => ({
-  registerModelSettingsMenu,
 }))
 
 vi.mock('../../src/model/model-cache', () => ({

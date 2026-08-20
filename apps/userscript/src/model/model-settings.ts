@@ -6,7 +6,7 @@ import {
   setModelAccessKey as setCoreModelAccessKey,
 } from '@hv-pony-solver/browser-core'
 
-import { alertUser, promptUser, registerGmMenu, runMenuAction } from '../userscript/gm-bridge'
+import { alertUser, promptUser } from '../userscript/gm-bridge'
 import { gmSettingsStorage } from '../userscript/gm-storage'
 
 export type VerifyModelAccessKey = (candidateKey: string) => Promise<void>
@@ -21,11 +21,6 @@ export function setModelAccessKey(value: string): Promise<void> {
 
 export function clearModelAccessKey(): Promise<void> {
   return clearCoreModelAccessKey(gmSettingsStorage)
-}
-
-export function registerModelSettingsMenu(onVerify?: VerifyModelAccessKey): void {
-  registerGmMenu('设置模型下载 Key', () => runMenuAction(() => setModelAccessKeyFromPrompt(onVerify), '模型下载 Key 设置失败'))
-  registerGmMenu('清除模型下载 Key', () => runMenuAction(clearSavedModelAccessKey, '模型下载 Key 设置失败'))
 }
 
 export async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKey): Promise<void> {

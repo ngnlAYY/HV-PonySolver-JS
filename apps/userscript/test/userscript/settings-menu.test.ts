@@ -197,4 +197,169 @@ describe('settings menu', () => {
     expect(localStorage.getItem('hvPonySolverMultiClickDelay')).toBe('750')
     expect(alert).toHaveBeenCalledWith('答题间隔已保存')
   })
+
+  it('does not save a first-time model key when top-level verification fails', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce('bad-key')
+    const alert = vi.fn()
+    const verify = vi.fn(async (_candidateKey: string) => {
+      throw new Error('HTTP 403')
+    })
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu({ onVerifyModelAccessKey: verify })
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(verify).toHaveBeenCalledWith('bad-key')
+    expect(localStorage.getItem('hvPonySolverModelAccessKey')).toBeNull()
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
+  })
+
+  it('keeps the model key when the top-level model prompt is cancelled', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(null)
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    localStorage.setItem('hvPonySolverModelAccessKey', 'old-key')
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(localStorage.getItem('hvPonySolverModelAccessKey')).toBe('old-key')
+    expect(alert).not.toHaveBeenCalled()
+  })
+
+  it('clears the model key when the top-level model prompt is blank', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce('   ')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    localStorage.setItem('hvPonySolverModelAccessKey', 'old-key')
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(localStorage.getItem('hvPonySolverModelAccessKey')).toBeNull()
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 已清除')
+  })
+
+  it('reports model-key storage failures through the top-level menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce('new-key')
+    const alert = vi.fn()
+    const setValue = vi.fn(async () => {
+      throw new Error('write failed')
+    })
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('GM_setValue', setValue)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu({ onVerifyModelAccessKey: async () => undefined })
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(setValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey', 'new-key')
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: write failed')
+  })
+
+  it('sets the panel position through the top-level settings menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('7').mockReturnValueOnce('250,800')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(prompt).toHaveBeenNthCalledWith(1, expect.stringContaining('7. 设置面板位置'), '1')
+    expect(prompt).toHaveBeenNthCalledWith(2, '请输入面板位置 top,left，例如 150,1240', '150,1240')
+    expect(localStorage.getItem('hvPonySolverPanelPosition')).toBe('250,800')
+    expect(alert).toHaveBeenCalledWith('面板位置已保存，刷新页面后生效')
+  })
+
+  it('resets the panel position through the top-level settings menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn(() => '8')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    localStorage.setItem('hvPonySolverPanelPosition', '250,800')
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(localStorage.getItem('hvPonySolverPanelPosition')).toBeNull()
+    expect(alert).toHaveBeenCalledWith('面板位置已重置，刷新页面后生效')
+  })
+
+  it('toggles compact panel mode through the top-level settings menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('9').mockReturnValueOnce('10')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+    expect(localStorage.getItem('hvPonySolverPanelCompact')).toBe('1')
+
+    await registerMenuCommand.mock.calls[0][1]()
+    expect(localStorage.getItem('hvPonySolverPanelCompact')).toBeNull()
+    expect(alert).toHaveBeenNthCalledWith(1, '精简版已开启，刷新页面后生效')
+    expect(alert).toHaveBeenNthCalledWith(2, '精简版已关闭，刷新页面后生效')
+  })
+
+  it('reports invalid panel positions through the top-level menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('7').mockReturnValueOnce('-1,abc')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(localStorage.getItem('hvPonySolverPanelPosition')).toBeNull()
+    expect(alert).toHaveBeenCalledWith('面板位置设置失败: Error: 面板位置格式无效，请输入非负整数 top,left，例如 150,1240')
+  })
+
+  it('reports model-key deletion failures through the top-level menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn(() => '2')
+    const alert = vi.fn()
+    const deleteValue = vi.fn(async () => {
+      throw new Error('delete failed')
+    })
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('GM_deleteValue', deleteValue)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    localStorage.setItem('hvPonySolverModelAccessKey', 'old-key')
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(deleteValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey')
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: delete failed')
+  })
 })
