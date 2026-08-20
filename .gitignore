@@ -12,6 +12,7 @@ node_modules/
 .pi/
 /model/
 .keyenv
+.workflow
 worker/wrangler.toml
 worker/.wrangler/
 apps/model-worker/wrangler.toml
