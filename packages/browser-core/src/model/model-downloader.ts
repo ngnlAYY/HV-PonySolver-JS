@@ -1,5 +1,5 @@
 import { inferenceTimeoutConfig } from '../inference/inference-config'
-import { ModelDownloadQuotaExceededError } from './model-download-error'
+import { ModelAccessKeyRejectedError, ModelDownloadQuotaExceededError } from './model-download-error'
 import { modelConfig } from './model-config'
 import type { ModelIntegrity } from './model-integrity'
 import { verifyModelIntegrity } from './model-integrity'
@@ -159,6 +159,22 @@ function parseProbeByteLength(contentLength: string | null): number {
 
 const contentLengthPattern = /^[0-9]+$/
 
+/**
+ * Detects the Worker's decoy payload, which unauthorized Keys receive under 200.
+ *
+ * The decoy is orders of magnitude smaller than the real model, so a success
+ * response declaring a tiny body means the Key was rejected rather than that a
+ * real download was truncated. Truncation of the real object still falls through
+ * to the existing size checks.
+ */
+function isDecoyResponse(contentLength: string | null, expectedByteLength: number): boolean {
+  if (contentLength === null || !contentLengthPattern.test(contentLength)) {
+    return false
+  }
+  const declaredByteLength = Number(contentLength)
+  return Number.isSafeInteger(declaredByteLength) && declaredByteLength * 2 < expectedByteLength
+}
+
 function parseRetryAfterSeconds(value: string | null): number | null {
   if (value === null || !contentLengthPattern.test(value)) {
     return null
@@ -314,6 +330,13 @@ export async function downloadModel(
         throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
       }
       throw new Error(`模型下载失败: HTTP ${response.status}`)
+    }
+    // The Worker answers an unauthorized Key with a small decoy under HTTP 200.
+    // Naming that cause beats surfacing it as a size-mismatch failure.
+    if (isDecoyResponse(response.headers.get('content-length'), integrity.byteLength)) {
+      await cancelResponseBody(response, deadline)
+      deadline.throwIfExpired()
+      throw new ModelAccessKeyRejectedError()
     }
     const buffer = await readModelResponse(
       response,

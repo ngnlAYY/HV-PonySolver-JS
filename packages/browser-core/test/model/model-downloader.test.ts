@@ -101,6 +101,46 @@ describe('downloadModel', () => {
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('?key=')
   })
 
+  it('reports a rejected Key when the Worker serves the small decoy under HTTP 200', async () => {
+    const cancel = vi.fn(async () => undefined)
+    const response = {
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-length': '1' }),
+      body: { cancel },
+    } as unknown as Response
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow(
+      '模型 Key 无效或已失效',
+    )
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps size-mismatch reporting for a truncated real download', async () => {
+    // Two of three bytes is short but not decoy-small, so this stays a size error.
+    const response = new Response(new Uint8Array([1, 2]), { headers: { 'content-length': '2' } })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('下载模型大小校验失败')
+  })
+
+  it('does not treat a missing Content-Length as a decoy', async () => {
+    const response = new Response(new Uint8Array([1, 2, 3]))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).resolves.toBeInstanceOf(ArrayBuffer)
+  })
+
   it('cancels every non-success response body before rejecting', async () => {
     const cancel = vi.fn(async () => undefined)
     const response = {

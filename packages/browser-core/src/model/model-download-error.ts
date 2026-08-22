@@ -9,3 +9,10 @@ export class ModelDownloadQuotaExceededError extends Error {
     this.retryAfterSeconds = retryAfterSeconds
   }
 }
+
+export class ModelAccessKeyRejectedError extends Error {
+  constructor() {
+    super('模型 Key 无效或已失效，请在设置中重新验证 Key')
+    this.name = 'ModelAccessKeyRejectedError'
+  }
+}
