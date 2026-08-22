@@ -9,10 +9,14 @@ import {
   CONTENT_PORT_NAME,
   OPTIONS_PORT_NAME,
   errorResponse,
+  isCancelRequest,
   isHostRequest,
   isHostResponse,
+  portStatusMessage,
+  successResponse,
   type HostRequest,
   type HostResponse,
+  type HostStatusUpdate,
 } from '../protocol/messages'
 
 export type HostInvoker = (request: HostRequest, signal: AbortSignal) => Promise<HostResponse>
@@ -20,13 +24,21 @@ export type BrokerPolicy = Readonly<{
   allowOptions: boolean
   /**
    * Called when a trusted content Port connects; the returned callback runs once
-   * that Port disconnects. Lets a host keep warm resources alive for as long as
-   * a captcha page is actually connected.
+   * that Port disconnects. Lets a host keep warm resources alive for as long
+   * as a captcha page is actually connected.
    */
   onContentConnected?: () => () => void
 }>
+export type BrokerHandle = Readonly<{
+  /** Removes the runtime connect listener. */
+  dispose(): void
+  /** Pushes a Host stage update to every currently connected content Port. */
+  broadcastContentStatus(status: HostStatusUpdate): void
+}>
 export const MAX_PORT_DETECT_REQUESTS = 2
 export const MAX_GLOBAL_DETECT_REQUESTS = 6
+export const MAX_PORT_PREPARE_REQUESTS = 2
+export const MAX_GLOBAL_PREPARE_REQUESTS = 4
 export const MAX_PORT_VERIFY_KEY_REQUESTS = 1
 export const MAX_GLOBAL_VERIFY_KEY_REQUESTS = 2
 export const BROKER_DETECT_TIMEOUT_MS = 40_000
@@ -98,10 +110,12 @@ function invokeWithTimeout(
   })
 }
 
-export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = { allowOptions: true }): () => void {
+export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = { allowOptions: true }): BrokerHandle {
   let globalDetectRequests = 0
+  let globalPrepareRequests = 0
   let globalVerifyKeyRequests = 0
-  return addRuntimeConnectListener((port) => {
+  const contentPorts = new Set<ExtensionPort>()
+  const dispose = addRuntimeConnectListener((port) => {
     if (!isTrustedPort(port, runtimeId(), runtimeGetUrl('options.html'))) {
       port.disconnect()
       return
@@ -110,8 +124,12 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       port.disconnect()
       return
     }
+    if (port.name === CONTENT_PORT_NAME) {
+      contentPorts.add(port)
+    }
     let connected = true
     let portDetectRequests = 0
+    let portPrepareRequests = 0
     let portVerifyKeyRequests = 0
     // Held for the Port's lifetime so the host can keep warm resources alive
     // while a captcha page stays connected.
@@ -124,18 +142,20 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       }
     }
     type RequestEntry = {
+      readonly requestId: string
       readonly controller: AbortController
-      readonly kind: 'detect' | 'verify-key' | 'other'
+      readonly kind: 'detect' | 'prepare' | 'verify-key' | 'other'
       released: boolean
     }
-    const entries = new Set<RequestEntry>()
+    const entries = new Map<string, RequestEntry>()
     const abortEntries = (): void => {
-      for (const entry of entries) {
+      for (const entry of entries.values()) {
         entry.controller.abort(new Error('推理客户端连接已断开'))
       }
     }
     const markDisconnected = (): void => {
       connected = false
+      contentPorts.delete(port)
       abortEntries()
       const release = releaseRetention
       releaseRetention = undefined
@@ -169,18 +189,31 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         return
       }
       entry.released = true
-      entries.delete(entry)
+      entries.delete(entry.requestId)
       if (entry.kind === 'detect') {
         portDetectRequests -= 1
         globalDetectRequests -= 1
+      } else if (entry.kind === 'prepare') {
+        portPrepareRequests -= 1
+        globalPrepareRequests -= 1
       } else if (entry.kind === 'verify-key') {
         portVerifyKeyRequests -= 1
         globalVerifyKeyRequests -= 1
       }
     }
     port.onDisconnect.addListener(markDisconnected)
-    port.onMessage.addListener((message) => {
-      if (!connected) {
+    port.onMessage.addListener((message) => {      if (!connected) {
+        return
+      }
+      if (isCancelRequest(message)) {
+        if (port.name !== CONTENT_PORT_NAME) {
+          disconnect()
+          return
+        }
+        // Cancelling an unknown or already-settled request is a harmless no-op,
+        // so the broker always acknowledges and never disconnects for it.
+        entries.get(message.cancelRequestId)?.controller.abort(new Error('推理客户端请求已取消'))
+        post(successResponse(message.requestId))
         return
       }
       if (!isHostRequest(message)) {
@@ -203,6 +236,13 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         return
       }
       if (
+        message.type === 'prepare' &&
+        (portPrepareRequests >= MAX_PORT_PREPARE_REQUESTS || globalPrepareRequests >= MAX_GLOBAL_PREPARE_REQUESTS)
+      ) {
+        post(errorResponse(message.requestId, '推理初始化繁忙，请稍后重试'))
+        return
+      }
+      if (
         message.type === 'verify-key' &&
         (portVerifyKeyRequests >= MAX_PORT_VERIFY_KEY_REQUESTS ||
           globalVerifyKeyRequests >= MAX_GLOBAL_VERIFY_KEY_REQUESTS)
@@ -210,16 +250,23 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         post(errorResponse(message.requestId, '模型 Key 验证队列繁忙，请稍后重试'))
         return
       }
-      const kind = message.type === 'detect' || message.type === 'verify-key' ? message.type : 'other'
+      const kind =
+        message.type === 'detect' || message.type === 'prepare' || message.type === 'verify-key'
+          ? message.type
+          : 'other'
       const entry: RequestEntry = {
+        requestId: message.requestId,
         controller: new AbortController(),
         kind,
         released: false,
       }
-      entries.add(entry)
+      entries.set(entry.requestId, entry)
       if (entry.kind === 'detect') {
         portDetectRequests += 1
         globalDetectRequests += 1
+      } else if (entry.kind === 'prepare') {
+        portPrepareRequests += 1
+        globalPrepareRequests += 1
       } else if (entry.kind === 'verify-key') {
         portVerifyKeyRequests += 1
         globalVerifyKeyRequests += 1
@@ -242,4 +289,17 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         })
     })
   })
+  return {
+    dispose,
+    broadcastContentStatus(status: HostStatusUpdate): void {
+      for (const port of contentPorts) {
+        try {
+          port.postMessage(portStatusMessage(status))
+        } catch {
+          // The Port is dead from the broker's point of view; drop it.
+          contentPorts.delete(port)
+        }
+      }
+    },
+  }
 }

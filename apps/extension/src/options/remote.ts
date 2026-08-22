@@ -22,6 +22,7 @@ const packagedModelHint = optionsElement<HTMLParagraphElement>('packaged-model-h
 const modelKey = optionsElement<HTMLInputElement>('model-key')
 const verifyKeyButton = optionsElement<HTMLButtonElement>('verify-key')
 const clearKeyButton = optionsElement<HTMLButtonElement>('clear-key')
+const cancelKeyOperationButton = optionsElement<HTMLButtonElement>('cancel-key-op')
 let requestSequence = 0
 let keyGeneration = 0
 let keyOperationTail: Promise<void> = Promise.resolve()
@@ -127,6 +128,7 @@ function enqueueKeyOperation(
   activeKeyController?.abort()
   const controller = new AbortController()
   activeKeyController = controller
+  cancelKeyOperationButton.disabled = false
   if (pendingStatus) {
     status.set(pendingStatus)
   }
@@ -145,10 +147,24 @@ function enqueueKeyOperation(
       } finally {
         if (activeKeyController === controller) {
           activeKeyController = null
+          cancelKeyOperationButton.disabled = true
         }
       }
     })
 }
+
+cancelKeyOperationButton.addEventListener('click', () => {
+  if (!activeKeyController) {
+    return
+  }
+  // Bumping the generation keeps the aborted operation from overwriting the
+  // cancellation status with its own rejection message.
+  keyGeneration += 1
+  activeKeyController.abort()
+  activeKeyController = null
+  cancelKeyOperationButton.disabled = true
+  status.set('Key 操作已取消')
+})
 
 verifyKeyButton.addEventListener('click', () => {
   enqueueKeyOperation(async (signal, generation) => {

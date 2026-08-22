@@ -132,3 +132,17 @@ export async function acquireOffscreenDocument(): Promise<() => void> {
 export function retainOffscreenDocument(): () => void {
   return takeLease()
 }
+
+/**
+ * Reconciles lease state after a service-worker restart.
+ *
+ * Chromium may terminate the service worker while a retention lease is held,
+ * which abandons the in-memory counters and the pending idle-close timer — the
+ * offscreen document and its warm ONNX session would then stay resident with
+ * nothing left to close them. Scheduling an idle close on every startup fixes
+ * that: any real activity takes a lease and cancels the timer, so only a
+ * genuinely idle document is closed.
+ */
+export function scheduleOffscreenIdleReconciliation(): void {
+  scheduleIdleClose()
+}

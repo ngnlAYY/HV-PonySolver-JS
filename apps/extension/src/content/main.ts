@@ -14,6 +14,7 @@ import { logError } from '@hv-pony-solver/browser-core/utils/logger'
 
 import { RemoteDetectorClient } from './remote-detector-client'
 import { startContentRuntime } from './content-runtime'
+import { scheduleExperiencedPrefetch } from './prefetch'
 import { ExtensionStorageMirror } from './storage-mirror'
 
 function createContentApp(storage: ExtensionStorageMirror): App {
@@ -41,6 +42,7 @@ function createContentApp(storage: ExtensionStorageMirror): App {
     dispose: () => storage.destroy(),
   })
   appReference.current = app
+  scheduleExperiencedPrefetch(storage, detector, () => appReference.current?.getAbortSignal())
   return app
 }
 

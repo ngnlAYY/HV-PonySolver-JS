@@ -3,10 +3,13 @@ import type { ModelRepository } from '@hv-pony-solver/browser-core/inference/onn
 import { loadPackagedModel } from './packaged-model'
 
 export class PackagedModelRepository implements ModelRepository {
-  constructor(private readonly loadModel: () => Promise<ArrayBuffer> = loadPackagedModel) {}
+  constructor(
+    private readonly loadModel: (signal?: AbortSignal) => Promise<ArrayBuffer> = (signal) =>
+      loadPackagedModel(fetch, signal),
+  ) {}
 
-  getCached(): Promise<ArrayBuffer> {
-    return this.loadModel()
+  getCached(signal?: AbortSignal): Promise<ArrayBuffer> {
+    return this.loadModel(signal)
   }
 
   download(): Promise<never> {

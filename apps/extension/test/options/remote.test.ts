@@ -217,6 +217,33 @@ describe('default remote options entry', () => {
     )
   })
 
+  it('cancels a hanging Key operation from the page and stops the port', async () => {
+    const verifyPort = controlledHostPort()
+    platformMocks.runtimeConnect.mockReset().mockReturnValue(verifyPort)
+    await import('../../src/options/main')
+
+    const cancelKeyOperation = optionsElement<HTMLButtonElement>('cancel-key-op')
+    expect(cancelKeyOperation.disabled).toBe(true)
+
+    optionsElement<HTMLInputElement>('model-key').value = 'c'.repeat(64)
+    optionsElement<HTMLButtonElement>('verify-key').click()
+    await vi.waitFor(() => {
+      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('正在验证模型 Key…')
+    })
+    expect(cancelKeyOperation.disabled).toBe(false)
+
+    cancelKeyOperation.click()
+    expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('Key 操作已取消')
+    expect(cancelKeyOperation.disabled).toBe(true)
+    // The in-flight request is aborted on both sides: the Port is disconnected.
+    expect(verifyPort.disconnect).toHaveBeenCalled()
+
+    // The aborted operation must not overwrite the cancellation status later.
+    verifyPort.emitDisconnect()
+    await Promise.resolve()
+    expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('Key 操作已取消')
+  })
+
   it('cancels page-owned verification on pagehide', async () => {
     const hostPort = controlledHostPort()
     platformMocks.runtimeConnect.mockReset().mockReturnValue(hostPort)

@@ -76,8 +76,17 @@ export async function loadPackagedAsset(
   integrity: PackagedAssetIntegrity,
   label: string,
   fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
-  const response = await fetchImpl(url, { cache: 'force-cache', redirect: 'error' })
+  const init: RequestInit = { cache: 'force-cache', redirect: 'error' }
+  if (signal) {
+    init.signal = signal
+  }
+  const response = await fetchImpl(url, init)
+  if (signal?.aborted) {
+    await cancelBody(response.body)
+    throw new Error(`${label} 加载已取消`)
+  }
   if (!response.ok) {
     await cancelBody(response.body)
     throw new Error(`${label} 读取失败: HTTP ${response.status}`)
@@ -99,6 +108,9 @@ export async function loadPackagedAsset(
   }
 
   const buffer = await readExactBody(response.body, integrity.byteLength, label)
+  if (signal?.aborted) {
+    throw new Error(`${label} 加载已取消`)
+  }
   if ((await sha256Hex(buffer)) !== integrity.sha256) {
     throw new Error(`${label} 完整性校验失败`)
   }

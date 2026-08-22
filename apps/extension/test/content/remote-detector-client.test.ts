@@ -99,18 +99,22 @@ describe('RemoteDetectorClient', () => {
     await expect(detectPromise).resolves.toEqual(result)
   })
 
-  it('rejects timed-out requests and discards late responses', async () => {
+  it('rejects timed-out requests, cancels them remotely, and keeps the Port for later work', async () => {
     vi.useFakeTimers()
     const panel = statusSink()
     const client = new RemoteDetectorClient(panel)
     const preparePromise = client.prepare()
-    const request = vi.mocked(platformMocks.ports[0]!.postMessage).mock.calls[0]![0] as { requestId: string }
+    const port = platformMocks.ports[0]!
+    const request = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
     const rejection = expect(preparePromise).rejects.toThrow('扩展推理请求超时')
 
     await vi.advanceTimersByTimeAsync(95_000)
     await rejection
-    expect(platformMocks.ports[0]!.disconnect).toHaveBeenCalledTimes(1)
-    platformMocks.ports[0]!.emitMessage({
+    expect(port.disconnect).not.toHaveBeenCalled()
+    expect(port.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'cancel', cancelRequestId: request.requestId }),
+    )
+    port.emitMessage({
       protocol: PROTOCOL_VERSION,
       type: 'result',
       requestId: request.requestId,
@@ -119,15 +123,72 @@ describe('RemoteDetectorClient', () => {
     expect(panel.setSessionReady).not.toHaveBeenCalled()
 
     const nextPrepare = client.prepare()
-    expect(platformMocks.ports).toHaveLength(2)
-    const nextRequest = vi.mocked(platformMocks.ports[1]!.postMessage).mock.calls[0]![0] as { requestId: string }
-    platformMocks.ports[1]!.emitMessage({
+    expect(platformMocks.ports).toHaveLength(1)
+    const nextRequest = vi.mocked(port.postMessage).mock.lastCall?.[0] as { requestId: string }
+    port.emitMessage({
       protocol: PROTOCOL_VERSION,
       type: 'result',
       requestId: nextRequest.requestId,
       ok: true,
     })
     await expect(nextPrepare).resolves.toBeUndefined()
+  })
+
+  it('keeps sibling requests alive when one request is abandoned on the same Port', async () => {
+    const client = new RemoteDetectorClient(statusSink())
+    const slowController = new AbortController()
+    const slow = client.detect(new Blob([new Uint8Array([1])], { type: 'image/png' }), slowController.signal)
+    const fast = client.detect(new Blob([new Uint8Array([2])], { type: 'image/png' }))
+    await vi.waitFor(() => expect(platformMocks.ports[0]?.postMessage).toHaveBeenCalledTimes(2))
+    const port = platformMocks.ports[0]!
+    const slowRequest = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
+    const fastRequest = vi.mocked(port.postMessage).mock.calls[1]![0] as { requestId: string }
+
+    slowController.abort()
+    await expect(slow).rejects.toThrow('推理请求已取消')
+    expect(port.disconnect).not.toHaveBeenCalled()
+    expect(port.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'cancel', cancelRequestId: slowRequest.requestId }),
+    )
+
+    const result = {
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.92 },
+      detections: [{ class_id: 0, confidence: 0.92 }],
+      candidates: [{ class_id: 0, confidence: 0.92 }],
+    }
+    port.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: fastRequest.requestId,
+      ok: true,
+      result,
+    })
+    await expect(fast).resolves.toEqual(result)
+  })
+
+  it('renders Host stage status updates without settling pending requests', async () => {
+    const panel = statusSink()
+    const client = new RemoteDetectorClient(panel)
+    const preparePromise = client.prepare()
+    const port = platformMocks.ports[0]!
+    const request = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
+
+    port.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'status',
+      status: { model: '下载中', session: '初始化中' },
+    })
+    expect(panel.setStatus).toHaveBeenCalledWith({ model: '下载中', session: '初始化中' })
+
+    port.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    })
+    await expect(preparePromise).resolves.toBeUndefined()
   })
 
   it('rejects on disconnect and reconnects lazily for the next request', async () => {
@@ -151,19 +212,21 @@ describe('RemoteDetectorClient', () => {
     expect(panel.setSessionReady).toHaveBeenCalledTimes(1)
   })
 
-  it('disconnects the owned Port on cancellation and reconnects for later work', async () => {
+  it('cancels only the aborted request and keeps the Port for later work', async () => {
     const client = new RemoteDetectorClient(statusSink())
     const controller = new AbortController()
     const firstPrepare = client.prepare(controller.signal)
     controller.abort()
+    const port = platformMocks.ports[0]!
 
-    await expect(firstPrepare).rejects.toThrow('扩展推理请求已取消')
-    expect(platformMocks.ports[0]!.disconnect).toHaveBeenCalledTimes(1)
+    await expect(firstPrepare).rejects.toThrow('推理请求已取消')
+    expect(port.disconnect).not.toHaveBeenCalled()
+    expect(port.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'cancel' }))
 
     const nextPrepare = client.prepare()
-    expect(platformMocks.ports).toHaveLength(2)
-    const nextRequest = vi.mocked(platformMocks.ports[1]!.postMessage).mock.calls[0]![0] as { requestId: string }
-    platformMocks.ports[1]!.emitMessage({
+    expect(platformMocks.ports).toHaveLength(1)
+    const nextRequest = vi.mocked(port.postMessage).mock.lastCall?.[0] as { requestId: string }
+    port.emitMessage({
       protocol: PROTOCOL_VERSION,
       type: 'result',
       requestId: nextRequest.requestId,
@@ -266,8 +329,9 @@ describe('RemoteDetectorClient', () => {
     })
     const client = new RemoteDetectorClient(statusSink())
 
-    await expect(client.prepare(controller.signal)).rejects.toThrow('扩展推理请求已取消')
+    await expect(client.prepare(controller.signal)).rejects.toThrow('推理请求已取消')
+    // The request was never posted, so no cancel must be sent for it.
     expect(platformMocks.ports[0]!.postMessage).not.toHaveBeenCalled()
-    expect(platformMocks.ports[0]!.disconnect).toHaveBeenCalledTimes(1)
+    expect(platformMocks.ports[0]!.disconnect).not.toHaveBeenCalled()
   })
 })

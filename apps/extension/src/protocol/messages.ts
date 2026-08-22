@@ -25,6 +25,14 @@ export type ClearKeyRequest = RequestBase & Readonly<{ type: 'clear-key' }>
 export type KeyIntentRequest = VerifyKeyRequest | ClearKeyRequest
 export type HostRequest = PrepareRequest | DetectRequest | KeyIntentRequest
 
+/**
+ * Asks the broker to abort one still-active request from the same Port.
+ *
+ * Unlike a Port disconnect this is request-scoped: it frees the queued or
+ * running work without disturbing sibling requests on the same Port.
+ */
+export type CancelRequest = RequestBase & Readonly<{ type: 'cancel'; cancelRequestId: string }>
+
 export type HostSuccessResponse = RequestBase &
   Readonly<{
     type: 'result'
@@ -54,6 +62,26 @@ export type OffscreenCancelRequest = Readonly<{
 }>
 
 export type OffscreenMessage = OffscreenRequest | OffscreenCancelRequest
+
+/**
+ * A one-way Host-to-client stage update (model download, session build).
+ *
+ * The Host owns the model and session rows; the content client keeps the
+ * inference row because only it can measure the full round trip.
+ */
+export type HostStatusUpdate = Readonly<Partial<Record<'model' | 'session' | 'inference', string>>>
+
+export type PortStatusMessage = Readonly<{
+  protocol: typeof PROTOCOL_VERSION
+  type: 'status'
+  status: HostStatusUpdate
+}>
+
+export type OffscreenStatusMessage = Readonly<{
+  type: typeof OFFSCREEN_MESSAGE_TYPE
+  operation: 'status'
+  status: HostStatusUpdate
+}>
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -150,6 +178,21 @@ export function isHostRequest(value: unknown): value is HostRequest {
   )
 }
 
+export function isCancelRequest(value: unknown): value is CancelRequest {
+  return (
+    isRecord(value) &&
+    value.protocol === PROTOCOL_VERSION &&
+    value.type === 'cancel' &&
+    isRequestId(value.requestId) &&
+    isRequestId(value.cancelRequestId) &&
+    hasOnlyKeys(value, ['protocol', 'type', 'requestId', 'cancelRequestId'])
+  )
+}
+
+export function cancelRequestFor(cancelRequestId: string, requestId: string): CancelRequest {
+  return { protocol: PROTOCOL_VERSION, type: 'cancel', requestId, cancelRequestId }
+}
+
 export function isHostResponse(value: unknown): value is HostResponse {
   if (
     !isRecord(value) ||
@@ -203,6 +246,51 @@ export function isOffscreenCancelRequest(value: unknown): value is OffscreenCanc
 
 export function isOffscreenMessage(value: unknown): value is OffscreenMessage {
   return isOffscreenRequest(value) || isOffscreenCancelRequest(value)
+}
+
+export function isHostStatusUpdate(value: unknown): value is HostStatusUpdate {
+  if (!isRecord(value)) {
+    return false
+  }
+  const keys = Object.keys(value)
+  if (keys.length === 0 || keys.length > 3) {
+    return false
+  }
+  return keys.every((key) => {
+    if (key !== 'model' && key !== 'session' && key !== 'inference') {
+      return false
+    }
+    const text = value[key]
+    return typeof text === 'string' && text.length > 0 && text.length <= 200
+  })
+}
+
+export function portStatusMessage(status: HostStatusUpdate): PortStatusMessage {
+  return { protocol: PROTOCOL_VERSION, type: 'status', status }
+}
+
+export function isPortStatusMessage(value: unknown): value is PortStatusMessage {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ['protocol', 'type', 'status']) &&
+    value.protocol === PROTOCOL_VERSION &&
+    value.type === 'status' &&
+    isHostStatusUpdate(value.status)
+  )
+}
+
+export function offscreenStatusMessage(status: HostStatusUpdate): OffscreenStatusMessage {
+  return { type: OFFSCREEN_MESSAGE_TYPE, operation: 'status', status }
+}
+
+export function isOffscreenStatusMessage(value: unknown): value is OffscreenStatusMessage {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ['type', 'operation', 'status']) &&
+    value.type === OFFSCREEN_MESSAGE_TYPE &&
+    value.operation === 'status' &&
+    isHostStatusUpdate(value.status)
+  )
 }
 
 export function errorResponse(requestId: string, error: string): HostErrorResponse {

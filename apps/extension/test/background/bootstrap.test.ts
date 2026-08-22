@@ -256,4 +256,111 @@ describe('target-specific extension bootstraps', () => {
     expect(earlyResponse).toHaveBeenCalledWith(expect.objectContaining({ ok: false }))
     expect(host.handle).toHaveBeenCalledTimes(1)
   })
+
+  it('rebuilds the offscreen Host when a pagehide left the document alive', async () => {
+    const hosts = [
+      {
+        handle: vi.fn(),
+        destroy: vi.fn(),
+      },
+      {
+        handle: vi.fn(async (): Promise<HostResponse> => ({
+          protocol: PROTOCOL_VERSION,
+          type: 'result',
+          requestId: 'prepare-after-hide',
+          ok: true,
+        })),
+        destroy: vi.fn(),
+      },
+    ]
+    let created = 0
+    registerOffscreenHost(() => hosts[Math.min(created++, hosts.length - 1)]! as never)
+    const listener = mocks.addRuntimeMessageListener.mock.calls[0]![0] as RuntimeMessageListener
+
+    globalThis.dispatchEvent(new Event('pagehide'))
+    expect(hosts[0]!.destroy).toHaveBeenCalledTimes(1)
+
+    const sendResponse = vi.fn()
+    const requestMessage = {
+      type: OFFSCREEN_MESSAGE_TYPE,
+      operation: 'request',
+      requestId: 'offscreen-after-hide',
+      request: { protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'prepare-after-hide' },
+    } as const
+    expect(listener(requestMessage, { id: 'extension-id' }, sendResponse)).toBe(true)
+    await vi.waitFor(() =>
+      expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'prepare-after-hide', ok: true })),
+    )
+    expect(hosts[1]!.handle).toHaveBeenCalledTimes(1)
+    expect(hosts[0]!.handle).not.toHaveBeenCalled()
+
+    // The rebuilt Host gets its own pagehide teardown.
+    globalThis.dispatchEvent(new Event('pagehide'))
+    expect(hosts[1]!.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends Host stage status to the service worker as one-way offscreen messages', () => {
+    let emit: ((status: { model?: string; session?: string }) => void) | undefined
+    registerOffscreenHost((emitStatus) => {
+      emit = emitStatus
+      return { handle: vi.fn(), destroy: vi.fn() } as never
+    })
+
+    emit?.({ model: '下载中' })
+
+    expect(mocks.sendRuntimeMessage).toHaveBeenCalledWith({
+      type: OFFSCREEN_MESSAGE_TYPE,
+      operation: 'status',
+      status: { model: '下载中' },
+    })
+  })
+
+  it('relays offscreen status notifications to content Ports through the broker handle', () => {
+    const broadcastContentStatus = vi.fn()
+    mocks.registerBroker.mockImplementation(() => ({ dispose: vi.fn(), broadcastContentStatus }))
+    registerChromiumBackground()
+
+    const relay = mocks.addRuntimeMessageListener.mock.calls.at(-1)![0] as RuntimeMessageListener
+    expect(
+      relay(
+        { type: OFFSCREEN_MESSAGE_TYPE, operation: 'status', status: { model: '下载中' } },
+        { id: 'extension-id' },
+        vi.fn(),
+      ),
+    ).toBe(false)
+    expect(broadcastContentStatus).toHaveBeenCalledWith({ model: '下载中' })
+
+    // Foreign senders, tab senders, and non-status shapes never broadcast.
+    relay(
+      { type: OFFSCREEN_MESSAGE_TYPE, operation: 'status', status: { model: 'x' } },
+      { id: 'other-extension' },
+      vi.fn(),
+    )
+    relay(
+      { type: OFFSCREEN_MESSAGE_TYPE, operation: 'status', status: { model: 'x' } },
+      { id: 'extension-id', tab: { url: 'https://hentaiverse.org/' } },
+      vi.fn(),
+    )
+    relay(
+      { type: OFFSCREEN_MESSAGE_TYPE, operation: 'cancel', requestId: 'sw-1' },
+      { id: 'extension-id' },
+      vi.fn(),
+    )
+    expect(broadcastContentStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('wires the Firefox Host status emitter to the broker broadcast', () => {
+    const broadcastContentStatus = vi.fn()
+    mocks.registerBroker.mockImplementation(() => ({ dispose: vi.fn(), broadcastContentStatus }))
+    let emit: ((status: { model?: string; session?: string }) => void) | undefined
+    const host = { handle: vi.fn(), destroy: vi.fn() }
+
+    registerFirefoxBackground((emitStatus) => {
+      emit = emitStatus
+      return host as never
+    })
+
+    emit?.({ session: '初始化中' })
+    expect(broadcastContentStatus).toHaveBeenCalledWith({ session: '初始化中' })
+  })
 })

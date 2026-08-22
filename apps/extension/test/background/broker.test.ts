@@ -23,6 +23,7 @@ import {
   MAX_GLOBAL_DETECT_REQUESTS,
   MAX_GLOBAL_VERIFY_KEY_REQUESTS,
   MAX_PORT_DETECT_REQUESTS,
+  MAX_PORT_PREPARE_REQUESTS,
   MAX_PORT_VERIFY_KEY_REQUESTS,
   isTrustedPort,
   registerBroker,
@@ -83,6 +84,23 @@ function verifyKeyRequest(index: number): Record<string, unknown> {
     type: 'verify-key',
     requestId: `verify-${index}`,
     candidateKey: index.toString(16).padStart(64, '0'),
+  }
+}
+
+function prepareRequest(index: number): Record<string, unknown> {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: 'prepare',
+    requestId: `prepare-${index}`,
+  }
+}
+
+function cancelMessage(cancelRequestId: string, index: number): Record<string, unknown> {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: 'cancel',
+    requestId: `cancel-${index}`,
+    cancelRequestId,
   }
 }
 
@@ -228,6 +246,101 @@ describe('broker queue and privilege boundaries', () => {
     for (const [requestId, entry] of pending) {
       entry.resolve({ protocol: PROTOCOL_VERSION, type: 'result', requestId, ok: true })
     }
+  })
+
+  it('limits concurrent prepares per content Port and releases capacity after completion', async () => {
+    const pending = new Map<string, (response: HostResponse) => void>()
+    const invokeHost = vi.fn(
+      (request: { requestId: string }) =>
+        new Promise<HostResponse>((resolve) => {
+          pending.set(request.requestId, resolve)
+        }),
+    )
+    registerBroker(invokeHost)
+    const client = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(client)
+
+    for (let index = 0; index < MAX_PORT_PREPARE_REQUESTS + 1; index += 1) {
+      client.emitMessage(prepareRequest(index))
+    }
+
+    expect(invokeHost).toHaveBeenCalledTimes(MAX_PORT_PREPARE_REQUESTS)
+    expect(client.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: `prepare-${MAX_PORT_PREPARE_REQUESTS}`,
+        ok: false,
+        error: expect.stringContaining('繁忙'),
+      }),
+    )
+
+    pending.get('prepare-0')?.({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'prepare-0', ok: true })
+    await vi.waitFor(() =>
+      expect(client.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'prepare-0', ok: true })),
+    )
+    client.emitMessage(prepareRequest(10))
+    expect(invokeHost).toHaveBeenCalledTimes(MAX_PORT_PREPARE_REQUESTS + 1)
+
+    for (const [requestId, resolve] of pending) {
+      resolve({ protocol: PROTOCOL_VERSION, type: 'result', requestId, ok: true })
+    }
+  })
+
+  it('aborts and acknowledges a request-scoped cancel, then frees its capacity', async () => {
+    const pending = new Map<string, Readonly<{ reject: (error: Error) => void; signal: AbortSignal }>>()
+    const invokeHost = vi.fn(
+      (request: { requestId: string }, signal: AbortSignal) =>
+        new Promise<HostResponse>((_, reject) => {
+          pending.set(request.requestId, { reject, signal })
+          signal.addEventListener('abort', () => reject(new Error('推理客户端请求已取消')))
+        }),
+    )
+    registerBroker(invokeHost)
+    const client = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(client)
+
+    client.emitMessage(detectRequest(0))
+    expect(invokeHost).toHaveBeenCalledTimes(1)
+
+    client.emitMessage(cancelMessage('detect-0', 0))
+
+    expect(pending.get('detect-0')?.signal.aborted).toBe(true)
+    expect(client.disconnect).not.toHaveBeenCalled()
+    expect(client.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'cancel-0', ok: true }))
+    await vi.waitFor(() =>
+      expect(client.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'detect-0', ok: false })),
+    )
+
+    client.emitMessage(detectRequest(1))
+    expect(invokeHost).toHaveBeenCalledTimes(2)
+
+    // Cancelling an unknown or settled request stays a harmless no-op.
+    client.emitMessage(cancelMessage('missing-request', 1))
+    expect(client.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'cancel-1', ok: true }))
+    expect(client.disconnect).not.toHaveBeenCalled()
+
+    for (const entry of pending.values()) {
+      entry.reject(new Error('settled'))
+    }
+  })
+
+  it('rejects cancel messages on options Ports', () => {
+    const invokeHost = vi.fn(async (): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'verify-1',
+      ok: true,
+    }))
+    registerBroker(invokeHost)
+    const client = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(client)
+
+    client.emitMessage(cancelMessage('verify-1', 0))
+
+    expect(client.disconnect).toHaveBeenCalledTimes(1)
+    expect(invokeHost).not.toHaveBeenCalled()
   })
 
   it('applies independent per-Port and global verify-key limits and releases capacity', async () => {
@@ -384,8 +497,47 @@ describe('broker queue and privilege boundaries', () => {
     expect(invokeHost).not.toHaveBeenCalled()
   })
 
-  it('retains a host resource for the lifetime of a content Port only', () => {
-    const release = vi.fn()
+  it('broadcasts Host stage status to connected content Ports only', () => {
+    const invokeHost = vi.fn(async (request: { requestId: string }): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    }))
+    const handle = registerBroker(invokeHost)
+    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    const contentTwo = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://alt.hentaiverse.org/' })
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(content)
+    platformMocks.connectListener?.(contentTwo)
+    platformMocks.connectListener?.(options)
+
+    handle.broadcastContentStatus({ model: '下载中', session: '初始化中' })
+
+    expect(content.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'status', status: { model: '下载中', session: '初始化中' } }),
+    )
+    expect(contentTwo.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'status', status: { model: '下载中', session: '初始化中' } }),
+    )
+    expect(options.postMessage).not.toHaveBeenCalled()
+
+    content.emitDisconnect()
+    handle.broadcastContentStatus({ session: '初始化中' })
+    expect(content.postMessage).toHaveBeenCalledTimes(1)
+    expect(contentTwo.postMessage).toHaveBeenCalledTimes(2)
+
+    // A Port that dies mid-broadcast is dropped without disturbing the others.
+    vi.mocked(contentTwo.postMessage).mockImplementation(() => {
+      throw new Error('Port closed')
+    })
+    expect(() => handle.broadcastContentStatus({ session: '错误' })).not.toThrow()
+  })
+
+  it('retains a host resource for the lifetime of a content Port only', () => {    const release = vi.fn()
     const onContentConnected = vi.fn(() => release)
     const invokeHost = vi.fn(async (): Promise<HostResponse> => ({
       protocol: PROTOCOL_VERSION,

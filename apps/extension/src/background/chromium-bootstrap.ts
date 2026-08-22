@@ -1,6 +1,18 @@
-import { registerOpenOptionsAction, sendRuntimeMessage } from '../platform/webextension'
-import { OFFSCREEN_MESSAGE_TYPE, isHostResponse, type HostRequest, type HostResponse } from '../protocol/messages'
-import { registerBroker, type BrokerPolicy } from './broker'
+import {
+  addRuntimeMessageListener,
+  registerOpenOptionsAction,
+  runtimeId,
+  sendRuntimeMessage,
+} from '../platform/webextension'
+import {
+  OFFSCREEN_MESSAGE_TYPE,
+  isHostResponse,
+  isOffscreenStatusMessage,
+  type HostRequest,
+  type HostResponse,
+  type HostStatusUpdate,
+} from '../protocol/messages'
+import { registerBroker, type BrokerHandle, type BrokerPolicy } from './broker'
 import { acquireOffscreenDocument, retainOffscreenDocument } from './chromium-offscreen'
 
 const serviceWorkerInstanceId = (() => {
@@ -128,12 +140,26 @@ export async function invokeOffscreenHost(request: HostRequest, signal: AbortSig
   }
 }
 
+/**
+ * Relays one-way Host stage updates from the Offscreen document to every
+ * connected content Port. The notification is fire-and-forget: losing one
+ * degrades panel detail only, never inference results.
+ */
+function registerOffscreenStatusRelay(broadcast: (status: HostStatusUpdate) => void): void {
+  addRuntimeMessageListener((message, sender) => {
+    if (sender.id !== runtimeId() || sender.tab || !isOffscreenStatusMessage(message)) {
+      return false
+    }
+    broadcast(message.status)
+    return false
+  })
+}
+
 export function registerChromiumBackground(policy: BrokerPolicy = { allowOptions: true }): void {
-  // Keep the offscreen document — and with it the warm ONNX session — alive for
-  // as long as a captcha page is connected, unless the caller overrides it.
-  registerBroker(invokeOffscreenHost, {
+  const handle: BrokerHandle | undefined = registerBroker(invokeOffscreenHost, {
     ...policy,
     onContentConnected: policy.onContentConnected ?? retainOffscreenDocument,
   })
+  registerOffscreenStatusRelay((status) => handle?.broadcastContentStatus(status))
   registerOpenOptionsAction()
 }

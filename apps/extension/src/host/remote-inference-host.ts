@@ -12,7 +12,7 @@ import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 import { runtimeGetUrl } from '../platform/webextension'
 import { IndexedDbStringStorage } from './indexeddb-string-storage'
 import { InferenceHost } from './inference-host'
-import { silentStatusSink } from './status-sink'
+import { createForwardingStatusSink, silentStatusSink, type HostStatusEmitter } from './status-sink'
 
 function assertVerificationActive(signal: AbortSignal): void {
   if (signal.aborted) {
@@ -48,16 +48,17 @@ export function createRemoteKeyVerifier(
   }
 }
 
-export function createRemoteInferenceHost(): InferenceHost {
+export function createRemoteInferenceHost(emitStatus?: HostStatusEmitter): InferenceHost {
+  const statusSink = emitStatus ? createForwardingStatusSink(emitStatus) : silentStatusSink
   const secretStorage = new IndexedDbStringStorage()
-  const modelCache = new ModelCache(silentStatusSink, (signal, options) =>
+  const modelCache = new ModelCache(statusSink, (signal, options) =>
     downloadModel(signal, options, {
       getAccessKey: () => getModelAccessKey(secretStorage),
     }),
   )
   const detector = new OnnxWorkerClient(
     modelCache,
-    silentStatusSink,
+    statusSink,
     () => new Worker(runtimeGetUrl('inference-worker.js'), { type: 'module' }),
   )
   return new InferenceHost({

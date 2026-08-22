@@ -3,12 +3,13 @@ import { OnnxWorkerClient } from '@hv-pony-solver/browser-core/inference/onnx-wo
 import { runtimeGetUrl } from '../platform/webextension'
 import { InferenceHost } from './inference-host'
 import { PackagedModelRepository } from './packaged-model-repository'
-import { silentStatusSink } from './status-sink'
+import { createForwardingStatusSink, silentStatusSink, type HostStatusEmitter } from './status-sink'
 
-export function createPackagedInferenceHost(): InferenceHost {
+export function createPackagedInferenceHost(emitStatus?: HostStatusEmitter): InferenceHost {
+  const statusSink = emitStatus ? createForwardingStatusSink(emitStatus) : silentStatusSink
   const detector = new OnnxWorkerClient(
     new PackagedModelRepository(),
-    silentStatusSink,
+    statusSink,
     () => new Worker(runtimeGetUrl('inference-worker.js'), { type: 'module' }),
   )
   return new InferenceHost({ detector })

@@ -129,6 +129,30 @@ describe('Chromium offscreen lifecycle', () => {
     await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
   })
 
+  it('closes a stranded offscreen document through startup idle reconciliation', async () => {
+    mocks.getContexts.mockResolvedValue([{}])
+    const { OFFSCREEN_IDLE_TIMEOUT_MS, scheduleOffscreenIdleReconciliation } = await lifecycle()
+
+    scheduleOffscreenIdleReconciliation()
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
+
+    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
+  })
+
+  it('lets startup idle reconciliation yield to leases taken after the restart', async () => {
+    mocks.getContexts.mockResolvedValue([{}])
+    const { OFFSCREEN_IDLE_TIMEOUT_MS, retainOffscreenDocument, scheduleOffscreenIdleReconciliation } = await lifecycle()
+
+    scheduleOffscreenIdleReconciliation()
+    const release = retainOffscreenDocument()
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
+    expect(mocks.closeDocument).not.toHaveBeenCalled()
+
+    release()
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
+    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
+  })
+
   it('waits for an in-progress idle close and recreates before admitting a racing request', async () => {
     let resolveClose: (() => void) | undefined
     mocks.getContexts.mockResolvedValueOnce([]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([])

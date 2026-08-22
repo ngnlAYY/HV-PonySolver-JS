@@ -1,8 +1,15 @@
 import type { InferenceHost } from '../host/inference-host'
-import { addRuntimeMessageListener, runtimeId } from '../platform/webextension'
-import { OFFSCREEN_MESSAGE_TYPE, errorResponse, isOffscreenMessage, type HostResponse } from '../protocol/messages'
+import type { HostStatusEmitter } from '../host/status-sink'
+import { addRuntimeMessageListener, runtimeId, sendRuntimeMessage } from '../platform/webextension'
+import {
+  OFFSCREEN_MESSAGE_TYPE,
+  errorResponse,
+  isOffscreenMessage,
+  offscreenStatusMessage,
+  type HostResponse,
+} from '../protocol/messages'
 
-export type OffscreenInferenceHostFactory = () => InferenceHost
+export type OffscreenInferenceHostFactory = (emitStatus: HostStatusEmitter) => InferenceHost
 
 const CANCEL_HISTORY_LIMIT = 256
 
@@ -12,7 +19,21 @@ type ActiveOffscreenRequest = Readonly<{
 }>
 
 export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory): void {
-  const host = hostFactory()
+  // Stage updates travel to the service worker, which relays them to content
+  // Ports. Delivery is best-effort and must never disturb inference: wrap the
+  // send so both sync throws and rejected promises are swallowed.
+  const emitStatus: HostStatusEmitter = (status) => {
+    try {
+      void Promise.resolve(sendRuntimeMessage(offscreenStatusMessage(status))).catch(() => undefined)
+    } catch {
+      // See above.
+    }
+  }
+  let host = hostFactory(emitStatus)
+  // A pagehide does not always mean this document is about to go away. The
+  // next accepted request proves the document is still serving, so the Host is
+  // rebuilt then instead of failing every future request terminally.
+  let hostDestroyed = false
   const activeRequests = new Map<string, ActiveOffscreenRequest>()
   const cancelledRequestIds = new Set<string>()
   const rememberCancellation = (requestId: string): void => {
@@ -26,6 +47,21 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
       cancelledRequestIds.delete(oldestRequestId)
     }
   }
+
+  const installPageHideTeardown = (): void => {
+    globalThis.addEventListener(
+      'pagehide',
+      () => {
+        for (const entry of activeRequests.values()) {
+          entry.controller.abort()
+        }
+        host.destroy()
+        hostDestroyed = true
+      },
+      { once: true },
+    )
+  }
+  installPageHideTeardown()
 
   addRuntimeMessageListener((message, sender, sendResponse) => {
     if (sender.id !== runtimeId() || sender.tab || !isOffscreenMessage(message)) {
@@ -48,6 +84,12 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
     if (activeRequests.has(message.requestId)) {
       sendResponse(errorResponse(message.request.requestId, 'Offscreen 推理请求 ID 重复'))
       return false
+    }
+
+    if (hostDestroyed) {
+      host = hostFactory(emitStatus)
+      hostDestroyed = false
+      installPageHideTeardown()
     }
 
     const entry: ActiveOffscreenRequest = {
@@ -73,14 +115,4 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
       })
     return true
   })
-  globalThis.addEventListener(
-    'pagehide',
-    () => {
-      for (const entry of activeRequests.values()) {
-        entry.controller.abort()
-      }
-      host.destroy()
-    },
-    { once: true },
-  )
 }

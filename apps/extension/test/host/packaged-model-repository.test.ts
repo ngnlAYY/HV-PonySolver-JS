@@ -43,6 +43,16 @@ describe('PackagedModelRepository', () => {
     expect(loadModel).toHaveBeenCalledTimes(1)
   })
 
+  it('passes the caller abort signal through to the local loader', async () => {
+    const model = Uint8Array.from([1, 2, 3]).buffer
+    const loadModel = vi.fn(async () => model)
+    const repository = new PackagedModelRepository(loadModel)
+    const controller = new AbortController()
+
+    await expect(repository.getCached(controller.signal)).resolves.toBe(model)
+    expect(loadModel).toHaveBeenCalledWith(controller.signal)
+  })
+
   it('transfers the local model once and never calls download or cache write', async () => {
     SuccessfulInitWorker.messages = []
     SuccessfulInitWorker.transfers = []

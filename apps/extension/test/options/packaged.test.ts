@@ -78,6 +78,8 @@ describe('packaged options entry', () => {
     const hint = optionsElement<HTMLParagraphElement>('packaged-model-hint')
     expect(hint.hidden).toBe(false)
     expect(hint.textContent).toBe('当前版本已内置模型，无需配置模型 Key。')
+    // The packaged edition never has a Key operation to cancel.
+    expect(optionsElement<HTMLButtonElement>('cancel-key-op').hidden).toBe(true)
     expect(platformMocks.runtimeConnect).not.toHaveBeenCalled()
     expect(forbiddenModuleMocks.protocolModuleLoaded).not.toHaveBeenCalled()
     expect(forbiddenModuleMocks.indexedDbModuleLoaded).not.toHaveBeenCalled()

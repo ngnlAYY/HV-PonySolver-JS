@@ -25,7 +25,7 @@ The direct CLI form is `node scripts/build-extension.mjs --model-mode remote|pac
 
 ## Runtime architecture
 
-The page-facing content script is identical in both modes. It owns bounded DOM observation, same-origin image loading, status/history rendering, answer clicks and the native submit-button click.
+The page-facing content script is identical in both modes. It owns bounded DOM observation, same-origin image loading, status/history rendering, answer clicks and the native submit-button click. Once answer history exists, it also prefetches the inference session at page load, so the first captcha of a browsing session does not pay the cold-start cost; fresh installs stay lazy and never spend a monthly download slot before their first captcha.
 
 ```text
 Hentaiverse content script
@@ -48,7 +48,7 @@ The Base64 representation is retained only for captcha images crossing WebExtens
 
 Model bytes do not use Base64 or chunks. The privileged Host verifies one binary model and `OnnxWorkerClient` transfers its `ArrayBuffer` once in the Worker `init` message. The Worker creates a WASM Execution Provider session and serializes inference.
 
-The broker validates extension ID, Hentaiverse/options origins, exact protocol shape, and request IDs. A content Port may retain at most two detect requests and the broker accepts at most six globally. Chromium's service worker stays stateless and creates one Offscreen Host. Firefox owns the same mode-specific Host directly; its MV3 manifest deliberately omits the unsupported `background.persistent` field.
+The broker validates extension ID, Hentaiverse/options origins, exact protocol shape, and request IDs. A content Port may retain at most two detect and two concurrent prepare requests; the broker accepts at most six detect and four prepare requests globally. These global counters live in the background context, so an MV3 service-worker restart resets them — they bound load per background generation, not per browser session. A content client can also send a request-scoped `cancel`, which aborts exactly one queued or running request and frees its capacity without disturbing sibling requests on the same Port. The Host pushes one-way `status` notifications (model and session stages) through the broker to every connected content Port — relayed from the Offscreen document through the service worker on Chromium — while the content client keeps inference-row reporting with full round-trip timing. Chromium's service worker stays stateless and creates one Offscreen Host; every service-worker start schedules an idle reconciliation, so a restart that abandoned an in-flight retention lease cannot strand the Offscreen document and its warm session. Firefox owns the same mode-specific Host directly; its MV3 manifest deliberately omits the unsupported `background.persistent` field.
 
 ## Model and runtime ownership
 
@@ -72,7 +72,7 @@ Packaged mode constructs none of those remote capabilities. It fetches the exten
 | Model access Key          | secret IndexedDB | not read or changed   | No                          |
 | Ordinary settings/history | `storage.local`  | `storage.local`       | Through an in-memory mirror |
 
-The remote options page enables the initially disabled Key fieldset after its handlers exist. It never echoes the stored Key. “Verify and save” downloads and validates a model before committing the Key and may consume a monthly allowance.
+The remote options page enables the initially disabled Key fieldset after its handlers exist. It never echoes the stored Key. “Verify and save” settles Key validity with an unmetered HEAD probe and persists the Key without spending a monthly download; the full download and integrity verification happen at first inference. A hanging Key operation can be cancelled from the page, which aborts the in-flight request on both sides.
 
 The packaged entry does not open Key storage or a Key Port. Its Key controls remain disabled and it shows exactly:
 
@@ -147,5 +147,3 @@ The ordinary production job is deliberately named **load-only**. It never reads 
 GitHub-hosted runners currently provide no supported Firefox Android WebExtension automation, so CI does not claim that coverage. An independent Android harness must install the canonical Firefox ZIP in Firefox Android major 142, disable random fallback, execute at least one successful inference, and upload an artifact named `hv-pony-solver-firefox-android-142-evidence` containing `firefox-android-142-evidence.json`. The record uses `kind: "firefox-android-142-packaged-e2e"`, identifies the device and Android version, records browser version 142, canonical model identity, exact Firefox archive name/length/SHA-256, and successful inference observation(s).
 
 For publication, dispatch `Verify Monorepo` with `publish_extension_artifact=true` and set `firefox_android_e2e_run_id` to the completed external run. The release gate downloads only a successful run's named evidence artifact and compares all archive identity fields with the freshly built Firefox release ZIP. Missing evidence, a newer desktop/Android version, random fallback, failed/non-success results, or any archive mismatch blocks publication. Desktop Chromium/Firefox evidence, exact-minimum desktop jobs, authenticated remote inference, and Android evidence are independent mandatory gates.
-
-This architecture does not prove the separately investigated intermittent submit-time browser crash is fixed. Crash causality still requires reproduction and browser crash diagnostics.

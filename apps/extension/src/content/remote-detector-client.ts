@@ -9,20 +9,23 @@ import { runtimeConnect, type ExtensionPort } from '../platform/webextension'
 import {
   CONTENT_PORT_NAME,
   PROTOCOL_VERSION,
+  cancelRequestFor,
   encodeImage,
   isHostResponse,
+  isPortStatusMessage,
   type HostRequest,
   type HostResponse,
   type HostSuccessResponse,
 } from '../protocol/messages'
 
-type PendingRequest = Readonly<{
+type PendingRequest = {
   resolve(response: HostResponse): void
   reject(error: Error): void
   timeoutId: ReturnType<typeof setTimeout>
   signal: AbortSignal | undefined
   abort: (() => void) | undefined
-}>
+  posted: boolean
+}
 
 export class RemoteDetectorClient implements DetectorService {
   private port: ExtensionPort | null = null
@@ -120,20 +123,20 @@ export class RemoteDetectorClient implements DetectorService {
       }
       const timeoutId = setTimeout(() => {
         if (this.pending.has(request.requestId)) {
-          this.disconnectPort(new Error('扩展推理请求超时'))
+          this.abandonRequest(request.requestId, new Error('扩展推理请求超时'))
         }
       }, timeoutMs)
       const abort = signal
         ? (): void => {
             if (this.pending.has(request.requestId)) {
-              this.disconnectPort(new Error('扩展推理请求已取消'))
+              this.abandonRequest(request.requestId, new Error('扩展推理请求已取消'))
             }
           }
         : undefined
       if (signal && abort) {
         signal.addEventListener('abort', abort, { once: true })
       }
-      this.pending.set(request.requestId, { resolve, reject, timeoutId, signal, abort })
+      this.pending.set(request.requestId, { resolve, reject, timeoutId, signal, abort, posted: false })
       // AbortSignal does not replay an abort that races with listener installation.
       // Recheck after publishing the pending entry so the abort handler can own cleanup.
       if (signal?.aborted) {
@@ -142,6 +145,10 @@ export class RemoteDetectorClient implements DetectorService {
       }
       try {
         port.postMessage(request)
+        const pending = this.pending.get(request.requestId)
+        if (pending) {
+          pending.posted = true
+        }
       } catch (error) {
         this.disconnectPort(error instanceof Error ? error : new Error(String(error)))
       }
@@ -155,6 +162,12 @@ export class RemoteDetectorClient implements DetectorService {
 
   private handleMessage(port: ExtensionPort, message: unknown): void {
     if (port !== this.port) {
+      return
+    }
+    if (isPortStatusMessage(message)) {
+      // One-way Host stage update (model download, session build); it carries
+      // no requestId and never settles a pending request.
+      this.statusSink.setStatus(message.status)
       return
     }
     if (!isHostResponse(message)) {
@@ -197,6 +210,35 @@ export class RemoteDetectorClient implements DetectorService {
       pending.signal?.removeEventListener('abort', pending.abort)
     }
     return pending
+  }
+
+  /**
+   * Settles one request locally and asks the broker to abort its queued or
+   * running work. The Port survives so sibling requests keep their channel —
+   * a single slow answer no longer drags the whole connection down.
+   */
+  private abandonRequest(requestId: string, error: Error): void {
+    const pending = this.takePending(requestId)
+    if (!pending) {
+      return
+    }
+    if (pending.posted) {
+      this.sendCancel(requestId)
+    }
+    pending.reject(error)
+  }
+
+  private sendCancel(requestId: string): void {
+    const port = this.port
+    if (!port) {
+      return
+    }
+    try {
+      port.postMessage(cancelRequestFor(requestId, this.nextRequestId()))
+    } catch {
+      // A Port that cannot carry the cancel cannot carry later responses either.
+      this.disconnectPort(new Error('扩展推理连接已关闭'))
+    }
   }
 
   private disconnectPort(error: Error): void {

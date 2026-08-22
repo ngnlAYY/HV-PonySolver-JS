@@ -45,6 +45,33 @@ describe('loadPackagedAsset', () => {
     })
   })
 
+  it('hands the caller signal to the fetch and aborts after resolution', async () => {
+    const controller = new AbortController()
+    const fetchImpl = vi.fn(async () => new Response(exactBytes, {
+      status: 200,
+      headers: { 'content-length': String(exactBytes.byteLength) },
+    })) as unknown as typeof fetch
+
+    controller.abort(new Error('推理请求已取消'))
+    await expect(
+      loadPackagedAsset(
+        'chrome-extension://extension-id/model/yolo26n-640.ort',
+        exactIntegrity,
+        '扩展内置模型',
+        fetchImpl,
+        controller.signal,
+      ),
+    ).rejects.toThrow('扩展内置模型 加载已取消')
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'chrome-extension://extension-id/model/yolo26n-640.ort',
+      {
+        cache: 'force-cache',
+        redirect: 'error',
+        signal: controller.signal,
+      },
+    )
+  })
+
   it('cancels a non-success response without replacing the HTTP error', async () => {
     const body = { cancel: vi.fn(async () => Promise.reject(new Error('cancel failed'))) }
     const fetchImpl = vi.fn(async () => responseWithBody(body as unknown as ReadableStream<Uint8Array>, { status: 404 })) as unknown as typeof fetch

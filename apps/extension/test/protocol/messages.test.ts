@@ -3,16 +3,98 @@ import { describe, expect, it } from 'vitest'
 import {
   MAX_IMAGE_BYTE_LENGTH,
   PROTOCOL_VERSION,
+  cancelRequestFor,
   decodeImage,
   encodeImage,
+  isCancelRequest,
   isHostRequest,
   isHostResponse,
   isOffscreenCancelRequest,
   isOffscreenRequest,
+  isOffscreenStatusMessage,
+  isPortStatusMessage,
+  offscreenStatusMessage,
+  portStatusMessage,
   successResponse,
 } from '../../src/protocol/messages'
 
 describe('extension protocol', () => {
+  it('validates request-scoped cancel messages', () => {
+    const cancel = cancelRequestFor('detect-1', 'cancel-1')
+    expect(cancel).toEqual({
+      protocol: PROTOCOL_VERSION,
+      type: 'cancel',
+      requestId: 'cancel-1',
+      cancelRequestId: 'detect-1',
+    })
+    expect(isCancelRequest(JSON.parse(JSON.stringify(cancel)))).toBe(true)
+    // A cancel is a control message, never a Host request of its own.
+    expect(isHostRequest(JSON.parse(JSON.stringify(cancel)))).toBe(false)
+
+    expect(isCancelRequest({ protocol: PROTOCOL_VERSION, type: 'cancel', requestId: 'cancel-2' })).toBe(false)
+    expect(
+      isCancelRequest({
+        protocol: PROTOCOL_VERSION,
+        type: 'cancel',
+        requestId: 'cancel-3',
+        cancelRequestId: 'detect-3',
+        extra: 'forbidden',
+      }),
+    ).toBe(false)
+    expect(
+      isCancelRequest({
+        protocol: PROTOCOL_VERSION,
+        type: 'cancel',
+        requestId: 'cancel-4',
+        cancelRequestId: 'not a valid id!',
+      }),
+    ).toBe(false)
+    expect(isCancelRequest({ protocol: 'unknown', type: 'cancel', requestId: 'cancel-5', cancelRequestId: 'x' })).toBe(
+      false,
+    )
+  })
+
+  it('validates one-way Host status notifications on both hops', () => {
+    const portMessage = portStatusMessage({ model: '下载中', session: '初始化中' })
+    expect(portMessage).toEqual({
+      protocol: PROTOCOL_VERSION,
+      type: 'status',
+      status: { model: '下载中', session: '初始化中' },
+    })
+    expect(isPortStatusMessage(JSON.parse(JSON.stringify(portMessage)))).toBe(true)
+    // A status notification is not a Host response and must not settle one.
+    expect(isHostResponse(JSON.parse(JSON.stringify(portMessage)))).toBe(false)
+
+    const offscreenMessage = offscreenStatusMessage({ session: '初始化中' })
+    expect(isOffscreenStatusMessage(JSON.parse(JSON.stringify(offscreenMessage)))).toBe(true)
+
+    expect(isPortStatusMessage({ protocol: PROTOCOL_VERSION, type: 'status', status: {} })).toBe(false)
+    expect(isPortStatusMessage({ protocol: PROTOCOL_VERSION, type: 'status', status: { unknown: 'x' } })).toBe(false)
+    expect(isPortStatusMessage({ protocol: PROTOCOL_VERSION, type: 'status', status: { model: '' } })).toBe(false)
+    expect(
+      isPortStatusMessage({
+        protocol: PROTOCOL_VERSION,
+        type: 'status',
+        status: { model: 'x'.repeat(201) },
+      }),
+    ).toBe(false)
+    expect(
+      isOffscreenStatusMessage({
+        type: 'hv-pony-solver:offscreen-request',
+        operation: 'status',
+        status: { model: 'x' },
+        requestId: 'extra-key',
+      }),
+    ).toBe(false)
+    expect(
+      isOffscreenStatusMessage({
+        type: 'hv-pony-solver:offscreen-request',
+        operation: 'cancel',
+        requestId: 'sw-1',
+      }),
+    ).toBe(false)
+  })
+
   it('round-trips a bounded image through JSON-safe base64', async () => {
     const source = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' })
     const encoded = await encodeImage(source)
