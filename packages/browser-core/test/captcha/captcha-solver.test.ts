@@ -5,6 +5,7 @@ import type { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 import { CaptchaSolver } from '../../src/captcha/captcha-solver'
 import type { ImageLoader } from '../../src/captcha/captcha-types'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
+import { ModelAccessKeyRejectedError } from '../../src/model/model-download-error'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
 
 function appendCaptcha(): HTMLDivElement {
@@ -305,6 +306,20 @@ describe('CaptchaSolver', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('does not retry permanent model failures such as a rejected Key', async () => {
+    appendCaptcha()
+    const detector = createDetector(vi.fn(async () => Promise.reject(new ModelAccessKeyRejectedError())))
+    const { solver, panel, answerSubmitter } = createSolver({ detector })
+
+    const result = await solver.trigger()
+
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(detector.detect).toHaveBeenCalledTimes(1)
+    expectPanelError(panel, '推理失败: 模型 Key 无效或已失效，请在设置中重新验证 Key')
+    expect(panel.addError).toHaveBeenCalledTimes(1)
+    expect(answerSubmitter.submit).not.toHaveBeenCalled()
   })
   it('retries a transient image failure without a DOM mutation and records no error after recovery', async () => {
     vi.useFakeTimers()

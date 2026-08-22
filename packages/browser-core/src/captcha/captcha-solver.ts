@@ -1,5 +1,6 @@
 import { ANSWER_CODES } from '@hv-pony-solver/shared/answer'
 import type { DetectorService, YoloParseResult } from '../inference/inference-types'
+import { isPermanentModelError } from '../model/permanent-model-error'
 import type { StatusPanel } from '../status-panel/status-panel-types'
 import { sleep } from '../utils/delay'
 import { formatErrorMessage } from '../utils/errors'
@@ -21,6 +22,7 @@ async function retryTransient<T>(
   operation: () => Promise<T>,
   isCurrent: () => boolean,
   signal?: AbortSignal,
+  shouldRetry: (error: unknown) => boolean = () => true,
 ): Promise<RetryOutcome<T>> {
   for (let attempt = 0; attempt <= TRANSIENT_RETRY_DELAYS_MS.length; attempt += 1) {
     if (!isCurrent()) {
@@ -32,6 +34,9 @@ async function retryTransient<T>(
     } catch (error) {
       if (!isCurrent()) {
         return { state: 'cancelled' }
+      }
+      if (!shouldRetry(error)) {
+        return { state: 'failed', error }
       }
       const retryDelay = TRANSIENT_RETRY_DELAYS_MS[attempt]
       if (retryDelay === undefined) {
@@ -122,7 +127,14 @@ export class CaptchaSolver {
 
       this.panel.setStatus({ inference: `图片获取完成 ${elapsed()}ms` })
       this.panel.setStatus({ inference: '推理请求中' })
-      const detectionOutcome = await retryTransient(() => this.detector.detect(blob, signal), isCurrent, signal)
+      const detectionOutcome = await retryTransient(
+        () => this.detector.detect(blob, signal),
+        isCurrent,
+        signal,
+        // An invalid Key or failed integrity check cannot be fixed by an
+        // immediate retry; surface it instead of burning the attempts.
+        (error) => !isPermanentModelError(error),
+      )
       if (detectionOutcome.state === 'cancelled') {
         return result(false)
       }

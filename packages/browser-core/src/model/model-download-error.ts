@@ -1,6 +1,8 @@
 import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 
-export class ModelDownloadQuotaExceededError extends Error {
+import { PermanentModelError } from './permanent-model-error'
+
+export class ModelDownloadQuotaExceededError extends PermanentModelError {
   readonly retryAfterSeconds: number | null
 
   constructor(retryAfterSeconds: number | null) {
@@ -10,7 +12,7 @@ export class ModelDownloadQuotaExceededError extends Error {
   }
 }
 
-export class ModelAccessKeyRejectedError extends Error {
+export class ModelAccessKeyRejectedError extends PermanentModelError {
   constructor() {
     super('模型 Key 无效或已失效，请在设置中重新验证 Key')
     this.name = 'ModelAccessKeyRejectedError'

@@ -1,5 +1,6 @@
 import { captchaSelectors } from '../captcha/captcha-selectors'
 import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from '../captcha/captcha-target'
+import { isPermanentModelError } from '../model/permanent-model-error'
 import { sleep } from '../utils/delay'
 import { formatErrorMessage } from '../utils/errors'
 import { warn } from '../utils/logger'
@@ -145,6 +146,10 @@ export class App {
         return this.isTargetCurrent(target, signal)
       } catch (error) {
         if (!this.isTargetCurrent(target, signal)) {
+          return false
+        }
+        if (isPermanentModelError(error)) {
+          warn('启动 ONNX 失败:', formatErrorMessage(error))
           return false
         }
         const retryDelay = PREPARE_RETRY_DELAYS_MS[attempt]

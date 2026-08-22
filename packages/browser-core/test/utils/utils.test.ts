@@ -11,6 +11,7 @@ import {
   yoloOutputConfig,
 } from '../../src/inference/inference-config'
 import { modelConfig } from '../../src/model/model-config'
+import { ModelAccessKeyRejectedError } from '../../src/model/model-download-error'
 import { randDelay, shuffle, sleep } from '../../src/utils/delay'
 import { formatErrorMessage } from '../../src/utils/errors'
 import { escapeHtml } from '../../src/utils/html'
@@ -70,6 +71,16 @@ describe('browser-core utility functions', () => {
     expect(formatErrorMessage(undefined)).toBe('未知错误')
     expect(formatErrorMessage(new TypeError('bad'))).toBe('TypeError: bad')
     expect(formatErrorMessage({ name: 'CustomError' })).toBe('CustomError')
+  })
+
+  it('renders a carried userMessage verbatim instead of the class-name prefix', () => {
+    expect(formatErrorMessage({ name: 'NoisyError', message: 'raw text', userMessage: '已经过翻译的文案' })).toBe(
+      '已经过翻译的文案',
+    )
+    expect(formatErrorMessage({ name: 'NoisyError', message: 'raw text', userMessage: '' })).toBe(
+      'NoisyError: raw text',
+    )
+    expect(formatErrorMessage(new ModelAccessKeyRejectedError())).toBe('模型 Key 无效或已失效，请在设置中重新验证 Key')
   })
 
   it('returns random delays inside the inclusive range', () => {
