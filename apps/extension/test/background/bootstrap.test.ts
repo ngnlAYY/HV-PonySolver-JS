@@ -164,6 +164,7 @@ describe('target-specific extension bootstraps', () => {
         if (!signal.aborted) {
           commits.push('verify')
         }
+        return undefined
       }),
       clearKey: vi.fn(async () => {
         commits.push('clear')

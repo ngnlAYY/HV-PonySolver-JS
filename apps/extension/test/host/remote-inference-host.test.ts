@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ModelCache, OnnxWorkerClient } from '@hv-pony-solver/browser-core'
+import { ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared'
 
 import { IndexedDbStringStorage } from '../../src/host/indexeddb-string-storage'
 import {
@@ -11,17 +12,11 @@ import {
 } from '../../src/host/remote-inference-host'
 import { PROTOCOL_VERSION } from '../../src/protocol/messages'
 
-function dependencies(
-  onStage?: (stage: 'download' | 'prepare-verified' | 'storage') => void,
-): RemoteKeyVerifierDependencies {
-  const modelBuffer = new Uint8Array([1, 2, 3]).buffer
+function dependencies(onStage?: (stage: 'probe' | 'storage') => void): RemoteKeyVerifierDependencies {
   return {
-    download: vi.fn(async () => {
-      onStage?.('download')
-      return modelBuffer
-    }),
-    prepareFromVerifiedModel: vi.fn(async () => {
-      onStage?.('prepare-verified')
+    probe: vi.fn(async () => {
+      onStage?.('probe')
+      return { valid: true, quotaExceededRetryAfterSeconds: null }
     }),
     set: vi.fn(async () => {
       onStage?.('storage')
@@ -30,26 +25,42 @@ function dependencies(
 }
 
 describe('createRemoteKeyVerifier', () => {
-  it('passes the once-verified download directly to verified-buffer preparation before persistence', async () => {
+  it('persists the Key once a quota-free probe accepts it', async () => {
     const order: string[] = []
     const deps = dependencies((stage) => order.push(stage))
     const verifier = createRemoteKeyVerifier(deps)
     const controller = new AbortController()
     const candidateKey = 'a'.repeat(64)
 
-    await verifier(`  ${candidateKey}  `, controller.signal)
+    await expect(verifier(`  ${candidateKey}  `, controller.signal)).resolves.toBeUndefined()
 
-    expect(order).toEqual(['download', 'prepare-verified', 'storage'])
-    expect(deps.download).toHaveBeenCalledWith(controller.signal, true, candidateKey)
-    const verifiedBuffer = await vi.mocked(deps.download).mock.results[0]!.value
-    expect(deps.prepareFromVerifiedModel).toHaveBeenCalledWith(verifiedBuffer, controller.signal)
+    expect(order).toEqual(['probe', 'storage'])
+    expect(deps.probe).toHaveBeenCalledWith(controller.signal, candidateKey)
     expect(deps.set).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY, candidateKey, controller.signal)
   })
 
+  it('rejects a Key the probe reports as invalid without persisting it', async () => {
+    const deps = dependencies()
+    vi.mocked(deps.probe).mockResolvedValueOnce({ valid: false, quotaExceededRetryAfterSeconds: null })
+    const verifier = createRemoteKeyVerifier(deps)
+
+    await expect(verifier('d'.repeat(64), new AbortController().signal)).rejects.toThrow('模型 Key 无效')
+    expect(deps.set).not.toHaveBeenCalled()
+  })
+
+  it('saves a valid Key and reports the notice when its monthly quota is already spent', async () => {
+    const deps = dependencies()
+    vi.mocked(deps.probe).mockResolvedValueOnce({ valid: true, quotaExceededRetryAfterSeconds: 852_747 })
+    const verifier = createRemoteKeyVerifier(deps)
+    const candidateKey = 'e'.repeat(64)
+
+    await expect(verifier(candidateKey, new AbortController().signal)).resolves.toContain('额度已用完')
+    expect(deps.set).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY, candidateKey, expect.any(AbortSignal))
+  })
+
   it.each([
-    ['download', []],
-    ['prepare-verified', ['download']],
-    ['storage', ['download', 'prepare-verified']],
+    ['probe', []],
+    ['storage', ['probe']],
   ] as const)('stops after cancellation at the %s boundary', async (abortStage, completedBefore) => {
     const controller = new AbortController()
     const completed: string[] = []
@@ -68,25 +79,10 @@ describe('createRemoteKeyVerifier', () => {
       expect(deps.set).not.toHaveBeenCalled()
     }
   })
-
-  it('persists a valid Key when verified-buffer preparation absorbs a cache write failure', async () => {
-    const deps = dependencies()
-    vi.mocked(deps.prepareFromVerifiedModel).mockImplementationOnce(async () => {
-      try {
-        await Promise.reject(new Error('IndexedDB cache failure'))
-      } catch {
-        // The verified-buffer API treats cache persistence as best-effort.
-      }
-    })
-    const verifier = createRemoteKeyVerifier(deps)
-
-    await expect(verifier('c'.repeat(64), new AbortController().signal)).resolves.toBeUndefined()
-    expect(deps.set).toHaveBeenCalledTimes(1)
-  })
 })
 
 describe('createRemoteInferenceHost', () => {
-  it('wires verified download, worker, Key storage, and terminal cleanup through the production factory', async () => {
+  it('wires quota-free Key probing, download, worker, Key storage, and terminal cleanup through the production factory', async () => {
     const modelBuffer = new Uint8Array([1, 2, 3]).buffer
     const storageGet = vi.spyOn(IndexedDbStringStorage.prototype, 'get').mockResolvedValue('stored-key')
     const storageSet = vi.spyOn(IndexedDbStringStorage.prototype, 'set').mockResolvedValue()
@@ -104,9 +100,17 @@ describe('createRemoteInferenceHost', () => {
       },
     })
     vi.stubGlobal('Worker', TestWorker)
+    const requestedMethods: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        requestedMethods.push(method)
+        if (method === 'HEAD') {
+          // The probe must present the candidate Key, never the stored one.
+          expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${'f'.repeat(64)}`)
+          return new Response(null, { headers: { 'content-length': String(ORT_MODEL_INTEGRITY.byteLength) } })
+        }
         expect(new Headers(init?.headers).get('authorization')).toBe('Bearer stored-key')
         return new Response(new Uint8Array(modelBuffer))
       }),
@@ -138,8 +142,7 @@ describe('createRemoteInferenceHost', () => {
       expect(detectorInternals.workerFactory()).toBeInstanceOf(TestWorker)
       expect(workerArguments).toEqual([['moz-extension://test/inference-worker.js', { type: 'module' }]])
 
-      const cacheDownload = vi.spyOn(modelCache, 'download').mockResolvedValue(modelBuffer)
-      const prepareVerified = vi.spyOn(detector, 'prepareFromVerifiedModel').mockResolvedValue()
+      const cacheDownload = vi.spyOn(modelCache, 'download')
       const cacheClose = vi.spyOn(modelCache, 'close').mockImplementation(() => undefined)
       const detectorDestroy = vi.spyOn(detector, 'destroy').mockImplementation(() => undefined)
 
@@ -150,9 +153,10 @@ describe('createRemoteInferenceHost', () => {
           requestId: 'factory-verify',
           candidateKey: `  ${'f'.repeat(64)}  `,
         }),
-      ).resolves.toMatchObject({ ok: true, requestId: 'factory-verify' })
-      expect(cacheDownload).toHaveBeenCalledWith(expect.any(AbortSignal), true, 'f'.repeat(64))
-      expect(prepareVerified).toHaveBeenCalledWith(modelBuffer, expect.any(AbortSignal))
+      ).resolves.toEqual({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'factory-verify', ok: true })
+      // Verification must settle on the HEAD probe alone, never on a metered GET.
+      expect(requestedMethods).toEqual(['GET', 'HEAD'])
+      expect(cacheDownload).not.toHaveBeenCalled()
       expect(storageSet).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY, 'f'.repeat(64), expect.any(AbortSignal))
 
       await expect(

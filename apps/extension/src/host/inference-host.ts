@@ -12,7 +12,7 @@ import {
 
 export type InferenceHostDependencies = Readonly<{
   detector: DetectorService
-  verifyKey?(candidateKey: string, signal: AbortSignal): Promise<void>
+  verifyKey?(candidateKey: string, signal: AbortSignal): Promise<string | undefined>
   clearKey?(signal: AbortSignal): Promise<void>
   close?(): void | Promise<void>
 }>
@@ -101,11 +101,12 @@ export class InferenceHost {
 
     const operation = this.keyOperationTail.then(async () => {
       this.assertKeyIntentActive(intent, callerSignal)
+      let notice: string | undefined
       if (request.type === 'verify-key') {
         if (!this.dependencies.verifyKey) {
           throw new Error('当前扩展版本不支持模型 Key')
         }
-        await this.dependencies.verifyKey(request.candidateKey.trim(), controller.signal)
+        notice = await this.dependencies.verifyKey(request.candidateKey.trim(), controller.signal)
       } else {
         if (!this.dependencies.clearKey) {
           throw new Error('当前扩展版本不支持清除模型 Key')
@@ -113,6 +114,7 @@ export class InferenceHost {
         await this.dependencies.clearKey(controller.signal)
       }
       this.assertKeyIntentActive(intent, callerSignal)
+      return notice
     })
     this.keyOperationTail = operation.then(
       () => undefined,
@@ -120,8 +122,8 @@ export class InferenceHost {
     )
 
     try {
-      await operation
-      return successResponse(request.requestId)
+      const notice = await operation
+      return successResponse(request.requestId, undefined, notice)
     } catch (error) {
       return errorResponse(request.requestId, formatErrorMessage(error))
     } finally {

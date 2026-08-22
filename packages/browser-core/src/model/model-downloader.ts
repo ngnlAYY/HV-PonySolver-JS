@@ -24,10 +24,14 @@ type DownloadDeadline = Readonly<{
   dispose(): void
 }>
 
-function createDownloadDeadline(callerSignal?: AbortSignal): DownloadDeadline {
+function createDownloadDeadline(
+  callerSignal?: AbortSignal,
+  label: string = '模型下载',
+  timeoutMs: number = inferenceTimeoutConfig.modelDownloadTimeoutMs,
+): DownloadDeadline {
   const controller = new AbortController()
   let reason: 'caller' | 'timeout' | null = null
-  const error = (): Error => (reason === 'timeout' ? new Error('模型下载超时') : new Error('模型下载已取消'))
+  const error = (): Error => new Error(reason === 'timeout' ? `${label}超时` : `${label}已取消`)
   const abortFromCaller = (): void => {
     if (reason !== null) {
       return
@@ -42,7 +46,7 @@ function createDownloadDeadline(callerSignal?: AbortSignal): DownloadDeadline {
     }
     reason = 'timeout'
     controller.abort(error())
-  }, inferenceTimeoutConfig.modelDownloadTimeoutMs)
+  }, timeoutMs)
   if (callerSignal?.aborted) {
     abortFromCaller()
   }
@@ -136,6 +140,21 @@ function createModelFetchInit(signal: AbortSignal, accessKey: string): RequestIn
     init.headers = { authorization: `Bearer ${accessKey}` }
   }
   return init
+}
+
+function createModelProbeInit(signal: AbortSignal, accessKey: string): RequestInit {
+  return { ...createModelFetchInit(signal, accessKey), method: 'HEAD' }
+}
+
+function parseProbeByteLength(contentLength: string | null): number {
+  if (contentLength === null || !contentLengthPattern.test(contentLength)) {
+    throw new Error('模型 Key 验证失败: 响应缺少有效的 Content-Length')
+  }
+  const byteLength = Number(contentLength)
+  if (!Number.isSafeInteger(byteLength)) {
+    throw new Error('模型 Key 验证失败: 响应缺少有效的 Content-Length')
+  }
+  return byteLength
 }
 
 const contentLengthPattern = /^[0-9]+$/
@@ -307,6 +326,62 @@ export async function downloadModel(
     }
     deadline.throwIfExpired()
     return buffer
+  } finally {
+    deadline.dispose()
+  }
+}
+
+export type ModelAccessKeyProbe = Readonly<{
+  /** True when the Worker served the real model rather than the decoy. */
+  valid: boolean
+  /** Set when the Key is valid but its monthly download quota is already spent. */
+  quotaExceededRetryAfterSeconds: number | null
+}>
+
+/**
+ * Checks whether an access Key unlocks the real model without spending a download.
+ *
+ * The Worker only meters GET requests, so a HEAD probe leaves the monthly quota
+ * untouched. A valid Key is served the real object and reports its full byte
+ * length; an invalid one silently receives the much smaller decoy.
+ */
+export async function probeModelAccessKey(
+  signal?: AbortSignal,
+  options: ModelIntegrityOptions = {},
+  environment: ModelDownloadEnvironment = {},
+): Promise<ModelAccessKeyProbe> {
+  const { integrity } = resolveIntegrityOptions(options)
+  const deadline = createDownloadDeadline(signal, '模型 Key 验证', inferenceTimeoutConfig.modelProbeTimeoutMs)
+  try {
+    deadline.throwIfExpired()
+    const accessKey = await deadline.run(() =>
+      getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
+    )
+    const response = await deadline.run(() =>
+      (environment.fetchImpl ?? fetch)(getModelUrl(), createModelProbeInit(deadline.signal, accessKey)),
+    )
+    await cancelResponseBody(response, deadline)
+    deadline.throwIfExpired()
+    // Defensive: the Worker only meters GET, so a HEAD probe is never rejected
+    // for quota today. Should that contract change, an exhausted quota still
+    // proves the Key itself is good.
+    if (response.status === 429) {
+      return {
+        valid: true,
+        quotaExceededRetryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after')),
+      }
+    }
+    if (response.status === 403) {
+      return { valid: false, quotaExceededRetryAfterSeconds: null }
+    }
+    if (!response.ok) {
+      throw new Error(`模型 Key 验证失败: HTTP ${response.status}`)
+    }
+    const declaredByteLength = parseProbeByteLength(response.headers.get('content-length'))
+    return {
+      valid: declaredByteLength === integrity.byteLength,
+      quotaExceededRetryAfterSeconds: null,
+    }
   } finally {
     deadline.dispose()
   }

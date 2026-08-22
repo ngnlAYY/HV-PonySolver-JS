@@ -21,6 +21,7 @@ export const inferenceTimeoutConfig = {
   workerAbortGraceTimeoutMs: 1000,
   workerPrepareTimeoutMs: 100000,
   modelDownloadTimeoutMs: 30000,
+  modelProbeTimeoutMs: 10000,
   modelCacheTimeoutMs: 5000,
 } as const
 

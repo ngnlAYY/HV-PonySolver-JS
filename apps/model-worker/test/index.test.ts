@@ -904,6 +904,48 @@ describe('model worker', () => {
     )
   })
 
+  it('keeps serving real-model metadata to HEAD after the quota is exhausted', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+
+    for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
+      await (await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).arrayBuffer()
+    }
+    expect((await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).status).toBe(429)
+
+    // HEAD is unmetered, so an exhausted Key still identifies itself as valid by
+    // reporting the real object's size. Clients rely on this to verify a Key
+    // without spending a download.
+    const headResponse = await fetchWorker(authorizedModelRequest(fixture, 'HEAD'), env)
+
+    expect(headResponse.status).toBe(200)
+    expect(headResponse.headers.get('content-length')).toBe(String(fixture.realBody.length))
+    expect(headResponse.headers.get('retry-after')).toBeNull()
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toHaveLength(
+      MODEL_MONTHLY_DOWNLOAD_LIMIT + 1,
+    )
+  })
+
+  it('distinguishes a valid Key from an invalid one by HEAD content-length alone', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+
+    const [valid, invalid] = await Promise.all([
+      fetchWorker(authorizedModelRequest(fixture, 'HEAD'), env),
+      fetchWorker(
+        assetRequest(fixture.publicModelPath, 'HEAD', { authorization: `Bearer ${fixture.mismatchedKey}` }),
+        env,
+      ),
+    ])
+
+    expect(valid.status).toBe(200)
+    expect(invalid.status).toBe(200)
+    expect(valid.headers.get('content-length')).toBe(String(fixture.realBody.length))
+    expect(invalid.headers.get('content-length')).toBe(String(fixture.decoyBody.length))
+    expect(valid.headers.get('content-length')).not.toBe(invalid.headers.get('content-length'))
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toEqual([])
+  })
+
   it('resets quota when the UTC calendar month changes', async () => {
     const fixture = createModelFixture()
     let now = new Date('2026-08-31T23:59:00.000Z')

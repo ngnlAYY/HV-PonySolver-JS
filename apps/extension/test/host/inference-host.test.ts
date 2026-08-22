@@ -63,6 +63,45 @@ describe('InferenceHost', () => {
     expect(deps.verifyKey).toHaveBeenCalledWith('a'.repeat(64), expect.any(AbortSignal))
   })
 
+  it('relays a verifier notice to the caller and omits it otherwise', async () => {
+    const deps = dependencies()
+    vi.mocked(deps.verifyKey!).mockResolvedValueOnce('模型 Key 有效并已安全保存；额度已用完')
+    const host = new InferenceHost(deps)
+
+    await expect(
+      host.handle({
+        protocol: PROTOCOL_VERSION,
+        type: 'verify-key',
+        requestId: 'verify-notice',
+        candidateKey: 'a'.repeat(64),
+      }),
+    ).resolves.toEqual({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'verify-notice',
+      ok: true,
+      notice: '模型 Key 有效并已安全保存；额度已用完',
+    })
+
+    await expect(
+      host.handle({
+        protocol: PROTOCOL_VERSION,
+        type: 'verify-key',
+        requestId: 'verify-plain',
+        candidateKey: 'a'.repeat(64),
+      }),
+    ).resolves.toEqual({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'verify-plain', ok: true })
+  })
+
+  it('never attaches a notice to clear-key', async () => {
+    const deps = dependencies()
+    const host = new InferenceHost(deps)
+
+    await expect(
+      host.handle({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-notice' }),
+    ).resolves.toEqual({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'clear-notice', ok: true })
+  })
+
   it('does not persist a Key when validation fails', async () => {
     const deps = dependencies()
     vi.mocked(deps.verifyKey!).mockRejectedValueOnce(new Error('HTTP 401'))
@@ -197,7 +236,7 @@ describe('InferenceHost', () => {
     let receivedSignal: AbortSignal | undefined
     vi.mocked(deps.verifyKey!).mockImplementationOnce(
       async (_candidateKey, signal) =>
-        new Promise<void>((_resolve, reject) => {
+        new Promise<string | undefined>((_resolve, reject) => {
           receivedSignal = signal
           signal.addEventListener('abort', () => reject(new Error('模型 Key 验证已取消')), { once: true })
         }),

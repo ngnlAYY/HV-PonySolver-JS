@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import type { ModelDownloadQuotaExceededError } from '../../src/model/model-download-error'
-import { downloadModel as downloadCoreModel, type ModelIntegrityOptions } from '../../src/model/model-downloader'
+import {
+  downloadModel as downloadCoreModel,
+  probeModelAccessKey,
+  type ModelAccessKeyProbe,
+  type ModelIntegrityOptions,
+} from '../../src/model/model-downloader'
 
 const getModelAccessKey = vi.fn(async () => '')
 
@@ -813,5 +818,131 @@ describe('downloadModel', () => {
         verifyIntegrity: false,
       }),
     ).rejects.toThrow('下载模型大小校验失败: 4 > 3')
+  })
+})
+
+describe('probeModelAccessKey', () => {
+  function probe(signal?: AbortSignal, options: ModelIntegrityOptions = {}): Promise<ModelAccessKeyProbe> {
+    return probeModelAccessKey(signal, { integrity: TEST_INTEGRITY, ...options }, { getAccessKey: getModelAccessKey })
+  }
+
+  function headResponse(status: number, headers: Record<string, string> = {}): Response {
+    return new Response(null, { status, headers })
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    getModelAccessKey.mockResolvedValue('')
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('probes with HEAD and the candidate Key so the monthly quota stays untouched', async () => {
+    const fetchMock = vi.fn(async () => headResponse(200, { 'content-length': '3' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(probe(undefined, { accessKeyOverride: '  candidate-token  ' })).resolves.toEqual({
+      valid: true,
+      quotaExceededRetryAfterSeconds: null,
+    })
+
+    const [url, init] = getFetchCall(fetchMock)
+    expect(url).toBe(MODEL_URL)
+    expect(init.method).toBe('HEAD')
+    expect(init.cache).toBe('no-store')
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer candidate-token')
+  })
+
+  it('treats a decoy-sized response as an invalid Key', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => headResponse(200, { 'content-length': '18' })),
+    )
+
+    await expect(probe()).resolves.toEqual({ valid: false, quotaExceededRetryAfterSeconds: null })
+  })
+
+  it('treats a forbidden response as an invalid Key', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => headResponse(403)),
+    )
+
+    await expect(probe()).resolves.toEqual({ valid: false, quotaExceededRetryAfterSeconds: null })
+  })
+
+  it('reports an exhausted quota as a valid Key and surfaces retry-after', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => headResponse(429, { 'retry-after': '852747' })),
+    )
+
+    await expect(probe()).resolves.toEqual({ valid: true, quotaExceededRetryAfterSeconds: 852_747 })
+  })
+
+  it('reports an exhausted quota without a parsable retry-after as a valid Key', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => headResponse(429, { 'retry-after': 'Wed, 01 Sep 2026 00:00:00 GMT' })),
+    )
+
+    await expect(probe()).resolves.toEqual({ valid: true, quotaExceededRetryAfterSeconds: null })
+  })
+
+  it('rejects other transport failures instead of reporting a verdict', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => headResponse(500)),
+    )
+
+    await expect(probe()).rejects.toThrow('模型 Key 验证失败: HTTP 500')
+  })
+
+  it.each([undefined, 'not-a-number'])(
+    'rejects a success response with an unusable Content-Length (%s)',
+    async (value) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => headResponse(200, value === undefined ? {} : { 'content-length': value })),
+      )
+
+      await expect(probe()).rejects.toThrow('模型 Key 验证失败: 响应缺少有效的 Content-Length')
+    },
+  )
+
+  it('falls back to the stored Key when no candidate is supplied', async () => {
+    getModelAccessKey.mockResolvedValue('stored-token')
+    const fetchMock = vi.fn(async () => headResponse(200, { 'content-length': '3' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(probe()).resolves.toMatchObject({ valid: true })
+    expect(new Headers(getFetchCall(fetchMock)[1].headers).get('authorization')).toBe('Bearer stored-token')
+  })
+
+  it('rejects once the caller aborts the probe', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => headResponse(200, { 'content-length': '3' })),
+    )
+
+    await expect(probe(controller.signal)).rejects.toThrow('模型 Key 验证已取消')
+  })
+
+  it('rejects once the probe deadline expires', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    )
+
+    const pending = probe()
+    const assertion = expect(pending).rejects.toThrow('模型 Key 验证超时')
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelProbeTimeoutMs)
+    await assertion
   })
 })

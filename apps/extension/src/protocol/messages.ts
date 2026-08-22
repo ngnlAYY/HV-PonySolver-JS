@@ -30,6 +30,7 @@ export type HostSuccessResponse = RequestBase &
     type: 'result'
     ok: true
     result?: YoloParseResult
+    notice?: string
   }>
 export type HostErrorResponse = RequestBase &
   Readonly<{
@@ -61,6 +62,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const expected = new Set(keys)
   return Object.keys(value).length === expected.size && Object.keys(value).every((key) => expected.has(key))
+}
+
+function hasAllowedKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+): boolean {
+  const allowed = new Set([...required, ...optional])
+  return (
+    required.every((key) => key in value) &&
+    Object.keys(value).length <= allowed.size &&
+    Object.keys(value).every((key) => allowed.has(key))
+  )
 }
 
 function isRequestId(value: unknown): value is string {
@@ -147,9 +161,16 @@ export function isHostResponse(value: unknown): value is HostResponse {
     return false
   }
   if (value.ok) {
-    return value.result === undefined
-      ? hasOnlyKeys(value, ['protocol', 'type', 'requestId', 'ok'])
-      : hasOnlyKeys(value, ['protocol', 'type', 'requestId', 'ok', 'result']) && isYoloResult(value.result)
+    if (!hasAllowedKeys(value, ['protocol', 'type', 'requestId', 'ok'], ['result', 'notice'])) {
+      return false
+    }
+    if (value.result !== undefined && !isYoloResult(value.result)) {
+      return false
+    }
+    return (
+      value.notice === undefined ||
+      (typeof value.notice === 'string' && value.notice.length > 0 && value.notice.length <= 1000)
+    )
   }
   return (
     hasOnlyKeys(value, ['protocol', 'type', 'requestId', 'ok', 'error']) &&
@@ -194,10 +215,19 @@ export function errorResponse(requestId: string, error: string): HostErrorRespon
   }
 }
 
-export function successResponse(requestId: string, result?: YoloParseResult): HostSuccessResponse {
-  return result
-    ? { protocol: PROTOCOL_VERSION, type: 'result', requestId, ok: true, result }
-    : { protocol: PROTOCOL_VERSION, type: 'result', requestId, ok: true }
+export function successResponse(
+  requestId: string,
+  result?: YoloParseResult,
+  notice?: string,
+): HostSuccessResponse {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: 'result',
+    requestId,
+    ok: true,
+    ...(result === undefined ? {} : { result }),
+    ...(notice ? { notice: notice.slice(0, 1000) } : {}),
+  }
 }
 
 function readBlobBase64(blob: Blob): Promise<string> {

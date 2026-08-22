@@ -160,9 +160,9 @@ verifyKeyButton.addEventListener('click', () => {
       throw new Error('模型 Key 必须是 64 位十六进制字符串')
     }
     if (isCurrentOperation(generation, signal)) {
-      status.set('正在下载并校验模型…')
+      status.set('正在验证模型 Key…')
     }
-    await requestHost(
+    const response = await requestHost(
       {
         protocol: PROTOCOL_VERSION,
         type: 'verify-key',
@@ -173,7 +173,7 @@ verifyKeyButton.addEventListener('click', () => {
     )
     assertCurrentOperation(generation, signal)
     modelKey.value = ''
-    status.set('模型 Key 验证成功并已安全保存')
+    status.set(response.notice ?? '模型 Key 验证成功并已安全保存')
   })
 })
 

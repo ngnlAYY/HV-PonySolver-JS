@@ -140,8 +140,35 @@ describe('default remote options entry', () => {
     })
   })
 
-  it('makes verify then clear latest-operation-wins with no late page mutation', async () => {
+  it('shows the host notice instead of the default success text when one is returned', async () => {
     const verifyPort = controlledHostPort()
+    platformMocks.runtimeConnect.mockReset().mockReturnValue(verifyPort)
+    await import('../../src/options/main')
+    const input = optionsElement<HTMLInputElement>('model-key')
+    input.value = 'c'.repeat(64)
+    optionsElement<HTMLButtonElement>('verify-key').click()
+    await vi.waitFor(() => expect(verifyPort.postMessage).toHaveBeenCalledTimes(1))
+    // The pending text must not promise a download the probe no longer performs.
+    expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('正在验证模型 Key…')
+
+    const request = verifyPort.postMessage.mock.calls[0]![0] as { requestId: string }
+    verifyPort.emitMessage({
+      protocol: 'hv-pony-solver/1',
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+      notice: '模型 Key 有效并已安全保存；本月 5 次模型下载额度已用完，额度恢复后将自动下载模型',
+    })
+
+    await vi.waitFor(() => {
+      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe(
+        '模型 Key 有效并已安全保存；本月 5 次模型下载额度已用完，额度恢复后将自动下载模型',
+      )
+    })
+    expect(input.value).toBe('')
+  })
+
+  it('makes verify then clear latest-operation-wins with no late page mutation', async () => {    const verifyPort = controlledHostPort()
     const clearPort = successfulHostPort()
     platformMocks.runtimeConnect.mockReset().mockReturnValueOnce(verifyPort).mockReturnValueOnce(clearPort)
     await import('../../src/options/main')

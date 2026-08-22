@@ -9,6 +9,7 @@ import {
   isHostResponse,
   isOffscreenCancelRequest,
   isOffscreenRequest,
+  successResponse,
 } from '../../src/protocol/messages'
 
 describe('extension protocol', () => {
@@ -133,5 +134,55 @@ describe('extension protocol', () => {
         result: { success: true, ponies: ['INVALID'] },
       }),
     ).toBe(false)
+  })
+
+  it('accepts a bounded notice on success and rejects malformed ones', () => {
+    const base = { protocol: PROTOCOL_VERSION, type: 'result', requestId: 'request-1', ok: true } as const
+
+    expect(isHostResponse({ ...base, notice: '模型 Key 有效并已安全保存' })).toBe(true)
+    expect(isHostResponse({ ...base, notice: 'x'.repeat(1000) })).toBe(true)
+    expect(isHostResponse({ ...base, notice: undefined })).toBe(true)
+
+    expect(isHostResponse({ ...base, notice: '' })).toBe(false)
+    expect(isHostResponse({ ...base, notice: 'x'.repeat(1001) })).toBe(false)
+    expect(isHostResponse({ ...base, notice: 42 })).toBe(false)
+    // Unknown keys must still be rejected now that the key set is no longer exact.
+    expect(isHostResponse({ ...base, notice: 'ok', unexpected: 'value' })).toBe(false)
+    expect(isHostResponse({ ...base, unexpected: 'value' })).toBe(false)
+  })
+
+  it('rejects a notice on an error response', () => {
+    expect(
+      isHostResponse({
+        protocol: PROTOCOL_VERSION,
+        type: 'result',
+        requestId: 'request-1',
+        ok: false,
+        error: '模型 Key 无效',
+        notice: '不应出现在错误响应上',
+      }),
+    ).toBe(false)
+  })
+
+  it('omits notice unless one is supplied and truncates an overlong one', () => {
+    expect(successResponse('request-1')).toEqual({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'request-1',
+      ok: true,
+    })
+    expect(successResponse('request-1', undefined, '额度已用完')).toEqual({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'request-1',
+      ok: true,
+      notice: '额度已用完',
+    })
+    // An empty notice must not create the key at all.
+    expect(successResponse('request-1', undefined, '')).not.toHaveProperty('notice')
+
+    const truncated = successResponse('request-1', undefined, 'x'.repeat(1500))
+    expect(truncated.notice).toHaveLength(1000)
+    expect(isHostResponse(truncated)).toBe(true)
   })
 })
