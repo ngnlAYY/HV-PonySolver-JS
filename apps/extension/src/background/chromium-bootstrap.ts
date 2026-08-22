@@ -1,7 +1,7 @@
 import { registerOpenOptionsAction, sendRuntimeMessage } from '../platform/webextension'
 import { OFFSCREEN_MESSAGE_TYPE, isHostResponse, type HostRequest, type HostResponse } from '../protocol/messages'
 import { registerBroker, type BrokerPolicy } from './broker'
-import { acquireOffscreenDocument } from './chromium-offscreen'
+import { acquireOffscreenDocument, retainOffscreenDocument } from './chromium-offscreen'
 
 const serviceWorkerInstanceId = (() => {
   try {
@@ -129,6 +129,11 @@ export async function invokeOffscreenHost(request: HostRequest, signal: AbortSig
 }
 
 export function registerChromiumBackground(policy: BrokerPolicy = { allowOptions: true }): void {
-  registerBroker(invokeOffscreenHost, policy)
+  // Keep the offscreen document — and with it the warm ONNX session — alive for
+  // as long as a captcha page is connected, unless the caller overrides it.
+  registerBroker(invokeOffscreenHost, {
+    ...policy,
+    onContentConnected: policy.onContentConnected ?? retainOffscreenDocument,
+  })
   registerOpenOptionsAction()
 }

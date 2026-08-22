@@ -1,6 +1,8 @@
 import { getChromiumOffscreenApi, runtimeGetUrl } from '../platform/webextension'
 
-export const OFFSCREEN_IDLE_TIMEOUT_MS = 5_000
+// Long enough to survive a game-page reload or short navigation so the next
+// Port reuses the warm ONNX session instead of rebuilding it.
+export const OFFSCREEN_IDLE_TIMEOUT_MS = 30_000
 
 let creatingDocument: Promise<void> | null = null
 let closingDocument: Promise<void> | null = null
@@ -87,7 +89,7 @@ function scheduleIdleClose(): void {
   }, OFFSCREEN_IDLE_TIMEOUT_MS)
 }
 
-export async function acquireOffscreenDocument(): Promise<() => void> {
+function takeLease(): () => void {
   activeLeases += 1
   lifecycleRevision += 1
   if (idleTimeoutId !== null) {
@@ -95,7 +97,7 @@ export async function acquireOffscreenDocument(): Promise<() => void> {
     idleTimeoutId = null
   }
   let released = false
-  const release = (): void => {
+  return (): void => {
     if (released) {
       return
     }
@@ -105,6 +107,10 @@ export async function acquireOffscreenDocument(): Promise<() => void> {
       scheduleIdleClose()
     }
   }
+}
+
+export async function acquireOffscreenDocument(): Promise<() => void> {
+  const release = takeLease()
   try {
     await ensureOffscreenDocument()
     return release
@@ -112,4 +118,17 @@ export async function acquireOffscreenDocument(): Promise<() => void> {
     release()
     throw error
   }
+}
+
+/**
+ * Holds the current offscreen document open without creating one.
+ *
+ * A connected content Port means the user is on a captcha page and more
+ * inference is likely, so keeping the warm ONNX session alive avoids rebuilding
+ * it — model read, integrity check, and session construction — per captcha.
+ * Unlike {@link acquireOffscreenDocument} this never creates the document, so
+ * an idle Port cannot spawn one on its own.
+ */
+export function retainOffscreenDocument(): () => void {
+  return takeLease()
 }

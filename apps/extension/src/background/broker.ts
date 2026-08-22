@@ -16,7 +16,15 @@ import {
 } from '../protocol/messages'
 
 export type HostInvoker = (request: HostRequest, signal: AbortSignal) => Promise<HostResponse>
-export type BrokerPolicy = Readonly<{ allowOptions: boolean }>
+export type BrokerPolicy = Readonly<{
+  allowOptions: boolean
+  /**
+   * Called when a trusted content Port connects; the returned callback runs once
+   * that Port disconnects. Lets a host keep warm resources alive for as long as
+   * a captcha page is actually connected.
+   */
+  onContentConnected?: () => () => void
+}>
 export const MAX_PORT_DETECT_REQUESTS = 2
 export const MAX_GLOBAL_DETECT_REQUESTS = 6
 export const MAX_PORT_VERIFY_KEY_REQUESTS = 1
@@ -105,6 +113,16 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
     let connected = true
     let portDetectRequests = 0
     let portVerifyKeyRequests = 0
+    // Held for the Port's lifetime so the host can keep warm resources alive
+    // while a captcha page stays connected.
+    let releaseRetention: (() => void) | undefined
+    if (port.name === CONTENT_PORT_NAME) {
+      try {
+        releaseRetention = policy.onContentConnected?.()
+      } catch {
+        // Retention is an optimization; a failure must not refuse the Port.
+      }
+    }
     type RequestEntry = {
       readonly controller: AbortController
       readonly kind: 'detect' | 'verify-key' | 'other'
@@ -119,6 +137,9 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
     const markDisconnected = (): void => {
       connected = false
       abortEntries()
+      const release = releaseRetention
+      releaseRetention = undefined
+      release?.()
     }
     const disconnect = (): void => {
       if (!connected) {

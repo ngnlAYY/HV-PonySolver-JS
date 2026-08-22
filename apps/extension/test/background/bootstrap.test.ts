@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   offscreenReleases: [] as Array<ReturnType<typeof vi.fn>>,
   registerBroker: vi.fn(),
   registerOpenOptionsAction: vi.fn(),
+  retainOffscreenDocument: vi.fn(() => vi.fn()),
   runtimeId: vi.fn(() => 'extension-id'),
   sendRuntimeMessage: vi.fn(),
 }))
@@ -22,6 +23,7 @@ vi.mock('../../src/background/broker', async (importOriginal) => ({
 }))
 vi.mock('../../src/background/chromium-offscreen', () => ({
   acquireOffscreenDocument: mocks.acquireOffscreenDocument,
+  retainOffscreenDocument: mocks.retainOffscreenDocument,
 }))
 vi.mock('../../src/platform/webextension', () => ({
   addRuntimeMessageListener: mocks.addRuntimeMessageListener,
@@ -37,6 +39,7 @@ import { registerOffscreenHost } from '../../src/offscreen/offscreen-bootstrap'
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.offscreenReleases.length = 0
+  mocks.retainOffscreenDocument.mockImplementation(() => vi.fn())
   mocks.acquireOffscreenDocument.mockImplementation(async () => {
     const release = vi.fn()
     mocks.offscreenReleases.push(release)
@@ -47,7 +50,10 @@ beforeEach(() => {
 describe('target-specific extension bootstraps', () => {
   it('sends Chromium requests with unique stable offscreen IDs and releases each lease', async () => {
     registerChromiumBackground({ allowOptions: false })
-    expect(mocks.registerBroker).toHaveBeenCalledWith(expect.any(Function), { allowOptions: false })
+    expect(mocks.registerBroker).toHaveBeenCalledWith(expect.any(Function), {
+      allowOptions: false,
+      onContentConnected: mocks.retainOffscreenDocument,
+    })
     expect(mocks.registerOpenOptionsAction).toHaveBeenCalledTimes(1)
     const invokeHost = mocks.registerBroker.mock.calls[0]![0] as HostInvoker
     mocks.sendRuntimeMessage.mockImplementation(

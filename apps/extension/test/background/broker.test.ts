@@ -384,6 +384,58 @@ describe('broker queue and privilege boundaries', () => {
     expect(invokeHost).not.toHaveBeenCalled()
   })
 
+  it('retains a host resource for the lifetime of a content Port only', () => {
+    const release = vi.fn()
+    const onContentConnected = vi.fn(() => release)
+    const invokeHost = vi.fn(async (): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'retain',
+      ok: true,
+    }))
+    registerBroker(invokeHost, { allowOptions: true, onContentConnected })
+
+    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(content)
+    expect(onContentConnected).toHaveBeenCalledTimes(1)
+    expect(release).not.toHaveBeenCalled()
+
+    // The options page does no inference, so it must not pin the resource.
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(options)
+    expect(onContentConnected).toHaveBeenCalledTimes(1)
+
+    content.emitDisconnect()
+    expect(release).toHaveBeenCalledTimes(1)
+
+    // A repeated disconnect must not double-release the lease.
+    content.emitDisconnect()
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it('admits a content Port even when retention setup throws', () => {
+    const onContentConnected = vi.fn(() => {
+      throw new Error('offscreen retention unavailable')
+    })
+    const invokeHost = vi.fn(async (request: { requestId: string }): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    }))
+    registerBroker(invokeHost, { allowOptions: true, onContentConnected })
+    const client = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+
+    expect(() => platformMocks.connectListener?.(client)).not.toThrow()
+    client.emitMessage(detectRequest(0))
+
+    expect(client.disconnect).not.toHaveBeenCalled()
+    expect(invokeHost).toHaveBeenCalledTimes(1)
+  })
+
   it('disconnects the options Port when the selected product disallows Key operations', () => {
     const invokeHost = vi.fn(async (): Promise<HostResponse> => ({
       protocol: PROTOCOL_VERSION,
