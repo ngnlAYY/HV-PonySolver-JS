@@ -1,5 +1,6 @@
 import { readWorkerConfig } from './env'
-import { getCanonicalRequestAccessToken, selectModelAccess } from './model-access'
+import { logWorkerError, logWorkerWarning, workerErrorName, type WorkerLogRoute } from './logger'
+import { selectModelAccess } from './model-access'
 import { consumeModelDownloadQuota } from './model-download-quota'
 import {
   modelObjectResponse,
@@ -7,6 +8,7 @@ import {
   preflightResponse,
   quotaExceededResponse,
   runtimeObjectResponse,
+  serviceUnavailableResponse,
   textResponse,
 } from './model-response'
 import type { Env, WorkerConfig } from './worker-types'
@@ -14,9 +16,11 @@ import type { Env, WorkerConfig } from './worker-types'
 const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'
 const LEGACY_MODEL_FILENAME = 'yolo26n-640.onnx'
 const ORT_MODEL_FILENAME = 'yolo26n-640.ort'
+const QUOTA_FAILURE_RETRY_AFTER_SECONDS = 5
 
 type ModelRoute = Readonly<{
   filename: string
+  logRoute: WorkerLogRoute
   realObjectKey: string
 }>
 
@@ -24,7 +28,11 @@ function filenameForPath(pathname: string, fallback: string): string {
   return pathname.slice(pathname.lastIndexOf('/') + 1) || fallback
 }
 
-async function readObjectForRequest(request: Request, env: Env, objectKey: string): Promise<R2Object | R2ObjectBody | null> {
+async function readObjectForRequest(
+  request: Request,
+  env: Env,
+  objectKey: string,
+): Promise<R2Object | R2ObjectBody | null> {
   return request.method === 'HEAD' ? env.MODEL_BUCKET.head(objectKey) : env.MODEL_BUCKET.get(objectKey)
 }
 
@@ -38,37 +46,39 @@ async function cancelResponseBody(response: Response): Promise<void> {
 
 async function serveModel(request: Request, env: Env, config: WorkerConfig, route: ModelRoute): Promise<Response> {
   const access = await selectModelAccess(request, env.MODEL_KEYS, config.invalidKeyMode)
-  if (access === 'forbidden') {
+  if (access.decision === 'forbidden') {
     return textResponse(request, 'Forbidden', 403)
   }
-  const objectKey = access === 'real' ? route.realObjectKey : config.decoyModelObjectKey
+  const objectKey = access.decision === 'real' ? route.realObjectKey : config.decoyModelObjectKey
   const object = await readObjectForRequest(request, env, objectKey)
   if (!object) {
     return internalErrorResponse(request)
   }
   const response = modelObjectResponse(request, object, route.filename)
-  if (access !== 'real' || request.method !== 'GET') {
+  if (access.decision !== 'real' || request.method !== 'GET') {
     return response
   }
 
-  const canonicalToken = getCanonicalRequestAccessToken(request)
-  if (!canonicalToken) {
+  if (!access.canonicalToken) {
     await cancelResponseBody(response)
     throw new Error('Authorized model request is missing a canonical token')
   }
   try {
-    const quota = await consumeModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, canonicalToken)
+    const quota = await consumeModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, access.canonicalToken)
     if (quota.allowed) {
       return response
     }
     await cancelResponseBody(response)
     return quotaExceededResponse(request, quota.retryAfterSeconds)
-  } catch {
+  } catch (error) {
     await cancelResponseBody(response)
-    return textResponse(request, 'Service Unavailable', 503, {
-      'Cache-Control': 'no-store',
-      'Retry-After': '5',
+    // Log only non-sensitive classification fields; the underlying error message may embed quota identities.
+    logWorkerWarning({
+      route: route.logRoute,
+      errorKind: 'quota-storage-unavailable',
+      errorName: workerErrorName(error),
     })
+    return serviceUnavailableResponse(request, QUOTA_FAILURE_RETRY_AFTER_SECONDS)
   }
 }
 
@@ -81,6 +91,7 @@ async function serveRuntime(request: Request, env: Env, config: WorkerConfig): P
 }
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
+  let logRoute: WorkerLogRoute = 'request'
   try {
     const config = readWorkerConfig(env)
     const pathname = new URL(request.url).pathname
@@ -98,17 +109,21 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       return textResponse(request, 'Method Not Allowed', 405, { allow: ALLOWED_METHODS })
     }
     if (isRuntime) {
+      logRoute = 'runtime'
       return await serveRuntime(request, env, config)
     }
 
+    logRoute = isOrtModel ? 'ort-model' : 'legacy-model'
     const route: ModelRoute = isOrtModel
       ? {
           filename: filenameForPath(config.publicOrtModelPath, ORT_MODEL_FILENAME),
+          logRoute: 'ort-model',
           realObjectKey: config.realOrtModelObjectKey,
         }
-      : { filename: LEGACY_MODEL_FILENAME, realObjectKey: config.realModelObjectKey }
+      : { filename: LEGACY_MODEL_FILENAME, logRoute: 'legacy-model', realObjectKey: config.realModelObjectKey }
     return await serveModel(request, env, config, route)
-  } catch {
+  } catch (error) {
+    logWorkerError({ route: logRoute, errorKind: 'unhandled-exception', errorName: workerErrorName(error) })
     return textResponse(request, 'Internal Server Error', 500)
   }
 }

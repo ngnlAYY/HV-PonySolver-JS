@@ -5,7 +5,12 @@ import { renderWranglerConfigFile } from './wrangler-config-renderer.mjs'
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const workerDir = resolve(scriptDir, '..')
 
-await renderWranglerConfigFile({
-  templatePath: resolve(workerDir, 'wrangler.template.toml'),
-  outputPath: resolve(workerDir, 'wrangler.toml'),
-})
+try {
+  await renderWranglerConfigFile({
+    templatePath: resolve(workerDir, 'wrangler.template.toml'),
+    outputPath: resolve(workerDir, 'wrangler.toml'),
+  })
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+  process.exitCode = 1
+}

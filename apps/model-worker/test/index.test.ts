@@ -2,16 +2,22 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+import type { SelectedModelAccess } from '../src/model-access'
+import type { InvalidKeyMode, ModelKeyStore } from '../src/worker-types'
+
 const modelAccessMocks = vi.hoisted(() => ({
-  getCanonicalRequestAccessToken: vi.fn<(request: Request) => string | null>(),
+  selectModelAccess:
+    vi.fn<
+      (request: Request, keyStore: ModelKeyStore, invalidKeyMode: InvalidKeyMode) => Promise<SelectedModelAccess>
+    >(),
 }))
 
 vi.mock(import('../src/model-access'), async (importOriginal) => {
   const modelAccess = await importOriginal()
-  modelAccessMocks.getCanonicalRequestAccessToken.mockImplementation(modelAccess.getCanonicalRequestAccessToken)
+  modelAccessMocks.selectModelAccess.mockImplementation(modelAccess.selectModelAccess)
   return {
     ...modelAccess,
-    getCanonicalRequestAccessToken: modelAccessMocks.getCanonicalRequestAccessToken,
+    selectModelAccess: modelAccessMocks.selectModelAccess,
   }
 })
 
@@ -553,10 +559,7 @@ describe('model worker', () => {
 
   it('normalizes INVALID_KEY_MODE before selecting the error behavior', async () => {
     const fixture = createModelFixture()
-    const response = await fetchWorker(
-      modelRequest(fixture, 'GET'),
-      createEnv(fixture, { invalidKeyMode: ' ERROR ' }),
-    )
+    const response = await fetchWorker(modelRequest(fixture, 'GET'), createEnv(fixture, { invalidKeyMode: ' ERROR ' }))
 
     expect(response.status).toBe(403)
     expect(await response.text()).toBe('Forbidden')
@@ -564,10 +567,7 @@ describe('model worker', () => {
 
   it('normalizes INVALID_KEY_MODE before selecting the decoy behavior', async () => {
     const fixture = createModelFixture()
-    const response = await fetchWorker(
-      modelRequest(fixture, 'GET'),
-      createEnv(fixture, { invalidKeyMode: ' DeCoY ' }),
-    )
+    const response = await fetchWorker(modelRequest(fixture, 'GET'), createEnv(fixture, { invalidKeyMode: ' DeCoY ' }))
 
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.decoyBody)
@@ -640,9 +640,7 @@ describe('model worker', () => {
       authorizedModelRequest(fixture, 'GET'),
       createEnv(fixture, {
         keyValues: new Map<string, string>([[fixture.validKey, '1']]),
-        objects: new Map<string, StoredObject>([
-          [fixture.decoyModelObjectKey, { body: fixture.decoyBody }],
-        ]),
+        objects: new Map<string, StoredObject>([[fixture.decoyModelObjectKey, { body: fixture.decoyBody }]]),
       }),
     )
 
@@ -657,7 +655,7 @@ describe('model worker', () => {
     const env = createEnv(fixture, {
       keyValues: new Map<string, string>([[fixture.validKey, '1']]),
     })
-    modelAccessMocks.getCanonicalRequestAccessToken.mockReturnValueOnce(null)
+    modelAccessMocks.selectModelAccess.mockResolvedValueOnce({ decision: 'real', canonicalToken: null })
 
     const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
 
@@ -667,10 +665,7 @@ describe('model worker', () => {
 
   it('returns 500 instead of silently falling back when INVALID_KEY_MODE is unsupported', async () => {
     const fixture = createModelFixture()
-    const response = await fetchWorker(
-      modelRequest(fixture, 'GET'),
-      createEnv(fixture, { invalidKeyMode: 'allow' }),
-    )
+    const response = await fetchWorker(modelRequest(fixture, 'GET'), createEnv(fixture, { invalidKeyMode: 'allow' }))
 
     expect(response.status).toBe(500)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
@@ -849,10 +844,7 @@ describe('model worker', () => {
       await response.arrayBuffer()
     }
 
-    const response = await fetchWorker(
-      authorizedModelRequest(fixture, 'GET', CANONICAL_ACCESS_TOKEN, { origin }),
-      env,
-    )
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', CANONICAL_ACCESS_TOKEN, { origin }), env)
     expect(response.status).toBe(429)
     expect(await response.text()).toBe('Monthly model download quota exceeded')
     expect(response.headers.get('retry-after')).toMatch(/^[1-9][0-9]*$/)
@@ -967,7 +959,12 @@ describe('model worker', () => {
   it('keeps separate keys on independent monthly quotas', async () => {
     const fixture = createModelFixture()
     const otherKey = 'fedcba9876543210'.repeat(4)
-    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1'], [otherKey, '1']]) })
+    const env = createEnv(fixture, {
+      keyValues: new Map([
+        [fixture.validKey, '1'],
+        [otherKey, '1'],
+      ]),
+    })
 
     for (const key of [fixture.validKey, otherKey]) {
       for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
@@ -990,8 +987,55 @@ describe('model worker', () => {
 
     expect(response.status).toBe(503)
     expect(response.headers.get('Retry-After')).toBe('5')
+    expect(response.headers.get('access-control-expose-headers')).toBe('Retry-After')
     expect(response.headers.get('Cache-Control')).toBe('no-store')
     expect(await response.text()).toBe('Service Unavailable')
+  })
+
+  it('logs only secret-free classification fields when quota storage fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const fixture = createModelFixture()
+      const response = await fetchWorker(
+        authorizedModelRequest(fixture, 'GET'),
+        createEnv(fixture, {
+          keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+          quotaError: new Error(`quota failed for ${fixture.validKey}`),
+        }),
+      )
+
+      expect(response.status).toBe(503)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      const logged = warnSpy.mock.calls.flat().join(' ')
+      expect(logged).toContain('route=legacy-model')
+      expect(logged).toContain('errorKind=quota-storage-unavailable')
+      expect(logged).not.toContain('quota failed')
+      expect(logged).not.toContain(fixture.validKey)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('logs only secret-free classification fields for unhandled failures', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const fixture = createModelFixture()
+      const response = await fetchWorker(
+        modelRequest(fixture, 'GET'),
+        createEnv(fixture, { bucketGetError: new Error(`R2 GET failed for ${fixture.decoyModelObjectKey}`) }),
+      )
+
+      expect(response.status).toBe(500)
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+      const logged = errorSpy.mock.calls.flat().join(' ')
+      expect(logged).toContain('route=legacy-model')
+      expect(logged).toContain('errorKind=unhandled-exception')
+      expect(logged).toContain('errorName=Error')
+      expect(logged).not.toContain('R2 GET failed')
+      expect(logged).not.toContain(fixture.decoyModelObjectKey)
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it('keeps concurrent real, decoy, and public runtime requests isolated', async () => {

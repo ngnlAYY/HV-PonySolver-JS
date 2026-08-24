@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { resolve } from 'node:path'
 import { clearTimeout as cancelTimeout, setTimeout as scheduleTimeout } from 'node:timers'
 import { setTimeout as sleepFor } from 'node:timers/promises'
-import { fileURLToPath, URL } from 'node:url'
+import { URL } from 'node:url'
+
+import { isDirectRun } from '../../../scripts/lib/direct-run.mjs'
 
 const ALLOWED_ORIGINS = Object.freeze(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
 const EXPECTED_METHODS = Object.freeze(['get', 'head', 'options'])
@@ -415,11 +416,7 @@ async function runCli({
   }
 }
 
-function isDirectRun() {
-  return Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-}
-
-if (isDirectRun()) {
+if (isDirectRun(import.meta.url)) {
   process.exitCode = await runCli()
 }
 

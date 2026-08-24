@@ -44,4 +44,10 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+  {
+    files: ['apps/model-worker/src/logger.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
 )

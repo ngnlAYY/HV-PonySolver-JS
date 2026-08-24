@@ -4,6 +4,7 @@ const CORS_ALLOW_HEADERS = 'Authorization'
 const CACHE_CONTROL = 'no-store'
 const INTERNAL_ERROR_MESSAGE = 'Internal Server Error'
 const QUOTA_EXCEEDED_MESSAGE = 'Monthly model download quota exceeded'
+const SERVICE_UNAVAILABLE_MESSAGE = 'Service Unavailable'
 
 function appendVaryOrigin(headers: Headers): void {
   const tokens = (headers.get('vary') ?? '')
@@ -56,6 +57,13 @@ export function quotaExceededResponse(request: Request, retryAfterSeconds: numbe
   })
 }
 
+export function serviceUnavailableResponse(request: Request, retryAfterSeconds: number): Response {
+  return textResponse(request, SERVICE_UNAVAILABLE_MESSAGE, 503, {
+    'access-control-expose-headers': 'Retry-After',
+    'retry-after': String(retryAfterSeconds),
+  })
+}
+
 export function preflightResponse(request: Request, isPublic: boolean): Response {
   const headers = new Headers({
     'access-control-allow-methods': CORS_ALLOW_METHODS,
@@ -101,11 +109,7 @@ function objectResponseBody(request: Request, object: R2Object | R2ObjectBody): 
   return object.body
 }
 
-export function modelObjectResponse(
-  request: Request,
-  object: R2Object | R2ObjectBody,
-  filename: string,
-): Response {
+export function modelObjectResponse(request: Request, object: R2Object | R2ObjectBody, filename: string): Response {
   const headers = createModelHeaders(request, object, filename)
   return new Response(objectResponseBody(request, object), { status: 200, headers })
 }

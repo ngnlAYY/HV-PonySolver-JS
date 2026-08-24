@@ -708,6 +708,7 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致。
 - 原始 Key、规范化 Key、配额对象标识和配额状态均不得写入日志或响应。
 - `decoy` 模式的未鉴权 `200` 不表示真实模型泄漏。
+- `HEAD` 请求不计配额，且 decoy 响应头的 `Content-Length` 与 `ETag` 来自诱饵对象，与真实对象不同；叠加公开的真实模型 SHA-256，构成可区分有效与无效 Key 的探测面。这是当前接受的权衡，缓解方向记录在 [`docs/model-worker-ops.md`](docs/model-worker-ops.md) 的「待办运维项」。
 - 部署检查、静态测试和浏览器 E2E 分别证明不同边界，不能相互替代。
 
 ## 故障排查

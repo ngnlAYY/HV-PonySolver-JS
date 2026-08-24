@@ -10,18 +10,22 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const workerDir = resolve(scriptDir, '..')
+const repoRoot = resolve(workerDir, '../..')
 const validKvNamespaceId = '0123456789abcdef0123456789abcdef'
 const validBucketName = 'bucket-prod'
 
 async function withTempWorker(callback) {
+  // Mirror the repository layout (apps/model-worker plus the shared scripts/lib) so the
+  // copied scripts keep resolving their cross-package imports.
   const tempRoot = await mkdtemp(join(tmpdir(), 'hv-pony-worker-config-'))
-  const tempWorkerDir = join(tempRoot, 'model-worker')
+  const tempWorkerDir = join(tempRoot, 'apps/model-worker')
 
   try {
     await cp(workerDir, tempWorkerDir, {
       recursive: true,
       filter: (source) => !source.includes('/node_modules/') && !source.includes('/coverage/'),
     })
+    await cp(join(repoRoot, 'scripts/lib'), join(tempRoot, 'scripts/lib'), { recursive: true })
     return await callback(tempWorkerDir)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -116,7 +120,8 @@ test('renderWranglerConfigFile escapes custom main paths as TOML strings', async
 test('renderWranglerConfig defaults INVALID_KEY_MODE to decoy', async () => {
   const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
 
-  const template = 'INVALID_KEY_MODE = "${INVALID_KEY_MODE}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
+  const template =
+    'INVALID_KEY_MODE = "${INVALID_KEY_MODE}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
   const rendered = renderWranglerConfig(template, { values: testWranglerConfigEnv })
 
   assert.match(rendered, /INVALID_KEY_MODE = "decoy"/)
@@ -125,7 +130,8 @@ test('renderWranglerConfig defaults INVALID_KEY_MODE to decoy', async () => {
 test('renderWranglerConfig accepts INVALID_KEY_MODE error', async () => {
   const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
 
-  const template = 'INVALID_KEY_MODE = "${INVALID_KEY_MODE}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
+  const template =
+    'INVALID_KEY_MODE = "${INVALID_KEY_MODE}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
   const rendered = renderWranglerConfig(template, {
     values: { ...testWranglerConfigEnv, INVALID_KEY_MODE: 'error' },
   })
@@ -136,7 +142,8 @@ test('renderWranglerConfig accepts INVALID_KEY_MODE error', async () => {
 test('renderWranglerConfig rejects unsupported INVALID_KEY_MODE values', async () => {
   const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
 
-  const template = 'INVALID_KEY_MODE = "${INVALID_KEY_MODE}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
+  const template =
+    'INVALID_KEY_MODE = "${INVALID_KEY_MODE}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
 
   assert.throws(
     () => renderWranglerConfig(template, { values: { ...testWranglerConfigEnv, INVALID_KEY_MODE: 'allow' } }),
@@ -273,28 +280,36 @@ test('validate-wrangler-config rejects invalid rendered values before deploy', a
 
 test('validate-wrangler-config rejects wrong MODEL_KEYS binding names before deploy', async () => {
   await assert.rejects(
-    runValidate(`[[kv_namespaces]]\nbinding = "MODEL_KEY"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_BUCKET"\nbucket_name = "${validBucketName}"\n`),
+    runValidate(
+      `[[kv_namespaces]]\nbinding = "MODEL_KEY"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_BUCKET"\nbucket_name = "${validBucketName}"\n`,
+    ),
     /wrangler\.toml kv_namespaces must contain binding = "MODEL_KEYS" with id/,
   )
 })
 
 test('validate-wrangler-config rejects swapped KV and bucket binding sections before deploy', async () => {
   await assert.rejects(
-    runValidate(`[[kv_namespaces]]\nbinding = "MODEL_BUCKET"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_KEYS"\nbucket_name = "${validBucketName}"\n`),
+    runValidate(
+      `[[kv_namespaces]]\nbinding = "MODEL_BUCKET"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_KEYS"\nbucket_name = "${validBucketName}"\n`,
+    ),
     /wrangler\.toml kv_namespaces must contain binding = "MODEL_KEYS" with id/,
   )
 })
 
 test('validate-wrangler-config rejects bindings declared outside resource sections before deploy', async () => {
   await assert.rejects(
-    runValidate(`id = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\n[[unsafe.metadata]]\nbinding = "MODEL_KEYS"\nbinding = "MODEL_BUCKET"\n`),
+    runValidate(
+      `id = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\n[[unsafe.metadata]]\nbinding = "MODEL_KEYS"\nbinding = "MODEL_BUCKET"\n`,
+    ),
     /wrangler\.toml kv_namespaces must contain binding = "MODEL_KEYS" with id/,
   )
 })
 
 test('validate-wrangler-config rejects unsupported INVALID_KEY_MODE values before deploy', async () => {
   await assert.rejects(
-    runValidate(`INVALID_KEY_MODE = "allow"\nid = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\nbinding = "MODEL_KEYS"\nbinding = "MODEL_BUCKET"\n`),
+    runValidate(
+      `INVALID_KEY_MODE = "allow"\nid = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\nbinding = "MODEL_KEYS"\nbinding = "MODEL_BUCKET"\n`,
+    ),
     /wrangler\.toml INVALID_KEY_MODE must be one of: decoy, error/,
   )
 })
@@ -308,7 +323,9 @@ test('validate-wrangler-config rejects malformed TOML assignments before deploy'
 
 test('validate-wrangler-config rejects duplicate KV namespace assignments before deploy', async () => {
   await assert.rejects(
-    runValidate(`id = "${validKvNamespaceId}"\nid = "fedcba9876543210fedcba9876543210"\nbucket_name = "${validBucketName}"\n`),
+    runValidate(
+      `id = "${validKvNamespaceId}"\nid = "fedcba9876543210fedcba9876543210"\nbucket_name = "${validBucketName}"\n`,
+    ),
     /wrangler\.toml must contain exactly one id/,
   )
 })
@@ -322,7 +339,9 @@ test('validate-wrangler-config rejects duplicate bucket assignments before deplo
 
 test('validate-wrangler-config rejects duplicate KV namespace assignments without required spaces', async () => {
   await assert.rejects(
-    runValidate(`id="${validKvNamespaceId}"\nid = "fedcba9876543210fedcba9876543210"\nbucket_name = "${validBucketName}"\n`),
+    runValidate(
+      `id="${validKvNamespaceId}"\nid = "fedcba9876543210fedcba9876543210"\nbucket_name = "${validBucketName}"\n`,
+    ),
     /wrangler\.toml must contain exactly one id/,
   )
 })

@@ -1,3 +1,5 @@
+import { escapeRegExp } from '../../../scripts/lib/strings.mjs'
+
 const requiredVariables = ['MODEL_KEYS_KV_NAMESPACE_ID', 'MODEL_BUCKET_NAME']
 const productionModes = new Set(['production', 'deploy'])
 const placeholderValues = new Set(['test-kv', 'test-bucket'])
@@ -65,10 +67,6 @@ function validateConfigValue(name, value, { allowTestPlaceholders = false } = {}
     throw new Error(`${name} must be ${format.description}`)
   }
   return value
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function readTomlStringAssignmentValues(content, assignment, sourceName) {

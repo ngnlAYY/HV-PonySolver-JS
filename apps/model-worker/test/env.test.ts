@@ -5,6 +5,15 @@ import { ORT_MODEL_OBJECT_KEY } from '@hv-pony-solver/shared'
 import { readWorkerConfig } from '../src/env'
 import { createEnv, createModelFixture } from './helpers/model-worker-fixture'
 
+function readWorkerConfigError(env: Parameters<typeof readWorkerConfig>[0]): Error {
+  try {
+    readWorkerConfig(env)
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error))
+  }
+  throw new Error('readWorkerConfig unexpectedly succeeded')
+}
+
 describe('readWorkerConfig', () => {
   it('normalizes the invalid-key mode', () => {
     const env = createEnv(createModelFixture(), { invalidKeyMode: ' ERROR ' })
@@ -48,20 +57,28 @@ describe('readWorkerConfig', () => {
     expect(() => readWorkerConfig(env)).toThrow(/absolute pathname/)
   })
 
-  it('rejects colliding public paths', () => {
+  it('rejects colliding public paths without embedding the path value', () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture)
     env.PUBLIC_ORT_MODEL_PATH = fixture.publicModelPath
 
-    expect(() => readWorkerConfig(env)).toThrow(/duplicate public path/)
+    const error = readWorkerConfigError(env)
+
+    expect(error.message).toMatch(/duplicate public path/)
+    expect(error.message).toContain('PUBLIC_ORT_MODEL_PATH must differ from PUBLIC_MODEL_PATH')
+    expect(error.message).not.toContain(fixture.publicModelPath)
   })
 
-  it('rejects real, decoy, and public runtime object-key collisions', () => {
+  it('rejects real, decoy, and public runtime object-key collisions without embedding the key value', () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture)
     env.RUNTIME_WASM_OBJECT_KEY = fixture.realOrtModelObjectKey
 
-    expect(() => readWorkerConfig(env)).toThrow(/duplicate R2 object key/)
+    const error = readWorkerConfigError(env)
+
+    expect(error.message).toMatch(/duplicate R2 object key/)
+    expect(error.message).toContain('RUNTIME_WASM_OBJECT_KEY must differ from REAL_ORT_MODEL_OBJECT_KEY')
+    expect(error.message).not.toContain(fixture.realOrtModelObjectKey)
   })
 
   it('rejects control characters in configured object keys', () => {
@@ -70,5 +87,58 @@ describe('readWorkerConfig', () => {
     env.REAL_MODEL_OBJECT_KEY = `${fixture.realModelObjectKey}\nunsafe`
 
     expect(() => readWorkerConfig(env)).toThrow(/control characters/)
+  })
+
+  it('rejects double quotes in configured public paths', () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    env.PUBLIC_MODEL_PATH = `${fixture.publicModelPath}"`
+
+    const error = readWorkerConfigError(env)
+
+    expect(error.message).toBe('PUBLIC_MODEL_PATH must not contain quotes')
+  })
+
+  it('rejects single quotes in configured public paths', () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    env.PUBLIC_ORT_MODEL_PATH = `${fixture.publicOrtModelPath}'`
+
+    expect(() => readWorkerConfig(env)).toThrow('PUBLIC_ORT_MODEL_PATH must not contain quotes')
+  })
+
+  it('rejects backticks in configured public paths', () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    env.PUBLIC_RUNTIME_WASM_PATH = `${fixture.publicRuntimeWasmPath}\``
+
+    expect(() => readWorkerConfig(env)).toThrow('PUBLIC_RUNTIME_WASM_PATH must not contain quotes')
+  })
+
+  it('reuses the validated config for the same env object without re-validating', () => {
+    const env = createEnv(createModelFixture())
+    let invalidKeyModeReads = 0
+    Object.defineProperty(env, 'INVALID_KEY_MODE', {
+      configurable: true,
+      get() {
+        invalidKeyModeReads += 1
+        return undefined
+      },
+    })
+
+    readWorkerConfig(env)
+    readWorkerConfig(env)
+
+    expect(invalidKeyModeReads).toBe(1)
+  })
+
+  it('does not cache failed validations, so a repaired env validates again', () => {
+    const env = createEnv(createModelFixture())
+    env.REAL_MODEL_OBJECT_KEY = ''
+
+    expect(() => readWorkerConfig(env)).toThrow('REAL_MODEL_OBJECT_KEY is required')
+
+    env.REAL_MODEL_OBJECT_KEY = 'real/repaired.onnx'
+    expect(readWorkerConfig(env).realModelObjectKey).toBe('real/repaired.onnx')
   })
 })

@@ -89,6 +89,14 @@ Worker code rollback 不会自动恢复或改变 KV token、R2 object、Durable 
 
 若只是 `error` 模式误伤正常用户，可在确认后重新触发 workflow 并把 `invalid_key_mode` 改回 `decoy`。这仍是一次新的生产部署，不能由 checker 自动执行。
 
+## 待办运维项
+
+以下为已记录、尚未执行的运维事项，均与「安全边界」中接受的探测面权衡相关：
+
+- 生成与真实模型相同字节长度的诱饵对象并上传 R2，拉平 decoy 响应的 `Content-Length`，缩小通过 `HEAD` 元数据区分有效/无效 Key 的空间。
+- 将 KV 中历史保留的大写/混合大小写 token 变体迁移为单一 canonical 小写键，迁移完成前 Worker 需要继续按大小写变体回退查询。
+- 评估 decoy `GET` 是否补充一次等价的 Durable Object 往返以拉平有效与无效 Key 的计时差；该改动会为未授权请求增加 DO 调用成本，留作决策项。
+
 ## Cloudflare rate limit 建议
 
 - 在 Cloudflare Dashboard 针对 `models.ngnl.host/yolo26n-640.onnx` 配置按 IP 的速率限制规则。
