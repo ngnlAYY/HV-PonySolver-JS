@@ -11,6 +11,7 @@ node_modules/
 .tmp/
 .pi/
 /model/
+.zcode/
 .keyenv
 .workflow
 worker/wrangler.toml
