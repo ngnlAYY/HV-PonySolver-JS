@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { USERSCRIPT_METADATA } from '../src/userscript/metadata'
+import { USERSCRIPT_METADATA, USERSCRIPT_VERSION_PLACEHOLDER } from '../src/userscript/metadata'
 
 describe('USERSCRIPT_METADATA', () => {
   it('matches only HTTPS HentaiVerse pages', () => {
@@ -8,7 +8,17 @@ describe('USERSCRIPT_METADATA', () => {
     expect(USERSCRIPT_METADATA).toContain('// @include     https://alt.hentaiverse.org/*')
     expect(USERSCRIPT_METADATA).not.toContain('http*://')
     expect(USERSCRIPT_METADATA).not.toContain('http://')
-    expect(USERSCRIPT_METADATA).toContain('// @connect     cdn.jsdelivr.net')
-    expect(USERSCRIPT_METADATA).toContain('// @connect     models.ngnl.host')
+  })
+
+  it('declares the version through the build-time placeholder', () => {
+    expect(USERSCRIPT_METADATA).toContain(`// @version     ${USERSCRIPT_VERSION_PLACEHOLDER}`)
+    // The published version lives only in apps/userscript/package.json and is
+    // injected by scripts/build-userscript.mjs; no literal version may leak
+    // into the template.
+    expect(USERSCRIPT_METADATA).not.toMatch(/@version\s+\d+\.\d+\.\d+/)
+  })
+
+  it('does not declare ineffective @connect entries without GM_xmlhttpRequest', () => {
+    expect(USERSCRIPT_METADATA).not.toContain('@connect')
   })
 })

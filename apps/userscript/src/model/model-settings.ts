@@ -7,20 +7,24 @@ import {
 } from '@hv-pony-solver/browser-core'
 
 import { alertUser, promptUser } from '../userscript/gm-bridge'
-import { gmSettingsStorage } from '../userscript/gm-storage'
+import { sensitiveGmSettingsStorage } from '../userscript/gm-storage'
 
 export type VerifyModelAccessKey = (candidateKey: string) => Promise<void>
 
+// The model access key is a credential: it is stored only through GM storage,
+// never through the page-readable localStorage fallback.
+const modelAccessKeyStorage = sensitiveGmSettingsStorage
+
 export function getModelAccessKey(): Promise<string> {
-  return getCoreModelAccessKey(gmSettingsStorage)
+  return getCoreModelAccessKey(modelAccessKeyStorage)
 }
 
 export function setModelAccessKey(value: string): Promise<void> {
-  return setCoreModelAccessKey(gmSettingsStorage, value)
+  return setCoreModelAccessKey(modelAccessKeyStorage, value)
 }
 
 export function clearModelAccessKey(): Promise<void> {
-  return clearCoreModelAccessKey(gmSettingsStorage)
+  return clearCoreModelAccessKey(modelAccessKeyStorage)
 }
 
 export async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKey): Promise<void> {

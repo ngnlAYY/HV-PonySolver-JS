@@ -11,8 +11,12 @@ const appDir = resolve(import.meta.dirname, '..')
 describe('userscript build output', () => {
   it('builds the default external full runtime profile', async () => {
     const output = await buildUserscript()
+    const { version } = JSON.parse(await readFile(resolve(appDir, 'package.json'), 'utf8')) as { version: string }
     expect(output).toContain('// ==UserScript==')
     expect(output).toContain('// @name        HV-PonySolver-Local')
+    // @version is injected from apps/userscript/package.json at build time.
+    expect(output).toMatch(new RegExp(`^// @version     ${version.replace(/\./g, '\\.')}$`, 'm'))
+    expect(output).not.toContain('__HV_PONY_SOLVER_VERSION__')
     expect(output).toContain('DOMContentLoaded')
     expect(output).toContain('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js')
     expect(output).not.toContain('wasmBinary')

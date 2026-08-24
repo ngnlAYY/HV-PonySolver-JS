@@ -1,4 +1,8 @@
-import type { AppDependencies } from '@hv-pony-solver/browser-core'
+import {
+  ModelAccessKeyRejectedError,
+  probeModelAccessKey,
+  type AppDependencies,
+} from '@hv-pony-solver/browser-core'
 
 import { getAnswerMode } from '../captcha/answer-mode-settings'
 import { AnswerSubmitter } from '../captcha/answer-submitter'
@@ -20,12 +24,15 @@ export function createAppDependencies(getAbortSignal?: () => AbortSignal | undef
   const imageLoader = new CachedImageLoader()
   const answerSubmitter = new AnswerSubmitter()
   const solver = new CaptchaSolver(panel, detector, imageLoader, answerSubmitter, getAnswerMode, getAbortSignal)
+  // A HEAD probe settles Key validity without spending a monthly download:
+  // the Worker only meters GET, so verification no longer downloads the model
+  // or writes the cache. An invalid Key surfaces through the core rejected-Key
+  // copy rendered by the settings menu.
   const verifyModelAccessKey = async (candidateKey: string): Promise<void> => {
-    const modelBuffer = await modelCache.download(undefined, true, candidateKey)
-    try {
-      await modelCache.putCached(modelBuffer, true)
-    } catch {
-      // Key validation succeeds once a verified model downloads; cache failure is non-authoritative.
+    const normalizedKey = candidateKey.trim()
+    const probe = await probeModelAccessKey(undefined, { accessKeyOverride: normalizedKey })
+    if (!probe.valid) {
+      throw new ModelAccessKeyRejectedError()
     }
   }
 

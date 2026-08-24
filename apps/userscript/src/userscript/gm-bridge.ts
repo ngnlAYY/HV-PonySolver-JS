@@ -2,6 +2,14 @@ import { formatErrorMessage } from '@hv-pony-solver/browser-core'
 
 export type MaybePromise<T> = T | Promise<T>
 
+export type SetGmValueOptions = Readonly<{
+  /**
+   * True for values a page must never read (model access keys): without GM
+   * storage these refuse the same-origin localStorage fallback instead.
+   */
+  sensitive?: boolean
+}>
+
 type ModernGmApi = {
   getValue?: (key: string, defaultValue: string) => MaybePromise<unknown>
   setValue?: (key: string, value: string) => MaybePromise<void>
@@ -76,7 +84,7 @@ export function getGmValueSync(key: string, defaultValue = ''): string {
   return (safeStorage.getItem(key) ?? defaultValue).trim()
 }
 
-export async function setGmValue(key: string, value: string): Promise<void> {
+export async function setGmValue(key: string, value: string, options: SetGmValueOptions = {}): Promise<void> {
   const userscriptGlobal = getUserscriptGlobal()
   const modernGm = userscriptGlobal.GM
   if (typeof modernGm?.setValue === 'function') {
@@ -86,6 +94,9 @@ export async function setGmValue(key: string, value: string): Promise<void> {
   if (typeof userscriptGlobal.GM_setValue === 'function') {
     await userscriptGlobal.GM_setValue(key, value)
     return
+  }
+  if (options.sensitive) {
+    throw new Error('当前脚本管理器不支持 GM 存储，无法安全保存模型下载 Key；请改用支持 GM_setValue 的用户脚本管理器')
   }
   safeStorage.setItem(key, value)
 }

@@ -7,6 +7,11 @@ export function createBlobWorker(workerScript: string): Worker {
   const workerUrl = URL.createObjectURL(workerBlob)
   try {
     return new Worker(workerUrl)
+  } catch (error) {
+    if ((error as { name?: string } | null)?.name === 'SecurityError') {
+      throw new Error('当前页面的内容安全策略（CSP）阻止了 blob: Worker；请让站点放宽 worker-src 后重试', { cause: error })
+    }
+    throw error
   } finally {
     URL.revokeObjectURL(workerUrl)
   }

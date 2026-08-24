@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const STORAGE_KEY = 'hvPonySolverModelAccessKey'
+// The core setter enforces the Worker's token format (64 hex chars).
+const VALID_TOKEN = 'A'.repeat(64)
+const VALID_TOKEN_LOWER = VALID_TOKEN.toLowerCase()
 
 describe('model settings', () => {
   beforeEach(() => {
@@ -16,35 +19,64 @@ describe('model settings', () => {
     await expect(getModelAccessKey()).resolves.toBe('')
   })
 
-  it('trims and persists model access keys through localStorage fallback', async () => {
-    const { getModelAccessKey, setModelAccessKey } = await import('../../src/model/model-settings')
+  it('refuses to save keys through the page-readable localStorage fallback when GM storage is unavailable', async () => {
+    const { setModelAccessKey } = await import('../../src/model/model-settings')
 
-    await setModelAccessKey('  abc-123  ')
-
-    expect(localStorage.getItem(STORAGE_KEY)).toBe('abc-123')
-    await expect(getModelAccessKey()).resolves.toBe('abc-123')
+    await expect(setModelAccessKey(`  ${VALID_TOKEN}  `)).rejects.toThrow(
+      '当前脚本管理器不支持 GM 存储，无法安全保存模型下载 Key；请改用支持 GM_setValue 的用户脚本管理器',
+    )
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
   })
 
-  it('clears saved model access keys through localStorage fallback', async () => {
-    const { clearModelAccessKey, getModelAccessKey, setModelAccessKey } = await import('../../src/model/model-settings')
+  it('trims and normalizes keys before persisting them through GM storage', async () => {
+    const setValue = vi.fn(async () => undefined)
+    vi.stubGlobal('GM_setValue', setValue)
+    const { setModelAccessKey } = await import('../../src/model/model-settings')
 
-    await setModelAccessKey('abc-123')
+    await setModelAccessKey(`  ${VALID_TOKEN}  `)
+
+    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN_LOWER)
+  })
+
+  it('rejects saving a key that does not match the token format', async () => {
+    const { setModelAccessKey } = await import('../../src/model/model-settings')
+
+    await expect(setModelAccessKey('abc-123')).rejects.toThrow('模型下载 Key 格式无效')
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+  })
+
+  it('clears saved model access keys through GM storage', async () => {
+    const setValue = vi.fn(async () => undefined)
+    const deleteValue = vi.fn(async () => undefined)
+    vi.stubGlobal('GM_setValue', setValue)
+    vi.stubGlobal('GM_deleteValue', deleteValue)
+    const { clearModelAccessKey, setModelAccessKey } = await import('../../src/model/model-settings')
+
+    await setModelAccessKey(VALID_TOKEN)
     await clearModelAccessKey()
 
+    expect(deleteValue).toHaveBeenCalledWith(STORAGE_KEY)
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
-    await expect(getModelAccessKey()).resolves.toBe('')
   })
 
   it('saves a prompted key immediately when verification is not configured', async () => {
-    const prompt = vi.fn(() => '  direct-key  ')
+    const prompt = vi.fn(() => ` ${VALID_TOKEN} `)
     const alert = vi.fn()
+    const store = new Map<string, string>()
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
+    vi.stubGlobal(
+      'GM_setValue',
+      vi.fn(async (key: string, value: string) => {
+        store.set(key, value)
+      }),
+    )
+    vi.stubGlobal('GM_getValue', vi.fn(async (key: string, fallback: string) => store.get(key) ?? fallback))
     const { getModelAccessKey, setModelAccessKeyFromPrompt } = await import('../../src/model/model-settings')
 
     await setModelAccessKeyFromPrompt()
 
-    await expect(getModelAccessKey()).resolves.toBe('direct-key')
+    await expect(getModelAccessKey()).resolves.toBe(VALID_TOKEN_LOWER)
     expect(alert).toHaveBeenCalledWith('模型下载 Key 已保存')
   })
 
@@ -73,12 +105,11 @@ describe('model settings', () => {
     const { clearModelAccessKey, getModelAccessKey, setModelAccessKey } = await import('../../src/model/model-settings')
 
     await expect(getModelAccessKey()).resolves.toBe('gm-key')
-    await setModelAccessKey('  saved-gm-key  ')
+    await setModelAccessKey(VALID_TOKEN)
     await clearModelAccessKey()
 
     expect(getValue).toHaveBeenCalledWith(STORAGE_KEY, '')
-    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, 'saved-gm-key')
+    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN_LOWER)
     expect(deleteValue).toHaveBeenCalledWith(STORAGE_KEY)
   })
-
 })

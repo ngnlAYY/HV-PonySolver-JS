@@ -19,4 +19,17 @@ export const gmSettingsStorage: SettingsStorage = {
   },
 }
 
+/**
+ * Settings storage for sensitive values (the model access key): writes refuse
+ * the page-readable localStorage fallback when GM storage is unavailable.
+ */
+export const sensitiveGmSettingsStorage: SettingsStorage = {
+  get: gmSettingsStorage.get,
+  getSync: gmSettingsStorage.getSync,
+  async set(key: string, value: string): Promise<void> {
+    await setGmValue(key, value, { sensitive: true })
+  },
+  remove: gmSettingsStorage.remove,
+}
+
 export const userscriptHistoryStorage = safeStorage

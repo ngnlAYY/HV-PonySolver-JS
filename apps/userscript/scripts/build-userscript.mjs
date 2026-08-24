@@ -52,6 +52,19 @@ export function validateUserscriptMetadata(metadata) {
   if (!metadata.endsWith('// ==/UserScript==')) throw new Error('Userscript metadata must end with // ==/UserScript==')
 }
 
+const USERSCRIPT_VERSION_PLACEHOLDER = '__HV_PONY_SOLVER_VERSION__'
+
+/**
+ * Replaces the metadata version placeholder with the version declared in
+ * apps/userscript/package.json, keeping package.json the single source of truth.
+ */
+export function injectUserscriptVersion(metadata, version) {
+  if (!metadata.includes(USERSCRIPT_VERSION_PLACEHOLDER)) {
+    throw new Error(`Userscript metadata is missing the ${USERSCRIPT_VERSION_PLACEHOLDER} placeholder`)
+  }
+  return metadata.replaceAll(USERSCRIPT_VERSION_PLACEHOLDER, version)
+}
+
 export function createUserscriptOutput(metadata, bundledText) {
   return `${metadata}\n\n${bundledText}`
 }
@@ -179,11 +192,19 @@ async function main() {
     createMainBuildOptions({ entryPoint, shouldMinify, shouldWriteMetafile, workerScriptText }),
   )
   const mainText = outputText(mainResult, 'main')
+  // The metadata template is extracted from the TS source as before; the
+  // version placeholder is replaced at the final artifact level so that the
+  // published @version always matches apps/userscript/package.json.
+  const { version: userscriptVersion } = JSON.parse(await readFile(resolve(appDir, 'package.json'), 'utf8'))
+  if (typeof userscriptVersion !== 'string' || userscriptVersion.length === 0) {
+    throw new Error('apps/userscript/package.json is missing a version string')
+  }
   const metadataModule = await readFile(metadataPath, 'utf8')
   const metadataMatch = metadataModule.match(/`([\s\S]*?)`/)
   if (!metadataMatch?.[1]) throw new Error('Unable to read userscript metadata')
-  validateUserscriptMetadata(metadataMatch[1])
-  const output = createUserscriptOutput(metadataMatch[1], mainText)
+  const metadata = injectUserscriptVersion(metadataMatch[1], userscriptVersion)
+  validateUserscriptMetadata(metadata)
+  const output = createUserscriptOutput(metadata, mainText)
   await mkdir(dirname(outputPath), { recursive: true })
   await writeFile(outputPath, output)
 

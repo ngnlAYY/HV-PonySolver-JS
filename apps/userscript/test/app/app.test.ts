@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type * as BrowserCore from '@hv-pony-solver/browser-core'
+
 import { appendCaptcha } from '../../../../test/support/captcha-fixture'
 
 const prepare = vi.fn(async () => ({}) as Worker)
@@ -10,7 +12,18 @@ const registerSettingsMenu = vi.fn()
 const modelDownload = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
 const modelPutCached = vi.fn(async () => undefined)
 const modelClose = vi.fn()
+const { probeModelAccessKey } = vi.hoisted(() => ({
+  probeModelAccessKey: vi.fn<(signal?: AbortSignal, options?: { accessKeyOverride?: string }) => Promise<{
+    valid: boolean
+    quotaExceededRetryAfterSeconds: number | null
+  }>>(),
+}))
 const apps: Array<{ destroy: () => void }> = []
+
+vi.mock('@hv-pony-solver/browser-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof BrowserCore>()),
+  probeModelAccessKey,
+}))
 
 vi.mock('../../src/inference/onnx-worker-client', () => ({
   OnnxWorkerClient: vi.fn(function OnnxWorkerClientMock() {
@@ -53,6 +66,7 @@ describe('App', () => {
     detect.mockResolvedValue({ success: false, ponies: [], confidences: {}, detections: [], candidates: [] })
     modelDownload.mockResolvedValue(new Uint8Array([1, 2, 3]).buffer)
     modelPutCached.mockResolvedValue(undefined)
+    probeModelAccessKey.mockResolvedValue({ valid: true, quotaExceededRetryAfterSeconds: null })
     window.requestAnimationFrame = (callback: FrameRequestCallback): number => window.setTimeout(() => callback(0), 0)
     window.cancelAnimationFrame = (id: number): void => window.clearTimeout(id)
     apps.length = 0
@@ -101,7 +115,7 @@ describe('App', () => {
     expect(registerSettingsMenu).toHaveBeenCalledTimes(1)
   })
 
-  it('verifies and caches the model from the settings menu callback with the candidate key', async () => {
+  it('verifies the model access key through an unmetered HEAD probe without downloading', async () => {
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
@@ -110,12 +124,13 @@ describe('App', () => {
     const verify = registerSettingsMenu.mock.calls[0][0].onVerifyModelAccessKey
     await verify('candidate-key')
 
-    expect(modelDownload).toHaveBeenCalledWith(undefined, true, 'candidate-key')
-    expect(modelPutCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true)
+    expect(probeModelAccessKey).toHaveBeenCalledWith(undefined, { accessKeyOverride: 'candidate-key' })
+    expect(modelDownload).not.toHaveBeenCalled()
+    expect(modelPutCached).not.toHaveBeenCalled()
   })
 
-  it('keeps settings model key verification successful when caching the verified model fails', async () => {
-    modelPutCached.mockRejectedValueOnce(new Error('cache failed'))
+  it('rejects key verification when the HEAD probe reports an invalid key', async () => {
+    probeModelAccessKey.mockResolvedValue({ valid: false, quotaExceededRetryAfterSeconds: null })
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
@@ -123,9 +138,9 @@ describe('App', () => {
     app.init()
     const verify = registerSettingsMenu.mock.calls[0][0].onVerifyModelAccessKey
 
-    await expect(verify('settings-key')).resolves.toBeUndefined()
-    expect(modelDownload).toHaveBeenCalledWith(undefined, true, 'settings-key')
-    expect(modelPutCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true)
+    await expect(verify('rejected-key')).rejects.toThrow('模型 Key 无效或已失效，请在设置中重新验证 Key')
+    expect(modelDownload).not.toHaveBeenCalled()
+    expect(modelPutCached).not.toHaveBeenCalled()
   })
 
   it('coalesces DOM mutations into one captcha scan', async () => {
@@ -168,6 +183,9 @@ describe('App', () => {
 
   it('retries the same captcha after a failed solve', async () => {
     const { App } = await import('../../src/app/app')
+    // A rejecting detector fails the solve for good (no random fallback can
+    // rescue it), keeping the retry-on-mutation behavior observable.
+    detect.mockRejectedValue(new Error('inference failed'))
     const app = new App()
     apps.push(app)
 
@@ -277,13 +295,14 @@ describe('App', () => {
     detect
       .mockReturnValueOnce(
         new Promise((resolve) => {
-          resolveFirstDetect = () => resolve({
-            success: true,
-            ponies: ['TS'],
-            confidences: { TS: 0.9 },
-            detections: [{ class_id: 0, confidence: 0.9 }],
-            candidates: [{ class_id: 0, confidence: 0.9 }],
-          })
+          resolveFirstDetect = () =>
+            resolve({
+              success: true,
+              ponies: ['TS'],
+              confidences: { TS: 0.9 },
+              detections: [{ class_id: 0, confidence: 0.9 }],
+              candidates: [{ class_id: 0, confidence: 0.9 }],
+            })
         }),
       )
       .mockResolvedValue({

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// The core setter only persists Worker tokens (64 hex chars).
+const VALID_KEY = 'a'.repeat(64)
+const VALID_KEY_UPPER = VALID_KEY.toUpperCase()
+
 describe('settings menu', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -49,10 +53,12 @@ describe('settings menu', () => {
 
   it('sets the model key through the top-level settings menu after verification succeeds', async () => {
     const registerMenuCommand = vi.fn()
-    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce('  top-menu-key  ')
+    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(`  ${VALID_KEY_UPPER}  `)
     const alert = vi.fn()
+    const setValue = vi.fn(async () => undefined)
     const verify = vi.fn(async (_candidateKey: string) => undefined)
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('GM_setValue', setValue)
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
     const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
@@ -62,8 +68,8 @@ describe('settings menu', () => {
 
     expect(prompt).toHaveBeenNthCalledWith(1, expect.stringContaining('1. 设置模型下载 Key'), '1')
     expect(prompt).toHaveBeenNthCalledWith(2, '请输入模型下载 Key（已设置时不会回填原值；留空会清除）', '')
-    expect(verify).toHaveBeenCalledWith('top-menu-key')
-    expect(localStorage.getItem('hvPonySolverModelAccessKey')).toBe('top-menu-key')
+    expect(verify).toHaveBeenCalledWith(VALID_KEY_UPPER)
+    expect(setValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey', VALID_KEY)
     expect(alert).toHaveBeenCalledWith('模型下载和校验成功，Key 可用')
   })
 
@@ -90,9 +96,11 @@ describe('settings menu', () => {
 
   it('saves a valid model key when verification reports exhausted monthly quota', async () => {
     const registerMenuCommand = vi.fn()
-    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce('quota-key')
+    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(VALID_KEY)
     const alert = vi.fn()
+    const setValue = vi.fn(async () => undefined)
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('GM_setValue', setValue)
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
     const { ModelDownloadQuotaExceededError } = await import('@hv-pony-solver/browser-core')
@@ -104,7 +112,7 @@ describe('settings menu', () => {
     registerSettingsMenu({ onVerifyModelAccessKey: verify })
     await registerMenuCommand.mock.calls[0][1]()
 
-    expect(localStorage.getItem('hvPonySolverModelAccessKey')).toBe('quota-key')
+    expect(setValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey', VALID_KEY)
     expect(alert).toHaveBeenCalledWith('本月 5 次模型下载额度已用完')
   })
 
@@ -254,7 +262,7 @@ describe('settings menu', () => {
 
   it('reports model-key storage failures through the top-level menu', async () => {
     const registerMenuCommand = vi.fn()
-    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce('new-key')
+    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(VALID_KEY)
     const alert = vi.fn()
     const setValue = vi.fn(async () => {
       throw new Error('write failed')
@@ -268,7 +276,7 @@ describe('settings menu', () => {
     registerSettingsMenu({ onVerifyModelAccessKey: async () => undefined })
     await registerMenuCommand.mock.calls[0][1]()
 
-    expect(setValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey', 'new-key')
+    expect(setValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey', VALID_KEY)
     expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: write failed')
   })
 
@@ -339,7 +347,9 @@ describe('settings menu', () => {
     await registerMenuCommand.mock.calls[0][1]()
 
     expect(localStorage.getItem('hvPonySolverPanelPosition')).toBeNull()
-    expect(alert).toHaveBeenCalledWith('面板位置设置失败: Error: 面板位置格式无效，请输入非负整数 top,left，例如 150,1240')
+    expect(alert).toHaveBeenCalledWith(
+      '面板位置设置失败: Error: 面板位置格式无效，请输入非负整数 top,left，例如 150,1240',
+    )
   })
 
   it('reports model-key deletion failures through the top-level menu', async () => {

@@ -72,6 +72,7 @@ function createSolver(
       answerSubmitter: AnswerSubmitter
       getAnswerMode: () => Promise<'auto' | 'manual'>
       getAbortSignal: () => AbortSignal | undefined
+      randomOnFail: boolean
     }>
   > = {},
 ): Readonly<{
@@ -87,7 +88,15 @@ function createSolver(
   const answerSubmitter = overrides.answerSubmitter ?? createAnswerSubmitter()
   const getAnswerMode = overrides.getAnswerMode ?? vi.fn(async () => 'auto' as const)
   return {
-    solver: new CaptchaSolver(panel, detector, imageLoader, answerSubmitter, getAnswerMode, overrides.getAbortSignal),
+    solver: new CaptchaSolver(
+      panel,
+      detector,
+      imageLoader,
+      answerSubmitter,
+      getAnswerMode,
+      overrides.getAbortSignal,
+      overrides.randomOnFail,
+    ),
     panel,
     detector,
     imageLoader,
@@ -295,7 +304,7 @@ describe('CaptchaSolver', () => {
   it('reports image loading and detector stages before failed detection results', async () => {
     appendCaptcha()
     const detector = createDetector(vi.fn(async () => emptyDetectionResult(false)))
-    const { solver, panel, answerSubmitter } = createSolver({ detector })
+    const { solver, panel, answerSubmitter } = createSolver({ detector, randomOnFail: false })
 
     const result = await solver.trigger()
 
@@ -333,7 +342,7 @@ describe('CaptchaSolver', () => {
   it('reports empty successful detection results as having no answer to submit', async () => {
     appendCaptcha()
     const detector = createDetector(vi.fn(async () => emptyDetectionResult(true)))
-    const { solver, panel, answerSubmitter } = createSolver({ detector })
+    const { solver, panel, answerSubmitter } = createSolver({ detector, randomOnFail: false })
 
     const result = await solver.trigger()
 

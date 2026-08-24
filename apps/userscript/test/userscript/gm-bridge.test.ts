@@ -63,4 +63,31 @@ describe('gm-bridge', () => {
 
     expect(registerGmMenu('caption', vi.fn())).toBe(false)
   })
+
+  it('falls back to localStorage for non-sensitive values when GM storage is unavailable', async () => {
+    const { setGmValue } = await import('../../src/userscript/gm-bridge')
+
+    await expect(setGmValue('key', 'value')).resolves.toBeUndefined()
+    expect(localStorage.getItem('key')).toBe('value')
+  })
+
+  it('stores sensitive values through GM_setValue when it is available', async () => {
+    const gmSetValue = vi.fn(async () => undefined)
+    testGlobal.GM_setValue = gmSetValue
+    const { setGmValue } = await import('../../src/userscript/gm-bridge')
+
+    await expect(setGmValue('key', 'secret', { sensitive: true })).resolves.toBeUndefined()
+
+    expect(gmSetValue).toHaveBeenCalledWith('key', 'secret')
+    expect(localStorage.getItem('key')).toBeNull()
+  })
+
+  it('refuses the localStorage fallback for sensitive values when GM storage is unavailable', async () => {
+    const { setGmValue } = await import('../../src/userscript/gm-bridge')
+
+    await expect(setGmValue('key', 'secret', { sensitive: true })).rejects.toThrow(
+      '当前脚本管理器不支持 GM 存储，无法安全保存模型下载 Key；请改用支持 GM_setValue 的用户脚本管理器',
+    )
+    expect(localStorage.getItem('key')).toBeNull()
+  })
 })

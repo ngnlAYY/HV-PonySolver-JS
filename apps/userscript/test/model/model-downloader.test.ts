@@ -247,6 +247,68 @@ describe('downloadModel', () => {
     }
   })
 
+  it('keeps forwarding caller aborts to the body after headers arrive without AbortSignal.any', async () => {
+    const abortSignalConstructor = AbortSignal as typeof AbortSignal & { any?: typeof AbortSignal.any }
+    const originalAny = abortSignalConstructor.any
+    Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: undefined })
+
+    try {
+      const controller = new AbortController()
+      const fetchMock = vi.fn(
+        async (_url: string, options: RequestInit) =>
+          ({
+            ok: true,
+            headers: new Headers(),
+            arrayBuffer: async () => {
+              throw new Error('arrayBuffer should not be used')
+            },
+            body: new ReadableStream<Uint8Array>({
+              start(streamController) {
+                options.signal?.addEventListener('abort', () => streamController.error(new Error('body aborted')), {
+                  once: true,
+                })
+              },
+            }),
+          }) as unknown as Response,
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const downloadPromise = downloadModel(controller.signal)
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      // The abort fires after the fetch promise resolved; the polyfill must
+      // still forward it into the pending body read.
+      await Promise.resolve()
+      controller.abort()
+
+      await expect(downloadPromise).rejects.toThrow('body aborted')
+    } finally {
+      Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: originalAny })
+    }
+  })
+
+  it('releases the polyfilled abort listeners once the body finishes reading', async () => {
+    const abortSignalConstructor = AbortSignal as typeof AbortSignal & { any?: typeof AbortSignal.any }
+    const originalAny = abortSignalConstructor.any
+    Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: undefined })
+
+    try {
+      const controller = new AbortController()
+      const addSpy = vi.spyOn(controller.signal, 'addEventListener')
+      const removeSpy = vi.spyOn(controller.signal, 'removeEventListener')
+      const response = new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-length': '3' } })
+      vi.stubGlobal('fetch', vi.fn(async () => response))
+
+      const buffer = await downloadModel(controller.signal, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
+
+      expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3])
+      // Every abort listener attached to the caller signal (deadline guard and
+      // polyfill forwarders) must be removed again once the body is consumed.
+      expect(removeSpy.mock.calls.length).toBe(addSpy.mock.calls.length)
+    } finally {
+      Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: originalAny })
+    }
+  })
+
   it('rejects and cancels responses whose content length is larger than expected by default', async () => {
     const arrayBuffer = vi.fn()
     const cancel = vi.fn()

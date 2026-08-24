@@ -1,6 +1,12 @@
+// The @version line carries a literal __HV_PONY_SOLVER_VERSION__ placeholder.
+// It must stay verbatim inside this template literal: scripts/build-userscript.mjs
+// extracts the raw text between the backticks and replaces the placeholder with
+// the version declared in apps/userscript/package.json.
+export const USERSCRIPT_VERSION_PLACEHOLDER = '__HV_PONY_SOLVER_VERSION__'
+
 export const USERSCRIPT_METADATA = `// ==UserScript==
 // @name        HV-PonySolver-Local
-// @version     3.0.0
+// @version     __HV_PONY_SOLVER_VERSION__
 // @description 使用浏览器本地 ONNX Runtime Web 自动识别并答题小马验证码
 // @include     https://hentaiverse.org/*
 // @include     https://alt.hentaiverse.org/*
@@ -14,6 +20,4 @@ export const USERSCRIPT_METADATA = `// ==UserScript==
 // @grant       GM_setValue
 // @grant       GM_deleteValue
 // @run-at      document-end
-// @connect     cdn.jsdelivr.net
-// @connect     models.ngnl.host
 // ==/UserScript==`

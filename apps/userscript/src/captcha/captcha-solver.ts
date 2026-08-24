@@ -19,7 +19,8 @@ export class CaptchaSolver extends CoreCaptchaSolver {
     answerSubmitter: AnswerSubmissionService,
     getAnswerMode: () => Promise<AnswerMode>,
     getAbortSignal?: () => AbortSignal | undefined,
+    randomOnFail: boolean = solverConfig.randomOnFail,
   ) {
-    super(panel, detector, imageLoader, answerSubmitter, getAnswerMode, getAbortSignal, solverConfig.randomOnFail)
+    super(panel, detector, imageLoader, answerSubmitter, getAnswerMode, getAbortSignal, randomOnFail)
   }
 }
