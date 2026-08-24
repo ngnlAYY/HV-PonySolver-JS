@@ -168,7 +168,8 @@ describe('default remote options entry', () => {
     expect(input.value).toBe('')
   })
 
-  it('makes verify then clear latest-operation-wins with no late page mutation', async () => {    const verifyPort = controlledHostPort()
+  it('makes verify then clear latest-operation-wins with no late page mutation', async () => {
+    const verifyPort = controlledHostPort()
     const clearPort = successfulHostPort()
     platformMocks.runtimeConnect.mockReset().mockReturnValueOnce(verifyPort).mockReturnValueOnce(clearPort)
     await import('../../src/options/main')
@@ -363,11 +364,15 @@ describe('default remote options entry', () => {
     await import('../../src/options/main')
 
     optionsElement<HTMLButtonElement>('verify-key').click()
-    await vi.waitFor(() => expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('请先输入模型 Key'))
+    await vi.waitFor(() =>
+      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('Error: 请先输入模型 Key'),
+    )
     optionsElement<HTMLInputElement>('model-key').value = 'not-a-key'
     optionsElement<HTMLButtonElement>('verify-key').click()
     await vi.waitFor(() =>
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 必须是 64 位十六进制字符串'),
+      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe(
+        'Error: 模型 Key 必须是 64 位十六进制字符串',
+      ),
     )
     expect(platformMocks.runtimeConnect).not.toHaveBeenCalled()
   })
@@ -377,7 +382,7 @@ describe('default remote options entry', () => {
 
     await import('../../src/options/main')
 
-    await vi.waitFor(() => expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('设置读取失败'))
+    await vi.waitFor(() => expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('Error: 设置读取失败'))
     expect(platformMocks.runtimeConnect).not.toHaveBeenCalled()
   })
 })

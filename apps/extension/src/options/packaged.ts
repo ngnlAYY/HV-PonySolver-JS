@@ -1,9 +1,6 @@
-import {
-  createOptionsStatus,
-  errorMessage,
-  installOrdinarySettingsController,
-  optionsElement,
-} from './ordinary-settings'
+import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
+
+import { createOptionsStatus, installOrdinarySettingsController, optionsElement } from './ordinary-settings'
 
 export const PACKAGED_MODEL_HINT = '当前版本已内置模型，无需配置模型 Key。'
 
@@ -19,4 +16,4 @@ packagedModelHint.hidden = false
 cancelKeyOperationButton.hidden = true
 
 const ordinarySettings = installOrdinarySettingsController(status)
-void ordinarySettings.load().catch((error: unknown) => status.set(errorMessage(error), true))
+void ordinarySettings.load().catch((error: unknown) => status.set(formatErrorMessage(error), true))

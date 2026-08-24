@@ -41,6 +41,41 @@ describe('webextension offscreen and action adapters', () => {
     expect(api.action.onClicked.removeListener).toHaveBeenCalledTimes(1)
   })
 
+  it('warns when the callback-style openOptionsPage reports runtime.lastError', async () => {
+    const warnSpy = vi.spyOn(console, 'warn')
+    const api = rawExtensionApi()
+    const stubbedRuntime = { ...api.runtime, lastError: { message: 'cannot open options' } }
+    vi.stubGlobal('chrome', { ...api, runtime: stubbedRuntime })
+
+    registerOpenOptionsAction()
+    ;(api.action.onClicked as unknown as { emit(): void }).emit()
+    const callback = vi.mocked(stubbedRuntime.openOptionsPage).mock.calls[0]![0] as () => void
+    callback()
+
+    await vi.waitFor(() =>
+      expect(warnSpy).toHaveBeenCalledWith('[PonySolverLocal]', '打开设置页失败:', 'Error: cannot open options'),
+    )
+  })
+
+  it('warns when the promise-style openOptionsPage rejects', async () => {
+    const warnSpy = vi.spyOn(console, 'warn')
+    const api = rawExtensionApi()
+    vi.stubGlobal('browser', {
+      ...api,
+      runtime: {
+        ...api.runtime,
+        openOptionsPage: vi.fn(() => Promise.reject(new Error('options unavailable'))),
+      },
+    })
+
+    registerOpenOptionsAction()
+    ;(api.action.onClicked as unknown as { emit(): void }).emit()
+
+    await vi.waitFor(() =>
+      expect(warnSpy).toHaveBeenCalledWith('[PonySolverLocal]', '打开设置页失败:', 'Error: options unavailable'),
+    )
+  })
+
   it('fails closed when Chromium offscreen capabilities are absent', () => {
     const api = rawExtensionApi()
     const withoutOffscreen = { ...api, offscreen: undefined, runtime: { ...api.runtime, getContexts: undefined } }

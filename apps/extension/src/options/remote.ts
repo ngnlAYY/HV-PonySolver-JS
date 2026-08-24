@@ -1,3 +1,5 @@
+import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
+
 import { runtimeConnect } from '../platform/webextension'
 import {
   OPTIONS_PORT_NAME,
@@ -8,12 +10,7 @@ import {
   type HostSuccessResponse,
   type KeyIntentRequest,
 } from '../protocol/messages'
-import {
-  createOptionsStatus,
-  errorMessage,
-  installOrdinarySettingsController,
-  optionsElement,
-} from './ordinary-settings'
+import { createOptionsStatus, installOrdinarySettingsController, optionsElement } from './ordinary-settings'
 
 const status = createOptionsStatus()
 const ordinarySettings = installOrdinarySettingsController(status)
@@ -142,7 +139,7 @@ function enqueueKeyOperation(
         await operation(controller.signal, generation)
       } catch (error) {
         if (isCurrentOperation(generation, controller.signal)) {
-          status.set(errorMessage(error), true)
+          status.set(formatErrorMessage(error), true)
         }
       } finally {
         if (activeKeyController === controller) {
@@ -232,6 +229,6 @@ void ordinarySettings
   })
   .catch((error: unknown) => {
     if (keyGeneration === initialKeyGeneration) {
-      status.set(errorMessage(error), true)
+      status.set(formatErrorMessage(error), true)
     }
   })

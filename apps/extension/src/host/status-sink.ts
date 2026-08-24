@@ -4,6 +4,7 @@ import type {
   PanelStatus,
 } from '@hv-pony-solver/browser-core/status-panel/status-panel-types'
 
+import { pickForwardedHostFields, sessionReadyStatus } from './status-fields'
 import type { HostStatusUpdate } from '../protocol/messages'
 
 export type HostStatusEmitter = (status: HostStatusUpdate) => void
@@ -25,19 +26,13 @@ export function createForwardingStatusSink(emit: HostStatusEmitter): CacheStatus
     // Method parameters are bivariant, so accepting the full panel status
     // satisfies both the cache (model-only) and inference sink interfaces.
     setStatus(changes: Partial<PanelStatus>) {
-      const status: { model?: string; session?: string } = {}
-      if (typeof changes.model === 'string' && changes.model) {
-        status.model = changes.model
-      }
-      if (typeof changes.session === 'string' && changes.session) {
-        status.session = changes.session
-      }
+      const status = pickForwardedHostFields(changes)
       if (status.model !== undefined || status.session !== undefined) {
         emit(status)
       }
     },
     setSessionReady(elapsed) {
-      emit({ session: `已就绪 ${Number(elapsed) || 0}ms` })
+      emit(sessionReadyStatus(elapsed))
     },
   }
 }

@@ -1,8 +1,5 @@
 import { prepareDeadlineConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
-import type {
-  DetectorService,
-  YoloParseResult,
-} from '@hv-pony-solver/browser-core/inference/inference-types'
+import type { DetectorService, YoloParseResult } from '@hv-pony-solver/browser-core/inference/inference-types'
 import { PermanentModelError } from '@hv-pony-solver/browser-core/model/permanent-model-error'
 import type { InferenceStatusSink } from '@hv-pony-solver/browser-core/status-panel/status-panel-types'
 import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
@@ -20,6 +17,8 @@ import {
   type HostResponse,
   type HostSuccessResponse,
 } from '../protocol/messages'
+import { DETECT_DEADLINE_CONFIG } from '../protocol/deadlines'
+import { resetPrefetchMisses } from './prefetch'
 
 type PendingRequest = {
   resolve(response: HostResponse): void
@@ -49,11 +48,15 @@ export class RemoteDetectorClient implements DetectorService {
       this.statusSink.setStatus({ session: '初始化中' })
     }
     try {
-      await this.request({
-        protocol: PROTOCOL_VERSION,
-        type: 'prepare',
-        requestId: this.nextRequestId(),
-      }, prepareDeadlineConfig.contentTimeoutMs, signal)
+      await this.request(
+        {
+          protocol: PROTOCOL_VERSION,
+          type: 'prepare',
+          requestId: this.nextRequestId(),
+        },
+        prepareDeadlineConfig.contentTimeoutMs,
+        signal,
+      )
       this.assertNotAborted(signal)
       if (!this.destroyed && !silent) {
         this.statusSink.setSessionReady(Date.now() - startedAt)
@@ -68,6 +71,9 @@ export class RemoteDetectorClient implements DetectorService {
 
   async detect(blob: Blob, signal?: AbortSignal): Promise<YoloParseResult> {
     this.assertNotAborted(signal)
+    // A real detect on this page proves the session is being used, so the
+    // prefetch idle-backoff budget starts fresh again.
+    resetPrefetchMisses()
     let image: Awaited<ReturnType<typeof encodeImage>>
     try {
       image = await encodeImage(blob)
@@ -82,7 +88,7 @@ export class RemoteDetectorClient implements DetectorService {
         requestId: this.nextRequestId(),
         ...image,
       },
-      35_000,
+      DETECT_DEADLINE_CONFIG.clientTimeoutMs,
       signal,
     )
     if (!response.result) {

@@ -21,6 +21,7 @@ import {
   parsePanelPosition,
   serializePanelPosition,
 } from '@hv-pony-solver/browser-core/status-panel/panel-settings'
+import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 
 import { storageGetAll, storageSet } from '../platform/webextension'
 
@@ -48,10 +49,6 @@ export function createOptionsStatus(): OptionsStatus {
       output.dataset.kind = isError ? 'error' : 'success'
     },
   }
-}
-
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 type OrdinaryField =
@@ -305,7 +302,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
           }
         } catch (error) {
           if (generation === saveGeneration) {
-            status.set(errorMessage(error), true)
+            status.set(formatErrorMessage(error), true)
           }
         } finally {
           pendingSaves -= 1
@@ -328,7 +325,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
     try {
       intent = createSaveIntent()
     } catch (error) {
-      status.set(errorMessage(error), true)
+      status.set(formatErrorMessage(error), true)
       saveButton.disabled = pendingSaves > 0
       return
     }

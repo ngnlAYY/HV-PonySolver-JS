@@ -121,7 +121,8 @@ describe('ordinary options settings lifecycle', () => {
     platformMocks.storageSet.mockRejectedValueOnce(new Error('storage failed'))
 
     submitForm()
-    await vi.waitFor(() => expect(status).toHaveBeenLastCalledWith('storage failed', true))
+    // formatErrorMessage (browser-core) prefixes the class name, matching the panel rendering.
+    await vi.waitFor(() => expect(status).toHaveBeenLastCalledWith('Error: storage failed', true))
     expect(saveButton?.disabled).toBe(false)
     expect(platformMocks.storageSet).toHaveBeenCalledTimes(1)
 
@@ -130,6 +131,25 @@ describe('ordinary options settings lifecycle', () => {
     await vi.waitFor(() => expect(status).toHaveBeenLastCalledWith('设置已保存；已打开的游戏页面刷新后应用全部设置'))
     expect(platformMocks.storageSet).toHaveBeenCalledTimes(2)
     expect(platformMocks.storageSet).toHaveBeenLastCalledWith({ [ANSWER_MODE_STORAGE_KEY]: 'manual' })
+  })
+
+  it('shows the shared-formatter text for errors carrying the userMessage channel', async () => {
+    const status = await installAndLoad()
+    const answerMode = optionsElement<HTMLSelectElement>('answer-mode')
+    answerMode.value = 'manual'
+    answerMode.dispatchEvent(new Event('change', { bubbles: true }))
+    const permanentLike = Object.assign(new Error('internal detail'), {
+      name: 'PermanentModelError',
+      userMessage: '模型 Key 无效或已失效，请在设置中重新验证 Key',
+    })
+    platformMocks.storageSet.mockRejectedValueOnce(permanentLike)
+
+    submitForm()
+
+    // formatErrorMessage renders the userMessage channel verbatim, matching the panel.
+    await vi.waitFor(() =>
+      expect(status).toHaveBeenLastCalledWith('模型 Key 无效或已失效，请在设置中重新验证 Key', true),
+    )
   })
 
   it('serializes rapid submits and applies the newest intent last', async () => {

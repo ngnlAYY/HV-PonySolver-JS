@@ -128,13 +128,43 @@ describe('extension protocol', () => {
     expect([...new Uint8Array(await decoded.arrayBuffer())]).toEqual([1, 2, 3, 4])
   })
 
+  it('decodes without a full request rescan but keeps type, shape, and size validation', async () => {
+    type DetectRequestLike = Parameters<typeof decodeImage>[0]
+    // Upstream isOffscreenRequest already ran the full isHostRequest gate, so
+    // the trusted Host path only re-checks the detect discriminator here.
+    const trusted = { type: 'detect', imageBase64: 'AQID', mimeType: 'image/png' } as DetectRequestLike
+    expect([...new Uint8Array(await decodeImage(trusted).arrayBuffer())]).toEqual([1, 2, 3])
+
+    expect(() => decodeImage({ type: 'prepare' } as unknown as DetectRequestLike)).toThrow('验证码图片消息无效')
+    expect(() =>
+      decodeImage({ type: 'detect', imageBase64: 'AQI*', mimeType: 'image/png' } as DetectRequestLike),
+    ).toThrow('验证码图片编码无效')
+    expect(() =>
+      decodeImage({ type: 'detect', imageBase64: 'AQID', mimeType: 'image/svg+xml' } as DetectRequestLike),
+    ).toThrow('验证码图片类型不受支持')
+    expect(() => decodeImage({ type: 'detect', imageBase64: '', mimeType: 'image/png' } as DetectRequestLike)).toThrow(
+      '验证码图片编码无效',
+    )
+  })
+
   it('rejects oversized, malformed, and credential-shaped messages', () => {
+    // The exact floor-formula boundary still validates; one quad above it cannot.
+    const maxBase64Length = Math.floor(MAX_IMAGE_BYTE_LENGTH / 3) * 4
     expect(
       isHostRequest({
         protocol: PROTOCOL_VERSION,
         type: 'detect',
         requestId: 'request-1',
-        imageBase64: 'A'.repeat(Math.ceil(MAX_IMAGE_BYTE_LENGTH / 3) * 4 + 4),
+        imageBase64: 'A'.repeat(maxBase64Length),
+        mimeType: 'image/png',
+      }),
+    ).toBe(true)
+    expect(
+      isHostRequest({
+        protocol: PROTOCOL_VERSION,
+        type: 'detect',
+        requestId: 'request-1b',
+        imageBase64: `${'A'.repeat(maxBase64Length)}AAAA`,
         mimeType: 'image/png',
       }),
     ).toBe(false)

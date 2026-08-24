@@ -21,6 +21,7 @@ vi.mock('../../src/platform/webextension', async (importOriginal) => {
 
 import {
   BROKER_DEFAULT_TIMEOUT_MS,
+  BROKER_DETECT_TIMEOUT_MS,
   MAX_GLOBAL_DETECT_REQUESTS,
   MAX_GLOBAL_VERIFY_KEY_REQUESTS,
   MAX_PORT_DETECT_REQUESTS,
@@ -588,7 +589,7 @@ describe('broker queue and privilege boundaries', () => {
     expect(signal?.aborted).toBe(true)
   })
 
-  it('broadcasts credential changes only after successful Key verification', async () => {
+  it('broadcasts credential changes after successful Key verification and clearing', async () => {
     const responses: HostResponse[] = [
       {
         protocol: PROTOCOL_VERSION,
@@ -599,7 +600,15 @@ describe('broker queue and privilege boundaries', () => {
         errorKind: 'permanent-model',
       },
       { protocol: PROTOCOL_VERSION, type: 'result', requestId: 'verify-61', ok: true },
-      { protocol: PROTOCOL_VERSION, type: 'result', requestId: 'clear-62', ok: true },
+      {
+        protocol: PROTOCOL_VERSION,
+        type: 'result',
+        requestId: 'clear-62',
+        ok: false,
+        error: 'clear failed',
+        errorKind: 'transient',
+      },
+      { protocol: PROTOCOL_VERSION, type: 'result', requestId: 'clear-63', ok: true },
     ]
     const invokeHost = vi.fn(async () => responses.shift()!)
     registerBroker(invokeHost)
@@ -610,27 +619,56 @@ describe('broker queue and privilege boundaries', () => {
     })
     platformMocks.connectListener?.(content)
     platformMocks.connectListener?.(options)
+    const credentialNotifications = (): number =>
+      vi
+        .mocked(content.postMessage)
+        .mock.calls.filter(([message]) => (message as { type?: string }).type === 'model-credentials-changed').length
 
     options.emitMessage(verifyKeyRequest(60))
-    await vi.waitFor(() => expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'verify-60' })))
-    expect(content.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'model-credentials-changed' }))
+    await vi.waitFor(() =>
+      expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'verify-60' })),
+    )
+    expect(credentialNotifications()).toBe(0)
 
     options.emitMessage(verifyKeyRequest(61))
-    await vi.waitFor(() =>
-      expect(content.postMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ protocol: PROTOCOL_VERSION, type: 'model-credentials-changed' }),
-      ),
-    )
-    const notificationsBeforeClear = vi.mocked(content.postMessage).mock.calls.filter(
-      ([message]) => (message as { type?: string }).type === 'model-credentials-changed',
-    ).length
+    await vi.waitFor(() => expect(credentialNotifications()).toBe(1))
 
+    // A failed clear stays silent.
     options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-62' })
-    await vi.waitFor(() => expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'clear-62' })))
-    const notificationsAfterClear = vi.mocked(content.postMessage).mock.calls.filter(
-      ([message]) => (message as { type?: string }).type === 'model-credentials-changed',
-    ).length
-    expect(notificationsAfterClear).toBe(notificationsBeforeClear)
+    await vi.waitFor(() =>
+      expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'clear-62' })),
+    )
+    expect(credentialNotifications()).toBe(1)
+
+    // A successful clear lets content scripts exit failure suppression at once.
+    options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-63' })
+    await vi.waitFor(() => expect(credentialNotifications()).toBe(2))
+  })
+
+  it('warns instead of silently swallowing a failed credentials revision persist', async () => {
+    const warnSpy = vi.spyOn(console, 'warn')
+    vi.mocked(storageSet).mockRejectedValueOnce(new Error('storage quota exceeded'))
+    const invokeHost = vi.fn(async (request: { requestId: string }): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    }))
+    registerBroker(invokeHost)
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(options)
+
+    options.emitMessage(verifyKeyRequest(0))
+
+    await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[PonySolverLocal]'),
+      expect.stringContaining('凭证版本持久化失败'),
+      expect.stringContaining('storage quota exceeded'),
+    )
   })
 
   it('disconnects the options Port when the selected product disallows Key operations', () => {
@@ -674,8 +712,19 @@ describe('broker queue and privilege boundaries', () => {
     expect(vi.mocked(storageSet).mock.calls[0]![0]).toEqual({
       hvPonySolverModelCredentialsRevision: expect.any(String) as string,
     })
-    expect(content.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'model-credentials-changed' }),
-    )
+    expect(content.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'model-credentials-changed' }))
+
+    // Clearing the Key persists the recovery revision through the same path.
+    options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-1' })
+    await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(2))
+  })
+
+  it('derives the broker detect deadline from the shared detect deadline config', async () => {
+    const { DETECT_DEADLINE_CONFIG } = await import('../../src/protocol/deadlines')
+    expect(BROKER_DETECT_TIMEOUT_MS).toBe(DETECT_DEADLINE_CONFIG.brokerTimeoutMs)
+    // The staged budgets keep their historical values: worker 30s < client 35s < broker 40s.
+    expect(DETECT_DEADLINE_CONFIG.workerTimeoutMs).toBe(30_000)
+    expect(DETECT_DEADLINE_CONFIG.clientTimeoutMs).toBe(35_000)
+    expect(DETECT_DEADLINE_CONFIG.brokerTimeoutMs).toBe(40_000)
   })
 })

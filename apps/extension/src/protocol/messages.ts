@@ -80,10 +80,7 @@ export type OffscreenIdleConfirmationRequest = Readonly<{
 }>
 
 export type OffscreenMessage =
-  | OffscreenClaimRequest
-  | OffscreenRequest
-  | OffscreenCancelRequest
-  | OffscreenIdleConfirmationRequest
+  OffscreenClaimRequest | OffscreenRequest | OffscreenCancelRequest | OffscreenIdleConfirmationRequest
 
 export type OffscreenClaimResponse = Readonly<{
   type: typeof OFFSCREEN_MESSAGE_TYPE
@@ -173,7 +170,9 @@ function isMimeType(value: unknown): value is string {
 }
 
 function isBase64(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > Math.ceil(MAX_IMAGE_BYTE_LENGTH / 3) * 4) {
+  // floor() keeps the worst-case decoded size at or below MAX_IMAGE_BYTE_LENGTH;
+  // ceil() would admit an encoding that decodes to exactly one byte too many.
+  if (typeof value !== 'string' || value.length === 0 || value.length > Math.floor(MAX_IMAGE_BYTE_LENGTH / 3) * 4) {
     return false
   }
   return value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value)
@@ -449,11 +448,7 @@ export function errorResponse(
   }
 }
 
-export function successResponse(
-  requestId: string,
-  result?: YoloParseResult,
-  notice?: string,
-): HostSuccessResponse {
+export function successResponse(requestId: string, result?: YoloParseResult, notice?: string): HostSuccessResponse {
   return {
     protocol: PROTOCOL_VERSION,
     type: 'result',
@@ -498,8 +493,17 @@ export async function encodeImage(blob: Blob): Promise<Pick<DetectRequest, 'imag
 }
 
 export function decodeImage(request: DetectRequest): Blob {
-  if (!isHostRequest(request) || request.type !== 'detect') {
+  // The upstream isOffscreenRequest gate has already run the full isHostRequest
+  // validation; this sits on the trusted Host path, so only the detect type is
+  // re-checked here. Length and base64 shape are still validated explicitly.
+  if (request.type !== 'detect') {
     throw new Error('验证码图片消息无效')
+  }
+  if (!isBase64(request.imageBase64)) {
+    throw new Error('验证码图片编码无效')
+  }
+  if (!isMimeType(request.mimeType)) {
+    throw new Error('验证码图片类型不受支持')
   }
   let binary: string
   try {

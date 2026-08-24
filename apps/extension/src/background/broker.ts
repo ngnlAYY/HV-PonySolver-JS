@@ -1,5 +1,8 @@
+import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
+import { warn } from '@hv-pony-solver/browser-core/utils/logger'
 import { prepareDeadlineConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
 
+import { pickForwardedHostFields } from '../host/status-fields'
 import {
   addRuntimeConnectListener,
   runtimeGetUrl,
@@ -8,7 +11,8 @@ import {
   type ExtensionPort,
   type ExtensionSender,
 } from '../platform/webextension'
-import { MODEL_CREDENTIALS_REVISION_KEY, nextModelCredentialsRevision } from '../model-credentials-revision'
+import { MODEL_CREDENTIALS_REVISION_KEY, nextModelCredentialsRevision } from '../protocol/model-credentials-revision'
+import { DETECT_DEADLINE_CONFIG } from '../protocol/deadlines'
 import {
   CONTENT_PORT_NAME,
   OPTIONS_PORT_NAME,
@@ -38,7 +42,7 @@ export const MAX_PORT_PREPARE_REQUESTS = 2
 export const MAX_GLOBAL_PREPARE_REQUESTS = 4
 export const MAX_PORT_VERIFY_KEY_REQUESTS = 1
 export const MAX_GLOBAL_VERIFY_KEY_REQUESTS = 2
-export const BROKER_DETECT_TIMEOUT_MS = 40_000
+export const BROKER_DETECT_TIMEOUT_MS = DETECT_DEADLINE_CONFIG.brokerTimeoutMs
 export const BROKER_PREPARE_TIMEOUT_MS = prepareDeadlineConfig.brokerTimeoutMs
 export const BROKER_DEFAULT_TIMEOUT_MS = 105_000
 
@@ -128,7 +132,9 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
     broadcast(modelCredentialsChangedMessage())
     // The broadcast only reaches Ports of this service-worker generation; the
     // persisted revision lets a later content-script generation recover too.
-    void storageSet({ [MODEL_CREDENTIALS_REVISION_KEY]: nextModelCredentialsRevision() }).catch(() => undefined)
+    void storageSet({ [MODEL_CREDENTIALS_REVISION_KEY]: nextModelCredentialsRevision() }).catch((error: unknown) => {
+      warn('凭证版本持久化失败:', formatErrorMessage(error))
+    })
   }
 
   const dispose = addRuntimeConnectListener((port) => {
@@ -286,7 +292,10 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
           if (!isHostResponse(response) || response.requestId !== message.requestId) {
             throw new Error('推理 Host 返回无效或错配消息')
           }
-          if (message.type === 'verify-key' && response.ok) {
+          if ((message.type === 'verify-key' || message.type === 'clear-key') && response.ok) {
+            // Both credential transitions must reach content scripts live, so a
+            // cleared Key exits the failure-suppression window immediately
+            // instead of waiting for the persisted-revision poll.
             broadcastCredentialsChanged()
           }
           post(response)
@@ -313,13 +322,7 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
   return {
     dispose,
     broadcastContentStatus(status: HostStatusUpdate): void {
-      const update: { model?: string; session?: string } = {}
-      if (typeof status.model === 'string' && status.model) {
-        update.model = status.model
-      }
-      if (typeof status.session === 'string' && status.session) {
-        update.session = status.session
-      }
+      const update = pickForwardedHostFields(status)
       if (update.model === undefined && update.session === undefined) {
         return
       }

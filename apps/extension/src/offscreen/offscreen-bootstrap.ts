@@ -1,5 +1,7 @@
 import type { InferenceHost } from '../host/inference-host'
 import type { HostStatusEmitter } from '../host/status-sink'
+import { warn } from '@hv-pony-solver/browser-core/utils/logger'
+
 import { addRuntimeMessageListener, runtimeGetUrl, runtimeId, sendRuntimeMessage } from '../platform/webextension'
 import {
   OFFSCREEN_MESSAGE_TYPE,
@@ -16,7 +18,15 @@ import {
 export type OffscreenInferenceHostFactory = (emitStatus: HostStatusEmitter) => InferenceHost
 
 export const OFFSCREEN_IDLE_TIMEOUT_MS = 30_000
-export const OFFSCREEN_IDLE_NOTIFICATION_RETRY_MS = 5_000
+/** Base delay of the exponential idle-notification backoff: 5s -> 10s -> 20s -> 40s, capped. */
+export const OFFSCREEN_IDLE_NOTIFICATION_RETRY_BASE_MS = 5_000
+export const OFFSCREEN_IDLE_NOTIFICATION_MAX_RETRY_MS = 60_000
+/**
+ * Upper bound on idle notifications for one idle generation. Without it a
+ * service worker that never confirms (or never manages to close this document)
+ * would be woken forever on a fixed cadence.
+ */
+export const MAX_OFFSCREEN_IDLE_NOTIFICATIONS = 10
 export const MAX_OFFSCREEN_DETECT_REQUESTS = 6
 export const MAX_OFFSCREEN_PREPARE_REQUESTS = 4
 export const MAX_OFFSCREEN_KEY_REQUESTS = 2
@@ -40,6 +50,7 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
   let lifecycleGeneration = 0
   let idleGeneration: number | null = null
   let idleTimeoutId: ReturnType<typeof setTimeout> | null = null
+  let idleRetryAttempts = 0
   let hostDestroyed = false
   const activeRequests = new Map<string, ActiveOffscreenRequest>()
   const cancelledRequestIds = new Set<string>()
@@ -51,32 +62,46 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
     }
   }
 
+  const resetIdleRetries = (): void => {
+    idleRetryAttempts = 0
+  }
+
+  function idleRetryDelayMs(attempt: number): number {
+    return Math.min(
+      OFFSCREEN_IDLE_NOTIFICATION_RETRY_BASE_MS * 2 ** (attempt - 1),
+      OFFSCREEN_IDLE_NOTIFICATION_MAX_RETRY_MS,
+    )
+  }
+
   const sendIdleNotification = (epoch: string, generation: number): void => {
     if (currentEpoch !== epoch || idleGeneration !== generation || activeRequests.size !== 0) {
       return
     }
+    if (idleRetryAttempts >= MAX_OFFSCREEN_IDLE_NOTIFICATIONS) {
+      // The service worker never confirmed this generation as closed. Stop
+      // waking it forever; the next request or claim restarts the heartbeat.
+      warn(`Offscreen 空闲通知连续 ${MAX_OFFSCREEN_IDLE_NOTIFICATIONS} 次未完成关闭，暂停心跳`)
+      return
+    }
+    idleRetryAttempts += 1
+    const attempt = idleRetryAttempts
     const notification: OffscreenIdleMessage = {
       type: OFFSCREEN_MESSAGE_TYPE,
       operation: 'idle',
       epoch,
       generation,
     }
+    const scheduleRetry = (): void => {
+      if (currentEpoch === epoch && idleGeneration === generation && activeRequests.size === 0) {
+        idleTimeoutId = setTimeout(() => sendIdleNotification(epoch, generation), idleRetryDelayMs(attempt))
+      }
+    }
     try {
       void Promise.resolve(sendRuntimeMessage(notification))
         .catch(() => undefined)
-        .finally(() => {
-          if (currentEpoch === epoch && idleGeneration === generation && activeRequests.size === 0) {
-            idleTimeoutId = setTimeout(
-              () => sendIdleNotification(epoch, generation),
-              OFFSCREEN_IDLE_NOTIFICATION_RETRY_MS,
-            )
-          }
-        })
+        .finally(scheduleRetry)
     } catch {
-      idleTimeoutId = setTimeout(
-        () => sendIdleNotification(epoch, generation),
-        OFFSCREEN_IDLE_NOTIFICATION_RETRY_MS,
-      )
+      scheduleRetry()
     }
   }
 
@@ -86,6 +111,7 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
     }
     clearIdleTimer()
     idleGeneration = null
+    resetIdleRetries()
     const epoch = currentEpoch
     const generation = ++lifecycleGeneration
     idleTimeoutId = setTimeout(() => {
@@ -101,6 +127,7 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
   const beginActivity = (): void => {
     clearIdleTimer()
     idleGeneration = null
+    resetIdleRetries()
     lifecycleGeneration += 1
   }
 
@@ -205,6 +232,11 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
     }
 
     if (message.operation === 'confirm-idle') {
+      if (message.epoch === currentEpoch && message.generation === idleGeneration) {
+        // The worker acknowledged this idle generation (and will try to close
+        // the document); a failed close restarts the backoff from the base.
+        resetIdleRetries()
+      }
       const response: OffscreenIdleConfirmationResponse = {
         type: OFFSCREEN_MESSAGE_TYPE,
         operation: 'idle-confirmed',
@@ -235,12 +267,7 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
       return false
     }
 
-    const kind =
-      message.request.type === 'detect'
-        ? 'detect'
-        : message.request.type === 'prepare'
-          ? 'prepare'
-          : 'key'
+    const kind = message.request.type === 'detect' ? 'detect' : message.request.type === 'prepare' ? 'prepare' : 'key'
     const atCapacity =
       (kind === 'detect' && countKind(kind) >= MAX_OFFSCREEN_DETECT_REQUESTS) ||
       (kind === 'prepare' && countKind(kind) >= MAX_OFFSCREEN_PREPARE_REQUESTS) ||

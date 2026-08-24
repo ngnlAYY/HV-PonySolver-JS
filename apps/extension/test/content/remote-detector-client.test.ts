@@ -5,10 +5,11 @@ import { isPermanentModelError } from '@hv-pony-solver/browser-core/model/perman
 import type { ExtensionPort } from '../../src/platform/webextension'
 import type * as WebExtensionModule from '../../src/platform/webextension'
 
-type TestPort = ExtensionPort & Readonly<{
-  emitMessage(message: unknown): void
-  emitDisconnect(): void
-}>
+type TestPort = ExtensionPort &
+  Readonly<{
+    emitMessage(message: unknown): void
+    emitDisconnect(): void
+  }>
 
 const platformMocks = vi.hoisted(() => ({
   ports: [] as TestPort[],
@@ -21,6 +22,7 @@ vi.mock('../../src/platform/webextension', async (importOriginal) => {
 })
 
 import { RemoteDetectorClient } from '../../src/content/remote-detector-client'
+import { PREFETCH_MISS_STORAGE_KEY } from '../../src/content/prefetch'
 import { PROTOCOL_VERSION } from '../../src/protocol/messages'
 
 function createPort(): TestPort {
@@ -367,6 +369,23 @@ describe('RemoteDetectorClient', () => {
     const error = await preparePromise.catch((caught: unknown) => caught)
     expect(isPermanentModelError(error)).toBe(true)
     expect(error).toMatchObject({ userMessage: '模型 Key 无效或已失效，请在设置中重新验证 Key' })
+  })
+
+  it('clears the prefetch idle-backoff budget as soon as a real detect starts', async () => {
+    globalThis.sessionStorage.setItem(PREFETCH_MISS_STORAGE_KEY, '3')
+    const client = new RemoteDetectorClient(statusSink())
+    const detectPromise = client.detect(new Blob([new Uint8Array([1])], { type: 'image/png' }))
+    await vi.waitFor(() => expect(platformMocks.ports[0]?.postMessage).toHaveBeenCalledTimes(1))
+    expect(globalThis.sessionStorage.getItem(PREFETCH_MISS_STORAGE_KEY)).toBeNull()
+
+    const request = vi.mocked(platformMocks.ports[0]!.postMessage).mock.calls[0]![0] as { requestId: string }
+    platformMocks.ports[0]!.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    })
+    await expect(detectPromise).rejects.toThrow('扩展推理 Host 未返回识别结果')
   })
 
   it('reports image encoding failures and rejects successful detections without a result', async () => {

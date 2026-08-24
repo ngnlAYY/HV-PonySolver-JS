@@ -1,3 +1,6 @@
+import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
+import { warn } from '@hv-pony-solver/browser-core/utils/logger'
+
 import { getChromiumOffscreenApi, runtimeGetUrl } from '../platform/webextension'
 
 let creatingDocument: Promise<void> | null = null
@@ -88,8 +91,11 @@ export async function closeOffscreenDocumentIfIdle(confirmIdle: () => Promise<bo
         return
       }
       await offscreen.closeDocument()
-    } catch {
-      // Offscreen repeats the authoritative idle notification while it remains alive.
+    } catch (error) {
+      // Offscreen repeats the authoritative idle notification (with backoff)
+      // while it remains alive, so closing stays best-effort — but the failure
+      // itself is reported instead of being swallowed.
+      warn('关闭空闲 Offscreen 文档失败:', formatErrorMessage(error))
     }
   })()
   closingDocument = operation

@@ -1,3 +1,6 @@
+import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
+import { warn } from '@hv-pony-solver/browser-core/utils/logger'
+
 import {
   addRuntimeMessageListener,
   registerOpenOptionsAction,
@@ -18,11 +21,7 @@ import {
   type OffscreenClaimResponse,
 } from '../protocol/messages'
 import { registerBroker, type BrokerHandle, type BrokerPolicy } from './broker'
-import {
-  acquireOffscreenAdmission,
-  closeOffscreenDocumentIfIdle,
-  hasOffscreenDocument,
-} from './chromium-offscreen'
+import { acquireOffscreenAdmission, closeOffscreenDocumentIfIdle, hasOffscreenDocument } from './chromium-offscreen'
 
 const serviceWorkerEpoch = (() => {
   try {
@@ -215,7 +214,11 @@ function claimExistingOffscreen(broadcast: (status: HostStatusUpdate) => void): 
         await confirmAndCloseIdleGeneration(claim.idleGeneration)
       }
     })
-    .catch(() => undefined)
+    .catch((error: unknown) => {
+      // Startup-only best-effort reclaim: a surviving document still recovers
+      // through the per-request claim path, but silence hid real breakage.
+      warn('接管既有 Offscreen 推理文档失败:', formatErrorMessage(error))
+    })
 }
 
 export function registerChromiumBackground(policy: BrokerPolicy = { allowOptions: true }): void {

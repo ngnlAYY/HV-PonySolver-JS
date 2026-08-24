@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { watchModelCredentialsRevision } from '../../src/content/credentials-watch'
-import { MODEL_CREDENTIALS_REVISION_KEY } from '../../src/model-credentials-revision'
 import type { CommittedChangeListener, ExtensionStorageMirror } from '../../src/content/storage-mirror'
+import { MODEL_CREDENTIALS_REVISION_KEY } from '../../src/protocol/model-credentials-revision'
 
 function mirrorWithListeners(): {
   mirror: ExtensionStorageMirror

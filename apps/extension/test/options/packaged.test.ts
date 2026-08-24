@@ -127,7 +127,7 @@ describe('packaged options entry', () => {
     await import('../../src/options/packaged')
 
     await vi.waitFor(() => {
-      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('<img src=x onerror=alert(1)>')
+      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('Error: <img src=x onerror=alert(1)>')
     })
     expect(optionsElement<HTMLOutputElement>('status').dataset.kind).toBe('error')
     expect(document.querySelector('img')).toBeNull()
