@@ -13,6 +13,7 @@ import { StatusPanel } from '@hv-pony-solver/browser-core/status-panel/status-pa
 import { logError } from '@hv-pony-solver/browser-core/utils/logger'
 
 import { RemoteDetectorClient } from './remote-detector-client'
+import { watchModelCredentialsRevision } from './credentials-watch'
 import { startContentRuntime } from './content-runtime'
 import { scheduleExperiencedPrefetch } from './prefetch'
 import { ExtensionStorageMirror } from './storage-mirror'
@@ -20,12 +21,12 @@ import { ExtensionStorageMirror } from './storage-mirror'
 function createContentApp(storage: ExtensionStorageMirror): App {
   const history = new HistoryStore(storage)
   const panel = new StatusPanel(history, storage)
-  const detector = new RemoteDetectorClient(panel)
+  const appReference: { current: App | null } = { current: null }
+  const detector = new RemoteDetectorClient(panel, () => appReference.current?.recoverAfterModelCredentialsChanged())
   const answerSubmitter = new AnswerSubmitter(
     () => getSubmitDelayRange(storage),
     () => getMultiClickDelayRange(storage),
   )
-  const appReference: { current: App | null } = { current: null }
   const solver = new CaptchaSolver(
     panel,
     detector,
@@ -42,7 +43,8 @@ function createContentApp(storage: ExtensionStorageMirror): App {
     dispose: () => storage.destroy(),
   })
   appReference.current = app
-  scheduleExperiencedPrefetch(storage, detector, () => appReference.current?.getAbortSignal())
+  watchModelCredentialsRevision(storage, () => appReference.current?.recoverAfterModelCredentialsChanged())
+  scheduleExperiencedPrefetch(history, detector, () => appReference.current?.getAbortSignal())
   return app
 }
 

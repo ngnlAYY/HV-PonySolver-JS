@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { DetectorService, YoloParseResult } from '@hv-pony-solver/browser-core'
+import { ModelAccessKeyRejectedError } from '@hv-pony-solver/browser-core/model/model-download-error'
 
 import { InferenceHost, type InferenceHostDependencies } from '../../src/host/inference-host'
 import { PROTOCOL_VERSION } from '../../src/protocol/messages'
@@ -45,6 +46,29 @@ describe('InferenceHost', () => {
       }),
     ).resolves.toMatchObject({ ok: true, requestId: 'detect-1', result: detectionResult })
     expect(deps.detector.detect).toHaveBeenCalledWith(expect.any(Blob), expect.any(AbortSignal))
+  })
+
+  it('classifies only permanent model failures as permanent protocol errors', async () => {
+    const deps = dependencies()
+    vi.mocked(deps.detector.prepare)
+      .mockRejectedValueOnce(new ModelAccessKeyRejectedError())
+      .mockRejectedValueOnce(new Error('network unavailable'))
+    const host = new InferenceHost(deps)
+
+    await expect(
+      host.handle({ protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'prepare-permanent' }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: '模型 Key 无效或已失效，请在设置中重新验证 Key',
+      errorKind: 'permanent-model',
+    })
+    await expect(
+      host.handle({ protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'prepare-transient' }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: 'Error: network unavailable',
+      errorKind: 'transient',
+    })
   })
 
   it('stores a candidate Key only after a verified model download', async () => {

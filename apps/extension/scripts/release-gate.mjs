@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto'
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -7,6 +6,7 @@ import { ANSWER_CODES } from '@hv-pony-solver/shared/answer'
 import { ORT_MODEL_FILENAME, ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared/ort-model'
 
 import { assertExactMinimumBrowserVersion, assertSupportedBrowserVersion } from './browser-support.mjs'
+import { discoverPackagedArtifact, verifyPackagedArchive } from './packaged-smoke-artifact.mjs'
 
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const canonicalIdentity = Object.freeze({
@@ -48,14 +48,7 @@ function assertSameArchive(actual, expected, label) {
   }
 }
 
-async function assertPackagedManifestSecurity(outputRoot, target) {
-  const manifestPath = path.join(outputRoot, target, 'manifest.json')
-  let manifest
-  try {
-    manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-  } catch (error) {
-    throw new Error(`${target} packaged manifest is missing or invalid`, { cause: error })
-  }
+function assertPackagedManifestSecurity(manifest, target) {
   if (manifest?.content_security_policy?.extension_pages !== packagedContentSecurityPolicy) {
     throw new Error(`${target} packaged manifest has an unexpected extension page CSP`)
   }
@@ -129,6 +122,9 @@ export function validateFirefoxAndroidEvidence(record, firefoxArtifact) {
   ) {
     throw new Error(`${label} is absent or invalid`)
   }
+  if (record.fixture === true || Object.hasOwn(record, 'oracle')) {
+    throw new Error(`${label} cannot attest a canonical release`)
+  }
   assertExactMinimumBrowserVersion('firefox-android', record.browserVersion)
   if (
     typeof record.device?.model !== 'string' ||
@@ -157,13 +153,10 @@ function assertCanonicalEnvironment(environment) {
   if (url.protocol !== 'https:') {
     throw new Error('PACKAGED_MODEL_URL must use HTTPS')
   }
-  const authenticationRequired = environment.PACKAGED_MODEL_AUTH_REQUIRED === 'true'
-  if (
-    environment.PACKAGED_MODEL_AUTH_REQUIRED !== undefined &&
-    !['true', 'false'].includes(environment.PACKAGED_MODEL_AUTH_REQUIRED)
-  ) {
-    throw new Error('PACKAGED_MODEL_AUTH_REQUIRED must be true or false')
+  if (environment.PACKAGED_MODEL_AUTH_REQUIRED !== 'true' && environment.PACKAGED_MODEL_AUTH_REQUIRED !== 'false') {
+    throw new Error('PACKAGED_MODEL_AUTH_REQUIRED must be explicitly true or false')
   }
+  const authenticationRequired = environment.PACKAGED_MODEL_AUTH_REQUIRED === 'true'
   if (authenticationRequired && !environment.PACKAGED_MODEL_BEARER_TOKEN) {
     throw new Error('PACKAGED_MODEL_BEARER_TOKEN is required for publication')
   }
@@ -238,33 +231,17 @@ export function createCanonicalAttestation(evidence) {
 }
 
 async function discoverArtifacts(outputRoot) {
-  const artifacts = []
-  for (const name of (await readdir(outputRoot)).filter((entry) => entry.endsWith('.artifact.json')).sort()) {
-    const artifact = JSON.parse(await readFile(path.join(outputRoot, name), 'utf8'))
-    if (requiredTargets.includes(artifact.target) && artifact.modelDelivery === 'packaged') {
-      const archiveName = artifact.archive?.archiveName
-      if (!archiveName || path.basename(archiveName) !== archiveName) {
-        throw new Error(`${artifact.target} artifact archive path is invalid`)
-      }
-      const archivePath = path.join(outputRoot, archiveName)
-      const archiveBytes = await readFile(archivePath)
-      const actualArchiveSha256 = createHash('sha256').update(archiveBytes).digest('hex')
-      if (archiveBytes.byteLength !== artifact.archive.byteLength || actualArchiveSha256 !== artifact.archive.sha256) {
-        throw new Error(`${artifact.target} archive bytes do not match artifact metadata`)
-      }
-      const sidecar = (await readFile(`${archivePath}.sha256`, 'utf8')).trim()
-      const expectedSidecar = `${actualArchiveSha256}  ${archiveName}`
-      if (sidecar !== expectedSidecar) {
-        throw new Error(`${artifact.target} archive checksum sidecar is invalid`)
-      }
-      await assertPackagedManifestSecurity(outputRoot, artifact.target)
-      artifacts.push(artifact)
-    }
-  }
-  return artifacts
+  return Promise.all(
+    requiredTargets.map(async (target) => {
+      const packagedArtifact = await discoverPackagedArtifact(outputRoot, target)
+      const verification = await verifyPackagedArchive(packagedArtifact)
+      assertPackagedManifestSecurity(verification.manifest, target)
+      return packagedArtifact.artifact
+    }),
+  )
 }
 
-function parseArguments(args) {
+export function parseArguments(args) {
   const command = args.shift()
   if (!['attest', 'preflight'].includes(command)) {
     throw new Error(
@@ -278,7 +255,11 @@ function parseArguments(args) {
   while (args.length > 0) {
     const option = args.shift()
     const value = args.shift()
-    if (!value || !['--output-root', '--evidence-dir', '--attestation', '--android-evidence'].includes(option)) {
+    if (
+      !value ||
+      value.startsWith('--') ||
+      !['--output-root', '--evidence-dir', '--attestation', '--android-evidence'].includes(option)
+    ) {
       throw new Error(`Invalid release gate argument: ${option ?? ''}`)
     }
     const key = {

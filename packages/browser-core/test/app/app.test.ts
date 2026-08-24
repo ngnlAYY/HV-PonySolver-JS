@@ -4,6 +4,7 @@ import { App } from '../../src/app/app'
 import type { AppDependencies, SolverService } from '../../src/app/app-dependencies'
 import type { CaptchaTarget } from '../../src/captcha/captcha-target'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
+import { PermanentModelError } from '../../src/model/permanent-model-error'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
 import { appendCaptcha } from '../../../../test/support/captcha-fixture'
 
@@ -247,6 +248,88 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(1)
   })
 
+  it('does not retry a reconstructed permanent model prepare failure', async () => {
+    appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare).mockRejectedValue(
+      new PermanentModelError('模型 Key 无效或已失效，请在设置中重新验证 Key'),
+    )
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+    expect(harness.trigger).not.toHaveBeenCalled()
+  })
+
+  it('retries the same failed captcha exactly once after model credentials change', async () => {
+    appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare)
+      .mockRejectedValueOnce(new PermanentModelError('模型 Key 无效'))
+      .mockResolvedValue(undefined)
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+    expect(harness.trigger).not.toHaveBeenCalled()
+
+    harness.app.recoverAfterModelCredentialsChanged()
+    harness.app.recoverAfterModelCredentialsChanged()
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    harness.app.recoverAfterModelCredentialsChanged()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+  })
+
+  it('invalidates an in-flight old-credential prepare and retries the same captcha once', async () => {
+    let resolveOldPrepare: (() => void) | undefined
+    appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare)
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveOldPrepare = resolve
+        }),
+      )
+      .mockResolvedValue(undefined)
+    apps.push(harness.app)
+
+    harness.app.init()
+    await vi.advanceTimersByTimeAsync(100)
+    await Promise.resolve()
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+
+    harness.app.recoverAfterModelCredentialsChanged()
+    resolveOldPrepare?.()
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry a normally handled captcha after model credentials change', async () => {
+    appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    harness.app.recoverAfterModelCredentialsChanged()
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+  })
+
   it('caps prepare retries for one target and does not restart them after unrelated mutations', async () => {
     const captcha = appendCaptcha('/captcha.png')
     const harness = createHarness()
@@ -264,6 +347,39 @@ describe('App', () => {
 
     expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
     expect(harness.trigger).not.toHaveBeenCalled()
+  })
+
+  it('retries a transient-failure suppression once its expiry passes', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare).mockRejectedValue(new Error('host down'))
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
+
+    vi.setSystemTime(Date.now() + 31_000)
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(6)
+    expect(harness.trigger).not.toHaveBeenCalled()
+  })
+
+  it('keeps an unexpected solver exception recoverable through credentials change', async () => {
+    appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    harness.trigger.mockRejectedValueOnce(new Error('面板异常'))
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    harness.app.recoverAfterModelCredentialsChanged()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
   })
 
   it('aborts and suppresses late work during destroy, then can initialize a fresh lifecycle', async () => {

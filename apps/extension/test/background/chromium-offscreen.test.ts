@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   closeDocument: vi.fn<() => Promise<void>>(),
@@ -22,15 +22,10 @@ async function lifecycle() {
 
 describe('Chromium offscreen lifecycle', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
     vi.resetModules()
     vi.clearAllMocks()
     mocks.closeDocument.mockResolvedValue(undefined)
     mocks.createDocument.mockResolvedValue(undefined)
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
   })
 
   it('coalesces concurrent creation attempts', async () => {
@@ -54,127 +49,98 @@ describe('Chromium offscreen lifecycle', () => {
 
   it('does not create another document when a matching context exists', async () => {
     mocks.getContexts.mockResolvedValue([{}])
-    const { ensureOffscreenDocument } = await lifecycle()
+    const { ensureOffscreenDocument, hasOffscreenDocument } = await lifecycle()
 
+    await expect(hasOffscreenDocument()).resolves.toBe(true)
     await ensureOffscreenDocument()
 
     expect(mocks.createDocument).not.toHaveBeenCalled()
   })
 
-  it('closes only after the final active or queued lease becomes idle', async () => {
-    mocks.getContexts.mockResolvedValueOnce([]).mockResolvedValue([{}])
-    const { OFFSCREEN_IDLE_TIMEOUT_MS, acquireOffscreenDocument } = await lifecycle()
-    const releaseFirst = await acquireOffscreenDocument()
-    const releaseSecond = await acquireOffscreenDocument()
+  it('does not close while a request is being admitted', async () => {
+    mocks.getContexts.mockResolvedValueOnce([])
+    const { acquireOffscreenAdmission, closeOffscreenDocumentIfIdle } = await lifecycle()
+    const release = await acquireOffscreenAdmission()
+    const confirmIdle = vi.fn(async () => true)
 
-    releaseFirst()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
+    await closeOffscreenDocumentIfIdle(confirmIdle)
+
+    expect(confirmIdle).not.toHaveBeenCalled()
     expect(mocks.closeDocument).not.toHaveBeenCalled()
-
-    releaseSecond()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
-  })
-
-  it('never creates a document for a retention lease alone', async () => {
-    mocks.getContexts.mockResolvedValue([{}])
-    const { OFFSCREEN_IDLE_TIMEOUT_MS, retainOffscreenDocument } = await lifecycle()
-
-    const release = retainOffscreenDocument()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-
-    // A connected Port must keep a live document warm without spawning one.
-    expect(mocks.createDocument).not.toHaveBeenCalled()
-    expect(mocks.closeDocument).not.toHaveBeenCalled()
-
     release()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
   })
 
-  it('keeps the document warm across separate requests while a retention lease is held', async () => {
-    mocks.getContexts.mockResolvedValueOnce([]).mockResolvedValue([{}])
-    const { OFFSCREEN_IDLE_TIMEOUT_MS, acquireOffscreenDocument, retainOffscreenDocument } = await lifecycle()
-    const releaseRetention = retainOffscreenDocument()
+  it('requires an authoritative idle confirmation before closing', async () => {
+    mocks.getContexts.mockResolvedValue([{}])
+    const { closeOffscreenDocumentIfIdle } = await lifecycle()
 
-    for (let index = 0; index < 3; index += 1) {
-      const release = await acquireOffscreenDocument()
-      release()
-      await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-    }
-
-    // The session survives the idle window between captchas, so it is built once.
-    expect(mocks.createDocument).toHaveBeenCalledTimes(1)
+    await closeOffscreenDocumentIfIdle(async () => false)
     expect(mocks.closeDocument).not.toHaveBeenCalled()
 
-    releaseRetention()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
+    await closeOffscreenDocumentIfIdle(async () => true)
+    expect(mocks.closeDocument).toHaveBeenCalledTimes(1)
   })
 
-  it('ignores a repeated retention release', async () => {
+  it('coalesces concurrent close attempts', async () => {
+    let resolveConfirmation: ((idle: boolean) => void) | undefined
+    const confirmation = new Promise<boolean>((resolve) => {
+      resolveConfirmation = resolve
+    })
     mocks.getContexts.mockResolvedValue([{}])
-    const { OFFSCREEN_IDLE_TIMEOUT_MS, acquireOffscreenDocument, retainOffscreenDocument } = await lifecycle()
-    const releaseRetention = retainOffscreenDocument()
-    const releaseRequest = await acquireOffscreenDocument()
+    const { closeOffscreenDocumentIfIdle } = await lifecycle()
 
-    releaseRetention()
-    releaseRetention()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-    // The double release must not cancel the still-active request lease.
-    expect(mocks.closeDocument).not.toHaveBeenCalled()
+    const first = closeOffscreenDocumentIfIdle(() => confirmation)
+    const second = closeOffscreenDocumentIfIdle(async () => true)
+    resolveConfirmation?.(true)
+    await Promise.all([first, second])
 
-    releaseRequest()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
+    expect(mocks.closeDocument).toHaveBeenCalledTimes(1)
   })
 
-  it('closes a stranded offscreen document through startup idle reconciliation', async () => {
-    mocks.getContexts.mockResolvedValue([{}])
-    const { OFFSCREEN_IDLE_TIMEOUT_MS, scheduleOffscreenIdleReconciliation } = await lifecycle()
-
-    scheduleOffscreenIdleReconciliation()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-
-    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
-  })
-
-  it('lets startup idle reconciliation yield to leases taken after the restart', async () => {
-    mocks.getContexts.mockResolvedValue([{}])
-    const { OFFSCREEN_IDLE_TIMEOUT_MS, retainOffscreenDocument, scheduleOffscreenIdleReconciliation } = await lifecycle()
-
-    scheduleOffscreenIdleReconciliation()
-    const release = retainOffscreenDocument()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-    expect(mocks.closeDocument).not.toHaveBeenCalled()
-
-    release()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
-  })
-
-  it('waits for an in-progress idle close and recreates before admitting a racing request', async () => {
+  it('waits for an in-progress close and recreates before admitting a racing request', async () => {
     let resolveClose: (() => void) | undefined
-    mocks.getContexts.mockResolvedValueOnce([]).mockResolvedValueOnce([{}]).mockResolvedValueOnce([])
+    mocks.getContexts.mockResolvedValueOnce([{}]).mockResolvedValueOnce([])
     mocks.closeDocument.mockReturnValueOnce(
       new Promise<void>((resolve) => {
         resolveClose = resolve
       }),
     )
-    const { OFFSCREEN_IDLE_TIMEOUT_MS, acquireOffscreenDocument } = await lifecycle()
-    const releaseFirst = await acquireOffscreenDocument()
-    releaseFirst()
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
-    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
+    const { acquireOffscreenAdmission, closeOffscreenDocumentIfIdle } = await lifecycle()
 
-    const racingLease = acquireOffscreenDocument()
+    const close = closeOffscreenDocumentIfIdle(async () => true)
+    await vi.waitFor(() => expect(mocks.closeDocument).toHaveBeenCalledTimes(1))
+    const racingAdmission = acquireOffscreenAdmission()
     await Promise.resolve()
-    expect(mocks.createDocument).toHaveBeenCalledTimes(1)
+    expect(mocks.createDocument).not.toHaveBeenCalled()
 
     resolveClose?.()
-    const releaseRacing = await racingLease
+    await close
+    const release = await racingAdmission
 
-    expect(mocks.createDocument).toHaveBeenCalledTimes(2)
-    releaseRacing()
+    expect(mocks.createDocument).toHaveBeenCalledTimes(1)
+    release()
+  })
+
+  it('keeps admission release idempotent', async () => {
+    mocks.getContexts.mockResolvedValueOnce([]).mockResolvedValue([{}])
+    const { acquireOffscreenAdmission, closeOffscreenDocumentIfIdle } = await lifecycle()
+    const release = await acquireOffscreenAdmission()
+
+    release()
+    release()
+    await closeOffscreenDocumentIfIdle(async () => true)
+
+    expect(mocks.closeDocument).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves cleanup retryable when close fails', async () => {
+    mocks.getContexts.mockResolvedValue([{}])
+    mocks.closeDocument.mockRejectedValueOnce(new Error('close failed')).mockResolvedValueOnce(undefined)
+    const { closeOffscreenDocumentIfIdle } = await lifecycle()
+
+    await expect(closeOffscreenDocumentIfIdle(async () => true)).resolves.toBeUndefined()
+    await expect(closeOffscreenDocumentIfIdle(async () => true)).resolves.toBeUndefined()
+
+    expect(mocks.closeDocument).toHaveBeenCalledTimes(2)
   })
 })

@@ -47,6 +47,9 @@ const packagedModelIdentity = Object.freeze({
 const packagedModelSource = path.join(repositoryRoot, 'model', ORT_MODEL_FILENAME)
 const packagedModelIdentityModule = path.join(extensionRoot, 'src', 'host', 'packaged-model-identity.ts')
 const fixtureIdentityNamespace = 'fixture-packaged-model-identity'
+const fixtureDetectHookModule = path.join(extensionRoot, 'src', 'host', 'fixture-detect-hook.ts')
+const fixtureDetectHookNamespace = 'fixture-detect-hook'
+const fixtureDetectDelayMarker = 'hv-pony-fixture-detect-delay'
 
 const contentMatches = ['https://hentaiverse.org/*', 'https://alt.hentaiverse.org/*']
 const contentExcludes = [
@@ -347,6 +350,27 @@ function packagedModelIdentityPlugin(identity) {
   }
 }
 
+function fixtureDetectHookPlugin() {
+  return {
+    name: fixtureDetectHookNamespace,
+    setup(buildApi) {
+      buildApi.onResolve({ filter: /^\.\/fixture-detect-hook$/ }, (args) => {
+        const resolved = path.resolve(args.resolveDir, `${args.path}.ts`)
+        if (resolved !== fixtureDetectHookModule) {
+          return undefined
+        }
+        return { path: 'fixture-detect-hook', namespace: fixtureDetectHookNamespace }
+      })
+      buildApi.onLoad({ filter: /.*/, namespace: fixtureDetectHookNamespace }, () => ({
+        contents: `export const fixtureBeforeDetect = () => new Promise((resolve) => setTimeout(resolve, 5000, ${JSON.stringify(
+          fixtureDetectDelayMarker,
+        )}));`,
+        loader: 'js',
+      }))
+    },
+  }
+}
+
 async function assertRuntimeAssets() {
   const [wasmBytes, glueBytes] = await Promise.all([readFile(runtimeWasmSource), readFile(runtimeGlueSource)])
   if (sha256(wasmBytes) !== runtimeWasmSha256) {
@@ -537,6 +561,15 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
       throw new Error(`${file.relativePath} references remote executable code`)
     }
   }
+  if (options.fixture !== true) {
+    for (const [relativePath, source] of javascriptSources) {
+      if (source.includes(fixtureDetectDelayMarker)) {
+        throw new Error(
+          `${target} ${relativePath} contains the fixture detect-delay marker: ${fixtureDetectDelayMarker}`,
+        )
+      }
+    }
+  }
   if (modelDelivery === 'packaged') {
     const remoteCapability =
       /https:\/\/models\.ngnl\.host|hvPonySolverExtensionSecrets|hvPonySolverModelAccessKey|Bearer /u
@@ -652,7 +685,12 @@ async function buildTarget(outputRoot, target, options = {}) {
     alias: {
       'onnxruntime-web/wasm': runtimeGlueSource,
     },
-    plugins: [extensionRuntimeGluePlugin()],
+    plugins: [
+      extensionRuntimeGluePlugin(),
+      ...(options.fixture === true && modelDelivery === 'packaged' && target === 'chromium'
+        ? [fixtureDetectHookPlugin()]
+        : []),
+    ],
   })
   await cp(path.join(extensionRoot, 'public', 'options.html'), path.join(targetDirectory, 'options.html'))
   await cp(path.join(extensionRoot, 'public', 'options.css'), path.join(targetDirectory, 'options.css'))

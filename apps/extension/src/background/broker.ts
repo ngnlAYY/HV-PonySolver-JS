@@ -1,10 +1,14 @@
+import { prepareDeadlineConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
+
 import {
   addRuntimeConnectListener,
   runtimeGetUrl,
   runtimeId,
+  storageSet,
   type ExtensionPort,
   type ExtensionSender,
 } from '../platform/webextension'
+import { MODEL_CREDENTIALS_REVISION_KEY, nextModelCredentialsRevision } from '../model-credentials-revision'
 import {
   CONTENT_PORT_NAME,
   OPTIONS_PORT_NAME,
@@ -12,6 +16,7 @@ import {
   isCancelRequest,
   isHostRequest,
   isHostResponse,
+  modelCredentialsChangedMessage,
   portStatusMessage,
   successResponse,
   type HostRequest,
@@ -22,17 +27,9 @@ import {
 export type HostInvoker = (request: HostRequest, signal: AbortSignal) => Promise<HostResponse>
 export type BrokerPolicy = Readonly<{
   allowOptions: boolean
-  /**
-   * Called when a trusted content Port connects; the returned callback runs once
-   * that Port disconnects. Lets a host keep warm resources alive for as long
-   * as a captcha page is actually connected.
-   */
-  onContentConnected?: () => () => void
 }>
 export type BrokerHandle = Readonly<{
-  /** Removes the runtime connect listener. */
   dispose(): void
-  /** Pushes a Host stage update to every currently connected content Port. */
   broadcastContentStatus(status: HostStatusUpdate): void
 }>
 export const MAX_PORT_DETECT_REQUESTS = 2
@@ -42,6 +39,7 @@ export const MAX_GLOBAL_PREPARE_REQUESTS = 4
 export const MAX_PORT_VERIFY_KEY_REQUESTS = 1
 export const MAX_GLOBAL_VERIFY_KEY_REQUESTS = 2
 export const BROKER_DETECT_TIMEOUT_MS = 40_000
+export const BROKER_PREPARE_TIMEOUT_MS = prepareDeadlineConfig.brokerTimeoutMs
 export const BROKER_DEFAULT_TIMEOUT_MS = 105_000
 
 function senderUrl(sender: ExtensionSender | undefined): string {
@@ -75,7 +73,10 @@ export function isTrustedPort(port: ExtensionPort, ownExtensionId: string, optio
 }
 
 function requestTimeoutMs(request: HostRequest): number {
-  return request.type === 'detect' ? BROKER_DETECT_TIMEOUT_MS : BROKER_DEFAULT_TIMEOUT_MS
+  if (request.type === 'detect') {
+    return BROKER_DETECT_TIMEOUT_MS
+  }
+  return request.type === 'prepare' ? BROKER_PREPARE_TIMEOUT_MS : BROKER_DEFAULT_TIMEOUT_MS
 }
 
 function invokeWithTimeout(
@@ -114,7 +115,22 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
   let globalDetectRequests = 0
   let globalPrepareRequests = 0
   let globalVerifyKeyRequests = 0
-  const contentPorts = new Set<ExtensionPort>()
+  let latestHostStatus: HostStatusUpdate = {}
+  const contentPorts = new Map<ExtensionPort, (message: unknown) => boolean>()
+
+  const broadcast = (message: unknown): void => {
+    for (const post of [...contentPorts.values()]) {
+      post(message)
+    }
+  }
+
+  const broadcastCredentialsChanged = (): void => {
+    broadcast(modelCredentialsChangedMessage())
+    // The broadcast only reaches Ports of this service-worker generation; the
+    // persisted revision lets a later content-script generation recover too.
+    void storageSet({ [MODEL_CREDENTIALS_REVISION_KEY]: nextModelCredentialsRevision() }).catch(() => undefined)
+  }
+
   const dispose = addRuntimeConnectListener((port) => {
     if (!isTrustedPort(port, runtimeId(), runtimeGetUrl('options.html'))) {
       port.disconnect()
@@ -124,23 +140,11 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       port.disconnect()
       return
     }
-    if (port.name === CONTENT_PORT_NAME) {
-      contentPorts.add(port)
-    }
+
     let connected = true
     let portDetectRequests = 0
     let portPrepareRequests = 0
     let portVerifyKeyRequests = 0
-    // Held for the Port's lifetime so the host can keep warm resources alive
-    // while a captcha page stays connected.
-    let releaseRetention: (() => void) | undefined
-    if (port.name === CONTENT_PORT_NAME) {
-      try {
-        releaseRetention = policy.onContentConnected?.()
-      } catch {
-        // Retention is an optimization; a failure must not refuse the Port.
-      }
-    }
     type RequestEntry = {
       readonly requestId: string
       readonly controller: AbortController
@@ -154,12 +158,12 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       }
     }
     const markDisconnected = (): void => {
+      if (!connected) {
+        return
+      }
       connected = false
       contentPorts.delete(port)
       abortEntries()
-      const release = releaseRetention
-      releaseRetention = undefined
-      release?.()
     }
     const disconnect = (): void => {
       if (!connected) {
@@ -172,12 +176,12 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         // The Port is already considered closed locally.
       }
     }
-    const post = (response: HostResponse): boolean => {
+    const post = (message: unknown): boolean => {
       if (!connected) {
         return false
       }
       try {
-        port.postMessage(response)
+        port.postMessage(message)
         return true
       } catch {
         disconnect()
@@ -189,7 +193,9 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         return
       }
       entry.released = true
-      entries.delete(entry.requestId)
+      if (entries.get(entry.requestId) === entry) {
+        entries.delete(entry.requestId)
+      }
       if (entry.kind === 'detect') {
         portDetectRequests -= 1
         globalDetectRequests -= 1
@@ -201,17 +207,17 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         globalVerifyKeyRequests -= 1
       }
     }
+
     port.onDisconnect.addListener(markDisconnected)
-    port.onMessage.addListener((message) => {      if (!connected) {
+    port.onMessage.addListener((message) => {
+      if (!connected) {
         return
       }
       if (isCancelRequest(message)) {
-        if (port.name !== CONTENT_PORT_NAME) {
+        if (port.name !== CONTENT_PORT_NAME || entries.has(message.requestId)) {
           disconnect()
           return
         }
-        // Cancelling an unknown or already-settled request is a harmless no-op,
-        // so the broker always acknowledges and never disconnects for it.
         entries.get(message.cancelRequestId)?.controller.abort(new Error('推理客户端请求已取消'))
         post(successResponse(message.requestId))
         return
@@ -225,6 +231,10 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         return
       }
       if (port.name === OPTIONS_PORT_NAME && message.type !== 'verify-key' && message.type !== 'clear-key') {
+        disconnect()
+        return
+      }
+      if (entries.has(message.requestId)) {
         disconnect()
         return
       }
@@ -276,6 +286,9 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
           if (!isHostResponse(response) || response.requestId !== message.requestId) {
             throw new Error('推理 Host 返回无效或错配消息')
           }
+          if (message.type === 'verify-key' && response.ok) {
+            broadcastCredentialsChanged()
+          }
           post(response)
         })
         .catch((error: unknown) => {
@@ -288,18 +301,30 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
           release(entry)
         })
     })
+
+    if (port.name === CONTENT_PORT_NAME) {
+      contentPorts.set(port, post)
+      if (Object.keys(latestHostStatus).length > 0) {
+        post(portStatusMessage(latestHostStatus))
+      }
+    }
   })
+
   return {
     dispose,
     broadcastContentStatus(status: HostStatusUpdate): void {
-      for (const port of contentPorts) {
-        try {
-          port.postMessage(portStatusMessage(status))
-        } catch {
-          // The Port is dead from the broker's point of view; drop it.
-          contentPorts.delete(port)
-        }
+      const update: { model?: string; session?: string } = {}
+      if (typeof status.model === 'string' && status.model) {
+        update.model = status.model
       }
+      if (typeof status.session === 'string' && status.session) {
+        update.session = status.session
+      }
+      if (update.model === undefined && update.session === undefined) {
+        return
+      }
+      latestHostStatus = { ...latestHostStatus, ...update }
+      broadcast(portStatusMessage(update))
     },
   }
 }

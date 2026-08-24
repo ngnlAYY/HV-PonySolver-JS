@@ -39,6 +39,14 @@ const validSuccessRecord: HistoryRecord = {
   time: '12:00:00',
 }
 
+const validManualRecord: HistoryRecord = {
+  type: 'manual',
+  answers: 'RA(88.8)',
+  elapsed: 99,
+  timestamp: 2,
+  time: '12:00:01',
+}
+
 const validErrorRecord: HistoryRecord = {
   type: 'error',
   elapsed: 456,
@@ -120,6 +128,26 @@ describe('HistoryStore', () => {
     expect(storage.values.has(HISTORY_KEY)).toBe(false)
     expect(storage.values.has(`${HISTORY_ENTRY_PREFIX}main:new-record`)).toBe(true)
     expect(store.get('main')).toMatchObject([{ answers: 'TS' }])
+  })
+
+  it('detects only strictly valid legacy or keyed history across both worlds', () => {
+    const storage = new MemoryEnumerableStorage()
+    const store = new HistoryStore(storage)
+    expect(store.hasHistory()).toBe(false)
+
+    storage.values.set(HISTORY_KEY, JSON.stringify({ main: [{ type: 'success', answers: 'TS', elapsed: 'fast' }] }))
+    storage.values.set(`${HISTORY_ENTRY_PREFIX}main:invalid`, JSON.stringify({ type: 'noop', elapsed: 1 }))
+    expect(store.hasHistory()).toBe(false)
+
+    storage.values.set(`${HISTORY_ENTRY_PREFIX}isekai:valid`, JSON.stringify(validSuccessRecord))
+    expect(store.hasHistory()).toBe(true)
+
+    storage.values.delete(`${HISTORY_ENTRY_PREFIX}isekai:valid`)
+    storage.values.set(HISTORY_KEY, JSON.stringify({ main: [validErrorRecord] }))
+    expect(store.hasHistory()).toBe(false)
+
+    storage.values.set(HISTORY_KEY, JSON.stringify({ isekai: [validManualRecord] }))
+    expect(store.hasHistory()).toBe(true)
   })
 
   it('exposes persistence rejection while retaining only the optimistic return value', async () => {

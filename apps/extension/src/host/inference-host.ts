@@ -1,4 +1,5 @@
 import type { DetectorService } from '@hv-pony-solver/browser-core/inference/inference-types'
+import { isPermanentModelError } from '@hv-pony-solver/browser-core/model/permanent-model-error'
 import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 
 import {
@@ -50,7 +51,11 @@ export class InferenceHost {
       this.assertActive(callerSignal)
       return successResponse(request.requestId, result)
     } catch (error) {
-      return errorResponse(request.requestId, formatErrorMessage(error))
+      return errorResponse(
+        request.requestId,
+        formatErrorMessage(error),
+        isPermanentModelError(error) ? 'permanent-model' : 'transient',
+      )
     } finally {
       callerSignal?.removeEventListener('abort', abort)
       this.destroyController.signal.removeEventListener('abort', abort)
@@ -125,7 +130,11 @@ export class InferenceHost {
       const notice = await operation
       return successResponse(request.requestId, undefined, notice)
     } catch (error) {
-      return errorResponse(request.requestId, formatErrorMessage(error))
+      return errorResponse(
+        request.requestId,
+        formatErrorMessage(error),
+        isPermanentModelError(error) ? 'permanent-model' : 'transient',
+      )
     } finally {
       callerSignal?.removeEventListener('abort', abortFromCaller)
       this.destroyController.signal.removeEventListener('abort', abortFromDestroy)

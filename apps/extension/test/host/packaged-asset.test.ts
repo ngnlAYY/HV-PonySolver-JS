@@ -157,6 +157,103 @@ describe('loadPackagedAsset', () => {
     expect(reader.releaseLock).toHaveBeenCalledTimes(1)
   })
 
+  it('aborts a pending reader read and performs non-blocking best-effort cleanup', async () => {
+    const controller = new AbortController()
+    const reader = {
+      read: vi.fn(() => new Promise<ReadableStreamReadResult<Uint8Array>>(() => undefined)),
+      cancel: vi.fn(() => new Promise<void>(() => undefined)),
+      releaseLock: vi.fn(() => {
+        throw new TypeError('read still pending')
+      }),
+    }
+    const body = { getReader: vi.fn(() => reader) }
+    const fetchImpl = vi.fn(async () => responseWithBody(body as unknown as ReadableStream<Uint8Array>)) as unknown as typeof fetch
+
+    const loading = loadPackagedAsset(
+      'moz-extension://id/model/test.ort',
+      exactIntegrity,
+      '模型',
+      fetchImpl,
+      controller.signal,
+    )
+    await vi.waitFor(() => expect(reader.read).toHaveBeenCalledTimes(1))
+    controller.abort()
+
+    await expect(loading).rejects.toThrow('模型 加载已取消')
+    expect(reader.cancel).toHaveBeenCalledTimes(1)
+    expect(reader.releaseLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('logically aborts a pending digest without waiting for it to finish', async () => {
+    const controller = new AbortController()
+    let resolveDigest!: (value: ArrayBuffer) => void
+    const digestPromise = new Promise<ArrayBuffer>((resolve) => {
+      resolveDigest = resolve
+    })
+    const digest = vi.spyOn(crypto.subtle, 'digest').mockReturnValue(digestPromise)
+    const fetchImpl = vi.fn(async () => new Response(exactBytes, { status: 200 })) as unknown as typeof fetch
+
+    try {
+      const loading = loadPackagedAsset(
+        'moz-extension://id/model/test.ort',
+        exactIntegrity,
+        '模型',
+        fetchImpl,
+        controller.signal,
+      )
+      await vi.waitFor(() => expect(digest).toHaveBeenCalledTimes(1))
+      controller.abort()
+
+      await expect(loading).rejects.toThrow('模型 加载已取消')
+      resolveDigest(new ArrayBuffer(32))
+      await Promise.resolve()
+    } finally {
+      digest.mockRestore()
+    }
+  })
+
+  it('checks cancellation again after the digest settles', async () => {
+    const controller = new AbortController()
+    let removals = 0
+    const originalRemove = controller.signal.removeEventListener.bind(controller.signal)
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener').mockImplementation(
+      (type, listener, options) => {
+        originalRemove(type, listener, options)
+        removals += 1
+        if (removals === 3) {
+          controller.abort()
+        }
+      },
+    )
+    let reads = 0
+    const reader = {
+      read: vi.fn(async () => {
+        reads += 1
+        return reads === 1
+          ? { done: false as const, value: exactBytes }
+          : { done: true as const, value: undefined }
+      }),
+      cancel: vi.fn(async () => undefined),
+      releaseLock: vi.fn(),
+    }
+    const body = { getReader: vi.fn(() => reader) }
+    const fetchImpl = vi.fn(async () => responseWithBody(body as unknown as ReadableStream<Uint8Array>)) as unknown as typeof fetch
+
+    try {
+      await expect(loadPackagedAsset(
+        'moz-extension://id/model/test.ort',
+        exactIntegrity,
+        '模型',
+        fetchImpl,
+        controller.signal,
+      )).rejects.toThrow('模型 加载已取消')
+      expect(removals).toBe(3)
+      expect(reader.cancel).not.toHaveBeenCalled()
+    } finally {
+      removeListener.mockRestore()
+    }
+  })
+
   it('rejects same-sized bytes with a different SHA-256', async () => {
     const fetchImpl = vi.fn(async () => new Response(Uint8Array.from([3, 2, 1]), { status: 200 })) as unknown as typeof fetch
 

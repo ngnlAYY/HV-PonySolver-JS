@@ -23,9 +23,16 @@ type MutationState = {
   tail: Promise<void>
 }
 
+export type CommittedChangeListener = (
+  key: string,
+  newValue: StoredValue,
+  oldValue: StoredValue,
+) => void
+
 export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextStorage {
   private readonly values = new Map<string, string>()
   private readonly mutationStates = new Map<string, MutationState>()
+  private readonly committedChangeListeners = new Set<CommittedChangeListener>()
   private readonly bufferedChanges: StorageChanges[] = []
   private removeChangeListener: (() => void) | null = null
   private initializing = true
@@ -87,6 +94,18 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
     return Array.from(this.values.entries()).filter(([key]) => key.startsWith(prefix))
   }
 
+  /**
+   * Observes externally committed storage changes (never this mirror's own
+   * writes), including the buffered replay of changes that arrived while the
+   * initial snapshot was still loading.
+   */
+  addCommittedChangeListener(listener: CommittedChangeListener): () => void {
+    this.committedChangeListeners.add(listener)
+    return () => {
+      this.committedChangeListeners.delete(listener)
+    }
+  }
+
   destroy(): void {
     if (this.destroyed) {
       return
@@ -96,6 +115,7 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
     this.removeChangeListener?.()
     this.removeChangeListener = null
     this.bufferedChanges.length = 0
+    this.committedChangeListeners.clear()
     this.mutationStates.clear()
     this.values.clear()
   }
@@ -120,12 +140,21 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
       return
     }
     for (const [key, change] of Object.entries(changes)) {
-      this.setCommittedValue(key, typeof change.newValue === 'string' ? change.newValue : null)
+      const oldValue = typeof change.oldValue === 'string' ? change.oldValue : null
+      const newValue = typeof change.newValue === 'string' ? change.newValue : null
+      this.setCommittedValue(key, newValue)
+      for (const listener of [...this.committedChangeListeners]) {
+        listener(key, newValue, oldValue)
+      }
     }
   }
 
   private setCommittedValue(key: string, value: StoredValue): void {
-    const state = this.getMutationState(key)
+    const state = this.mutationStates.get(key)
+    if (!state) {
+      this.setVisibleValue(key, value)
+      return
+    }
     state.committedValue = value
     state.committedRevision += 1
     this.refreshVisibleValue(key, state)
@@ -173,6 +202,9 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
       state.committedRevision += 1
     }
     this.refreshVisibleValue(key, state)
+    if (state.pending.length === 0) {
+      this.mutationStates.delete(key)
+    }
   }
 
   private getMutationState(key: string): MutationState {
@@ -192,7 +224,10 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
 
   private refreshVisibleValue(key: string, state: MutationState): void {
     const latestMutation = state.pending.at(-1)
-    const value = latestMutation ? latestMutation.value : state.committedValue
+    this.setVisibleValue(key, latestMutation ? latestMutation.value : state.committedValue)
+  }
+
+  private setVisibleValue(key: string, value: StoredValue): void {
     if (value === null) {
       this.values.delete(key)
     } else {

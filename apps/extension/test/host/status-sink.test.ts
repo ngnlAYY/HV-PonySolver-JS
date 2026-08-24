@@ -20,8 +20,9 @@ describe('host status sinks', () => {
     sink.setStatus({ model: '' })
     sink.setSessionReady(123)
 
-    expect(emit).toHaveBeenCalledTimes(2)
+    expect(emit).toHaveBeenCalledTimes(3)
     expect(emit).toHaveBeenNthCalledWith(1, { model: '下载中' })
     expect(emit).toHaveBeenNthCalledWith(2, { session: '初始化中' })
+    expect(emit).toHaveBeenNthCalledWith(3, { session: '已就绪 123ms' })
   })
 })

@@ -315,6 +315,7 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
       args: [],
     })
     assert.deepEqual(storageResult, { ok: true, randomOnFail: '0' })
+    const randomFallbackDisabled = storageResult.randomOnFail === '0'
     await request('POST', `${sessionPath}/url`, { url: `https://hentaiverse.org/fixture?run=${runIndex}` })
     const inferenceResult = await request('POST', `${sessionPath}/execute/async`, {
       script: `
@@ -332,7 +333,7 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
                 (input, index) => input.checked ? index : -1,
               ).filter((index) => index >= 0),
               panel,
-              randomFallbackDisabled: true,
+              randomFallbackDisabled: ${JSON.stringify(randomFallbackDisabled)},
             })
             return
           }

@@ -217,6 +217,10 @@ test('keeps default and explicit remote builds deterministic and model-free', as
       const archive = unzipSync(new Uint8Array(archiveBytes))
       assert.ok(archive['manifest.json'])
       assert.ok(archive['inference-worker.js'])
+      assert.equal(
+        new TextDecoder().decode(archive['inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
+        false,
+      )
       assert.ok(Object.keys(archive).some((name) => name.startsWith('runtime/') && name.endsWith('.wasm')))
       assert.equal(
         Object.keys(archive).some((name) => name.endsWith('.ort')),
@@ -278,6 +282,11 @@ test('builds deterministic packaged-model fixtures with distinct names and graph
       assert.equal(Object.keys(archive).filter((name) => name.endsWith('.ort')).length, 1)
       assert.equal('offscreen.html' in archive, target === 'chromium')
       assert.equal('offscreen.js' in archive, target === 'chromium')
+      // Only the Chromium fixture bundle carries the lifecycle-smoke detect delay.
+      assert.equal(
+        new TextDecoder().decode(archive['inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
+        target === 'chromium',
+      )
 
       const manifest = JSON.parse(new TextDecoder().decode(archive['manifest.json']))
       assert.equal(manifest.host_permissions.includes('https://models.ngnl.host/*'), false)
@@ -319,6 +328,45 @@ test('builds deterministic packaged-model fixtures with distinct names and graph
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true })
     await rm(comparisonRoot, { recursive: true, force: true })
+  }
+})
+
+test('production packaged builds stay free of the fixture detect-delay marker', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-canonical-packaged-'))
+  try {
+    await buildExtensions({ outputRoot: temporaryRoot, modelDelivery: 'packaged', targets: ['chromium'] })
+
+    const archiveName = 'hv-pony-solver-chromium-packaged-0.1.0.zip'
+    const rootFiles = await readdir(temporaryRoot)
+    assert.deepEqual(
+      rootFiles.filter((name) => name.endsWith('.zip')),
+      [archiveName],
+    )
+    assert.equal(
+      rootFiles.some((name) => name.includes('-fixture')),
+      false,
+    )
+    const archive = unzipSync(new Uint8Array(await readFile(path.join(temporaryRoot, archiveName))))
+    assert.equal(
+      new TextDecoder().decode(archive['inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
+      false,
+    )
+    const artifact = JSON.parse(
+      await readFile(path.join(temporaryRoot, 'hv-pony-solver-chromium-packaged-0.1.0.artifact.json'), 'utf8'),
+    )
+    assert.equal(artifact.modelDelivery, 'packaged')
+    assert.equal('fixture' in artifact, false)
+
+    const chromiumDirectory = path.join(temporaryRoot, 'chromium')
+    await auditBuiltExtension(chromiumDirectory, 'chromium', { modelDelivery: 'packaged' })
+    const optionsPath = path.join(chromiumDirectory, 'options.js')
+    await writeFile(optionsPath, `${await readFile(optionsPath, 'utf8')};;//hv-pony-fixture-detect-delay\n`)
+    await assert.rejects(
+      auditBuiltExtension(chromiumDirectory, 'chromium', { modelDelivery: 'packaged' }),
+      /chromium options\.js contains the fixture detect-delay marker/u,
+    )
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
   }
 })
 

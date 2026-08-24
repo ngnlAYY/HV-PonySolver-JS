@@ -15,6 +15,7 @@ vi.mock('../../src/platform/webextension', async (importOriginal) => {
     }),
     runtimeId: () => 'extension-id',
     runtimeGetUrl: () => 'moz-extension://extension-id/options.html',
+    storageSet: vi.fn(async () => undefined),
   }
 })
 
@@ -36,6 +37,7 @@ import {
   type HostResponse,
 } from '../../src/protocol/messages'
 import type { ExtensionPort, ExtensionSender } from '../../src/platform/webextension'
+import { storageSet } from '../../src/platform/webextension'
 
 type TestPort = ExtensionPort &
   Readonly<{
@@ -537,55 +539,98 @@ describe('broker queue and privilege boundaries', () => {
     expect(() => handle.broadcastContentStatus({ session: '错误' })).not.toThrow()
   })
 
-  it('retains a host resource for the lifetime of a content Port only', () => {    const release = vi.fn()
-    const onContentConnected = vi.fn(() => release)
-    const invokeHost = vi.fn(async (): Promise<HostResponse> => ({
-      protocol: PROTOCOL_VERSION,
-      type: 'result',
-      requestId: 'retain',
-      ok: true,
-    }))
-    registerBroker(invokeHost, { allowOptions: true, onContentConnected })
-
-    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
-    platformMocks.connectListener?.(content)
-    expect(onContentConnected).toHaveBeenCalledTimes(1)
-    expect(release).not.toHaveBeenCalled()
-
-    // The options page does no inference, so it must not pin the resource.
-    const options = port(OPTIONS_PORT_NAME, {
-      id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
-    })
-    platformMocks.connectListener?.(options)
-    expect(onContentConnected).toHaveBeenCalledTimes(1)
-
-    content.emitDisconnect()
-    expect(release).toHaveBeenCalledTimes(1)
-
-    // A repeated disconnect must not double-release the lease.
-    content.emitDisconnect()
-    expect(release).toHaveBeenCalledTimes(1)
-  })
-
-  it('admits a content Port even when retention setup throws', () => {
-    const onContentConnected = vi.fn(() => {
-      throw new Error('offscreen retention unavailable')
-    })
+  it('replays the merged model and session snapshot to newly connected content Ports', () => {
     const invokeHost = vi.fn(async (request: { requestId: string }): Promise<HostResponse> => ({
       protocol: PROTOCOL_VERSION,
       type: 'result',
       requestId: request.requestId,
       ok: true,
     }))
-    registerBroker(invokeHost, { allowOptions: true, onContentConnected })
-    const client = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    const handle = registerBroker(invokeHost)
+    handle.broadcastContentStatus({ model: '下载中', inference: 'ignored' })
+    handle.broadcastContentStatus({ session: '已就绪 123ms' })
 
-    expect(() => platformMocks.connectListener?.(client)).not.toThrow()
-    client.emitMessage(detectRequest(0))
+    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(content)
+    platformMocks.connectListener?.(options)
 
-    expect(client.disconnect).not.toHaveBeenCalled()
+    expect(content.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'status',
+        status: { model: '下载中', session: '已就绪 123ms' },
+      }),
+    )
+    expect(options.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('disconnects and aborts the original request on an active duplicate ID', async () => {
+    let signal: AbortSignal | undefined
+    const invokeHost = vi.fn(
+      (_request: HostRequest, requestSignal: AbortSignal) =>
+        new Promise<HostResponse>(() => {
+          signal = requestSignal
+        }),
+    )
+    registerBroker(invokeHost)
+    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(content)
+    const request = prepareRequest(50)
+
+    content.emitMessage(request)
+    content.emitMessage(request)
+
     expect(invokeHost).toHaveBeenCalledTimes(1)
+    expect(content.disconnect).toHaveBeenCalledTimes(1)
+    expect(signal?.aborted).toBe(true)
+  })
+
+  it('broadcasts credential changes only after successful Key verification', async () => {
+    const responses: HostResponse[] = [
+      {
+        protocol: PROTOCOL_VERSION,
+        type: 'result',
+        requestId: 'verify-60',
+        ok: false,
+        error: 'invalid',
+        errorKind: 'permanent-model',
+      },
+      { protocol: PROTOCOL_VERSION, type: 'result', requestId: 'verify-61', ok: true },
+      { protocol: PROTOCOL_VERSION, type: 'result', requestId: 'clear-62', ok: true },
+    ]
+    const invokeHost = vi.fn(async () => responses.shift()!)
+    registerBroker(invokeHost)
+    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(content)
+    platformMocks.connectListener?.(options)
+
+    options.emitMessage(verifyKeyRequest(60))
+    await vi.waitFor(() => expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'verify-60' })))
+    expect(content.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'model-credentials-changed' }))
+
+    options.emitMessage(verifyKeyRequest(61))
+    await vi.waitFor(() =>
+      expect(content.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ protocol: PROTOCOL_VERSION, type: 'model-credentials-changed' }),
+      ),
+    )
+    const notificationsBeforeClear = vi.mocked(content.postMessage).mock.calls.filter(
+      ([message]) => (message as { type?: string }).type === 'model-credentials-changed',
+    ).length
+
+    options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-62' })
+    await vi.waitFor(() => expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'clear-62' })))
+    const notificationsAfterClear = vi.mocked(content.postMessage).mock.calls.filter(
+      ([message]) => (message as { type?: string }).type === 'model-credentials-changed',
+    ).length
+    expect(notificationsAfterClear).toBe(notificationsBeforeClear)
   })
 
   it('disconnects the options Port when the selected product disallows Key operations', () => {
@@ -604,5 +649,33 @@ describe('broker queue and privilege boundaries', () => {
 
     expect(client.disconnect).toHaveBeenCalledTimes(1)
     expect(invokeHost).not.toHaveBeenCalled()
+  })
+
+  it('persists a durable credentials revision alongside the live broadcast', async () => {
+    vi.mocked(storageSet).mockClear()
+    const invokeHost = vi.fn(async (request: { requestId: string }): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    }))
+    registerBroker(invokeHost)
+    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(content)
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(options)
+
+    options.emitMessage(verifyKeyRequest(0))
+
+    await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(storageSet).mock.calls[0]![0]).toEqual({
+      hvPonySolverModelCredentialsRevision: expect.any(String) as string,
+    })
+    expect(content.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'model-credentials-changed' }),
+    )
   })
 })

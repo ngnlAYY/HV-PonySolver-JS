@@ -2,15 +2,22 @@ import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { URL } from 'node:url'
 
+import { zipSync } from 'fflate'
+
 import { ORT_MODEL_FILENAME, ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared/ort-model'
 
-import { createCanonicalAttestation, validateFirefoxAndroidEvidence, validateReleaseGate } from './release-gate.mjs'
+import {
+  createCanonicalAttestation,
+  parseArguments,
+  validateFirefoxAndroidEvidence,
+  validateReleaseGate,
+} from './release-gate.mjs'
 
 const model = {
   filename: ORT_MODEL_FILENAME,
@@ -23,6 +30,14 @@ const archiveHashes = {
 }
 const packagedContentSecurityPolicy =
   "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'"
+
+function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+function jsonBytes(value) {
+  return Buffer.from(`${JSON.stringify(value)}\n`)
+}
 
 function artifact(target, overrides = {}) {
   return {
@@ -42,6 +57,81 @@ function artifact(target, overrides = {}) {
     },
     ...overrides,
   }
+}
+
+async function writeTransferredArtifact(outputRoot, target, contentSecurityPolicy = packagedContentSecurityPolicy) {
+  const manifestBytes = jsonBytes({
+    manifest_version: 3,
+    background: target === 'chromium' ? { service_worker: 'background.js' } : { scripts: ['background.js'] },
+    content_security_policy: { extension_pages: contentSecurityPolicy },
+  })
+  const backgroundBytes = Buffer.from('globalThis.releaseFixture = true\n')
+  const modelBytes = await readFile(new URL('../../../model/yolo26n-640.ort', import.meta.url))
+  const sourceFiles = {
+    'background.js': backgroundBytes,
+    'manifest.json': manifestBytes,
+    [`model/${model.filename}`]: modelBytes,
+  }
+  const files = Object.fromEntries(
+    Object.entries(sourceFiles).map(([name, bytes]) => [
+      name,
+      {
+        byteLength: name.startsWith('model/') ? model.byteLength : bytes.byteLength,
+        sha256: name.startsWith('model/') ? model.sha256 : sha256(bytes),
+      },
+    ]),
+  )
+  const buildManifest = {
+    target,
+    version: '0.1.0',
+    modelDelivery: 'packaged',
+    model,
+    files,
+  }
+  const archiveName = `hv-pony-solver-${target}-packaged-0.1.0.zip`
+  const archiveBytes = Buffer.from(zipSync({ ...sourceFiles, 'build-manifest.json': jsonBytes(buildManifest) }))
+  const archive = { archiveName, byteLength: archiveBytes.byteLength, sha256: sha256(archiveBytes) }
+  const record = { ...buildManifest, archive }
+  await Promise.all([
+    writeFile(path.join(outputRoot, `${target}.artifact.json`), `${JSON.stringify(record)}\n`),
+    writeFile(path.join(outputRoot, archiveName), archiveBytes),
+    writeFile(path.join(outputRoot, `${archiveName}.sha256`), `${archive.sha256}  ${archiveName}\n`),
+  ])
+  return record
+}
+
+async function rewriteTransferredArchive(outputRoot, record, contentSecurityPolicy) {
+  const archiveName = record.archive.archiveName
+  const manifestBytes = jsonBytes({
+    manifest_version: 3,
+    background: record.target === 'chromium' ? { service_worker: 'background.js' } : { scripts: ['background.js'] },
+    content_security_policy: { extension_pages: contentSecurityPolicy },
+  })
+  const modelBytes = await readFile(new URL('../../../model/yolo26n-640.ort', import.meta.url))
+  const sourceFiles = {
+    'background.js': Buffer.from('globalThis.releaseFixture = true\n'),
+    'manifest.json': manifestBytes,
+    [`model/${model.filename}`]: modelBytes,
+  }
+  const files = Object.fromEntries(
+    Object.entries(sourceFiles).map(([name, bytes]) => [
+      name,
+      {
+        byteLength: name.startsWith('model/') ? model.byteLength : bytes.byteLength,
+        sha256: name.startsWith('model/') ? model.sha256 : sha256(bytes),
+      },
+    ]),
+  )
+  const buildManifest = { target: record.target, version: record.version, modelDelivery: 'packaged', model, files }
+  const archiveBytes = Buffer.from(zipSync({ ...sourceFiles, 'build-manifest.json': jsonBytes(buildManifest) }))
+  const archive = { archiveName, byteLength: archiveBytes.byteLength, sha256: sha256(archiveBytes) }
+  const changedRecord = { ...buildManifest, archive }
+  await Promise.all([
+    writeFile(path.join(outputRoot, `${record.target}.artifact.json`), `${JSON.stringify(changedRecord)}\n`),
+    writeFile(path.join(outputRoot, archiveName), archiveBytes),
+    writeFile(path.join(outputRoot, `${archiveName}.sha256`), `${archive.sha256}  ${archiveName}\n`),
+  ])
+  return changedRecord
 }
 
 function successfulInference(runCount = 2) {
@@ -144,6 +234,15 @@ test('Firefox Android evidence is mandatory, exact-major, and archive-bound', ()
   assert.equal(validateFirefoxAndroidEvidence(androidEvidence(), firefoxArtifact), true)
   assert.throws(() => validateFirefoxAndroidEvidence(undefined, firefoxArtifact), /absent or invalid/u)
   assert.throws(
+    () => validateFirefoxAndroidEvidence(androidEvidence({ fixture: true }), firefoxArtifact),
+    /cannot attest a canonical release/u,
+  )
+  assert.throws(
+    () =>
+      validateFirefoxAndroidEvidence(androidEvidence({ oracle: { classId: 0, confidence: 0.95 } }), firefoxArtifact),
+    /cannot attest a canonical release/u,
+  )
+  assert.throws(
     () => validateFirefoxAndroidEvidence(androidEvidence({ browserVersion: '143.0' }), firefoxArtifact),
     /not the executable minimum major 142/u,
   )
@@ -167,6 +266,18 @@ test('publication requires canonical secret policy and exact provenance', () => 
     [{}, /PACKAGED_MODEL_URL is required/u],
     [{ PACKAGED_MODEL_URL: 'http://models.example/model.ort' }, /must use HTTPS/u],
     [
+      { PACKAGED_MODEL_URL: environment.PACKAGED_MODEL_URL },
+      /PACKAGED_MODEL_AUTH_REQUIRED must be explicitly true or false/u,
+    ],
+    [
+      { PACKAGED_MODEL_URL: environment.PACKAGED_MODEL_URL, PACKAGED_MODEL_AUTH_REQUIRED: '' },
+      /PACKAGED_MODEL_AUTH_REQUIRED must be explicitly true or false/u,
+    ],
+    [
+      { PACKAGED_MODEL_URL: environment.PACKAGED_MODEL_URL, PACKAGED_MODEL_AUTH_REQUIRED: 'yes' },
+      /PACKAGED_MODEL_AUTH_REQUIRED must be explicitly true or false/u,
+    ],
+    [
       {
         PACKAGED_MODEL_URL: environment.PACKAGED_MODEL_URL,
         PACKAGED_MODEL_AUTH_REQUIRED: 'true',
@@ -186,29 +297,40 @@ test('publication requires canonical secret policy and exact provenance', () => 
   assert.throws(() => validateReleaseGate(absentInputs), /attestation is absent/u)
 })
 
-test('CLI preflight hashes archives and requires external Android evidence', async (context) => {
+test('verify-monorepo pins Firefox load tooling and binds Android evidence to the release revision', async () => {
+  const workflow = await readFile(new URL('../../../.github/workflows/verify-monorepo.yml', import.meta.url), 'utf8')
+  const extensionJob = workflow.match(
+    /\n {2}extension-e2e:\n(?<job>[\s\S]*?)\n {2}extension-remote-authenticated-e2e:/u,
+  )?.groups?.job
+  assert.ok(extensionJob)
+  assert.match(
+    extensionJob,
+    /- name: Install pinned geckodriver\n\s+id: geckodriver\n\s+run: node apps\/extension\/scripts\/install-geckodriver\.mjs "\$RUNNER_TEMP\/geckodriver"/u,
+  )
+  assert.match(
+    extensionJob,
+    /- name: Firefox production remote extension load-only smoke\n\s+env:\n\s+GECKODRIVER_PATH: \$\{\{ steps\.geckodriver\.outputs\.path \}\}/u,
+  )
+
+  const androidStep = workflow.match(
+    /- name: Download successful external Firefox Android 142 evidence\n(?<step>[\s\S]*?)\n\s+- name: Fail-closed desktop and Firefox Android release preflight/u,
+  )?.groups?.step
+  assert.ok(androidStep)
+  assert.match(androidStep, /FIREFOX_ANDROID_E2E_WORKFLOW_ID: \$\{\{ vars\.FIREFOX_ANDROID_E2E_WORKFLOW_ID \}\}/u)
+  assert.match(androidStep, /if \[\[ ! "\$FIREFOX_ANDROID_E2E_WORKFLOW_ID" =~ \^\[0-9\]\+\$ \]\]; then/u)
+  assert.match(androidStep, /\[\.conclusion, \.head_sha, \(\.workflow_id \| tostring\), \.event\] \| @tsv/u)
+  assert.match(androidStep, /if \[\[ "\$head_sha" != "\$GITHUB_SHA" \]\]; then/u)
+  assert.match(androidStep, /if \[\[ "\$workflow_id" != "\$FIREFOX_ANDROID_E2E_WORKFLOW_ID" \]\]; then/u)
+  assert.match(androidStep, /workflow_dispatch\|repository_dispatch\) ;;/u)
+  assert.ok(androidStep.indexOf('case "$event" in') < androidStep.indexOf('gh run download'))
+})
+
+test('CLI preflight verifies only the transferred, hash-bound ZIP products and rejects wrong packaged CSP', async (context) => {
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-release-gate-'))
   context.after(() => rm(outputRoot, { recursive: true, force: true }))
-  const records = []
-  for (const target of ['chromium', 'firefox']) {
-    const archiveName = `hv-pony-solver-${target}-packaged-0.1.0.zip`
-    const archiveBytes = Buffer.from(`${target}-archive`)
-    const archiveSha256 = createHash('sha256').update(archiveBytes).digest('hex')
-    const record = artifact(target, {
-      archive: { archiveName, byteLength: archiveBytes.byteLength, sha256: archiveSha256 },
-    })
-    records.push(record)
-    await Promise.all([
-      writeFile(path.join(outputRoot, `${target}.artifact.json`), `${JSON.stringify(record)}\n`),
-      writeFile(path.join(outputRoot, archiveName), archiveBytes),
-      writeFile(path.join(outputRoot, `${archiveName}.sha256`), `${archiveSha256}  ${archiveName}\n`),
-      mkdir(path.join(outputRoot, target), { recursive: true }),
-    ])
-    await writeFile(
-      path.join(outputRoot, target, 'manifest.json'),
-      `${JSON.stringify({ content_security_policy: { extension_pages: packagedContentSecurityPolicy } })}\n`,
-    )
-  }
+  const records = await Promise.all(
+    ['chromium', 'firefox'].map((target) => writeTransferredArtifact(outputRoot, target)),
+  )
   const attestation = createCanonicalAttestation({
     chromium: evidence('chromium', { archive: records[0].archive }),
     firefox: evidence('firefox', { archive: records[1].archive }),
@@ -231,10 +353,35 @@ test('CLI preflight hashes archives and requires external Android evidence', asy
       env: environmentOverrides,
       encoding: 'utf8',
     })
-  assert.equal(run().status, 0)
+  const passed = run()
+  assert.equal(passed.status, 0, passed.stderr)
 
   await writeFile(path.join(outputRoot, records[0].archive.archiveName), 'tampered archive')
   const tampered = run()
   assert.equal(tampered.status, 1)
   assert.match(tampered.stderr, /archive bytes do not match artifact metadata/u)
+
+  const wrongCspRecord = await rewriteTransferredArchive(outputRoot, records[0], "script-src 'self'; object-src 'none'")
+  attestation.targets.chromium.archive = { ...wrongCspRecord.archive }
+  await writeFile(path.join(outputRoot, 'canonical-gate-attestation.json'), `${JSON.stringify(attestation)}\n`)
+  const wrongCsp = run()
+  assert.equal(wrongCsp.status, 1)
+  assert.match(wrongCsp.stderr, /packaged manifest has an unexpected extension page CSP/u)
+})
+
+test('release gate CLI rejects option values that look like further options', () => {
+  assert.throws(() => parseArguments(['nonsense']), /Usage: release-gate\.mjs/u)
+  assert.throws(() => parseArguments(['preflight', '--evidence-dir']), /Invalid release gate argument: --evidence-dir/u)
+  assert.throws(
+    () => parseArguments(['preflight', '--evidence-dir', '--attestation']),
+    /Invalid release gate argument: --evidence-dir/u,
+  )
+  assert.throws(
+    () => parseArguments(['attest', '--output-root', '--android-evidence', 'evidence.json']),
+    /Invalid release gate argument: --output-root/u,
+  )
+  const options = parseArguments(['preflight', '--output-root', 'dist-check'])
+  assert.equal(options.command, 'preflight')
+  assert.equal(options.outputRoot, path.resolve('dist-check'))
+  assert.equal(options.evidenceDir, path.join(path.resolve('dist-check'), 'canonical-e2e-evidence'))
 })

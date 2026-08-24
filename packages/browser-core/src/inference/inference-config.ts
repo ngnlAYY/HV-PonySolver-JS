@@ -15,11 +15,17 @@ export const yoloOutputConfig = {
   maxOutputRows: 100_000,
 } as const
 
+export const prepareDeadlineConfig = {
+  workerTimeoutMs: 100_000,
+  contentTimeoutMs: 105_000,
+  brokerTimeoutMs: 110_000,
+} as const
+
 export const inferenceTimeoutConfig = {
   workerInitTimeoutMs: 60000,
   workerDetectTimeoutMs: 30000,
   workerAbortGraceTimeoutMs: 1000,
-  workerPrepareTimeoutMs: 100000,
+  workerPrepareTimeoutMs: prepareDeadlineConfig.workerTimeoutMs,
   modelDownloadTimeoutMs: 30000,
   modelProbeTimeoutMs: 10000,
   modelCacheTimeoutMs: 5000,

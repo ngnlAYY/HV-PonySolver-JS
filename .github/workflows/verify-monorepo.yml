@@ -43,7 +43,7 @@ jobs:
         env:
           PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
           PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
-          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
+          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
         run: |
           if [[ -z "${PACKAGED_MODEL_URL//[[:space:]]/}" ]]; then
             echo 'PACKAGED_MODEL_URL is not configured; skipping the canonical packaged-model gate.'
@@ -261,6 +261,10 @@ jobs:
       - name: Install Playwright Firefox
         run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps firefox
 
+      - name: Install pinned geckodriver
+        id: geckodriver
+        run: node apps/extension/scripts/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
+
       - name: Extension content E2E smoke
         run: pnpm test:e2e:extension:content
 
@@ -268,6 +272,8 @@ jobs:
         run: pnpm test:e2e:extension:chromium:load-only
 
       - name: Firefox production remote extension load-only smoke
+        env:
+          GECKODRIVER_PATH: ${{ steps.geckodriver.outputs.path }}
         run: pnpm test:e2e:extension:firefox:load-only
 
   extension-remote-authenticated-e2e:
@@ -445,7 +451,7 @@ jobs:
     env:
       PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
       PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
-      PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
+      PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -574,21 +580,45 @@ jobs:
       - name: Download successful external Firefox Android 142 evidence
         env:
           ANDROID_EVIDENCE_RUN_ID: ${{ inputs.firefox_android_e2e_run_id }}
+          FIREFOX_ANDROID_E2E_WORKFLOW_ID: ${{ vars.FIREFOX_ANDROID_E2E_WORKFLOW_ID }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if [[ ! "$ANDROID_EVIDENCE_RUN_ID" =~ ^[0-9]+$ ]]; then
             echo 'A numeric firefox_android_e2e_run_id is required for extension publication.' >&2
             exit 1
           fi
+          if [[ ! "$FIREFOX_ANDROID_E2E_WORKFLOW_ID" =~ ^[0-9]+$ ]]; then
+            echo 'Repository variable FIREFOX_ANDROID_E2E_WORKFLOW_ID must identify the trusted Android evidence workflow.' >&2
+            exit 1
+          fi
           if [[ "$ANDROID_EVIDENCE_RUN_ID" == "$GITHUB_RUN_ID" ]]; then
             echo 'Firefox Android evidence must come from a completed external run.' >&2
             exit 1
           fi
-          conclusion="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$ANDROID_EVIDENCE_RUN_ID" --jq '.conclusion')"
+          run_metadata="$(
+            gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$ANDROID_EVIDENCE_RUN_ID" \
+              --jq '[.conclusion, .head_sha, (.workflow_id | tostring), .event] | @tsv'
+          )"
+          IFS=$'\t' read -r conclusion head_sha workflow_id event <<< "$run_metadata"
           if [[ "$conclusion" != 'success' ]]; then
             echo "Firefox Android evidence run did not conclude successfully: $conclusion" >&2
             exit 1
           fi
+          if [[ "$head_sha" != "$GITHUB_SHA" ]]; then
+            echo "Firefox Android evidence run is for $head_sha, expected $GITHUB_SHA." >&2
+            exit 1
+          fi
+          if [[ "$workflow_id" != "$FIREFOX_ANDROID_E2E_WORKFLOW_ID" ]]; then
+            echo "Firefox Android evidence came from workflow $workflow_id, expected $FIREFOX_ANDROID_E2E_WORKFLOW_ID." >&2
+            exit 1
+          fi
+          case "$event" in
+            workflow_dispatch|repository_dispatch) ;;
+            *)
+              echo "Firefox Android evidence run used disallowed event: $event" >&2
+              exit 1
+              ;;
+          esac
           gh run download "$ANDROID_EVIDENCE_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
             --name hv-pony-solver-firefox-android-142-evidence \
@@ -601,7 +631,7 @@ jobs:
         env:
           PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
           PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
-          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
+          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
         run: node apps/extension/scripts/release-gate.mjs preflight
 
       - name: Transfer complete extension release gate
@@ -706,7 +736,7 @@ jobs:
         env:
           PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
           PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
-          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED || 'false' }}
+          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
         run: node apps/extension/scripts/release-gate.mjs preflight
 
       - name: Publish extension artifacts

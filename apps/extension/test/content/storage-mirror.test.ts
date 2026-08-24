@@ -30,6 +30,10 @@ function emitStorageChanges(api: RawExtensionApi, changes: StorageChanges): void
   event.emit(changes, 'local')
 }
 
+function mutationStateCount(mirror: ExtensionStorageMirror): number {
+  return (mirror as unknown as { mutationStates: Map<string, unknown> }).mutationStates.size
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
@@ -56,6 +60,106 @@ describe('ExtensionStorageMirror', () => {
 
     mirror.destroy()
     expect(api.storage.onChanged.removeListener).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retain mutation state for snapshot values or committed-only storage changes', async () => {
+    const api = rawExtensionApi()
+    vi.mocked(api.storage.local.get).mockResolvedValue({ initial: 'value' })
+    vi.stubGlobal('browser', api)
+
+    const mirror = await ExtensionStorageMirror.create()
+    expect(mutationStateCount(mirror)).toBe(0)
+
+    emitStorageChanges(api, {
+      initial: { oldValue: 'value', newValue: 'updated' },
+      added: { newValue: 'fresh' },
+      removed: { oldValue: 'gone' },
+    })
+
+    expect(mirror.getSync('initial')).toBe('updated')
+    expect(mirror.getSync('added')).toBe('fresh')
+    expect(mirror.getSync('removed')).toBeNull()
+    expect(mutationStateCount(mirror)).toBe(0)
+  })
+
+  it('notifies committed-change listeners for external changes only', async () => {
+    const api = rawExtensionApi()
+    vi.mocked(api.storage.local.get).mockResolvedValue({ setting: 'initial' })
+    const persistence = deferred<void>()
+    vi.mocked(api.storage.local.set).mockReturnValue(persistence.promise)
+    vi.stubGlobal('browser', api)
+    const mirror = await ExtensionStorageMirror.create()
+
+    const events: Array<[string, string | null, string | null]> = []
+    const unsubscribe = mirror.addCommittedChangeListener((key, newValue, oldValue) => {
+      events.push([key, newValue, oldValue])
+    })
+
+    emitStorageChanges(api, { setting: { oldValue: 'initial', newValue: 'updated' } })
+    expect(events).toEqual([['setting', 'updated', 'initial']])
+
+    const write = mirror.set('setting', 'local')
+    persistence.resolve(undefined)
+    await expect(write).resolves.toBeUndefined()
+    expect(events).toEqual([['setting', 'updated', 'initial']])
+
+    unsubscribe()
+    emitStorageChanges(api, { setting: { oldValue: 'local', newValue: 'external' } })
+    expect(mirror.getSync('setting')).toBe('external')
+    expect(events).toEqual([['setting', 'updated', 'initial']])
+
+    mirror.destroy()
+    emitStorageChanges(api, { setting: { oldValue: 'external', newValue: 'ignored' } })
+    expect(events).toEqual([['setting', 'updated', 'initial']])
+  })
+
+  it.each(['success', 'failure'] as const)('prunes mutation state after the final local mutation %s', async (outcome) => {
+    const api = rawExtensionApi()
+    const persistence = deferred<void>()
+    vi.mocked(api.storage.local.get).mockResolvedValue({ setting: 'old' })
+    vi.mocked(api.storage.local.set).mockReturnValue(persistence.promise)
+    vi.stubGlobal('browser', api)
+    const mirror = await ExtensionStorageMirror.create()
+
+    const write = mirror.set('setting', 'new')
+    expect(mutationStateCount(mirror)).toBe(1)
+    if (outcome === 'success') {
+      persistence.resolve(undefined)
+      await expect(write).resolves.toBeUndefined()
+      expect(mirror.getSync('setting')).toBe('new')
+    } else {
+      persistence.reject(new Error('write failed'))
+      await expect(write).rejects.toThrow('write failed')
+      expect(mirror.getSync('setting')).toBe('old')
+    }
+    expect(mutationStateCount(mirror)).toBe(0)
+  })
+
+  it('keeps state and revision protection until the final queued mutation settles', async () => {
+    const api = rawExtensionApi()
+    const firstPersistence = deferred<void>()
+    const secondPersistence = deferred<void>()
+    vi.mocked(api.storage.local.get).mockResolvedValue({ setting: 'base' })
+    vi.mocked(api.storage.local.set)
+      .mockReturnValueOnce(firstPersistence.promise)
+      .mockReturnValueOnce(secondPersistence.promise)
+    vi.stubGlobal('browser', api)
+    const mirror = await ExtensionStorageMirror.create()
+
+    const firstWrite = mirror.set('setting', 'first')
+    const secondWrite = mirror.set('setting', 'second')
+    emitStorageChanges(api, { setting: { oldValue: 'base', newValue: 'remote' } })
+    firstPersistence.resolve(undefined)
+    await expect(firstWrite).resolves.toBeUndefined()
+
+    expect(mirror.getSync('setting')).toBe('second')
+    expect(mutationStateCount(mirror)).toBe(1)
+    await vi.waitFor(() => expect(api.storage.local.set).toHaveBeenCalledTimes(2))
+    secondPersistence.reject(new Error('second failed'))
+    await expect(secondWrite).rejects.toThrow('second failed')
+
+    expect(mirror.getSync('setting')).toBe('first')
+    expect(mutationStateCount(mirror)).toBe(0)
   })
 
   it('rolls back optimistic set and remove mutations when storage rejects', async () => {

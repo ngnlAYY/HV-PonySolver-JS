@@ -1,7 +1,9 @@
+import { prepareDeadlineConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
 import type {
   DetectorService,
   YoloParseResult,
 } from '@hv-pony-solver/browser-core/inference/inference-types'
+import { PermanentModelError } from '@hv-pony-solver/browser-core/model/permanent-model-error'
 import type { InferenceStatusSink } from '@hv-pony-solver/browser-core/status-panel/status-panel-types'
 import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 
@@ -12,6 +14,7 @@ import {
   cancelRequestFor,
   encodeImage,
   isHostResponse,
+  isModelCredentialsChangedMessage,
   isPortStatusMessage,
   type HostRequest,
   type HostResponse,
@@ -33,24 +36,30 @@ export class RemoteDetectorClient implements DetectorService {
   private requestSequence = 0
   private destroyed = false
 
-  constructor(private readonly statusSink: InferenceStatusSink) {}
+  constructor(
+    private readonly statusSink: InferenceStatusSink,
+    private readonly onModelCredentialsChanged: () => void = () => undefined,
+  ) {}
 
-  async prepare(signal?: AbortSignal): Promise<void> {
+  async prepare(signal?: AbortSignal, options?: Readonly<{ silent?: boolean }>): Promise<void> {
     this.assertNotAborted(signal)
+    const silent = options?.silent === true
     const startedAt = Date.now()
-    this.statusSink.setStatus({ session: '初始化中' })
+    if (!silent) {
+      this.statusSink.setStatus({ session: '初始化中' })
+    }
     try {
       await this.request({
         protocol: PROTOCOL_VERSION,
         type: 'prepare',
         requestId: this.nextRequestId(),
-      }, 95_000, signal)
+      }, prepareDeadlineConfig.contentTimeoutMs, signal)
       this.assertNotAborted(signal)
-      if (!this.destroyed) {
+      if (!this.destroyed && !silent) {
         this.statusSink.setSessionReady(Date.now() - startedAt)
       }
     } catch (error) {
-      if (!this.destroyed && !signal?.aborted) {
+      if (!this.destroyed && !silent && !signal?.aborted) {
         this.statusSink.setStatus({ session: '错误' })
       }
       throw error
@@ -154,7 +163,9 @@ export class RemoteDetectorClient implements DetectorService {
       }
     }).then((response) => {
       if (!response.ok) {
-        throw new Error(response.error)
+        throw response.errorKind === 'permanent-model'
+          ? new PermanentModelError(response.error)
+          : new Error(response.error)
       }
       return response
     })
@@ -162,6 +173,10 @@ export class RemoteDetectorClient implements DetectorService {
 
   private handleMessage(port: ExtensionPort, message: unknown): void {
     if (port !== this.port) {
+      return
+    }
+    if (isModelCredentialsChangedMessage(message)) {
+      this.onModelCredentialsChanged()
       return
     }
     if (isPortStatusMessage(message)) {
@@ -236,8 +251,8 @@ export class RemoteDetectorClient implements DetectorService {
     try {
       port.postMessage(cancelRequestFor(requestId, this.nextRequestId()))
     } catch {
-      // A Port that cannot carry the cancel cannot carry later responses either.
-      this.disconnectPort(new Error('扩展推理连接已关闭'))
+      // Best-effort only: the broker's per-request deadline still bounds the
+      // abandoned work, and the Port may keep carrying sibling responses.
     }
   }
 

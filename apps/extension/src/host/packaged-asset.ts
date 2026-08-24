@@ -31,10 +31,60 @@ async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+function abortError(label: string): Error {
+  return new Error(`${label} 加载已取消`)
+}
+
+function waitForAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined, label: string): Promise<T> {
+  if (!signal) {
+    return promise
+  }
+  if (signal.aborted) {
+    return Promise.reject(abortError(label))
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false
+    const cleanup = (): void => signal.removeEventListener('abort', onAbort)
+    const onAbort = (): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      cleanup()
+      reject(abortError(label))
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        cleanup()
+        resolve(value)
+      },
+      (error: unknown) => {
+        if (settled) {
+          return
+        }
+        settled = true
+        cleanup()
+        reject(error)
+      },
+    )
+    if (signal.aborted) {
+      onAbort()
+    }
+  })
+}
+
 async function readExactBody(
   body: ReadableStream<Uint8Array>,
   expectedByteLength: number,
   label: string,
+  signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
   const reader = body.getReader()
   const output = new Uint8Array(expectedByteLength)
@@ -42,7 +92,7 @@ async function readExactBody(
   let primaryError: unknown
   try {
     while (true) {
-      const { done, value } = await reader.read()
+      const { done, value } = await waitForAbort(reader.read(), signal, label)
       if (done) {
         break
       }
@@ -58,12 +108,16 @@ async function readExactBody(
   } catch (error) {
     primaryError = error
     try {
-      await reader.cancel()
+      void reader.cancel().catch(() => undefined)
     } catch {
-      // Preserve the read, length, or integrity error that caused cancellation.
+      // Preserve the read, length, or cancellation error that caused cleanup.
     }
   } finally {
-    reader.releaseLock()
+    try {
+      reader.releaseLock()
+    } catch {
+      // Releasing a failed or still-pending reader is best-effort cleanup.
+    }
   }
   if (primaryError !== undefined) {
     throw primaryError
@@ -107,11 +161,15 @@ export async function loadPackagedAsset(
     throw new Error(`${label} 响应正文不可用`)
   }
 
-  const buffer = await readExactBody(response.body, integrity.byteLength, label)
+  const buffer = await readExactBody(response.body, integrity.byteLength, label, signal)
   if (signal?.aborted) {
-    throw new Error(`${label} 加载已取消`)
+    throw abortError(label)
   }
-  if ((await sha256Hex(buffer)) !== integrity.sha256) {
+  const digest = await waitForAbort(sha256Hex(buffer), signal, label)
+  if (signal?.aborted) {
+    throw abortError(label)
+  }
+  if (digest !== integrity.sha256) {
     throw new Error(`${label} 完整性校验失败`)
   }
   return buffer

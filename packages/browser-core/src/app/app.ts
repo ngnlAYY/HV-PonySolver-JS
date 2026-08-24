@@ -7,6 +7,9 @@ import { warn } from '../utils/logger'
 import type { AppDependencies } from './app-dependencies'
 
 const PREPARE_RETRY_DELAYS_MS = [250, 750] as const
+const TRANSIENT_FAILURE_RETRY_AFTER_MS = 30_000
+
+type PrepareTargetResult = 'prepared' | 'stale' | 'permanent-failure' | 'transient-failure'
 
 export class App {
   private readonly panel: AppDependencies['panel']
@@ -20,6 +23,10 @@ export class App {
   private scheduledScan = false
   private pendingScan = false
   private lastCaptchaTarget: CaptchaTarget | null = null
+  private failedCaptchaTarget: CaptchaTarget | null = null
+  private transientSuppressionAt: number | null = null
+  private preparingCaptchaTarget: CaptchaTarget | null = null
+  private modelCredentialsRevision = 0
   private destroyed = false
   private settingsMenuRegistered = false
   private solveAbortController: AbortController | null = null
@@ -34,6 +41,26 @@ export class App {
 
   getAbortSignal(): AbortSignal | undefined {
     return this.solveAbortController?.signal
+  }
+
+  recoverAfterModelCredentialsChanged(): void {
+    if (this.destroyed) {
+      return
+    }
+    const currentTarget = findCaptchaTarget()
+    const recoveryTarget = [this.failedCaptchaTarget, this.preparingCaptchaTarget].find((target) =>
+      isSameCaptchaTarget(target, currentTarget),
+    )
+    if (!recoveryTarget) {
+      return
+    }
+    this.modelCredentialsRevision += 1
+    this.failedCaptchaTarget = null
+    this.transientSuppressionAt = null
+    if (isSameCaptchaTarget(this.lastCaptchaTarget, currentTarget)) {
+      this.lastCaptchaTarget = null
+    }
+    this.scheduleSolve()
   }
 
   init(): void {
@@ -75,6 +102,10 @@ export class App {
     this.scheduledScan = false
     this.pendingScan = false
     this.lastCaptchaTarget = null
+    this.failedCaptchaTarget = null
+    this.transientSuppressionAt = null
+    this.preparingCaptchaTarget = null
+    this.modelCredentialsRevision += 1
     this.detector.destroy()
     this.dispose?.()
     this.panel.destroy()
@@ -136,48 +167,83 @@ export class App {
     return !this.destroyed && signal?.aborted !== true && isSameCaptchaTarget(target, findCaptchaTarget())
   }
 
-  private async prepareTarget(target: CaptchaTarget, signal?: AbortSignal): Promise<boolean> {
-    for (let attempt = 0; attempt <= PREPARE_RETRY_DELAYS_MS.length; attempt += 1) {
-      if (!this.isTargetCurrent(target, signal)) {
-        return false
+  private async prepareTarget(
+    target: CaptchaTarget,
+    credentialsRevision: number,
+    signal?: AbortSignal,
+  ): Promise<PrepareTargetResult> {
+    this.preparingCaptchaTarget = target
+    try {
+      for (let attempt = 0; attempt <= PREPARE_RETRY_DELAYS_MS.length; attempt += 1) {
+        if (!this.isTargetCurrent(target, signal) || credentialsRevision !== this.modelCredentialsRevision) {
+          return 'stale'
+        }
+        try {
+          await this.detector.prepare(signal)
+          return this.isTargetCurrent(target, signal) && credentialsRevision === this.modelCredentialsRevision
+            ? 'prepared'
+            : 'stale'
+        } catch (error) {
+          if (!this.isTargetCurrent(target, signal) || credentialsRevision !== this.modelCredentialsRevision) {
+            return 'stale'
+          }
+          if (isPermanentModelError(error)) {
+            warn('启动 ONNX 失败:', formatErrorMessage(error))
+            return 'permanent-failure'
+          }
+          const retryDelay = PREPARE_RETRY_DELAYS_MS[attempt]
+          if (retryDelay === undefined) {
+            warn('启动 ONNX 失败:', formatErrorMessage(error))
+            return 'transient-failure'
+          }
+          await sleep(retryDelay, signal)
+        }
       }
-      try {
-        await this.detector.prepare(signal)
-        return this.isTargetCurrent(target, signal)
-      } catch (error) {
-        if (!this.isTargetCurrent(target, signal)) {
-          return false
-        }
-        if (isPermanentModelError(error)) {
-          warn('启动 ONNX 失败:', formatErrorMessage(error))
-          return false
-        }
-        const retryDelay = PREPARE_RETRY_DELAYS_MS[attempt]
-        if (retryDelay === undefined) {
-          warn('启动 ONNX 失败:', formatErrorMessage(error))
-          return false
-        }
-        await sleep(retryDelay, signal)
+      return 'transient-failure'
+    } finally {
+      if (this.preparingCaptchaTarget === target) {
+        this.preparingCaptchaTarget = null
       }
     }
-    return false
   }
 
   private async runSolve(): Promise<void> {
     let target: CaptchaTarget | null = null
     const signal = this.solveAbortController?.signal
+    const credentialsRevision = this.modelCredentialsRevision
     try {
       target = findCaptchaTarget()
-      if (this.destroyed || this.solver.isBusy || !target || isSameCaptchaTarget(target, this.lastCaptchaTarget)) {
+      if (this.destroyed || this.solver.isBusy || !target) {
         return
       }
-      const prepared = await this.prepareTarget(target, signal)
-      if (!prepared) {
-        if (this.isTargetCurrent(target, signal)) {
+      if (
+        this.transientSuppressionAt !== null &&
+        Date.now() - this.transientSuppressionAt >= TRANSIENT_FAILURE_RETRY_AFTER_MS &&
+        isSameCaptchaTarget(target, this.lastCaptchaTarget)
+      ) {
+        // The host outage behind a transient-failure suppression may have
+        // healed; allow one fresh cycle instead of skipping until reload.
+        this.lastCaptchaTarget = null
+        this.failedCaptchaTarget = null
+        this.transientSuppressionAt = null
+      }
+      if (isSameCaptchaTarget(target, this.lastCaptchaTarget)) {
+        return
+      }
+      const prepareResult = await this.prepareTarget(target, credentialsRevision, signal)
+      if (prepareResult !== 'prepared') {
+        if (
+          (prepareResult === 'permanent-failure' || prepareResult === 'transient-failure') &&
+          this.isTargetCurrent(target, signal)
+        ) {
+          this.failedCaptchaTarget = target
           this.lastCaptchaTarget = target
+          this.transientSuppressionAt = prepareResult === 'transient-failure' ? Date.now() : null
         }
         return
       }
+      this.failedCaptchaTarget = null
+      this.transientSuppressionAt = null
       const result = await this.solver.trigger(target)
       if (result.handled && this.isTargetCurrent(target, signal)) {
         this.lastCaptchaTarget = target
@@ -185,7 +251,9 @@ export class App {
     } catch (error) {
       if (target && this.isTargetCurrent(target, signal)) {
         this.lastCaptchaTarget = target
-        warn('启动 ONNX 失败:', formatErrorMessage(error))
+        this.failedCaptchaTarget = target
+        this.transientSuppressionAt = null
+        warn('处理验证码失败:', formatErrorMessage(error))
       }
     } finally {
       this.scheduledScan = false

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
@@ -81,4 +82,24 @@ test('driver owns the system-access flag and Firefox capabilities do not', () =>
   assert.deepEqual(firefoxArguments(), ['-headless'])
   assert.equal(firefoxArguments().includes('-remote-allow-system-access'), false)
   assert.throws(() => geckodriverArguments(0), /Invalid geckodriver port/u)
+})
+
+test('Chromium smoke scripts retain real BFCache and service-worker lifecycle evidence', async () => {
+  const [contentSmoke, packagedSmoke] = await Promise.all([
+    readFile(new globalThis.URL('./chromium-content-smoke.mjs', import.meta.url), 'utf8'),
+    readFile(new globalThis.URL('./chromium-packaged-model-smoke.mjs', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(contentSmoke, /ignoreDefaultArgs: \['--disable-back-forward-cache'\]/u)
+  assert.match(contentSmoke, /Page\.backForwardCacheNotUsed/u)
+  assert.match(contentSmoke, /pagehide\?\.includes\(true\)/u)
+  assert.match(contentSmoke, /pageshow\?\.includes\(true\)/u)
+  assert.doesNotMatch(contentSmoke, /\.reload\(/u)
+
+  assert.match(packagedSmoke, /ServiceWorker\.stopWorker/u)
+  assert.match(packagedSmoke, /Target\.getTargetInfo/u)
+  assert.match(packagedSmoke, /Offscreen document did not close after warm-idle timeout/u)
+  assert.match(packagedSmoke, /推理请求中/u)
+  assert.doesNotMatch(packagedSmoke, /Debugger\.pause/u)
+  assert.doesNotMatch(packagedSmoke, /chrome\.offscreen\.closeDocument/u)
 })

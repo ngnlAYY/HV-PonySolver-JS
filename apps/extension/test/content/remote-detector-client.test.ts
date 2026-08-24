@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { prepareDeadlineConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
+import { isPermanentModelError } from '@hv-pony-solver/browser-core/model/permanent-model-error'
 import type { ExtensionPort } from '../../src/platform/webextension'
 import type * as WebExtensionModule from '../../src/platform/webextension'
 
@@ -99,6 +101,59 @@ describe('RemoteDetectorClient', () => {
     await expect(detectPromise).resolves.toEqual(result)
   })
 
+  it('prepares silently without touching the status panel', async () => {
+    const sink = statusSink()
+    const client = new RemoteDetectorClient(sink)
+    const preparePromise = client.prepare(undefined, { silent: true })
+    await vi.waitFor(() => expect(platformMocks.ports[0]?.postMessage).toHaveBeenCalledTimes(1))
+    const request = vi.mocked(platformMocks.ports[0]!.postMessage).mock.calls[0]![0] as { requestId: string }
+    platformMocks.ports[0]!.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    })
+
+    await expect(preparePromise).resolves.toBeUndefined()
+    expect(sink.setStatus).not.toHaveBeenCalled()
+    expect(sink.setSessionReady).not.toHaveBeenCalled()
+  })
+
+  it('keeps a silent failed prepare out of the status panel', async () => {
+    const sink = statusSink()
+    const client = new RemoteDetectorClient(sink)
+    const preparePromise = client.prepare(undefined, { silent: true })
+    await vi.waitFor(() => expect(platformMocks.ports[0]?.postMessage).toHaveBeenCalledTimes(1))
+    const request = vi.mocked(platformMocks.ports[0]!.postMessage).mock.calls[0]![0] as { requestId: string }
+    platformMocks.ports[0]!.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: false,
+      error: '离线',
+      errorKind: 'transient',
+    })
+
+    await expect(preparePromise).rejects.toThrow('离线')
+    expect(sink.setStatus).not.toHaveBeenCalled()
+  })
+
+  it('keeps the Port alive when a cancel post fails so sibling requests still settle', async () => {
+    vi.useFakeTimers()
+    const client = new RemoteDetectorClient(statusSink())
+    const detectPromise = client.detect(new Blob([new Uint8Array([1])], { type: 'image/png' }))
+    await vi.waitFor(() => expect(platformMocks.ports[0]?.postMessage).toHaveBeenCalledTimes(1))
+    const port = platformMocks.ports[0]!
+    vi.mocked(port.postMessage).mockImplementation(() => {
+      throw new Error('port closed')
+    })
+
+    const rejection = expect(detectPromise).rejects.toThrow('扩展推理请求超时')
+    await vi.advanceTimersByTimeAsync(35_000)
+    await rejection
+    expect(port.disconnect).not.toHaveBeenCalled()
+  })
+
   it('rejects timed-out requests, cancels them remotely, and keeps the Port for later work', async () => {
     vi.useFakeTimers()
     const panel = statusSink()
@@ -108,7 +163,7 @@ describe('RemoteDetectorClient', () => {
     const request = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
     const rejection = expect(preparePromise).rejects.toThrow('扩展推理请求超时')
 
-    await vi.advanceTimersByTimeAsync(95_000)
+    await vi.advanceTimersByTimeAsync(prepareDeadlineConfig.contentTimeoutMs)
     await rejection
     expect(port.disconnect).not.toHaveBeenCalled()
     expect(port.postMessage).toHaveBeenCalledWith(
@@ -132,6 +187,27 @@ describe('RemoteDetectorClient', () => {
       ok: true,
     })
     await expect(nextPrepare).resolves.toBeUndefined()
+  })
+
+  it('accepts a legal Worker preparation that completes after the former 95-second client deadline', async () => {
+    vi.useFakeTimers()
+    const panel = statusSink()
+    const client = new RemoteDetectorClient(panel)
+    const preparePromise = client.prepare()
+    const port = platformMocks.ports[0]!
+    const request = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
+
+    await vi.advanceTimersByTimeAsync(99_000)
+    expect(port.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'cancel' }))
+    port.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    })
+
+    await expect(preparePromise).resolves.toBeUndefined()
+    expect(panel.setSessionReady).toHaveBeenCalledTimes(1)
   })
 
   it('keeps sibling requests alive when one request is abandoned on the same Port', async () => {
@@ -188,6 +264,22 @@ describe('RemoteDetectorClient', () => {
       requestId: request.requestId,
       ok: true,
     })
+    await expect(preparePromise).resolves.toBeUndefined()
+  })
+
+  it('forwards only strict model-credentials change controls without settling requests', async () => {
+    const onModelCredentialsChanged = vi.fn()
+    const client = new RemoteDetectorClient(statusSink(), onModelCredentialsChanged)
+    const preparePromise = client.prepare()
+    const port = platformMocks.ports[0]!
+    const request = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
+
+    port.emitMessage({ protocol: PROTOCOL_VERSION, type: 'model-credentials-changed', extra: true })
+    expect(onModelCredentialsChanged).not.toHaveBeenCalled()
+    port.emitMessage({ protocol: PROTOCOL_VERSION, type: 'model-credentials-changed' })
+    expect(onModelCredentialsChanged).toHaveBeenCalledTimes(1)
+
+    port.emitMessage({ protocol: PROTOCOL_VERSION, type: 'result', requestId: request.requestId, ok: true })
     await expect(preparePromise).resolves.toBeUndefined()
   })
 
@@ -250,10 +342,31 @@ describe('RemoteDetectorClient', () => {
       requestId: request.requestId,
       ok: false,
       error: '模型不可用',
+      errorKind: 'transient',
     })
 
     await expect(preparePromise).rejects.toThrow('模型不可用')
     expect(panel.setStatus).toHaveBeenLastCalledWith({ session: '错误' })
+  })
+
+  it('reconstructs only allowlisted permanent model failures across the Port boundary', async () => {
+    const client = new RemoteDetectorClient(statusSink())
+    const preparePromise = client.prepare()
+    const port = platformMocks.ports[0]!
+    const request = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
+
+    port.emitMessage({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: false,
+      error: '模型 Key 无效或已失效，请在设置中重新验证 Key',
+      errorKind: 'permanent-model',
+    })
+
+    const error = await preparePromise.catch((caught: unknown) => caught)
+    expect(isPermanentModelError(error)).toBe(true)
+    expect(error).toMatchObject({ userMessage: '模型 Key 无效或已失效，请在设置中重新验证 Key' })
   })
 
   it('reports image encoding failures and rejects successful detections without a result', async () => {

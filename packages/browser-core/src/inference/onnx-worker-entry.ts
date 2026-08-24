@@ -22,6 +22,9 @@ type WorkerScope = Readonly<{
 
 type OnnxRuntime = typeof Ort
 type RuntimeInitializer = (runtime: OnnxRuntime) => void | Promise<void>
+type WorkerHooks = Readonly<{
+  beforeDetect?(): void | Promise<unknown>
+}>
 
 class FatalInferenceError extends Error {
   constructor(message: string, cause?: unknown) {
@@ -30,7 +33,11 @@ class FatalInferenceError extends Error {
   }
 }
 
-export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: RuntimeInitializer): void {
+export function startOnnxWorker(
+  runtime: OnnxRuntime,
+  initializeRuntime: RuntimeInitializer,
+  hooks: WorkerHooks = {},
+): void {
   const workerScope = globalThis as unknown as WorkerScope
   let session: Ort.InferenceSession | undefined
   let runtimeInitialization: Promise<void> | undefined
@@ -128,6 +135,7 @@ export function startOnnxWorker(runtime: OnnxRuntime, initializeRuntime: Runtime
           workerScope.postMessage({ type: 'response', requestId: request.requestId })
           return
         }
+        await hooks.beforeDetect?.()
         const result = await detect(request.imageBlob)
         workerScope.postMessage({ type: 'response', requestId: request.requestId, result })
       } catch (error) {

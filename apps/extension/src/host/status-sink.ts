@@ -16,9 +16,9 @@ export const silentStatusSink: CacheStatusSink & InferenceStatusSink = {
 /**
  * Forwards Host-side stage status to a caller-provided emitter.
  *
- * The inference row stays client-owned — the content client reports it with
- * full round-trip timing — and session-ready transitions stay client-owned as
- * well, so only the model and session stages travel to the panel.
+ * The inference row stays client-owned because only content can measure the
+ * full round trip. Model and session stages, including the terminal ready
+ * transition, travel across the Host boundary for snapshot replay.
  */
 export function createForwardingStatusSink(emit: HostStatusEmitter): CacheStatusSink & InferenceStatusSink {
   return {
@@ -36,8 +36,8 @@ export function createForwardingStatusSink(emit: HostStatusEmitter): CacheStatus
         emit(status)
       }
     },
-    setSessionReady() {
-      // Client-owned; see the doc comment above.
+    setSessionReady(elapsed) {
+      emit({ session: `已就绪 ${Number(elapsed) || 0}ms` })
     },
   }
 }

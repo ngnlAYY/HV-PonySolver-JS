@@ -8,6 +8,7 @@ import {
   imagePreprocessConfig,
   inferenceRecoveryConfig,
   inferenceTimeoutConfig,
+  prepareDeadlineConfig,
   yoloOutputConfig,
 } from '../../src/inference/inference-config'
 import { modelConfig } from '../../src/model/model-config'
@@ -51,6 +52,13 @@ describe('config defaults', () => {
     expect(inferenceTimeoutConfig.workerDetectTimeoutMs).toBe(30000)
     expect(inferenceTimeoutConfig.workerAbortGraceTimeoutMs).toBe(1000)
     expect(inferenceTimeoutConfig.workerPrepareTimeoutMs).toBe(100000)
+    expect(prepareDeadlineConfig).toEqual({
+      workerTimeoutMs: 100_000,
+      contentTimeoutMs: 105_000,
+      brokerTimeoutMs: 110_000,
+    })
+    expect(prepareDeadlineConfig.workerTimeoutMs).toBeLessThan(prepareDeadlineConfig.contentTimeoutMs)
+    expect(prepareDeadlineConfig.contentTimeoutMs).toBeLessThan(prepareDeadlineConfig.brokerTimeoutMs)
     expect(inferenceTimeoutConfig.modelDownloadTimeoutMs).toBe(30000)
     expect(inferenceTimeoutConfig.modelCacheTimeoutMs).toBe(5000)
     expect(inferenceRecoveryConfig.maxConsecutiveWorkerErrors).toBe(3)

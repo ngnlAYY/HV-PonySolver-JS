@@ -103,6 +103,16 @@ export class HistoryStore {
     ]).slice(0, HISTORY_MAX)
   }
 
+  hasHistory(): boolean {
+    // Only installs that produced at least one real answer count as
+    // experienced: error/random-only history must not warm the session (and,
+    // on remote editions, spend a monthly download slot) without proof of a
+    // single usable inference.
+    const hasUsableRecord = (world: World): boolean =>
+      this.get(world).some((record) => record.type === 'success' || record.type === 'manual')
+    return hasUsableRecord('main') || hasUsableRecord('isekai')
+  }
+
   add(world: World, record: HistoryRecord): HistoryMutation {
     const completedRecord = completeRecord(record)
     if (isEnumerableTextStorage(this.storage)) {

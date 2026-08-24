@@ -15,7 +15,8 @@ export type YoloParseResult = Readonly<{
 
 export interface DetectorService {
   detect(blob: Blob, signal?: AbortSignal): Promise<YoloParseResult>
-  prepare(signal?: AbortSignal): Promise<void>
+  /** `silent` suppresses status-panel side effects for background warm-ups. */
+  prepare(signal?: AbortSignal, options?: Readonly<{ silent?: boolean }>): Promise<void>
   destroy(): void
 }
 

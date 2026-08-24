@@ -6,13 +6,21 @@ import {
   cancelRequestFor,
   decodeImage,
   encodeImage,
+  errorResponse,
   isCancelRequest,
   isHostRequest,
   isHostResponse,
+  isModelCredentialsChangedMessage,
   isOffscreenCancelRequest,
+  isOffscreenClaimRequest,
+  isOffscreenClaimResponse,
+  isOffscreenIdleConfirmationRequest,
+  isOffscreenIdleConfirmationResponse,
+  isOffscreenIdleMessage,
   isOffscreenRequest,
   isOffscreenStatusMessage,
   isPortStatusMessage,
+  modelCredentialsChangedMessage,
   offscreenStatusMessage,
   portStatusMessage,
   successResponse,
@@ -65,7 +73,7 @@ describe('extension protocol', () => {
     // A status notification is not a Host response and must not settle one.
     expect(isHostResponse(JSON.parse(JSON.stringify(portMessage)))).toBe(false)
 
-    const offscreenMessage = offscreenStatusMessage({ session: '初始化中' })
+    const offscreenMessage = offscreenStatusMessage('epoch-1', { session: '初始化中' })
     expect(isOffscreenStatusMessage(JSON.parse(JSON.stringify(offscreenMessage)))).toBe(true)
 
     expect(isPortStatusMessage({ protocol: PROTOCOL_VERSION, type: 'status', status: {} })).toBe(false)
@@ -82,6 +90,7 @@ describe('extension protocol', () => {
       isOffscreenStatusMessage({
         type: 'hv-pony-solver:offscreen-request',
         operation: 'status',
+        epoch: 'epoch-1',
         status: { model: 'x' },
         requestId: 'extra-key',
       }),
@@ -93,6 +102,14 @@ describe('extension protocol', () => {
         requestId: 'sw-1',
       }),
     ).toBe(false)
+  })
+
+  it('validates the exact credentials-changed control message', () => {
+    const message = modelCredentialsChangedMessage()
+    expect(message).toEqual({ protocol: PROTOCOL_VERSION, type: 'model-credentials-changed' })
+    expect(isModelCredentialsChangedMessage(message)).toBe(true)
+    expect(isModelCredentialsChangedMessage({ ...message, requestId: 'not-allowed' })).toBe(false)
+    expect(isHostResponse(message)).toBe(false)
   })
 
   it('round-trips a bounded image through JSON-safe base64', async () => {
@@ -157,7 +174,7 @@ describe('extension protocol', () => {
     ).toBe(false)
   })
 
-  it('validates exact clear-key and offscreen request/cancel operation schemas', () => {
+  it('validates exact clear-key and epoch-owned offscreen operation schemas', () => {
     const clearRequest = {
       protocol: PROTOCOL_VERSION,
       type: 'clear-key',
@@ -166,29 +183,88 @@ describe('extension protocol', () => {
     expect(isHostRequest(clearRequest)).toBe(true)
     expect(isHostRequest({ ...clearRequest, candidateKey: 'a'.repeat(64) })).toBe(false)
 
+    const claim = {
+      type: 'hv-pony-solver:offscreen-request',
+      operation: 'claim',
+      epoch: 'epoch-1',
+    } as const
+    const request = {
+      type: 'hv-pony-solver:offscreen-request',
+      operation: 'request',
+      epoch: 'epoch-1',
+      requestId: 'offscreen-1',
+      request: clearRequest,
+    } as const
+    const cancel = {
+      type: 'hv-pony-solver:offscreen-request',
+      operation: 'cancel',
+      epoch: 'epoch-1',
+      requestId: 'offscreen-1',
+    } as const
+    const confirmIdle = {
+      type: 'hv-pony-solver:offscreen-request',
+      operation: 'confirm-idle',
+      epoch: 'epoch-1',
+      generation: 2,
+    } as const
+
+    expect(isOffscreenClaimRequest(claim)).toBe(true)
+    expect(isOffscreenRequest(request)).toBe(true)
+    expect(isOffscreenCancelRequest(cancel)).toBe(true)
+    expect(isOffscreenIdleConfirmationRequest(confirmIdle)).toBe(true)
+    expect(isOffscreenRequest({ ...request, epoch: 'invalid epoch' })).toBe(false)
+    expect(isOffscreenCancelRequest({ ...cancel, request: clearRequest })).toBe(false)
+    expect(isOffscreenIdleConfirmationRequest({ ...confirmIdle, generation: -1 })).toBe(false)
+
     expect(
-      isOffscreenRequest({
+      isOffscreenClaimResponse({
         type: 'hv-pony-solver:offscreen-request',
-        operation: 'request',
-        requestId: 'offscreen-1',
-        request: clearRequest,
+        operation: 'claimed',
+        epoch: 'epoch-1',
+        idleGeneration: null,
+        status: { session: '已就绪 10ms' },
       }),
     ).toBe(true)
     expect(
-      isOffscreenCancelRequest({
+      isOffscreenIdleConfirmationResponse({
         type: 'hv-pony-solver:offscreen-request',
-        operation: 'cancel',
-        requestId: 'offscreen-1',
+        operation: 'idle-confirmed',
+        epoch: 'epoch-1',
+        generation: 2,
+        idle: true,
       }),
     ).toBe(true)
     expect(
-      isOffscreenCancelRequest({
+      isOffscreenIdleMessage({
         type: 'hv-pony-solver:offscreen-request',
-        operation: 'cancel',
-        requestId: 'offscreen-1',
-        request: clearRequest,
+        operation: 'idle',
+        epoch: 'epoch-1',
+        generation: 2,
       }),
-    ).toBe(false)
+    ).toBe(true)
+  })
+
+  it('requires a bounded allowlisted category on every error response', () => {
+    const transient = errorResponse('request-1', 'temporary failure')
+    const permanent = errorResponse('request-2', '模型 Key 无效', 'permanent-model')
+
+    expect(transient).toEqual({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'request-1',
+      ok: false,
+      error: 'temporary failure',
+      errorKind: 'transient',
+    })
+    expect(permanent.errorKind).toBe('permanent-model')
+    expect(isHostResponse(transient)).toBe(true)
+    expect(isHostResponse(permanent)).toBe(true)
+
+    const withoutKind = { ...transient } as Record<string, unknown>
+    delete withoutKind.errorKind
+    expect(isHostResponse(withoutKind)).toBe(false)
+    expect(isHostResponse({ ...transient, errorKind: 'Error' })).toBe(false)
+    expect(isHostResponse({ ...transient, className: 'PermanentModelError' })).toBe(false)
   })
 
   it('validates complete inference results and bounded errors', () => {
@@ -241,6 +317,7 @@ describe('extension protocol', () => {
         requestId: 'request-1',
         ok: false,
         error: '模型 Key 无效',
+        errorKind: 'permanent-model',
         notice: '不应出现在错误响应上',
       }),
     ).toBe(false)

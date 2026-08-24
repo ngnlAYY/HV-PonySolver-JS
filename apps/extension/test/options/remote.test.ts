@@ -34,7 +34,7 @@ function successfulHostPort(): Readonly<{
     postMessage: vi.fn((message: Record<string, unknown>) => {
       queueMicrotask(() => {
         messageListener?.({
-          protocol: 'hv-pony-solver/1',
+          protocol: 'hv-pony-solver/2',
           type: 'result',
           requestId: message.requestId,
           ok: true,
@@ -118,7 +118,7 @@ describe('default remote options entry', () => {
     }
     expect(verifyPort.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        protocol: 'hv-pony-solver/1',
+        protocol: 'hv-pony-solver/2',
         type: 'verify-key',
         candidateKey,
       }),
@@ -133,7 +133,7 @@ describe('default remote options entry', () => {
       postMessage: ReturnType<typeof vi.fn>
     }
     expect(clearPort.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ protocol: 'hv-pony-solver/1', type: 'clear-key' }),
+      expect.objectContaining({ protocol: 'hv-pony-solver/2', type: 'clear-key' }),
     )
     await vi.waitFor(() => {
       expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 已清除')
@@ -153,7 +153,7 @@ describe('default remote options entry', () => {
 
     const request = verifyPort.postMessage.mock.calls[0]![0] as { requestId: string }
     verifyPort.emitMessage({
-      protocol: 'hv-pony-solver/1',
+      protocol: 'hv-pony-solver/2',
       type: 'result',
       requestId: request.requestId,
       ok: true,
@@ -184,7 +184,7 @@ describe('default remote options entry', () => {
     await vi.waitFor(() => expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 已清除'))
     const staleRequest = verifyPort.postMessage.mock.calls[0]![0] as { requestId: string }
     verifyPort.emitMessage({
-      protocol: 'hv-pony-solver/1',
+      protocol: 'hv-pony-solver/2',
       type: 'result',
       requestId: staleRequest.requestId,
       ok: true,
@@ -264,7 +264,7 @@ describe('default remote options entry', () => {
     platformMocks.runtimeConnect.mockReset().mockReturnValue(timeoutPort)
     const { requestHost } = await import('../../src/options/remote')
     const verifyRequest = {
-      protocol: 'hv-pony-solver/1',
+      protocol: 'hv-pony-solver/2',
       type: 'verify-key',
       requestId: 'timeout-request',
       candidateKey: 'f'.repeat(64),
@@ -279,7 +279,7 @@ describe('default remote options entry', () => {
     platformMocks.runtimeConnect.mockReturnValue(abortPort)
     const controller = new AbortController()
     const clearPromise = requestHost(
-      { protocol: 'hv-pony-solver/1', type: 'clear-key', requestId: 'abort-clear' },
+      { protocol: 'hv-pony-solver/2', type: 'clear-key', requestId: 'abort-clear' },
       { signal: controller.signal },
     )
     controller.abort()
@@ -295,7 +295,7 @@ describe('default remote options entry', () => {
     await expect(
       requestHost(
         {
-          protocol: 'hv-pony-solver/1',
+          protocol: 'hv-pony-solver/2',
           type: 'verify-key',
           requestId: 'already-aborted',
           candidateKey: 'a'.repeat(64),
@@ -311,7 +311,7 @@ describe('default remote options entry', () => {
     platformMocks.runtimeConnect.mockReset().mockReturnValue(port)
     const { requestHost } = await import('../../src/options/remote')
     const request = {
-      protocol: 'hv-pony-solver/1',
+      protocol: 'hv-pony-solver/2',
       type: 'verify-key',
       requestId: 'host-failure',
       candidateKey: 'b'.repeat(64),
@@ -319,13 +319,14 @@ describe('default remote options entry', () => {
     const response = requestHost(request)
 
     port.emitMessage(undefined)
-    port.emitMessage({ protocol: 'hv-pony-solver/1', type: 'result', requestId: 'other', ok: true })
+    port.emitMessage({ protocol: 'hv-pony-solver/2', type: 'result', requestId: 'other', ok: true })
     port.emitMessage({
-      protocol: 'hv-pony-solver/1',
+      protocol: 'hv-pony-solver/2',
       type: 'result',
       requestId: request.requestId,
       ok: false,
       error: 'Key 无效',
+      errorKind: 'permanent-model',
     })
 
     await expect(response).rejects.toThrow('Key 无效')
@@ -337,7 +338,7 @@ describe('default remote options entry', () => {
     platformMocks.runtimeConnect.mockReset().mockReturnValueOnce(disconnectPort)
     const { requestHost } = await import('../../src/options/remote')
     const request = {
-      protocol: 'hv-pony-solver/1',
+      protocol: 'hv-pony-solver/2',
       type: 'verify-key',
       requestId: 'disconnect',
       candidateKey: 'c'.repeat(64),
