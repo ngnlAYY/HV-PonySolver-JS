@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import {
-  DEFAULT_ANSWER_MODE,
-  getAnswerMode,
-  setAnswerMode,
-} from '../../src/captcha/answer-mode-settings'
+import { DEFAULT_ANSWER_MODE, getAnswerMode, setAnswerMode } from '../../src/captcha/answer-mode-settings'
 import { DEFAULT_RANDOM_ON_FAIL, getRandomOnFailSync } from '../../src/captcha/fallback-settings'
 import { timingConfig } from '../../src/captcha/timing-config'
 import {
@@ -93,5 +89,26 @@ describe('portable captcha settings', () => {
     }
     expect(getSubmitDelayRangeSync(unavailable)).toEqual(timingConfig.submitDelay)
     await expect(getSubmitDelayRange(unavailable)).resolves.toEqual(timingConfig.submitDelay)
+  })
+
+  it('warns once per failed read while falling back for answer mode and timings', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const unavailable = storage()
+    unavailable.getSync = () => {
+      throw new Error('storage down')
+    }
+    unavailable.get = async () => {
+      throw new Error('storage down')
+    }
+
+    await expect(getAnswerMode(unavailable)).resolves.toBe(DEFAULT_ANSWER_MODE)
+    expect(getMultiClickDelayRangeSync(unavailable)).toEqual(timingConfig.multiClickDelay)
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[PonySolverLocal]',
+      '读取答题模式设置失败，使用默认值:',
+      'Error: storage down',
+    )
+    expect(warnSpy).toHaveBeenCalledWith('[PonySolverLocal]', '读取时间设置失败，使用默认值:', 'Error: storage down')
   })
 })

@@ -42,6 +42,29 @@ function historyStore(persisted: Promise<HistoryRecord[]>, recordsAfterFailure: 
   } as unknown as HistoryStore
 }
 
+function deferredSettingsStorage(): Readonly<{
+  storage: SettingsStorage
+  resolveGet(key: string, value: string): void
+}> {
+  const resolvers = new Map<string, Array<(value: string) => void>>()
+  return {
+    storage: {
+      getSync: () => null,
+      get: (key: string) =>
+        new Promise<string>((resolve) => {
+          const waiting = resolvers.get(key) ?? []
+          waiting.push(resolve)
+          resolvers.set(key, waiting)
+        }),
+      set: async () => undefined,
+      remove: async () => undefined,
+    },
+    resolveGet(key, value) {
+      resolvers.get(key)?.shift()?.(value)
+    },
+  }
+}
+
 describe('StatusPanel history persistence', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
@@ -92,5 +115,26 @@ describe('StatusPanel history persistence', () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain('[RA]'))
     expect(document.body.textContent).not.toContain('[TS]')
     expect(document.body.textContent).not.toContain('历史记录保存失败')
+  })
+
+  it('drops stale async settings writes after a fast destroy and re-create', async () => {
+    const { storage, resolveGet } = deferredSettingsStorage()
+    const panel = new StatusPanel(historyStore(Promise.resolve([])), storage)
+
+    panel.create()
+    panel.destroy()
+    panel.create()
+
+    // The first generation's position read resolves against the new element;
+    // the generation guard must discard it instead of moving the fresh panel.
+    resolveGet('hvPonySolverPanelPosition', '999,999')
+    resolveGet('hvPonySolverPanelCompact', '1')
+    resolveGet('hvPonySolverHistoryLimit', '42')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(document.querySelector<HTMLElement>('.ponyLog')?.style.top).toBe('150px')
+
+    resolveGet('hvPonySolverPanelPosition', '300,200')
+    await vi.waitFor(() => expect(document.querySelector<HTMLElement>('.ponyLog')?.style.top).toBe('300px'))
+    expect(document.querySelector<HTMLElement>('.ponyLog')?.style.left).toBe('200px')
   })
 })

@@ -1,6 +1,7 @@
 import { ANSWER_CODES } from '@hv-pony-solver/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { DEFAULT_RANDOM_ON_FAIL } from '../../src/captcha/fallback-settings'
 import { captchaSelectors } from '../../src/captcha/captcha-selectors'
 import { solverConfig } from '../../src/captcha/solver-config'
 import { timingConfig } from '../../src/captcha/timing-config'
@@ -15,7 +16,6 @@ import { modelConfig } from '../../src/model/model-config'
 import { ModelAccessKeyRejectedError } from '../../src/model/model-download-error'
 import { randDelay, shuffle, sleep } from '../../src/utils/delay'
 import { formatErrorMessage } from '../../src/utils/errors'
-import { escapeHtml } from '../../src/utils/html'
 
 describe('config defaults', () => {
   it('matches legacy DOM selectors', () => {
@@ -30,7 +30,8 @@ describe('config defaults', () => {
     expect(ANSWER_CODES).toEqual(['TS', 'RA', 'FS', 'RD', 'PP', 'AJ'])
     expect(timingConfig.submitDelay).toEqual([3000, 5000])
     expect(timingConfig.multiClickDelay).toEqual([1000, 1500])
-    expect(solverConfig.randomOnFail).toBe(false)
+    expect(DEFAULT_RANDOM_ON_FAIL).toBe(true)
+    expect(solverConfig.randomOnFail).toBe(DEFAULT_RANDOM_ON_FAIL)
     expect(imagePreprocessConfig.imageSize).toBe(640)
     expect(imagePreprocessConfig.maxEncodedBytes).toBe(2 * 1024 * 1024)
     expect(imagePreprocessConfig.maxSourceSide).toBe(4096)
@@ -68,10 +69,6 @@ describe('config defaults', () => {
 describe('browser-core utility functions', () => {
   afterEach(() => {
     vi.useRealTimers()
-  })
-
-  it('escapes HTML-sensitive characters', () => {
-    expect(escapeHtml('<tag a="b">&')).toBe('&lt;tag a=&quot;b&quot;&gt;&amp;')
   })
 
   it('formats unknown errors the same way as the legacy script', () => {

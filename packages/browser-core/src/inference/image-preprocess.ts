@@ -172,6 +172,15 @@ export function assertInferenceImageDimensions(width: number, height: number): v
   }
 }
 
+/** Fixed header size that always covers PNG/GIF/WebP dimension fields. */
+const IMAGE_SNIFF_PREFIX_BYTES = 64
+/**
+ * JPEG dimension discovery walks variable-length segments with no header bound,
+ * so the walk is capped at this prefix; larger images rely on the post-decode
+ * dimension check instead of reading the whole blob before decoding.
+ */
+const JPEG_SCAN_PREFIX_LIMIT_BYTES = 64 * 1024
+
 /**
  * Bounds compressed bytes first and inspects dimensions for PNG/GIF/JPEG/WebP
  * before createImageBitmap allocates decoded pixels. Unknown formats still get
@@ -184,11 +193,27 @@ export async function validateInferenceImageBeforeDecode(imageBlob: Blob): Promi
   if (imageBlob.size > imagePreprocessConfig.maxEncodedBytes) {
     throw new Error(`验证码图片数据超过限制: ${imageBlob.size}`)
   }
-  const dimensions = inspectEncodedImageDimensions(new Uint8Array(await imageBlob.arrayBuffer()))
+  const head = new Uint8Array(await imageBlob.slice(0, IMAGE_SNIFF_PREFIX_BYTES).arrayBuffer())
+  const dimensions = matchesBytes(head, 0, [0xff, 0xd8])
+    ? await inspectJpegDimensionsBeforeDecode(imageBlob)
+    : inspectEncodedImageDimensions(head)
   if (dimensions) {
     assertInferenceImageDimensions(dimensions.width, dimensions.height)
   }
   return dimensions
+}
+
+async function inspectJpegDimensionsBeforeDecode(imageBlob: Blob): Promise<ImageDimensions | null> {
+  if (imageBlob.size <= JPEG_SCAN_PREFIX_LIMIT_BYTES) {
+    return inspectJpegDimensions(new Uint8Array(await imageBlob.arrayBuffer()))
+  }
+  try {
+    return inspectJpegDimensions(new Uint8Array(await imageBlob.slice(0, JPEG_SCAN_PREFIX_LIMIT_BYTES).arrayBuffer()))
+  } catch {
+    // The segment walk ran past the scan window, so the image cannot be judged
+    // here; treat the format as legal and let createImageBitmap decide.
+    return null
+  }
 }
 
 export function calculateLetterboxLayout(
@@ -208,9 +233,11 @@ export function calculateLetterboxLayout(
 }
 
 export function copyRgbaToChwFloat32(rgba: Uint8ClampedArray, output: Float32Array, plane: number): void {
+  // getImageData guarantees one RGBA quad per pixel, so no per-channel
+  // fallback is needed here.
   for (let index = 0, offset = 0; index < plane; index += 1, offset += 4) {
-    output[index] = (rgba[offset] ?? 0) / 255
-    output[plane + index] = (rgba[offset + 1] ?? 0) / 255
-    output[plane * 2 + index] = (rgba[offset + 2] ?? 0) / 255
+    output[index] = rgba[offset]! / 255
+    output[plane + index] = rgba[offset + 1]! / 255
+    output[plane * 2 + index] = rgba[offset + 2]! / 255
   }
 }

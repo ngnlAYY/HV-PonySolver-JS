@@ -18,6 +18,26 @@ function createPngHeader(width: number, height: number): Uint8Array {
   return bytes
 }
 
+function createJpegBytes(options: Readonly<{ width: number; height: number; zeroPadding?: number }>): Uint8Array {
+  const values: number[] = [
+    0xff,
+    0xd8,
+    0xff,
+    0xc0,
+    0x00,
+    0x07,
+    0x08,
+    (options.height >> 8) & 0xff,
+    options.height & 0xff,
+    (options.width >> 8) & 0xff,
+    options.width & 0xff,
+  ]
+  for (let i = 0; i < (options.zeroPadding ?? 0); i += 1) {
+    values.push(0x00)
+  }
+  return new Uint8Array(values)
+}
+
 describe('image preprocessing helpers', () => {
   it('calculates centered letterbox layout for wide images', () => {
     expect(calculateLetterboxLayout(200, 100, 640)).toEqual({
@@ -116,5 +136,40 @@ describe('image preprocessing helpers', () => {
   it('rejects empty and non-integral source dimensions', async () => {
     await expect(validateInferenceImageBeforeDecode(new Blob([]))).rejects.toThrow('验证码图片数据为空')
     expect(() => assertInferenceImageDimensions(10.5, 10)).toThrow('验证码图片尺寸无效')
+  })
+
+  it('reads JPEG dimensions from a small blob before decode', async () => {
+    await expect(
+      validateInferenceImageBeforeDecode(new Blob([createJpegBytes({ width: 320, height: 160 })])),
+    ).resolves.toEqual({
+      width: 320,
+      height: 160,
+    })
+  })
+
+  it('rejects a truncated small JPEG header before decode', async () => {
+    await expect(validateInferenceImageBeforeDecode(new Blob([new Uint8Array([0xff, 0xd8, 0xff])]))).rejects.toThrow(
+      '验证码图片 JPEG 缺少尺寸信息',
+    )
+    await expect(
+      validateInferenceImageBeforeDecode(new Blob([createJpegBytes({ width: 320, height: 160 }).slice(0, 10)])),
+    ).rejects.toThrow('验证码图片 JPEG 头无效')
+  })
+
+  it('validates oversized JPEG dimensions found inside the scan prefix', async () => {
+    const blob = new Blob([
+      createJpegBytes({ width: imagePreprocessConfig.maxSourceSide + 1, height: 1, zeroPadding: 70_000 }),
+    ])
+
+    await expect(validateInferenceImageBeforeDecode(blob)).rejects.toThrow('验证码图片边长超过限制')
+  })
+
+  it('passes oversized JPEGs without an in-window SOF through to the decode-time check', async () => {
+    const bytes = new Uint8Array(70_000)
+    bytes[0] = 0xff
+    bytes[1] = 0xd8
+    const blob = new Blob([bytes])
+
+    await expect(validateInferenceImageBeforeDecode(blob)).resolves.toBeNull()
   })
 })

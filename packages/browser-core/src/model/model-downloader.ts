@@ -1,15 +1,11 @@
 import { inferenceTimeoutConfig } from '../inference/inference-config'
+import { raceAbort } from '../utils/abort-race'
 import { ModelAccessKeyRejectedError, ModelDownloadQuotaExceededError } from './model-download-error'
 import { modelConfig } from './model-config'
-import type { ModelIntegrity } from './model-integrity'
-import { verifyModelIntegrity } from './model-integrity'
+import { computeModelSha256, type ModelIntegrityOptions, resolveIntegrityOptions } from './model-integrity'
+import { ModelIntegrityVerificationError } from './permanent-model-error'
 
-export type ModelIntegrityOptions = Readonly<{
-  accessKeyOverride?: string
-  integrity?: ModelIntegrity
-  verifyIntegrity?: boolean
-  forceVerifyIntegrity?: boolean
-}>
+export type { ModelIntegrityOptions } from './model-integrity'
 
 export type ModelDownloadEnvironment = Readonly<{
   fetchImpl?: typeof fetch
@@ -57,33 +53,7 @@ function createDownloadDeadline(
     }
   }
 
-  const runPromise = <T>(promise: PromiseLike<T>): Promise<T> => {
-    if (controller.signal.aborted) {
-      void Promise.resolve(promise).catch(() => undefined)
-      return Promise.reject(error())
-    }
-    return new Promise<T>((resolve, reject) => {
-      let settled = false
-      const cleanup = (): void => controller.signal.removeEventListener('abort', onAbort)
-      const finish = (callback: () => void): void => {
-        if (settled) {
-          return
-        }
-        settled = true
-        cleanup()
-        callback()
-      }
-      const onAbort = (): void => finish(() => reject(error()))
-      controller.signal.addEventListener('abort', onAbort, { once: true })
-      Promise.resolve(promise).then(
-        (value) => finish(() => resolve(value)),
-        (operationError: unknown) => finish(() => reject(operationError)),
-      )
-      if (controller.signal.aborted) {
-        onAbort()
-      }
-    })
-  }
+  const runPromise = <T>(promise: PromiseLike<T>): Promise<T> => raceAbort(promise, controller.signal, error)
 
   return {
     signal: controller.signal,
@@ -101,16 +71,6 @@ function createDownloadDeadline(
       clearTimeout(timeoutId)
       callerSignal?.removeEventListener('abort', abortFromCaller)
     },
-  }
-}
-
-function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): {
-  integrity: ModelIntegrity
-  verifyIntegrity: boolean
-} {
-  return {
-    integrity: options.integrity ?? modelConfig.integrity,
-    verifyIntegrity: options.forceVerifyIntegrity ? true : (options.verifyIntegrity ?? modelConfig.verifyIntegrity),
   }
 }
 
@@ -160,14 +120,14 @@ function parseProbeByteLength(contentLength: string | null): number {
 const contentLengthPattern = /^[0-9]+$/
 
 /**
- * Detects the Worker's decoy payload, which unauthorized Keys receive under 200.
+ * Marks Content-Length declarations that brand an unauthorized Key's decoy.
  *
  * The decoy is orders of magnitude smaller than the real model, so a success
- * response declaring a tiny body means the Key was rejected rather than that a
- * real download was truncated. Truncation of the real object still falls through
- * to the existing size checks.
+ * response declaring such a tiny body is untrustworthy: it may be a rejected
+ * Key, or a proxy misreporting a real payload. The declaration therefore only
+ * flags suspicion — the body hash decides — and must not drive read bounds.
  */
-function isDecoyResponse(contentLength: string | null, expectedByteLength: number): boolean {
+function isSuspiciousDeclaredLength(contentLength: string | null, expectedByteLength: number): boolean {
   if (contentLength === null || !contentLengthPattern.test(contentLength)) {
     return false
   }
@@ -237,6 +197,11 @@ async function readModelResponse(
     await cancelResponseBody(response, deadline)
     throw error
   }
+  // A suspicious declaration may be lying about the payload, so it must not
+  // drive the read bounds; the caller adjudicates the body by hash instead.
+  const suspiciousDeclared =
+    declaredByteLength !== null && isSuspiciousDeclaredLength(contentLength, expectedByteLength ?? maxByteLength)
+  const trustDeclared = declaredByteLength !== null && !suspiciousDeclared
   if (expectedByteLength !== null && declaredByteLength !== null && declaredByteLength > expectedByteLength) {
     await cancelResponseBody(response, deadline)
     throw new Error(`下载模型大小校验失败: ${contentLength} != ${expectedByteLength}`)
@@ -247,11 +212,16 @@ async function readModelResponse(
   }
   if (!response.body) {
     const buffer = await deadline.run(() => response.arrayBuffer())
-    assertDeclaredByteLength(buffer.byteLength, declaredByteLength)
+    if (trustDeclared) {
+      assertDeclaredByteLength(buffer.byteLength, declaredByteLength)
+    }
     assertModelByteLength(buffer, expectedByteLength, maxByteLength)
     return buffer
   }
-  const expectedContentLength = declaredByteLength === null ? expectedByteLength : declaredByteLength
+  // Suspicious declarations collect into chunks instead of a pre-sized buffer:
+  // their length claim is unproven until the caller's hash check passes.
+  const expectedContentLength =
+    declaredByteLength === null ? expectedByteLength : trustDeclared ? declaredByteLength : null
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []
   const bytes = expectedContentLength === null ? null : new Uint8Array(expectedContentLength)
@@ -331,23 +301,34 @@ export async function downloadModel(
       }
       throw new Error(`模型下载失败: HTTP ${response.status}`)
     }
-    // The Worker answers an unauthorized Key with a small decoy under HTTP 200.
-    // Naming that cause beats surfacing it as a size-mismatch failure.
-    if (isDecoyResponse(response.headers.get('content-length'), integrity.byteLength)) {
-      await cancelResponseBody(response, deadline)
-      deadline.throwIfExpired()
-      throw new ModelAccessKeyRejectedError()
-    }
     const buffer = await readModelResponse(
       response,
       verifyIntegrity ? integrity.byteLength : null,
       integrity.byteLength,
       deadline,
     )
-    if (verifyIntegrity) {
-      await deadline.run(() => verifyModelIntegrity(buffer, integrity, '下载模型'))
+    // The Worker answers an unauthorized Key with a small decoy under HTTP 200,
+    // but a lying proxy can declare the same tiny length for the real payload.
+    // A suspicious declaration therefore only triggers suspicion: the body hash
+    // proves a real model, and only a mismatch names the decoy as permanent.
+    const suspicious = isSuspiciousDeclaredLength(response.headers.get('content-length'), integrity.byteLength)
+    if (verifyIntegrity || suspicious) {
+      if (buffer.byteLength !== integrity.byteLength && !suspicious) {
+        throw new Error(`下载模型大小校验失败: ${buffer.byteLength} != ${integrity.byteLength}`)
+      }
+      const sha256 = await deadline.run(() => computeModelSha256(buffer))
+      if (sha256 === integrity.sha256) {
+        deadline.throwIfExpired()
+        return buffer
+      }
     }
     deadline.throwIfExpired()
+    if (suspicious) {
+      throw new ModelAccessKeyRejectedError()
+    }
+    if (verifyIntegrity) {
+      throw new ModelIntegrityVerificationError(`下载模型 SHA-256 校验失败`)
+    }
     return buffer
   } finally {
     deadline.dispose()

@@ -1,11 +1,13 @@
 import type { CacheStatusSink } from '../status-panel/status-panel-types'
 import { inferenceTimeoutConfig } from '../inference/inference-config'
+import { raceAbort } from '../utils/abort-race'
 import { formatErrorMessage } from '../utils/errors'
 import { isRecordObject } from '../utils/guards'
 import { warn } from '../utils/logger'
 import { modelConfig } from './model-config'
-import { downloadModel, type ModelIntegrityOptions } from './model-downloader'
-import { verifyModelIntegrity } from './model-integrity'
+import { downloadModel } from './model-downloader'
+import type { ModelIntegrityOptions } from './model-integrity'
+import { resolveIntegrityOptions, verifyModelIntegrity } from './model-integrity'
 
 const MODEL_STORE_NAME = 'models'
 
@@ -27,18 +29,6 @@ class ModelCacheLifecycleError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'ModelCacheLifecycleError'
-  }
-}
-
-function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): {
-  integrity: NonNullable<ModelIntegrityOptions['integrity']>
-  verifyIntegrity: boolean
-  forceVerifyIntegrity: boolean
-} {
-  return {
-    integrity: options.integrity ?? modelConfig.integrity,
-    verifyIntegrity: options.forceVerifyIntegrity ? true : (options.verifyIntegrity ?? modelConfig.verifyIntegrity),
-    forceVerifyIntegrity: options.forceVerifyIntegrity ?? false,
   }
 }
 
@@ -88,6 +78,7 @@ export class ModelCache {
   private generation = 0
   private lifecycleController = new AbortController()
   private readonly activeTransactionAborts = new Set<() => void>()
+  private readonly activeDownloads = new Map<string, Promise<ArrayBuffer>>()
 
   constructor(
     private readonly statusSink: CacheStatusSink,
@@ -112,7 +103,10 @@ export class ModelCache {
       }
       this.statusSink.setStatus({ model: `缓存未命中 ${elapsed}ms` })
     } catch (error) {
-      if (error instanceof ModelCacheLifecycleError && signal?.aborted) {
+      // A lifecycle cancellation (close/abort) must surface to the caller:
+      // swallowing it here would read as a cache miss and trigger a real,
+      // quota-metered download for an operation that was already abandoned.
+      if (error instanceof ModelCacheLifecycleError) {
         throw error
       }
       const elapsed = Date.now() - startedAt
@@ -132,9 +126,19 @@ export class ModelCache {
     }
     const startedAt = Date.now()
     this.statusSink.setStatus({ model: '下载中' })
-    const options: ModelIntegrityOptions =
-      accessKeyOverride === undefined ? { verifyIntegrity } : { accessKeyOverride, verifyIntegrity }
-    const buffer = await this.downloadModelImpl(signal, options)
+    // Concurrent callers share one in-flight download so a single monthly-quota
+    // GET serves all of them; each caller still honors its own abort signal.
+    const downloadKey = `${verifyIntegrity ? 'verified' : 'unverified'}:${accessKeyOverride ?? ''}`
+    let sharedDownload = this.activeDownloads.get(downloadKey)
+    if (!sharedDownload) {
+      const options: ModelIntegrityOptions =
+        accessKeyOverride === undefined ? { verifyIntegrity } : { accessKeyOverride, verifyIntegrity }
+      sharedDownload = this.downloadModelImpl(signal, options).finally(() => {
+        this.activeDownloads.delete(downloadKey)
+      })
+      this.activeDownloads.set(downloadKey, sharedDownload)
+    }
+    const buffer = await raceAbort(sharedDownload, signal, () => new Error('模型缓存操作已取消'))
     if (signal?.aborted) {
       throw new Error('模型缓存操作已取消')
     }
@@ -399,40 +403,23 @@ export class ModelCache {
       void Promise.resolve(promise).catch(() => undefined)
       return Promise.reject(error)
     }
-    return new Promise<T>((resolve, reject) => {
-      let settled = false
-      const remainingMs = Math.max(0, context.deadline - Date.now())
-      const cleanup = (): void => {
-        clearTimeout(timeoutId)
-        context.signal?.removeEventListener('abort', onControlAbort)
-        context.lifecycleSignal.removeEventListener('abort', onControlAbort)
-      }
-      const finish = (callback: () => void): void => {
-        if (settled) {
-          return
-        }
-        settled = true
-        cleanup()
-        callback()
-      }
-      const onControlAbort = (): void => {
-        cancel()
-        finish(() => reject(this.operationControlError()))
-      }
-      const timeoutId = setTimeout(() => {
-        cancel()
-        finish(() => reject(new Error(timeoutMessage)))
-      }, remainingMs)
-      context.signal?.addEventListener('abort', onControlAbort, { once: true })
-      context.lifecycleSignal.addEventListener('abort', onControlAbort, { once: true })
-      Promise.resolve(promise).then(
-        (value) => finish(() => resolve(value)),
-        (error: unknown) => finish(() => reject(error)),
-      )
-      if (context.signal?.aborted || context.lifecycleSignal.aborted || context.generation !== this.generation) {
-        onControlAbort()
-      }
+    const controlSignals: AbortSignal[] = context.signal
+      ? [context.signal, context.lifecycleSignal]
+      : [context.lifecycleSignal]
+    const controlled = raceAbort(promise, controlSignals, () => this.operationControlError(), {
+      onAbort: cancel,
     })
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    const deadlineRace = new Promise<never>((_resolve, reject) => {
+      timeoutId = setTimeout(
+        () => {
+          cancel()
+          reject(new Error(timeoutMessage))
+        },
+        Math.max(0, context.deadline - Date.now()),
+      )
+    })
+    return Promise.race([controlled, deadlineRace]).finally(() => clearTimeout(timeoutId))
   }
 
   private assertOperationActive(context: CacheOperationContext, timeoutMessage: string = '模型缓存操作超时'): void {

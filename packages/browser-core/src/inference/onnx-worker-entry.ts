@@ -6,11 +6,12 @@ import {
   copyRgbaToChwFloat32,
   validateInferenceImageBeforeDecode,
 } from './image-preprocess'
+import { imagePreprocessConfig } from './inference-config'
 import type { WorkerMessage, WorkerRequest } from './inference-types'
 import { parseYoloOutputTensor } from './yolo-output-parser'
 import { formatErrorMessage } from '../utils/errors'
 
-const INPUT_SIZE = 640
+const INPUT_SIZE = imagePreprocessConfig.imageSize
 const INPUT_NAME = 'images'
 const OUTPUT_NAME = 'output0'
 
@@ -41,10 +42,28 @@ export function startOnnxWorker(
   const workerScope = globalThis as unknown as WorkerScope
   let session: Ort.InferenceSession | undefined
   let runtimeInitialization: Promise<void> | undefined
+  // Detect requests are processed serially, so the canvas, its context, and
+  // the CHW output buffer are allocated once per worker and reused per frame.
+  // The RGBA readback itself is the one allocation getImageData cannot avoid.
+  let inputContext: OffscreenCanvasRenderingContext2D | null = null
+  let chwFloat32: Float32Array | null = null
 
   async function ensureRuntimeInitialized(): Promise<void> {
     runtimeInitialization ??= Promise.resolve(initializeRuntime(runtime))
     return runtimeInitialization
+  }
+
+  function prepareReusableInputFrame(): { context: OffscreenCanvasRenderingContext2D; data: Float32Array } {
+    if (!inputContext || !chwFloat32) {
+      const canvas = new OffscreenCanvas(INPUT_SIZE, INPUT_SIZE)
+      const context = canvas.getContext('2d', { willReadFrequently: true })
+      if (!context) {
+        throw new Error('无法创建验证码画布')
+      }
+      inputContext = context
+      chwFloat32 = new Float32Array(INPUT_SIZE * INPUT_SIZE * 3)
+    }
+    return { context: inputContext, data: chwFloat32 }
   }
 
   async function createInputTensor(imageBlob: Blob): Promise<Ort.Tensor> {
@@ -59,19 +78,13 @@ export function startOnnxWorker(
       // This fallback protects formats whose dimensions cannot be read from the
       // encoded header; preflight checks already ran for PNG/GIF/JPEG/WebP.
       assertInferenceImageDimensions(bitmap.width, bitmap.height)
-      const canvas = new OffscreenCanvas(INPUT_SIZE, INPUT_SIZE)
-      const context = canvas.getContext('2d', { willReadFrequently: true })
-      if (!context) {
-        throw new Error('无法创建验证码画布')
-      }
+      const { context, data } = prepareReusableInputFrame()
       context.fillStyle = '#727272'
       context.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE)
       const layout = calculateLetterboxLayout(bitmap.width, bitmap.height, INPUT_SIZE)
       context.drawImage(bitmap, layout.x, layout.y, layout.width, layout.height)
       const rgba = context.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data
-      const plane = INPUT_SIZE * INPUT_SIZE
-      const data = new Float32Array(plane * 3)
-      copyRgbaToChwFloat32(rgba, data, plane)
+      copyRgbaToChwFloat32(rgba, data, INPUT_SIZE * INPUT_SIZE)
       return new runtime.Tensor('float32', data, [1, 3, INPUT_SIZE, INPUT_SIZE])
     } finally {
       bitmap.close()

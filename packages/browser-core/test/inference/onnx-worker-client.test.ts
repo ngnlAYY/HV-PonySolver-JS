@@ -553,6 +553,145 @@ describe('OnnxWorkerClient', () => {
     expect(SuccessfulWorker.instances).toHaveLength(2)
   })
 
+  it('stops rebuilding after three consecutive detect timeouts instead of looping forever', async () => {
+    vi.useFakeTimers()
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    const modelCache = {
+      getCached: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      download: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelRepository
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(modelCache, panel)
+
+    const detectMessages = () => SuccessfulWorker.messages.filter((message) => message.type === 'detect')
+    const respondLatestInit = (): void => {
+      const inits = SuccessfulWorker.messages.filter((message) => message.type === 'init')
+      SuccessfulWorker.instances[SuccessfulWorker.instances.length - 1]?.respond(inits[inits.length - 1]?.requestId)
+    }
+
+    const preparePromise = client.prepare()
+    await vi.waitFor(() => {
+      respondLatestInit()
+      expect(SuccessfulWorker.messages).toHaveLength(1)
+    })
+    await preparePromise
+
+    for (let attempt = 1; attempt <= inferenceRecoveryConfig.maxConsecutiveWorkerErrors; attempt += 1) {
+      const detectPromise = client.detect({} as Blob)
+      await vi.waitFor(() => {
+        // Each retry rebuilds the discarded Worker, so keep answering its init.
+        respondLatestInit()
+        expect(detectMessages()).toHaveLength(attempt)
+      })
+      const rejection = expect(detectPromise).rejects.toThrow('ONNX Worker 请求超时')
+
+      await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.workerDetectTimeoutMs)
+      await rejection
+    }
+
+    expect(SuccessfulWorker.terminateCount).toBe(inferenceRecoveryConfig.maxConsecutiveWorkerErrors)
+    const workersBeforeGiveUp = SuccessfulWorker.instances.length
+    const detectsBeforeGiveUp = detectMessages().length
+
+    await expect(client.detect({} as Blob)).rejects.toThrow('连续多次请求超时')
+
+    expect(SuccessfulWorker.instances.length).toBe(workersBeforeGiveUp)
+    expect(detectMessages().length).toBe(detectsBeforeGiveUp)
+    await expect(client.prepare()).rejects.toThrow('连续多次请求超时')
+    expect(SuccessfulWorker.instances.length).toBe(workersBeforeGiveUp)
+  })
+
+  it('clears the consecutive-timeout count after a successful detect', async () => {
+    vi.useFakeTimers()
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    const modelCache = {
+      getCached: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      download: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelRepository
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+
+    const typedMessages = (type: string) => SuccessfulWorker.messages.filter((message) => message.type === type)
+    const respondLatest = (type: string): void => {
+      const messages = typedMessages(type)
+      SuccessfulWorker.instances[SuccessfulWorker.instances.length - 1]?.respond(
+        messages[messages.length - 1]?.requestId,
+      )
+    }
+    const runTimedOutDetect = async (): Promise<void> => {
+      const detectsBefore = typedMessages('detect').length
+      const detectPromise = client.detect({} as Blob)
+      await vi.waitFor(() => {
+        // A discarded Worker is rebuilt first, so keep answering its init.
+        respondLatest('init')
+        expect(typedMessages('detect')).toHaveLength(detectsBefore + 1)
+      })
+      const rejection = expect(detectPromise).rejects.toThrow('ONNX Worker 请求超时')
+      await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.workerDetectTimeoutMs)
+      await rejection
+    }
+
+    const preparePromise = client.prepare()
+    await vi.waitFor(() => {
+      respondLatest('init')
+      expect(typedMessages('init')).toHaveLength(1)
+    })
+    await preparePromise
+
+    await runTimedOutDetect()
+
+    SuccessfulWorker.autoRespond = true
+    await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true })
+    SuccessfulWorker.autoRespond = false
+
+    await runTimedOutDetect()
+
+    // Two stalls have accumulated since the successful detect, which stays
+    // below the limit: the next detect must still rebuild a fresh session.
+    SuccessfulWorker.autoRespond = true
+    const workersBeforeRecovery = SuccessfulWorker.instances.length
+    await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true })
+    expect(SuccessfulWorker.instances.length).toBe(workersBeforeRecovery + 1)
+  })
+
+  it('suppresses all status-panel writes while preparing silently', async () => {
+    const modelBuffer = new ArrayBuffer(8)
+    const modelCache = {
+      getCached: vi.fn(async () => null),
+      download: vi.fn(async () => modelBuffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelRepository
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(modelCache, panel)
+
+    await expect(client.prepare(undefined, { silent: true })).rejects.toThrow('init failed')
+
+    expect(panel.setStatus).not.toHaveBeenCalled()
+    expect(panel.setSessionReady).not.toHaveBeenCalled()
+  })
+
+  it('keeps silent preparations off-panel when initialization succeeds', async () => {
+    vi.stubGlobal('__HV_PONY_SOLVER_TEST_WORKER_SCRIPT__', 'self.onmessage = () => {}')
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    const modelCache = {
+      getCached: vi.fn(async () => null),
+      download: vi.fn(async () => modelBuffer),
+      putCached: vi.fn(async () => undefined),
+    } as unknown as ModelRepository
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(modelCache, panel)
+
+    await client.prepare(undefined, { silent: true })
+
+    expect(panel.setStatus).not.toHaveBeenCalled()
+    expect(panel.setSessionReady).not.toHaveBeenCalled()
+    await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true })
+  })
+
   it('does not cache or mark ready when destroyed before worker init response', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     SuccessfulWorker.autoRespond = false

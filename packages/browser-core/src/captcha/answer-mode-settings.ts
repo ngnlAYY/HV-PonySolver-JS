@@ -1,4 +1,6 @@
 import type { AsyncStringStorage } from '../platform/storage'
+import { formatErrorMessage } from '../utils/errors'
+import { warn } from '../utils/logger'
 
 export type AnswerMode = 'auto' | 'manual'
 
@@ -13,7 +15,8 @@ export async function getAnswerMode(storage: AsyncStringStorage): Promise<Answer
   try {
     const saved = await storage.get(ANSWER_MODE_STORAGE_KEY)
     return isAnswerMode(saved) ? saved : DEFAULT_ANSWER_MODE
-  } catch {
+  } catch (error) {
+    warn('读取答题模式设置失败，使用默认值:', formatErrorMessage(error))
     return DEFAULT_ANSWER_MODE
   }
 }

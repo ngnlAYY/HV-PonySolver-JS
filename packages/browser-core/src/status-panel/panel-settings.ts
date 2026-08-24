@@ -1,4 +1,6 @@
 import type { SettingsStorage } from '../platform/storage'
+import { formatErrorMessage } from '../utils/errors'
+import { warn } from '../utils/logger'
 
 export const PANEL_POSITION_STORAGE_KEY = 'hvPonySolverPanelPosition'
 export const PANEL_COMPACT_MODE_STORAGE_KEY = 'hvPonySolverPanelCompact'
@@ -54,7 +56,8 @@ export function getPanelPositionSync(storage: SettingsStorage): PanelPosition {
   try {
     const saved = storage.getSync(PANEL_POSITION_STORAGE_KEY)
     return saved ? parsePanelPosition(saved) : DEFAULT_PANEL_POSITION
-  } catch {
+  } catch (error) {
+    warn('读取面板位置设置失败，使用默认值:', formatErrorMessage(error))
     return DEFAULT_PANEL_POSITION
   }
 }

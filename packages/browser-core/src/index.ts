@@ -40,5 +40,4 @@ export type {
 export * from './utils/delay'
 export * from './utils/errors'
 export * from './utils/guards'
-export * from './utils/html'
 export * from './utils/logger'

@@ -19,6 +19,17 @@ export class WorkerResponseError extends Error {
   }
 }
 
+/**
+ * Marks request timeouts so recovery logic can distinguish a wedged session
+ * (which must be discarded) from a Worker that answered with an error.
+ */
+export class WorkerRequestTimeoutError extends Error {
+  constructor() {
+    super('ONNX Worker 请求超时')
+    this.name = 'WorkerRequestTimeoutError'
+  }
+}
+
 export class WorkerRequestBridge {
   private readonly requests = new Map<number, PendingRequest>()
   private nextRequestId = 1
@@ -39,7 +50,7 @@ export class WorkerRequestBridge {
           ? inferenceTimeoutConfig.workerInitTimeoutMs
           : inferenceTimeoutConfig.workerDetectTimeoutMs
       const timeoutId = setTimeout(() => {
-        const error = new Error('ONNX Worker 请求超时')
+        const error = new WorkerRequestTimeoutError()
         this.requests.delete(requestId)
         reject(error)
         this.onFailure(error)

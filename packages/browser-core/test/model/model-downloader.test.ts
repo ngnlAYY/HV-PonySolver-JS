@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import type { ModelDownloadQuotaExceededError } from '../../src/model/model-download-error'
+import { PermanentModelError } from '../../src/model/permanent-model-error'
 import {
   downloadModel as downloadCoreModel,
   probeModelAccessKey,
@@ -101,34 +102,50 @@ describe('downloadModel', () => {
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('?key=')
   })
 
-  it('reports a rejected Key when the Worker serves the small decoy under HTTP 200', async () => {
-    const cancel = vi.fn(async () => undefined)
-    const response = {
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-length': '1' }),
-      body: { cancel },
-    } as unknown as Response
+  it('reports a rejected Key when a suspicious declaration carries a non-model body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(new Uint8Array([9]), { headers: { 'content-length': '1' } })),
+    )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('模型 Key 无效或已失效')
+  })
+
+  it('reports a rejected Key for a suspicious declaration even with verification disabled', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(new Uint8Array([9]), { headers: { 'content-length': '1' } })),
+    )
+
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+      '模型 Key 无效或已失效',
+    )
+  })
+
+  it('accepts the real model when a proxy lies about its content length', async () => {
+    const response = new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-length': '1' } })
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => response),
     )
 
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow(
-      '模型 Key 无效或已失效',
-    )
-    expect(cancel).toHaveBeenCalledTimes(1)
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).resolves.toBeInstanceOf(ArrayBuffer)
   })
 
-  it('keeps size-mismatch reporting for a truncated real download', async () => {
-    // Two of three bytes is short but not decoy-small, so this stays a size error.
+  it('keeps truncated downloads retryable instead of naming them permanent', async () => {
+    // Two of three bytes is short but not decoy-small, so this stays a plain size error.
     const response = new Response(new Uint8Array([1, 2]), { headers: { 'content-length': '2' } })
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => response),
     )
 
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('下载模型大小校验失败')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow(
+      '下载模型大小校验失败: 2 != 3',
+    )
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toBeInstanceOf(
+      PermanentModelError,
+    )
   })
 
   it('does not treat a missing Content-Length as a decoy', async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   DEFAULT_PANEL_POSITION,
@@ -20,6 +20,10 @@ function storage(initial: string | null): SettingsStorage {
 }
 
 describe('panel position parser', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('round-trips safe coordinates within the configured range', () => {
     const position = { top: MAX_PANEL_POSITION, left: 0 }
     expect(parsePanelPosition(serializePanelPosition(position))).toEqual(position)
@@ -34,8 +38,31 @@ describe('panel position parser', () => {
   })
 
   it('falls back when a stored coordinate cannot be represented safely', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const invalid = storage('999999999999999999999999,20')
     expect(getPanelPositionSync(invalid)).toEqual(DEFAULT_PANEL_POSITION)
     await expect(getPanelPosition(invalid)).resolves.toEqual(DEFAULT_PANEL_POSITION)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[PonySolverLocal]',
+      '读取面板位置设置失败，使用默认值:',
+      'Error: 面板位置格式无效，请输入非负整数 top,left，例如 150,1240',
+    )
+  })
+
+  it('warns when the synchronous position read itself throws', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const unavailable: SettingsStorage = {
+      ...storage(null),
+      getSync: () => {
+        throw new Error('storage unavailable')
+      },
+    }
+
+    expect(getPanelPositionSync(unavailable)).toEqual(DEFAULT_PANEL_POSITION)
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[PonySolverLocal]',
+      '读取面板位置设置失败，使用默认值:',
+      'Error: storage unavailable',
+    )
   })
 })

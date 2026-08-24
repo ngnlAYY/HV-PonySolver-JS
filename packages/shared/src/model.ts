@@ -1,3 +1,7 @@
+// MODEL_INTEGRITY describes the source ONNX file and ORT_MODEL_INTEGRITY (in
+// ort-model.ts) the packaged .ort build of the very same model. The pair must
+// be regenerated together from one export: if one side changes, the other is
+// stale by definition.
 export const MODEL_FILENAME = 'yolo26n-640.onnx'
 export const DEFAULT_PUBLIC_MODEL_PATH = `/${MODEL_FILENAME}`
 export const MODEL_VERSION = 'yolo26n-640-2026-05-14'

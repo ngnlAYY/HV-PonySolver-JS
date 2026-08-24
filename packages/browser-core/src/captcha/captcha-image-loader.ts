@@ -1,55 +1,15 @@
 import { imagePreprocessConfig } from '../inference/inference-config'
+import { raceAbort } from '../utils/abort-race'
 import { warn } from '../utils/logger'
 import type { ImageLoader } from './captcha-types'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
-const SUPPORTED_IMAGE_CONTENT_TYPE = /^(?:image\/(?:jpeg|png|gif|webp))(?:[ \t]*;[ \t]*[!#$%&'*+.^_`|~0-9A-Za-z-]+[ \t]*=[ \t]*(?:[!#$%&'*+.^_`|~0-9A-Za-z-]+|"(?:[\t\x20\x21\x23-\x5b\x5d-\x7e]|\\[\t\x20-\x7e])*"))*[ \t]*$/iu
+const SUPPORTED_IMAGE_CONTENT_TYPE =
+  /^(?:image\/(?:jpeg|png|gif|webp))(?:[ \t]*;[ \t]*[!#$%&'*+.^_`|~0-9A-Za-z-]+[ \t]*=[ \t]*(?:[!#$%&'*+.^_`|~0-9A-Za-z-]+|"(?:[\t\x20\x21\x23-\x5b\x5d-\x7e]|\\[\t\x20-\x7e])*"))*[ \t]*$/iu
 const STRICT_CONTENT_LENGTH = /^(?:0|[1-9]\d*)$/u
 
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('图片请求已取消', 'AbortError')
-}
-
-function waitForAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    return Promise.reject(abortReason(signal))
-  }
-
-  return new Promise<T>((resolve, reject) => {
-    let settled = false
-    const cleanup = (): void => signal.removeEventListener('abort', onAbort)
-    const onAbort = (): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      cleanup()
-      reject(abortReason(signal))
-    }
-
-    signal.addEventListener('abort', onAbort, { once: true })
-    promise.then(
-      (value) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        cleanup()
-        resolve(value)
-      },
-      (error: unknown) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        cleanup()
-        reject(error)
-      },
-    )
-    if (signal.aborted) {
-      onAbort()
-    }
-  })
 }
 
 function contentLength(response: Response): number | null {
@@ -94,7 +54,7 @@ async function readBoundedBody(
   let actualLength = 0
   try {
     while (true) {
-      const { done, value } = await waitForAbort(reader.read(), signal)
+      const { done, value } = await raceAbort(reader.read(), signal, () => abortReason(signal))
       if (done) {
         break
       }
@@ -176,7 +136,7 @@ export class CachedImageLoader implements ImageLoader {
   }
 
   private async fetchBlob(url: string, cache: RequestCache, signal: AbortSignal, fallback: boolean): Promise<Blob> {
-    const response = await waitForAbort(
+    const response = await raceAbort(
       fetch(url, {
         cache,
         mode: 'same-origin',
@@ -184,6 +144,7 @@ export class CachedImageLoader implements ImageLoader {
         signal,
       }),
       signal,
+      () => abortReason(signal),
     )
     if (!response.ok) {
       const suffix = fallback ? ' (回退也失败)' : ''

@@ -1,3 +1,5 @@
+import { DEFAULT_RANDOM_ON_FAIL } from './fallback-settings'
+
 export const solverConfig = {
-  randomOnFail: false,
+  randomOnFail: DEFAULT_RANDOM_ON_FAIL,
 } as const

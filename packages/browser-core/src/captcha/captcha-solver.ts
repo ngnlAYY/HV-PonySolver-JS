@@ -11,7 +11,8 @@ import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from './ca
 import type { ImageLoader } from './captcha-types'
 import { solverConfig } from './solver-config'
 
-const TRANSIENT_RETRY_DELAYS_MS = [250, 750] as const
+/** Backoff schedule shared by every transient retry loop in the package. */
+export const TRANSIENT_RETRY_DELAYS_MS = [250, 750] as const
 
 type RetryOutcome<T> =
   | Readonly<{ state: 'success'; value: T }>

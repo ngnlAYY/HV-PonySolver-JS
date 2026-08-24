@@ -1,7 +1,8 @@
 import type { VerifiedModelDetectorService, YoloParseResult } from './inference-types'
 import { inferenceRecoveryConfig, inferenceTimeoutConfig } from './inference-config'
-import { WorkerRequestBridge } from './worker-request-bridge'
+import { WorkerRequestBridge, WorkerRequestTimeoutError } from './worker-request-bridge'
 import type { InferenceStatusSink } from '../status-panel/status-panel-types'
+import { raceAbort } from '../utils/abort-race'
 
 export interface ModelRepository {
   getCached(signal?: AbortSignal, deadline?: number): Promise<ArrayBuffer | null>
@@ -21,6 +22,8 @@ type PreparationSource =
 
 type PreparationOperation = {
   readonly controller: AbortController
+  /** The first caller decides whether the whole preparation stays off-panel. */
+  readonly silent: boolean
   promise: Promise<void>
   owners: number
   settled: boolean
@@ -54,16 +57,20 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     private readonly workerFactory: WorkerFactory,
   ) {}
 
-  async prepare(signal?: AbortSignal): Promise<void> {
+  async prepare(signal?: AbortSignal, options?: Readonly<{ silent?: boolean }>): Promise<void> {
     this.assertRequestActive(signal)
     if (this.worker && this.ready) {
       return
     }
-    const operation = this.preparation ?? this.startPreparation({ type: 'repository' })
+    const operation = this.preparation ?? this.startPreparation({ type: 'repository' }, options?.silent === true)
     return this.joinPreparation(operation, signal)
   }
 
-  async prepareFromVerifiedModel(modelBuffer: ArrayBuffer, signal?: AbortSignal): Promise<void> {
+  async prepareFromVerifiedModel(
+    modelBuffer: ArrayBuffer,
+    signal?: AbortSignal,
+    options?: Readonly<{ silent?: boolean }>,
+  ): Promise<void> {
     this.assertRequestActive(signal)
     if (this.worker && this.ready) {
       await this.cacheVerifiedBufferBestEffort(modelBuffer, signal)
@@ -89,7 +96,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       }
     }
 
-    const operation = this.startPreparation({ type: 'verified-buffer', modelBuffer })
+    const operation = this.startPreparation({ type: 'verified-buffer', modelBuffer }, options?.silent === true)
     return this.joinPreparation(operation, signal)
   }
 
@@ -107,7 +114,9 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       () => undefined,
       () => undefined,
     )
-    return this.waitForAbort(detectPromise, signal, () => workerPosted)
+    return raceAbort(detectPromise, signal, () => new Error('推理请求已取消'), {
+      holdOnAbort: () => workerPosted,
+    })
   }
 
   destroy(): void {
@@ -125,10 +134,11 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     this.consecutiveDetectErrors = 0
   }
 
-  private startPreparation(source: PreparationSource): PreparationOperation {
+  private startPreparation(source: PreparationSource, silent: boolean = false): PreparationOperation {
     const controller = new AbortController()
     const operation: PreparationOperation = {
       controller,
+      silent,
       promise: Promise.resolve(),
       owners: 0,
       settled: false,
@@ -137,11 +147,11 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       }, inferenceTimeoutConfig.workerPrepareTimeoutMs),
     }
     this.preparation = operation
-    operation.promise = this.createWorker(controller, source)
+    operation.promise = this.createWorker(controller, source, silent)
       .catch((error: unknown) => {
         this.ready = false
         const preparationReason = controller.signal.reason
-        if (!this.destroyed && !(preparationReason instanceof PreparationCancelledError)) {
+        if (!silent && !this.destroyed && !(preparationReason instanceof PreparationCancelledError)) {
           this.panel.setStatus({ session: '错误' })
         }
         throw error
@@ -248,9 +258,20 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     }
   }
 
-  private async createWorker(controller: AbortController, source: PreparationSource): Promise<void> {
+  private async createWorker(
+    controller: AbortController,
+    source: PreparationSource,
+    silent: boolean = false,
+  ): Promise<void> {
+    // Repeated timeouts mean the environment cannot finish a session; rebuilding
+    // forever would loop the download quota and CPU without ever recovering.
+    if (this.consecutiveDetectErrors >= inferenceRecoveryConfig.maxConsecutiveWorkerErrors) {
+      throw new Error('ONNX Worker 连续多次请求超时，已停止自动重建')
+    }
     const startedAt = Date.now()
-    this.panel.setStatus({ session: '初始化中' })
+    if (!silent) {
+      this.panel.setStatus({ session: '初始化中' })
+    }
     let createdWorker: Worker | null = null
     let createdBridge: WorkerRequestBridge | null = null
 
@@ -273,8 +294,11 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       }
       this.checkPreparation(controller, worker, bridge)
       this.ready = true
-      this.consecutiveDetectErrors = 0
-      this.panel.setSessionReady(Date.now() - startedAt)
+      // Only a completed detect proves the session actually answers on this
+      // device, so the consecutive-timeout count survives a successful init.
+      if (!silent) {
+        this.panel.setSessionReady(Date.now() - startedAt)
+      }
     } catch (error) {
       if (createdWorker && createdBridge && this.worker === createdWorker && this.requestBridge === createdBridge) {
         this.discardWorker(createdWorker, createdBridge, error)
@@ -317,13 +341,17 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       }
     }
 
-    const cachedModel = await this.waitForSignal(
+    const cachedModel = await raceAbort(
       this.modelCache.getCached(controller.signal, Date.now() + inferenceTimeoutConfig.modelCacheTimeoutMs),
       controller.signal,
+      () => signalError(controller.signal, '操作已取消'),
     )
     this.checkPreparation(controller)
     const modelBuffer =
-      cachedModel ?? (await this.waitForSignal(this.modelCache.download(controller.signal), controller.signal))
+      cachedModel ??
+      (await raceAbort(this.modelCache.download(controller.signal), controller.signal, () =>
+        signalError(controller.signal, '操作已取消'),
+      ))
     return {
       modelBuffer,
       cacheBuffer: cachedModel ? null : modelBuffer.slice(0),
@@ -348,7 +376,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     modelBuffer: ArrayBuffer,
   ): Promise<void> {
     this.checkPreparation(controller, worker, bridge)
-    await this.waitForSignal(
+    await raceAbort(
       bridge.post(
         {
           type: 'init',
@@ -357,6 +385,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
         [modelBuffer],
       ),
       controller.signal,
+      () => signalError(controller.signal, '操作已取消'),
     )
   }
 
@@ -376,7 +405,9 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     }
 
     try {
-      await this.waitForSignal(this.modelCache.putCached(buffer, true, true, controller.signal), controller.signal)
+      await raceAbort(this.modelCache.putCached(buffer, true, true, controller.signal), controller.signal, () =>
+        signalError(controller.signal, '操作已取消'),
+      )
     } catch {
       if (this.destroyed || this.destroyController.signal.aborted) {
         throw new Error('Worker 已关闭')
@@ -416,7 +447,13 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     this.worker = null
     this.requestBridge = null
     this.ready = false
-    this.consecutiveDetectErrors = 0
+    if (error instanceof WorkerRequestTimeoutError) {
+      // The wedged session is gone, but the timeout still counts toward the
+      // recovery limit so a slow device stops rebuilding after repeated stalls.
+      this.consecutiveDetectErrors += 1
+    } else {
+      this.consecutiveDetectErrors = 0
+    }
     if (reportSessionError && !this.destroyed) {
       this.panel.setStatus({ session: '错误' })
     }
@@ -434,33 +471,6 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     if (signal?.aborted) {
       throw new Error('推理请求已取消')
     }
-  }
-
-  private waitForSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-    if (signal.aborted) {
-      return Promise.reject(signalError(signal, '操作已取消'))
-    }
-    return new Promise<T>((resolve, reject) => {
-      let settled = false
-      const cleanup = (): void => signal.removeEventListener('abort', onAbort)
-      const finish = (callback: () => void): void => {
-        if (settled) {
-          return
-        }
-        settled = true
-        cleanup()
-        callback()
-      }
-      const onAbort = (): void => finish(() => reject(signalError(signal, '操作已取消')))
-      signal.addEventListener('abort', onAbort, { once: true })
-      promise.then(
-        (value) => finish(() => resolve(value)),
-        (error: unknown) => finish(() => reject(error)),
-      )
-      if (signal.aborted) {
-        onAbort()
-      }
-    })
   }
 
   private waitForRunningAbortRecovery<T>(
@@ -486,53 +496,6 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       signal.removeEventListener('abort', onAbort)
       if (timeoutId !== null) {
         clearTimeout(timeoutId)
-      }
-    })
-  }
-
-  private waitForAbort<T>(
-    promise: Promise<T>,
-    signal?: AbortSignal,
-    mustWaitForSettlement: () => boolean = () => false,
-  ): Promise<T> {
-    if (!signal) {
-      return promise
-    }
-    if (signal.aborted && !mustWaitForSettlement()) {
-      return Promise.reject(new Error('推理请求已取消'))
-    }
-    return new Promise<T>((resolve, reject) => {
-      let settled = false
-      const cleanup = (): void => signal.removeEventListener('abort', onAbort)
-      const onAbort = (): void => {
-        if (settled || mustWaitForSettlement()) {
-          return
-        }
-        settled = true
-        cleanup()
-        reject(new Error('推理请求已取消'))
-      }
-      signal.addEventListener('abort', onAbort, { once: true })
-      promise.then(
-        (value) => {
-          if (settled) {
-            return
-          }
-          settled = true
-          cleanup()
-          resolve(value)
-        },
-        (error: unknown) => {
-          if (settled) {
-            return
-          }
-          settled = true
-          cleanup()
-          reject(error)
-        },
-      )
-      if (signal.aborted) {
-        onAbort()
       }
     })
   }

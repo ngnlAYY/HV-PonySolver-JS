@@ -1,12 +1,14 @@
 import { captchaSelectors } from '../captcha/captcha-selectors'
 import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from '../captcha/captcha-target'
+import { TRANSIENT_RETRY_DELAYS_MS } from '../captcha/captcha-solver'
 import { isPermanentModelError } from '../model/permanent-model-error'
 import { sleep } from '../utils/delay'
 import { formatErrorMessage } from '../utils/errors'
 import { warn } from '../utils/logger'
 import type { AppDependencies } from './app-dependencies'
 
-const PREPARE_RETRY_DELAYS_MS = [250, 750] as const
+const STARTUP_SCAN_DELAY_MS = 100
+const MUTATION_SCAN_DEBOUNCE_MS = 100
 const TRANSIENT_FAILURE_RETRY_AFTER_MS = 30_000
 
 type PrepareTargetResult = 'prepared' | 'stale' | 'permanent-failure' | 'transient-failure'
@@ -80,7 +82,7 @@ export class App {
       this.startupTimeoutId = setTimeout(() => {
         this.startupTimeoutId = null
         this.scheduleSolve()
-      }, 100)
+      }, STARTUP_SCAN_DELAY_MS)
     }
     this.observe()
   }
@@ -118,16 +120,22 @@ export class App {
       if (captchaMaster && (target === captchaMaster || captchaMaster.contains(target as Node))) {
         return true
       }
-      for (const node of [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)]) {
-        if (!(node instanceof Element)) {
-          continue
+      for (const node of record.addedNodes) {
+        if (this.isCaptchaNode(node)) {
+          return true
         }
-        if (node.id === 'riddlemaster' || node.querySelector('#riddlemaster') !== null) {
+      }
+      for (const node of record.removedNodes) {
+        if (this.isCaptchaNode(node)) {
           return true
         }
       }
     }
     return false
+  }
+
+  private isCaptchaNode(node: Node): boolean {
+    return node instanceof Element && (node.id === 'riddlemaster' || node.querySelector('#riddlemaster') !== null)
   }
 
   private observe(): void {
@@ -141,7 +149,7 @@ export class App {
       this.observerTimeoutId = setTimeout(() => {
         this.observerTimeoutId = null
         this.scheduleSolve()
-      }, 100)
+      }, MUTATION_SCAN_DEBOUNCE_MS)
     })
     const target = document.body || document.documentElement
     if (target) {
@@ -174,7 +182,7 @@ export class App {
   ): Promise<PrepareTargetResult> {
     this.preparingCaptchaTarget = target
     try {
-      for (let attempt = 0; attempt <= PREPARE_RETRY_DELAYS_MS.length; attempt += 1) {
+      for (let attempt = 0; attempt <= TRANSIENT_RETRY_DELAYS_MS.length; attempt += 1) {
         if (!this.isTargetCurrent(target, signal) || credentialsRevision !== this.modelCredentialsRevision) {
           return 'stale'
         }
@@ -191,7 +199,7 @@ export class App {
             warn('启动 ONNX 失败:', formatErrorMessage(error))
             return 'permanent-failure'
           }
-          const retryDelay = PREPARE_RETRY_DELAYS_MS[attempt]
+          const retryDelay = TRANSIENT_RETRY_DELAYS_MS[attempt]
           if (retryDelay === undefined) {
             warn('启动 ONNX 失败:', formatErrorMessage(error))
             return 'transient-failure'

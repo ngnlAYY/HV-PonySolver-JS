@@ -48,6 +48,9 @@ export class StatusPanel implements StatusPanelContract {
       return
     }
     this.lifecycleGeneration += 1
+    // Async settings reads may outlive this very panel element; each callback
+    // must drop its stale write when destroy/create replaced the generation.
+    const lifecycleGeneration = this.lifecycleGeneration
     this.persistenceError = null
     this.records = this.history.get(this.world)
     this.recordsVersion += 1
@@ -57,22 +60,29 @@ export class StatusPanel implements StatusPanelContract {
     const syncPosition = getPanelPositionSync(this.settingsStorage)
     this.el.style.cssText = `position:absolute;top:${syncPosition.top}px;left:${syncPosition.left}px;font-size:12px;text-align:left`
     getPanelPosition(this.settingsStorage).then((position) => {
-      if (this.el && (position.top !== syncPosition.top || position.left !== syncPosition.left)) {
-        this.el.style.top = `${position.top}px`
-        this.el.style.left = `${position.left}px`
+      if (
+        lifecycleGeneration !== this.lifecycleGeneration ||
+        !this.el ||
+        (position.top === syncPosition.top && position.left === syncPosition.left)
+      ) {
+        return
       }
+      this.el.style.top = `${position.top}px`
+      this.el.style.left = `${position.left}px`
     })
     isPanelCompactMode(this.settingsStorage).then((compactMode) => {
-      if (this.el && compactMode !== this.compactMode) {
-        this.compactMode = compactMode
-        this.scheduleRender()
+      if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || compactMode === this.compactMode) {
+        return
       }
+      this.compactMode = compactMode
+      this.scheduleRender()
     })
     getPanelHistoryLimit(this.settingsStorage).then((historyLimit) => {
-      if (this.el && historyLimit !== this.historyLimit) {
-        this.historyLimit = historyLimit
-        this.scheduleRender()
+      if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || historyLimit === this.historyLimit) {
+        return
       }
+      this.historyLimit = historyLimit
+      this.scheduleRender()
     })
     document.body.appendChild(this.el)
     this.render()

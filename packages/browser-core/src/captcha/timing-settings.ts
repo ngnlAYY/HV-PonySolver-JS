@@ -1,4 +1,6 @@
 import type { SettingsStorage } from '../platform/storage'
+import { formatErrorMessage } from '../utils/errors'
+import { warn } from '../utils/logger'
 import { timingConfig } from './timing-config'
 
 export type DelayRange = readonly [number, number]
@@ -31,7 +33,8 @@ function getDelayRangeSync(storage: SettingsStorage, key: string, fallback: Dela
   try {
     const saved = storage.getSync(key)
     return saved ? parseDelayRange(saved) : fallback
-  } catch {
+  } catch (error) {
+    warn('读取时间设置失败，使用默认值:', formatErrorMessage(error))
     return fallback
   }
 }
@@ -40,7 +43,8 @@ async function getDelayRange(storage: SettingsStorage, key: string, fallback: De
   try {
     const saved = await storage.get(key)
     return saved ? parseDelayRange(saved) : fallback
-  } catch {
+  } catch (error) {
+    warn('读取时间设置失败，使用默认值:', formatErrorMessage(error))
     return fallback
   }
 }

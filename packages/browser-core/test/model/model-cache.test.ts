@@ -342,7 +342,7 @@ describe('ModelCache', () => {
     expect(database.close).not.toHaveBeenCalled()
   })
 
-  it('rejects stale open requests after close', async () => {
+  it('rejects stale open requests after close instead of reporting a cache miss', async () => {
     const { request, database } = stubIndexedDb({ deferOpenSuccess: true })
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const panel = createStatusPanel()
@@ -352,9 +352,8 @@ describe('ModelCache', () => {
     cache.close()
     request.onsuccess?.(new Event('success'))
 
-    await expect(promise).resolves.toBeNull()
+    await expect(promise).rejects.toThrow('模型缓存操作已取消')
     expect(database.close).toHaveBeenCalledTimes(1)
-    expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^缓存读取失败 \d+ms，准备下载$/) })
   })
 
   it('closes the cached database on versionchange', async () => {
@@ -391,7 +390,7 @@ describe('ModelCache', () => {
     expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
   })
 
-  it('settles and aborts a pending cache read when close is called', async () => {
+  it('rejects a pending cache read when close is called instead of reporting a cache miss', async () => {
     const { transactions } = stubIndexedDb({ deferTransactionCompletion: true })
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const cache = new ModelCache(createStatusPanel())
@@ -400,8 +399,39 @@ describe('ModelCache', () => {
 
     cache.close()
 
-    await expect(promise).resolves.toBeNull()
+    await expect(promise).rejects.toThrow('模型缓存操作已取消')
     expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
+  })
+
+  it('shares one in-flight download across concurrent callers', async () => {
+    const downloadModelImpl = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
+    const panel = createStatusPanel()
+    const cache = new ModelCache(panel, downloadModelImpl)
+
+    const [first, second] = await Promise.all([cache.download(undefined, false), cache.download(undefined, false)])
+
+    expect(first.byteLength).toBe(3)
+    expect(second).toBe(first)
+    expect(downloadModelImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not reuse a finished download for later callers', async () => {
+    const downloadModelImpl = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
+    const cache = new ModelCache(createStatusPanel(), downloadModelImpl)
+
+    await cache.download(undefined, false)
+    await cache.download(undefined, false)
+
+    expect(downloadModelImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps distinct access key overrides on separate downloads', async () => {
+    const downloadModelImpl = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
+    const cache = new ModelCache(createStatusPanel(), downloadModelImpl)
+
+    await Promise.all([cache.download(undefined, false, 'key-a'), cache.download(undefined, false, 'key-b')])
+
+    expect(downloadModelImpl).toHaveBeenCalledTimes(2)
   })
 
   it('reports elapsed time when download completes', async () => {

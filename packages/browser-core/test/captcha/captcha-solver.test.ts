@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 import { CaptchaSolver } from '../../src/captcha/captcha-solver'
 import type { ImageLoader } from '../../src/captcha/captcha-types'
+import { solverConfig } from '../../src/captcha/solver-config'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
 import { ModelAccessKeyRejectedError } from '../../src/model/model-download-error'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
@@ -70,6 +71,7 @@ function createSolver(
       answerSubmitter: AnswerSubmitter
       getAnswerMode: () => Promise<'auto' | 'manual'>
       getAbortSignal: () => AbortSignal | undefined
+      randomOnFail: boolean
     }>
   > = {},
 ): Readonly<{
@@ -85,7 +87,15 @@ function createSolver(
   const answerSubmitter = overrides.answerSubmitter ?? createAnswerSubmitter()
   const getAnswerMode = overrides.getAnswerMode ?? vi.fn(async () => 'auto' as const)
   return {
-    solver: new CaptchaSolver(panel, detector, imageLoader, answerSubmitter, getAnswerMode, overrides.getAbortSignal),
+    solver: new CaptchaSolver(
+      panel,
+      detector,
+      imageLoader,
+      answerSubmitter,
+      getAnswerMode,
+      overrides.getAbortSignal,
+      overrides.randomOnFail ?? solverConfig.randomOnFail,
+    ),
     panel,
     detector,
     imageLoader,
@@ -436,7 +446,7 @@ describe('CaptchaSolver', () => {
   it('reports image loading and detector stages before failed detection results', async () => {
     appendCaptcha()
     const detector = createDetector(vi.fn(async () => emptyDetectionResult(false)))
-    const { solver, panel, answerSubmitter } = createSolver({ detector })
+    const { solver, panel, answerSubmitter } = createSolver({ detector, randomOnFail: false })
 
     const result = await solver.trigger()
 
@@ -476,7 +486,7 @@ describe('CaptchaSolver', () => {
   it('reports empty successful detection results as having no answer to submit', async () => {
     appendCaptcha()
     const detector = createDetector(vi.fn(async () => emptyDetectionResult(true)))
-    const { solver, panel, answerSubmitter } = createSolver({ detector })
+    const { solver, panel, answerSubmitter } = createSolver({ detector, randomOnFail: false })
 
     const result = await solver.trigger()
 

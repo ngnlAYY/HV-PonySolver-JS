@@ -27,22 +27,88 @@ function insertTopDetection(classIds: number[], confidences: number[], classId: 
   }
 }
 
+/** Parallel top-N arrays fed by insertTopDetection always stay equally long. */
 function buildDetections(classIds: number[], confidences: number[]): Detection[] {
-  const detections: Detection[] = new Array(classIds.length)
-
+  const detections: Detection[] = []
   for (let i = 0; i < classIds.length; i += 1) {
-    const classId = classIds[i]
-    const confidence = confidences[i]
-    if (classId === undefined || confidence === undefined) {
+    detections.push({
+      class_id: classIds[i]!,
+      confidence: roundConfidence(confidences[i]!),
+    })
+  }
+  return detections
+}
+
+type RankingAccumulator = {
+  detectionClassIds: number[]
+  detectionConfidences: number[]
+  candidateClassIds: number[]
+  candidateConfidences: number[]
+  bestClassId: number
+  bestConfidence: number
+}
+
+function createRankingAccumulator(): RankingAccumulator {
+  return {
+    detectionClassIds: [],
+    detectionConfidences: [],
+    candidateClassIds: [],
+    candidateConfidences: [],
+    bestClassId: -1,
+    bestConfidence: Number.NEGATIVE_INFINITY,
+  }
+}
+
+function accumulateRow(state: RankingAccumulator, classId: number, confidence: number): void {
+  insertTopDetection(state.candidateClassIds, state.candidateConfidences, classId, confidence)
+
+  if (confidence > state.bestConfidence) {
+    state.bestConfidence = confidence
+    state.bestClassId = classId
+  }
+
+  if (confidence >= confidenceThreshold) {
+    insertTopDetection(state.detectionClassIds, state.detectionConfidences, classId, confidence)
+  }
+}
+
+function finalizeRanking(state: RankingAccumulator): YoloParseResult {
+  if (state.detectionClassIds.length === 0 && state.bestConfidence !== Number.NEGATIVE_INFINITY) {
+    state.detectionClassIds.push(state.bestClassId)
+    state.detectionConfidences.push(state.bestConfidence)
+  }
+
+  const detections = buildDetections(state.detectionClassIds, state.detectionConfidences)
+  const candidates = buildDetections(state.candidateClassIds, state.candidateConfidences)
+
+  const ponies: AnswerCode[] = []
+  const confidences: Partial<Record<AnswerCode, number>> = {}
+
+  for (const detection of detections) {
+    const pony = answerCodeForClassId(detection.class_id)
+    if (!pony) {
       continue
     }
-    detections[i] = {
-      class_id: classId,
-      confidence: roundConfidence(confidence),
+
+    const currentConfidence = confidences[pony]
+    if (currentConfidence === undefined) {
+      ponies.push(pony)
+      confidences[pony] = detection.confidence
+      continue
+    }
+
+    if (detection.confidence > currentConfidence) {
+      confidences[pony] = detection.confidence
     }
   }
 
-  return detections
+  return {
+    success: ponies.length >= 1 && ponies.length <= yoloOutputConfig.maxKinds,
+    ponies,
+    confidences,
+    detections,
+    candidates,
+  }
 }
 
 export type YoloOutputTensor = Readonly<{
@@ -76,12 +142,17 @@ function validateTensorDimensions(dims: readonly number[], dataLength: number): 
   return rows
 }
 
-/** Strict Worker boundary validation before the permissive ranking parser. */
+/**
+ * Strict Worker boundary validation fused with the ranking pass: one sweep per
+ * row both rejects any non-finite value (including unused box columns, which is
+ * a tamper-detection contract) and feeds the valid ones to the ranking.
+ */
 export function parseYoloOutputTensor(output: YoloOutputTensor): YoloParseResult {
   if (!(output.data instanceof Float32Array) || !Array.isArray(output.dims)) {
     throw new Error('模型输出格式无效')
   }
   const rows = validateTensorDimensions(output.dims, output.data.length)
+  const state = createRankingAccumulator()
   for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
     const base = rowIndex * rowSize
     for (let column = 0; column < rowSize; column += 1) {
@@ -97,19 +168,19 @@ export function parseYoloOutputTensor(output: YoloOutputTensor): YoloParseResult
     if (classId === undefined || !Number.isInteger(classId) || !answerCodeForClassId(classId)) {
       throw new Error(`模型输出第 ${rowIndex + 1} 行类别无效`)
     }
+    accumulateRow(state, classId, confidence)
   }
-  return parseYoloOutput(output.data)
+  return finalizeRanking(state)
 }
 
+/**
+ * Permissive ranking pass that skips invalid rows instead of rejecting them.
+ *
+ * @internal Must only run after parseYoloOutputTensor validated the tensor at
+ * the Worker boundary; on its own it accepts malformed model output.
+ */
 export function parseYoloOutput(data: Float32Array): YoloParseResult {
-  const detectionClassIds: number[] = []
-  const detectionConfidences: number[] = []
-  const candidateClassIds: number[] = []
-  const candidateConfidences: number[] = []
-
-  let bestClassId = -1
-  let bestConfidence = Number.NEGATIVE_INFINITY
-
+  const state = createRankingAccumulator()
   const totalRows = Math.floor(data.length / rowSize)
 
   for (let rowIndex = 0; rowIndex < totalRows; rowIndex += 1) {
@@ -124,52 +195,8 @@ export function parseYoloOutput(data: Float32Array): YoloParseResult {
       continue
     }
 
-    insertTopDetection(candidateClassIds, candidateConfidences, classId, confidence)
-
-    if (confidence > bestConfidence) {
-      bestConfidence = confidence
-      bestClassId = classId
-    }
-
-    if (confidence >= confidenceThreshold) {
-      insertTopDetection(detectionClassIds, detectionConfidences, classId, confidence)
-    }
+    accumulateRow(state, classId, confidence)
   }
 
-  if (detectionClassIds.length === 0 && bestConfidence !== Number.NEGATIVE_INFINITY) {
-    detectionClassIds.push(bestClassId)
-    detectionConfidences.push(bestConfidence)
-  }
-
-  const detections = buildDetections(detectionClassIds, detectionConfidences)
-  const candidates = buildDetections(candidateClassIds, candidateConfidences)
-
-  const ponies: AnswerCode[] = []
-  const confidences: Partial<Record<AnswerCode, number>> = {}
-
-  for (const detection of detections) {
-    const pony = answerCodeForClassId(detection.class_id)
-    if (!pony) {
-      continue
-    }
-
-    const currentConfidence = confidences[pony]
-    if (currentConfidence === undefined) {
-      ponies.push(pony)
-      confidences[pony] = detection.confidence
-      continue
-    }
-
-    if (detection.confidence > currentConfidence) {
-      confidences[pony] = detection.confidence
-    }
-  }
-
-  return {
-    success: ponies.length >= 1 && ponies.length <= yoloOutputConfig.maxKinds,
-    ponies,
-    confidences,
-    detections,
-    candidates,
-  }
+  return finalizeRanking(state)
 }
