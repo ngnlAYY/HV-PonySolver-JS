@@ -1,3 +1,4 @@
+import { escapeRegExp } from '../lib/strings.mjs'
 import { readModelWorkerHttpFacts } from './model-worker-source-facts.mjs'
 
 function checkModelWorkerDocs(readme, facts) {
@@ -17,16 +18,28 @@ function checkModelWorkerDocs(readme, facts) {
   }
 
   const optionsLine = findModelWorkerHttpRow(lines, 'OPTIONS')
-  if (facts.corsAllowMethods && !lineMentionsHeaderValue(optionsLine, 'Access-Control-Allow-Methods', facts.corsAllowMethods)) {
-    errors.push(`README.md Model Worker OPTIONS docs must mention Access-Control-Allow-Methods: ${facts.corsAllowMethods}`)
+  if (
+    facts.corsAllowMethods &&
+    !lineMentionsHeaderValue(optionsLine, 'Access-Control-Allow-Methods', facts.corsAllowMethods)
+  ) {
+    errors.push(
+      `README.md Model Worker OPTIONS docs must mention Access-Control-Allow-Methods: ${facts.corsAllowMethods}`,
+    )
   }
-  if (facts.corsAllowHeaders && !lineMentionsHeaderValue(optionsLine, 'Access-Control-Allow-Headers', facts.corsAllowHeaders)) {
-    errors.push(`README.md Model Worker OPTIONS docs must mention Access-Control-Allow-Headers: ${facts.corsAllowHeaders}`)
+  if (
+    facts.corsAllowHeaders &&
+    !lineMentionsHeaderValue(optionsLine, 'Access-Control-Allow-Headers', facts.corsAllowHeaders)
+  ) {
+    errors.push(
+      `README.md Model Worker OPTIONS docs must mention Access-Control-Allow-Headers: ${facts.corsAllowHeaders}`,
+    )
   }
 
   const methodNotAllowedLine = findMethodNotAllowedDocsLine(lines)
   if (facts.allowedMethods && !lineMentionsHeaderValue(methodNotAllowedLine, 'Allow', facts.allowedMethods)) {
-    errors.push(`README.md Model Worker HTTP 405 docs must mention Allow: ${facts.allowedMethods} on the method-not-allowed row`)
+    errors.push(
+      `README.md Model Worker HTTP 405 docs must mention Allow: ${facts.allowedMethods} on the method-not-allowed row`,
+    )
   }
   if (lines.some(hasStaleMethodAllowHeader)) {
     errors.push('README.md Model Worker HTTP 405 docs must not document stale Allow: GET, HEAD semantics')
@@ -41,13 +54,20 @@ function checkModelWorkerDocs(readme, facts) {
   }
 
   const selectedObjectMissingLine = lines.find(isSelectedObjectMissingDocsLine) ?? ''
-  if (facts.selectedObjectMissingStatus && facts.selectedObjectMissingMessage
-    && !selectedObjectMissingLine.includes(`${facts.selectedObjectMissingStatus} ${facts.selectedObjectMissingMessage}`)) {
-    errors.push(`README.md Model Worker selected R2 object missing docs must mention ${facts.selectedObjectMissingStatus} ${facts.selectedObjectMissingMessage}`)
+  if (
+    facts.selectedObjectMissingStatus &&
+    facts.selectedObjectMissingMessage &&
+    !selectedObjectMissingLine.includes(`${facts.selectedObjectMissingStatus} ${facts.selectedObjectMissingMessage}`)
+  ) {
+    errors.push(
+      `README.md Model Worker selected R2 object missing docs must mention ${facts.selectedObjectMissingStatus} ${facts.selectedObjectMissingMessage}`,
+    )
   }
 
   if (lines.some((line) => line.includes('Cache-Control: public, max-age=86400'))) {
-    errors.push('README.md Model Worker HTTP docs must not document stale Cache-Control: public, max-age=86400 semantics')
+    errors.push(
+      'README.md Model Worker HTTP docs must not document stale Cache-Control: public, max-age=86400 semantics',
+    )
   }
 
   return errors
@@ -68,10 +88,6 @@ function lineMentionsHeaderValue(line, headerName, value) {
   return new RegExp(`(?:\`${escapedHeaderValue}\`|${escapedHeaderValue}(?=$|[\\s，。;；|)]))`).test(line)
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 function isMethodNotAllowedDocsLine(line) {
   return /^\|\s*非\s+`GET`\s*\/\s*`HEAD`\s*\/\s*`OPTIONS`\s+方法\s*\|/.test(line)
 }
@@ -81,7 +97,9 @@ function hasStaleMethodAllowHeader(line) {
 }
 
 function isQueryStringKeyDocsLine(line) {
-  return /(?:query[-\s]+string\s+key|key\s+query\s+string|query\s+param(?:eter)?\s+key|search\s+param(?:eter)?\s+key|url\s+param(?:eter)?\s+key|[?&]key=)/i.test(line)
+  return /(?:query[-\s]+string\s+key|key\s+query\s+string|query\s+param(?:eter)?\s+key|search\s+param(?:eter)?\s+key|url\s+param(?:eter)?\s+key|[?&]key=)/i.test(
+    line,
+  )
 }
 
 function statesQueryStringDoesNotAuthorizeRealModel(line) {
@@ -104,14 +122,22 @@ function stripAllowedQueryStringDenials(line) {
   return line
     .replace(/不(?:会|能)?授权真实模型/g, '')
     .replace(/不(?:会|能)?返回真实模型/g, '')
-    .replace(new RegExp(String.raw`\b${denial}\s+(?:authori[sz]es?|returns?|serves?)\s+(?:access\s+to\s+)?${realModel}\b`, 'gi'), '')
+    .replace(
+      new RegExp(
+        String.raw`\b${denial}\s+(?:authori[sz]es?|returns?|serves?)\s+(?:access\s+to\s+)?${realModel}\b`,
+        'gi',
+      ),
+      '',
+    )
     .replace(new RegExp(String.raw`\b${denial}\s+grants?\s+(?:access\s+to\s+)?${realModel}\b`, 'gi'), '')
     .replace(/\b(?:while|but)\s+(?:Authorization:\s*)?Bearer(?:\s+token)?\b[^.;。；]*/gi, '')
     .replace(/,\s*(?:Authorization:\s*)?Bearer(?:\s+token)?\b[^.;。；]*/gi, '')
 }
 
 function queryStringSegmentAuthorizesRealModel(line) {
-  return /(?:授权真实模型|(?:会|可)?返回\s*(?:`?200`?\s*)?真实模型|returns?\s+(?:(?:`?200`?|\d{3})[\s,，]*)?(?:a\s+|the\s+)?real model|serves?\s+(?:a\s+|the\s+)?real model|authori[sz]es?\s+(?:access\s+to\s+)?(?:a\s+|the\s+)?real model|grants?\s+(?:access\s+to\s+)?(?:a\s+|the\s+)?real model|can\s+grant\s+access\s+to\s+(?:a\s+|the\s+)?real model|200\s*(?:真实模型|real model))/i.test(line)
+  return /(?:授权真实模型|(?:会|可)?返回\s*(?:`?200`?\s*)?真实模型|returns?\s+(?:(?:`?200`?|\d{3})[\s,，]*)?(?:a\s+|the\s+)?real model|serves?\s+(?:a\s+|the\s+)?real model|authori[sz]es?\s+(?:access\s+to\s+)?(?:a\s+|the\s+)?real model|grants?\s+(?:access\s+to\s+)?(?:a\s+|the\s+)?real model|can\s+grant\s+access\s+to\s+(?:a\s+|the\s+)?real model|200\s*(?:真实模型|real model))/i.test(
+    line,
+  )
 }
 
 function isSelectedObjectMissingDocsLine(line) {

@@ -1,42 +1,26 @@
 import { existsSync } from 'node:fs'
-import { readdir, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { dirname, extname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { parseRepoRootArgs } from './lib/cli.mjs'
+import { isDirectRun } from './lib/direct-run.mjs'
+import { collectSourceFiles } from './lib/source-files.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '..')
-const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.mjs'])
 const browserSourceDirs = ['apps/userscript/src', 'packages/browser-core/src', 'apps/extension/src']
-const allowedSinks = new Map([
-  ['apps/userscript/src/inference/onnx-worker-external-entry.ts', { importScripts: 1 }],
-])
+const allowedSinks = new Map([['apps/userscript/src/inference/onnx-worker-external-entry.ts', { importScripts: 1 }]])
 
-if (isDirectRun()) {
+if (isDirectRun(import.meta.url)) {
   try {
-    const { repoRoot, explicitRepoRoot } = parseArgs(process.argv.slice(2))
+    const { repoRoot, explicitRepoRoot } = parseRepoRootArgs(process.argv.slice(2), defaultRepoRoot)
     await checkBrowserSinks(repoRoot, { requireSourceDir: explicitRepoRoot })
     process.stdout.write('Browser sink check passed\n')
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1
   }
-}
-
-function isDirectRun() {
-  return process.argv[1] ? resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false
-}
-
-function parseArgs(args) {
-  const repoRootIndex = args.indexOf('--repo-root')
-  if (repoRootIndex === -1) {
-    return { repoRoot: defaultRepoRoot, explicitRepoRoot: false }
-  }
-  const repoRoot = args[repoRootIndex + 1]
-  if (!repoRoot) {
-    throw new Error('--repo-root requires a path')
-  }
-  return { repoRoot: resolve(repoRoot), explicitRepoRoot: true }
 }
 
 async function checkBrowserSinks(repoRoot = defaultRepoRoot, { requireSourceDir = false } = {}) {
@@ -69,22 +53,6 @@ async function checkBrowserSinks(repoRoot = defaultRepoRoot, { requireSourceDir 
   if (violations.length > 0) {
     throw new Error(violations.join('\n'))
   }
-}
-
-async function collectSourceFiles(dir) {
-  const entries = await readdir(dir, { withFileTypes: true })
-  const files = []
-  for (const entry of entries) {
-    const path = resolve(dir, entry.name)
-    if (entry.isDirectory()) {
-      files.push(...await collectSourceFiles(path))
-      continue
-    }
-    if (entry.isFile() && sourceExtensions.has(extname(entry.name))) {
-      files.push(path)
-    }
-  }
-  return files
 }
 
 function findSinkKinds(source, fileName = 'browser-sink-source.ts') {
@@ -121,11 +89,7 @@ function readScriptKind(fileName) {
 }
 
 function isInnerHtmlAssignment(node) {
-  return (
-    ts.isBinaryExpression(node)
-    && isAssignmentOperator(node.operatorToken.kind)
-    && isInnerHtmlTarget(node.left)
-  )
+  return ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind) && isInnerHtmlTarget(node.left)
 }
 
 function isAssignmentOperator(kind) {
@@ -136,22 +100,19 @@ function isInnerHtmlTarget(node) {
   if (ts.isPropertyAccessExpression(node)) {
     return node.name.text === 'innerHTML'
   }
-  return ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === 'innerHTML'
+  return (
+    ts.isElementAccessExpression(node) &&
+    ts.isStringLiteralLike(node.argumentExpression) &&
+    node.argumentExpression.text === 'innerHTML'
+  )
 }
 
 function isNewFunctionCall(node) {
-  return (
-    ts.isNewExpression(node)
-    && ts.isIdentifier(node.expression)
-    && node.expression.text === 'Function'
-  )
+  return ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function'
 }
 
 function isImportScriptsCall(node) {
-  return (
-    ts.isCallExpression(node)
-    && isImportScriptsExpression(node.expression)
-  )
+  return ts.isCallExpression(node) && isImportScriptsExpression(node.expression)
 }
 
 function isImportScriptsExpression(expression) {

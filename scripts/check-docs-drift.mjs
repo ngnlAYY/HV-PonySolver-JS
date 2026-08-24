@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseOnnxRuntimeAssetsManifest } from '../apps/userscript/scripts/onnx-runtime-assets.mjs'
+import { parseRepoRootArgs } from './lib/cli.mjs'
+import { isDirectRun } from './lib/direct-run.mjs'
 import { checkArchitectureGuardrails, checkUserscriptConfigDocs } from './docs-drift/architecture-docs.mjs'
 import { checkModelManifestDocs } from './docs-drift/model-manifest-docs.mjs'
 import { checkModelWorkerDocs, readModelWorkerHttpFacts } from './docs-drift/model-worker-docs.mjs'
@@ -13,9 +15,9 @@ import { parseModelManifest } from './model-manifest.mjs'
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '..')
 
-if (isDirectRun()) {
+if (isDirectRun(import.meta.url)) {
   try {
-    const repoRoot = resolveRepoRoot(process.argv.slice(2))
+    const { repoRoot } = parseRepoRootArgs(process.argv.slice(2), defaultRepoRoot)
     const errors = await checkDocsDrift(repoRoot)
     if (errors.length > 0) {
       for (const error of errors) {
@@ -29,22 +31,6 @@ if (isDirectRun()) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1
   }
-}
-
-function isDirectRun() {
-  return process.argv[1] ? resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false
-}
-
-function resolveRepoRoot(args) {
-  const repoRootIndex = args.indexOf('--repo-root')
-  if (repoRootIndex === -1) {
-    return defaultRepoRoot
-  }
-  const repoRoot = args[repoRootIndex + 1]
-  if (!repoRoot) {
-    throw new Error('--repo-root requires a path')
-  }
-  return resolve(repoRoot)
 }
 
 async function checkDocsDrift(repoRoot = defaultRepoRoot) {
@@ -107,4 +93,4 @@ async function importBrowserSupport(repoRoot) {
   return import(url.href)
 }
 
-export { checkDocsDrift, parseModelManifest, parseOnnxRuntimeAssetsManifest, resolveRepoRoot }
+export { checkDocsDrift, parseModelManifest, parseOnnxRuntimeAssetsManifest }

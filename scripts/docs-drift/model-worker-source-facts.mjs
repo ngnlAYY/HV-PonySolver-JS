@@ -52,11 +52,7 @@ function readModelWorkerHttpFacts(requestRouterSource, modelAccessSource, modelR
     'apps/model-worker/src/model-response.ts',
     errors,
   )
-  const selectedObjectMissingStatus = readSelectedObjectMissingStatus(
-    modelResponseSource,
-    requestRouterSource,
-    errors,
-  )
+  const selectedObjectMissingStatus = readSelectedObjectMissingStatus(modelResponseSource, requestRouterSource, errors)
   validateModelWorkerHttpUseSites(requestRouterSource, modelResponseSource, errors)
 
   if (!hasBearerAuthorizationAccessPath(modelAccessSource) || !hasBearerAuthorizationSelectionPath(modelAccessSource)) {
@@ -64,7 +60,9 @@ function readModelWorkerHttpFacts(requestRouterSource, modelAccessSource, modelR
   }
   const queryStringKeyArguments = extractStringCallArgumentsFromCode(modelAccessSource, 'searchParams.get')
   if (queryStringKeyArguments.some((value) => value.toLowerCase() === 'key')) {
-    errors.push('apps/model-worker/src/model-access.ts must not read query-string key unless README contract is updated')
+    errors.push(
+      'apps/model-worker/src/model-access.ts must not read query-string key unless README contract is updated',
+    )
   }
 
   return {
@@ -94,10 +92,14 @@ function validateModelWorkerHttpUseSites(requestRouterSource, modelResponseSourc
   }
 
   const preflightResponseBody = readFunctionBodySource(modelResponseSource, 'preflightResponse')
-  if (!hasStringPropertyWithIdentifierValue(preflightResponseBody, 'access-control-allow-headers', 'CORS_ALLOW_HEADERS')) {
+  if (
+    !hasStringPropertyWithIdentifierValue(preflightResponseBody, 'access-control-allow-headers', 'CORS_ALLOW_HEADERS')
+  ) {
     errors.push('apps/model-worker/src/model-response.ts must use CORS_ALLOW_HEADERS for Access-Control-Allow-Headers')
   }
-  if (!hasStringPropertyWithIdentifierValue(preflightResponseBody, 'access-control-allow-methods', 'CORS_ALLOW_METHODS')) {
+  if (
+    !hasStringPropertyWithIdentifierValue(preflightResponseBody, 'access-control-allow-methods', 'CORS_ALLOW_METHODS')
+  ) {
     errors.push('apps/model-worker/src/model-response.ts must use CORS_ALLOW_METHODS for Access-Control-Allow-Methods')
   }
   if (!hasStringPropertyWithIdentifierValue(preflightResponseBody, 'cache-control', 'CACHE_CONTROL')) {
@@ -105,7 +107,15 @@ function validateModelWorkerHttpUseSites(requestRouterSource, modelResponseSourc
   }
 
   const textResponseBody = readFunctionBodySource(modelResponseSource, 'textResponse')
-  if (!hasMemberCallWithStringAndIdentifierArgument(textResponseBody, 'responseHeaders', 'set', 'cache-control', 'CACHE_CONTROL')) {
+  if (
+    !hasMemberCallWithStringAndIdentifierArgument(
+      textResponseBody,
+      'responseHeaders',
+      'set',
+      'cache-control',
+      'CACHE_CONTROL',
+    )
+  ) {
     errors.push('apps/model-worker/src/model-response.ts must use CACHE_CONTROL for text responses')
   }
 
@@ -171,7 +181,13 @@ function hasIdentifierPropertyWithIdentifierValue(source, propertyName, identifi
   return false
 }
 
-function hasMemberCallWithStringAndIdentifierArgument(source, objectName, methodName, stringArgument, identifierArgument) {
+function hasMemberCallWithStringAndIdentifierArgument(
+  source,
+  objectName,
+  methodName,
+  stringArgument,
+  identifierArgument,
+) {
   for (let index = 0; index < source.length; index += 1) {
     const skipped = skipIgnoredSyntaxAndRegexLiteral(source, index)
     if (skipped !== index) {
@@ -209,9 +225,10 @@ function readSelectedObjectMissingStatus(modelResponseSource, requestRouterSourc
   const normalizedServeModelBody = stripIgnoredSyntax(stripDeadFalseBranches(serveModelBody))
   const objectReadMatch = /(?:env\.MODEL_BUCKET\.get|readObjectForRequest)\s*\(/.exec(normalizedServeModelBody)
   const searchSource = objectReadMatch ? normalizedServeModelBody.slice(objectReadMatch.index) : ''
-  const missingObjectMatch = /if\s*\(\s*(?:!\s*object|object\s*={2,3}\s*null|null\s*={2,3}\s*object|object\s*==\s*null)\s*\)\s*(?:{\s*)?return\s+internalErrorResponse\(\s*request\s*\)/s.exec(
-    searchSource,
-  )
+  const missingObjectMatch =
+    /if\s*\(\s*(?:!\s*object|object\s*={2,3}\s*null|null\s*={2,3}\s*object|object\s*==\s*null)\s*\)\s*(?:{\s*)?return\s+internalErrorResponse\(\s*request\s*\)/s.exec(
+      searchSource,
+    )
   const status = statusMatch?.groups?.status
   if (!status || !missingObjectMatch) {
     errors.push('apps/model-worker/src/model-response.ts must return a literal status for selected R2 object misses')
@@ -230,7 +247,9 @@ function hasBearerAuthorizationAccessPath(source) {
   if (!authorization) {
     return false
   }
-  const execPattern = new RegExp(String.raw`const\s+(?<match>[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*BEARER_AUTHORIZATION_PATTERN\.exec\(\s*${authorization}\.trim\(\s*\)\s*\)`)
+  const execPattern = new RegExp(
+    String.raw`const\s+(?<match>[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*BEARER_AUTHORIZATION_PATTERN\.exec\(\s*${authorization}\.trim\(\s*\)\s*\)`,
+  )
   const execMatch = execPattern.exec(stripIgnoredSyntax(body))
   const matchVariable = execMatch?.groups?.match
   if (!matchVariable) {
@@ -276,8 +295,26 @@ function readAuthorizationHeaderVariable(source) {
 }
 
 function hasBearerAuthorizationSelectionPath(source) {
-  const body = stripDeadFalseBranches(readFunctionBodySource(source, 'selectModelAccess'))
-  return /getModelAccessTokenLookupKeys\(\s*getRequestAccessToken\(\s*request\s*\)\s*\)/.test(stripIgnoredSyntax(body))
+  const body = stripIgnoredSyntax(stripDeadFalseBranches(readFunctionBodySource(source, 'selectModelAccess')))
+  const tokenVariable = readSingleRequestAccessTokenVariable(body)
+  if (!tokenVariable) {
+    return false
+  }
+  const lookupKeysPattern = new RegExp(String.raw`getModelAccessTokenLookupKeys\(\s*${tokenVariable}\s*\)`)
+  const canonicalTokenPattern = new RegExp(String.raw`normalizeModelAccessToken\(\s*${tokenVariable}\s*\)`)
+  return lookupKeysPattern.test(body) && canonicalTokenPattern.test(body)
+}
+
+// The Authorization header must be parsed exactly once per request: selectModelAccess reads it
+// into a single variable that feeds both the KV lookup keys and the canonical token.
+function readSingleRequestAccessTokenVariable(body) {
+  const declarationPattern = /const\s+(?<token>[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*getRequestAccessToken\(\s*request\s*\)/
+  const tokenVariable = declarationPattern.exec(body)?.groups?.token
+  if (!tokenVariable) {
+    return null
+  }
+  const occurrences = body.split('getRequestAccessToken(').length - 1
+  return occurrences === 1 ? tokenVariable : null
 }
 
 function hasBearerTokenCapture(literal) {

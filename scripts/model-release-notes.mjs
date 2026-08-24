@@ -1,6 +1,7 @@
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
+import { isDirectRun } from './lib/direct-run.mjs'
 import { readModelManifest } from './model-manifest.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -21,10 +22,6 @@ export function createModelReleaseNotes(manifest) {
     '- 保留上一版 R2 object，直到新 userscript release 已完成验证。',
     '',
   ].join('\n')
-}
-
-function isDirectRun(moduleUrl, argvPath = process.argv[1]) {
-  return Boolean(argvPath) && moduleUrl === pathToFileURL(resolve(argvPath)).href
 }
 
 if (isDirectRun(import.meta.url)) {

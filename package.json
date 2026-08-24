@@ -6,7 +6,7 @@
   "packageManager": "pnpm@11.21.0",
   "scripts": {
     "build": "corepack pnpm -r build",
-    "test": "corepack pnpm -r test && node --test scripts/model-manifest.test.mjs && node --test scripts/model-release-notes.test.mjs && node --test scripts/check-docs-drift.test.mjs && node --test scripts/check-architecture-boundaries.test.mjs && node --test scripts/check-browser-sinks.test.mjs && node --test scripts/check-bundle-budget.test.mjs",
+    "test": "corepack pnpm -r test && node --test \"scripts/**/*.test.mjs\"",
     "test:coverage": "corepack pnpm -r test:coverage",
     "typecheck": "corepack pnpm -r typecheck",
     "lint": "eslint .",

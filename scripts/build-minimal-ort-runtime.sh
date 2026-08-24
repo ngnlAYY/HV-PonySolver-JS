@@ -21,6 +21,14 @@ elif [[ $# -gt 0 ]]; then
   exit 2
 fi
 
+# Guard before any rm -rf: BUILD_ROOT is overridable via ORT_BUILD_ROOT and feeds
+# destructive cleanup below, so refuse empty, root, home, or unexpected locations.
+if [[ -z "$BUILD_ROOT" ]] || [[ "$BUILD_ROOT" == "/" ]] || [[ "$BUILD_ROOT" == "${HOME:-}" ]] || [[ "$BUILD_ROOT" != *hv-pony-ort-* ]]; then
+  printf 'Refusing unsafe ORT build root: refusing to delete outside an hv-pony-ort-* directory (ORT_BUILD_ROOT=%s)\n' \
+    "${BUILD_ROOT:-<empty>}" >&2
+  exit 1
+fi
+
 mkdir -p "$BUILD_ROOT"
 if [[ ! -d "$ORT_SOURCE/.git" ]]; then
   git clone --depth 1 --branch "$ORT_TAG" --recurse-submodules --shallow-submodules \

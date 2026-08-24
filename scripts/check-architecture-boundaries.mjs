@@ -1,13 +1,14 @@
 import { existsSync } from 'node:fs'
-import { readdir, readFile } from 'node:fs/promises'
-import { dirname, extname, relative, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { parseRepoRootArgs } from './lib/cli.mjs'
+import { isDirectRun } from './lib/direct-run.mjs'
+import { collectSourceFiles } from './lib/source-files.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '..')
-const sourceExtensions = new Set(['.js', '.mjs', '.ts', '.tsx'])
-const ignoredSourceDirectories = new Set(['coverage', 'dist', 'node_modules'])
 
 const BOUNDARY_RULES = [
   {
@@ -107,31 +108,15 @@ const BOUNDARY_RULES = [
   },
 ]
 
-if (isDirectRun()) {
+if (isDirectRun(import.meta.url)) {
   try {
-    const { repoRoot, explicitRepoRoot } = parseArgs(process.argv.slice(2))
+    const { repoRoot, explicitRepoRoot } = parseRepoRootArgs(process.argv.slice(2), defaultRepoRoot)
     await checkArchitectureBoundaries(repoRoot, { requireSourceDirs: explicitRepoRoot })
     process.stdout.write('Architecture boundary check passed\n')
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1
   }
-}
-
-function isDirectRun() {
-  return process.argv[1] ? resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false
-}
-
-function parseArgs(args) {
-  const repoRootIndex = args.indexOf('--repo-root')
-  if (repoRootIndex === -1) {
-    return { repoRoot: defaultRepoRoot, explicitRepoRoot: false }
-  }
-  const repoRoot = args[repoRootIndex + 1]
-  if (!repoRoot) {
-    throw new Error('--repo-root requires a path')
-  }
-  return { repoRoot: resolve(repoRoot), explicitRepoRoot: true }
 }
 
 async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot, { requireSourceDirs = false } = {}) {
@@ -166,25 +151,6 @@ async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot, { require
   if (violations.length > 0) {
     throw new Error(violations.join('\n'))
   }
-}
-
-async function collectSourceFiles(dir) {
-  const entries = await readdir(dir, { withFileTypes: true })
-  const files = []
-  for (const entry of entries) {
-    const path = resolve(dir, entry.name)
-    if (entry.isDirectory()) {
-      if (ignoredSourceDirectories.has(entry.name)) {
-        continue
-      }
-      files.push(...(await collectSourceFiles(path)))
-      continue
-    }
-    if (entry.isFile() && sourceExtensions.has(extname(entry.name))) {
-      files.push(path)
-    }
-  }
-  return files
 }
 
 function extractImportSpecifiers(source) {

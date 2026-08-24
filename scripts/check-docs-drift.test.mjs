@@ -901,11 +901,31 @@ test('fails clearly when Bearer token parser is unused by model access selection
   await withFixture(async (fixtureRoot) => {
     const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
     const accessSource = await readFile(accessPath, 'utf8')
+    assert.ok(accessSource.includes('const lookupKeys = getModelAccessTokenLookupKeys(requestToken)'))
     await writeFile(
       accessPath,
       accessSource.replace(
-        'const lookupKeys = getModelAccessTokenLookupKeys(getRequestAccessToken(request))',
+        'const lookupKeys = getModelAccessTokenLookupKeys(requestToken)',
         "const lookupKeys = getModelAccessTokenLookupKeys(request.headers.get('x-model-token'))",
+      ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
+test('fails clearly when the Authorization header is parsed more than once per request', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const accessSource = await readFile(accessPath, 'utf8')
+    assert.ok(accessSource.includes('const canonicalToken = normalizeModelAccessToken(requestToken)'))
+    await writeFile(
+      accessPath,
+      accessSource.replace(
+        'const canonicalToken = normalizeModelAccessToken(requestToken)',
+        'const canonicalToken = normalizeModelAccessToken(getRequestAccessToken(request))',
       ),
     )
 

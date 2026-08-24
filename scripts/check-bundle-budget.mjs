@@ -3,6 +3,8 @@ import { stat } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { isDirectRun } from './lib/direct-run.mjs'
+
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '..')
 const defaultArtifactPath = 'apps/userscript/dist/hv-pony-solver.user.js'
@@ -18,7 +20,7 @@ const BUNDLE_BUDGET_PROFILES = Object.freeze({
   }),
 })
 
-if (isDirectRun()) {
+if (isDirectRun(import.meta.url)) {
   try {
     const options = parseArgs(process.argv.slice(2))
     const result = await checkBundleBudget(options)
@@ -27,10 +29,6 @@ if (isDirectRun()) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1
   }
-}
-
-function isDirectRun() {
-  return process.argv[1] ? resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false
 }
 
 function parseArgs(args) {
