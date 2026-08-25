@@ -5,7 +5,7 @@ import { formatErrorMessage } from '../utils/errors'
 import { isRecordObject } from '../utils/guards'
 import { warn } from '../utils/logger'
 import { modelConfig } from './model-config'
-import { downloadModel } from './model-downloader'
+import { confirmCachedModelDownload, downloadModel } from './model-downloader'
 import type { ModelIntegrityOptions } from './model-integrity'
 import { resolveIntegrityOptions, verifyModelIntegrity } from './model-integrity'
 
@@ -158,9 +158,11 @@ export class ModelCache {
       this.assertOperationActive(context)
       await this.writeCached(buffer, verifyIntegrity, skipIntegrityVerification, context)
       this.assertOperationActive(context)
+      await this.waitForOperation(confirmCachedModelDownload(buffer, context.signal), context, '模型下载缓存确认超时')
+      this.assertOperationActive(context)
       this.statusSink.setStatus({ model: `已缓存 ${Date.now() - startedAt}ms` })
     } catch (error) {
-      warn('写入模型缓存失败，继续使用已下载模型:', formatErrorMessage(error))
+      warn('模型缓存或下载次数确认失败，继续使用已下载模型:', formatErrorMessage(error))
       if (verifyIntegrity || error instanceof ModelCacheLifecycleError) {
         throw error
       }

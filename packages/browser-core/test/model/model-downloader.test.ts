@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
+
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import type { ModelDownloadQuotaExceededError } from '../../src/model/model-download-error'
 import { PermanentModelError } from '../../src/model/permanent-model-error'
 import {
+  confirmCachedModelDownload,
+  copyModelDownloadConfirmation,
   downloadModel as downloadCoreModel,
   queryModelDownloadQuota,
   probeModelAccessKey,
@@ -23,6 +27,7 @@ const TEST_INTEGRITY = {
 } as const
 const MODEL_URL = 'https://models.ngnl.host/yolo26n-640.ort'
 const QUOTA_URL = 'https://models.ngnl.host/quota'
+const RECEIPT_ID = 'a'.repeat(32)
 
 function getFetchCall(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit] {
   const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -74,6 +79,80 @@ describe('downloadModel', () => {
     expect(url).not.toContain('?key=')
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer saved-token')
     expect(init).toEqual(expect.objectContaining({ cache: 'no-store' }))
+  })
+
+  it('defers quota usage until the verified bytes have been copied for and written to cache', async () => {
+    getModelAccessKey.mockResolvedValue('saved-token')
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), {
+          headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: RECEIPT_ID },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ confirmed: true, alreadyConfirmed: false }))
+
+    const downloaded = await downloadCoreModel(
+      undefined,
+      { integrity: TEST_INTEGRITY },
+      { fetchImpl: fetchMock, getAccessKey: getModelAccessKey },
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const cacheBuffer = downloaded.slice(0)
+    copyModelDownloadConfirmation(downloaded, cacheBuffer)
+    await confirmCachedModelDownload(cacheBuffer)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(url).toBe(QUOTA_URL)
+    expect(init.method).toBe('POST')
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer saved-token')
+    expect(new Headers(init.headers).get(MODEL_DOWNLOAD_RECEIPT_HEADER)).toBe(RECEIPT_ID)
+    await confirmCachedModelDownload(cacheBuffer)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps unlimited or legacy downloads confirmation-free and rejects malformed receipt headers', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1, 2, 3])))
+    const buffer = await downloadCoreModel(undefined, { integrity: TEST_INTEGRITY }, { fetchImpl: fetchMock })
+    await confirmCachedModelDownload(buffer)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(new Uint8Array([1, 2, 3]), { headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: 'invalid' } }),
+    )
+    await expect(downloadCoreModel(undefined, { integrity: TEST_INTEGRITY }, { fetchImpl: fetchMock })).rejects.toThrow(
+      '模型下载确认凭证无效',
+    )
+  })
+
+  it.each([
+    [403, '模型 Key 无效或已失效'],
+    [409, '确认凭证已失效'],
+    [500, '确认失败: HTTP 500'],
+  ] as const)('surfaces HTTP %s from the post-cache confirmation', async (status, message) => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), { headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: RECEIPT_ID } }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status }))
+    const buffer = await downloadCoreModel(undefined, { integrity: TEST_INTEGRITY }, { fetchImpl: fetchMock })
+
+    await expect(confirmCachedModelDownload(buffer)).rejects.toThrow(message)
+  })
+
+  it('rejects a malformed successful cache-confirmation response', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2, 3]), { headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: RECEIPT_ID } }),
+      )
+      .mockResolvedValueOnce(Response.json({ confirmed: false }))
+    const buffer = await downloadCoreModel(undefined, { integrity: TEST_INTEGRITY }, { fetchImpl: fetchMock })
+
+    await expect(confirmCachedModelDownload(buffer)).rejects.toThrow('确认响应无效')
   })
 
   it('uses the candidate model access key override as trimmed Authorization', async () => {

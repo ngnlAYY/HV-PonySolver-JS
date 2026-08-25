@@ -23,6 +23,7 @@ const downloadModelButton = optionsElement<HTMLButtonElement>('download-model')
 const queryModelQuotaButton = optionsElement<HTMLButtonElement>('query-model-quota')
 const clearKeyButton = optionsElement<HTMLButtonElement>('clear-key')
 const cancelKeyOperationButton = optionsElement<HTMLButtonElement>('cancel-key-op')
+const QUOTA_QUERY_RECONNECT_DELAY_MS = 100
 let requestSequence = 0
 let keyGeneration = 0
 let keyOperationTail: Promise<void> = Promise.resolve()
@@ -34,9 +35,11 @@ function nextRequestId(): string {
   return `options-${Date.now().toString(36)}-${requestSequence.toString(36)}`
 }
 
-export function requestHost(
+class HostConnectionDisconnectedError extends Error {}
+
+function requestHostAttempt(
   request: KeyIntentRequest | DownloadModelRequest,
-  options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }> = {},
+  options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }>,
 ): Promise<HostSuccessResponse> {
   const { signal, timeoutMs = 95_000 } = options
   const operationName =
@@ -94,7 +97,7 @@ export function requestHost(
       settled = true
       cleanup()
       const disconnectMessage = port.error?.message?.trim()
-      reject(new Error(disconnectMessage || `${operationName}连接已断开`))
+      reject(new HostConnectionDisconnectedError(disconnectMessage || `${operationName}连接已断开`))
     }
     const timeoutId = setTimeout(() => {
       settle(() => reject(new Error(`${operationName}超时`)))
@@ -116,6 +119,38 @@ export function requestHost(
     }
     return response
   })
+}
+
+function waitForQuotaQueryReconnect(signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new Error('额度查询已取消'))
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timeoutId)
+      reject(new Error('额度查询已取消'))
+    }
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, QUOTA_QUERY_RECONNECT_DELAY_MS)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+export async function requestHost(
+  request: KeyIntentRequest | DownloadModelRequest,
+  options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }> = {},
+): Promise<HostSuccessResponse> {
+  try {
+    return await requestHostAttempt(request, options)
+  } catch (error) {
+    if (request.type !== 'query-model-quota' || !(error instanceof HostConnectionDisconnectedError)) {
+      throw error
+    }
+    await waitForQuotaQueryReconnect(options.signal)
+    return requestHostAttempt(request, options)
+  }
 }
 
 function isCurrentOperation(generation: number, signal: AbortSignal): boolean {

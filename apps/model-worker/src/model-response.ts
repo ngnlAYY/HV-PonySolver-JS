@@ -1,6 +1,8 @@
+import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
+
 const ALLOWED_ORIGINS = new Set(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
-const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'
-const CORS_ALLOW_HEADERS = 'Authorization'
+const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'
+const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt'
 const CACHE_CONTROL = 'no-store'
 const INTERNAL_ERROR_MESSAGE = 'Internal Server Error'
 const QUOTA_EXCEEDED_MESSAGE = 'Monthly model download quota exceeded'
@@ -124,6 +126,12 @@ function objectResponseBody(request: Request, object: R2Object | R2ObjectBody): 
 export function modelObjectResponse(request: Request, object: R2Object | R2ObjectBody, filename: string): Response {
   const headers = createModelHeaders(request, object, filename)
   return new Response(objectResponseBody(request, object), { status: 200, headers })
+}
+
+export function attachModelDownloadReceipt(response: Response, receiptId: string): Response {
+  response.headers.set(MODEL_DOWNLOAD_RECEIPT_HEADER, receiptId)
+  response.headers.set('access-control-expose-headers', MODEL_DOWNLOAD_RECEIPT_HEADER)
+  return response
 }
 
 export function runtimeObjectResponse(request: Request, object: R2Object | R2ObjectBody): Response {

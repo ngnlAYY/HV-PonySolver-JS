@@ -47,6 +47,9 @@ describe('readWorkerConfig', () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, { quotaEnabled: false })
     expect(readWorkerConfig(env).downloadQuotaEnabled).toBe(false)
+
+    const enabledEnv = createEnv(createModelFixture(), { quotaEnabled: true })
+    expect(readWorkerConfig(enabledEnv).downloadQuotaEnabled).toBe(true)
   })
 
   it('rejects invalid quota enforcement values', () => {

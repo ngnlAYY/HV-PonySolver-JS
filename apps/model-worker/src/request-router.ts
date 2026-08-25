@@ -2,11 +2,13 @@ import { readWorkerConfig } from './env'
 import { logWorkerError, logWorkerWarning, workerErrorName, type WorkerLogRoute } from './logger'
 import { selectModelAccess } from './model-access'
 import {
-  consumeModelDownloadQuota,
+  confirmModelDownloadQuota,
   readModelDownloadQuota,
+  reserveModelDownloadQuota,
   type ModelDownloadQuotaStatus,
 } from './model-download-quota'
 import {
+  attachModelDownloadReceipt,
   modelObjectResponse,
   modelQuotaStatusResponse,
   internalErrorResponse,
@@ -18,8 +20,10 @@ import {
 } from './model-response'
 import type { Env, WorkerConfig } from './worker-types'
 
+import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
+
 const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'
-const QUOTA_ALLOWED_METHODS = 'GET, OPTIONS'
+const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'
 const LEGACY_MODEL_FILENAME = 'yolo26n-640.onnx'
 const ORT_MODEL_FILENAME = 'yolo26n-640.ort'
 const QUOTA_FAILURE_RETRY_AFTER_SECONDS = 5
@@ -78,12 +82,14 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
     throw new Error('Authorized model request is missing a canonical token')
   }
   try {
-    const quota = await consumeModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, access.canonicalToken)
+    const quota = await reserveModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, access.canonicalToken)
     if (quota.allowed) {
-      return response
+      return attachModelDownloadReceipt(response, quota.receiptId)
     }
     await cancelResponseBody(response)
-    return quotaExceededResponse(request, quota.retryAfterSeconds)
+    return quota.reason === 'quota-exhausted'
+      ? quotaExceededResponse(request, quota.retryAfterSeconds)
+      : serviceUnavailableResponse(request, quota.retryAfterSeconds)
   } catch (error) {
     await cancelResponseBody(response)
     // Log only non-sensitive classification fields; the underlying error message may embed quota identities.
@@ -110,6 +116,9 @@ async function serveQuota(request: Request, env: Env, config: WorkerConfig): Pro
     return textResponse(request, 'Forbidden', 403)
   }
   if (!config.downloadQuotaEnabled) {
+    if (request.method === 'POST') {
+      return modelQuotaStatusResponse(request, { confirmed: true, alreadyConfirmed: false })
+    }
     const status: PublicQuotaStatus = {
       enabled: false,
       limit: 0,
@@ -120,6 +129,17 @@ async function serveQuota(request: Request, env: Env, config: WorkerConfig): Pro
     return modelQuotaStatusResponse(request, status)
   }
   try {
+    if (request.method === 'POST') {
+      const receiptId = request.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER)?.trim() ?? ''
+      if (!/^[0-9a-f]{32}$/i.test(receiptId)) {
+        return textResponse(request, 'Invalid model download receipt', 400)
+      }
+      const confirmation = await confirmModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, access.canonicalToken, receiptId)
+      if (!confirmation.confirmed) {
+        return textResponse(request, 'Model download receipt expired', 409)
+      }
+      return modelQuotaStatusResponse(request, confirmation)
+    }
     const quota: ModelDownloadQuotaStatus = await readModelDownloadQuota(
       env.MODEL_DOWNLOAD_QUOTAS,
       access.canonicalToken,
@@ -152,17 +172,15 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     if (request.method === 'OPTIONS') {
       return preflightResponse(request, isRuntime)
     }
-    if (request.method !== 'GET' && request.method !== 'HEAD') {
-      if (isQuota) {
-        return textResponse(request, 'Method Not Allowed', 405, { allow: QUOTA_ALLOWED_METHODS })
-      }
+    const methodAllowed = isQuota
+      ? request.method === 'GET' || request.method === 'POST'
+      : request.method === 'GET' || request.method === 'HEAD'
+    if (!methodAllowed) {
+      if (isQuota) return textResponse(request, 'Method Not Allowed', 405, { allow: QUOTA_ALLOWED_METHODS })
       return textResponse(request, 'Method Not Allowed', 405, { allow: ALLOWED_METHODS })
     }
     if (isQuota) {
       logRoute = 'quota'
-      if (request.method !== 'GET') {
-        return textResponse(request, 'Method Not Allowed', 405, { allow: QUOTA_ALLOWED_METHODS })
-      }
       return await serveQuota(request, env, config)
     }
     if (isRuntime) {

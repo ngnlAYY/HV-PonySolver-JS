@@ -1,5 +1,11 @@
 import { inferenceTimeoutConfig } from '../inference/inference-config'
 import { raceAbort } from '../utils/abort-race'
+import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
+import {
+  clearModelDownloadConfirmation,
+  getModelDownloadConfirmation,
+  registerModelDownloadConfirmation,
+} from './model-download-confirmation-store'
 import { ModelAccessKeyRejectedError, ModelDownloadQuotaExceededError } from './model-download-error'
 import { modelConfig } from './model-config'
 import { computeModelSha256, type ModelIntegrityOptions, resolveIntegrityOptions } from './model-integrity'
@@ -11,6 +17,10 @@ export type ModelDownloadEnvironment = Readonly<{
   fetchImpl?: typeof fetch
   getAccessKey?: (signal?: AbortSignal) => Promise<string>
 }>
+
+const receiptIdPattern = /^[0-9a-f]{32}$/
+
+export { copyModelDownloadConfirmation } from './model-download-confirmation-store'
 
 type DownloadDeadline = Readonly<{
   signal: AbortSignal
@@ -113,6 +123,12 @@ function createModelProbeInit(signal: AbortSignal, accessKey: string): RequestIn
   return { ...createModelFetchInit(signal, accessKey), method: 'HEAD' }
 }
 
+function createModelConfirmationInit(signal: AbortSignal, accessKey: string, receiptId: string): RequestInit {
+  const headers = new Headers(createModelFetchInit(signal, accessKey).headers)
+  headers.set(MODEL_DOWNLOAD_RECEIPT_HEADER, receiptId)
+  return { cache: 'no-store', headers, method: 'POST', signal }
+}
+
 function parseProbeByteLength(contentLength: string | null): number {
   if (contentLength === null || !contentLengthPattern.test(contentLength)) {
     throw new Error('模型 Key 验证失败: 响应缺少有效的 Content-Length')
@@ -158,6 +174,62 @@ async function cancelResponseBody(response: Response, deadline: DownloadDeadline
     }
   } catch {
     // The primary HTTP/read error remains authoritative if cleanup fails or times out.
+  }
+}
+
+function captureModelDownloadConfirmation(
+  response: Response,
+  buffer: ArrayBuffer,
+  accessKey: string,
+  fetchImpl: typeof fetch,
+): ArrayBuffer {
+  const rawReceiptId = response.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER)
+  if (rawReceiptId === null) {
+    return buffer
+  }
+  const receiptId = rawReceiptId.trim().toLowerCase()
+  if (!receiptIdPattern.test(receiptId)) {
+    throw new Error('模型下载确认凭证无效')
+  }
+  registerModelDownloadConfirmation(buffer, { accessKey, fetchImpl, receiptId })
+  return buffer
+}
+
+export async function confirmCachedModelDownload(buffer: ArrayBuffer, signal?: AbortSignal): Promise<void> {
+  const confirmation = getModelDownloadConfirmation(buffer)
+  if (!confirmation) {
+    return
+  }
+  const deadline = createDownloadDeadline(signal, '模型下载缓存确认', inferenceTimeoutConfig.modelProbeTimeoutMs)
+  try {
+    const response = await deadline.run(() =>
+      confirmation.fetchImpl(
+        getQuotaUrl(),
+        createModelConfirmationInit(deadline.signal, confirmation.accessKey, confirmation.receiptId),
+      ),
+    )
+    if (!response.ok) {
+      await cancelResponseBody(response, deadline)
+      deadline.throwIfExpired()
+      if (response.status === 403) {
+        throw new ModelAccessKeyRejectedError()
+      }
+      if (response.status === 429) {
+        throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
+      }
+      if (response.status === 409) {
+        throw new Error('模型已缓存，但下载次数确认凭证已失效')
+      }
+      throw new Error(`模型已缓存，但下载次数确认失败: HTTP ${response.status}`)
+    }
+    const value: unknown = await deadline.run(() => response.json())
+    if (typeof value !== 'object' || value === null || (value as { confirmed?: unknown }).confirmed !== true) {
+      throw new Error('模型已缓存，但下载次数确认响应无效')
+    }
+    deadline.throwIfExpired()
+    clearModelDownloadConfirmation(buffer, confirmation)
+  } finally {
+    deadline.dispose()
   }
 }
 
@@ -297,8 +369,9 @@ export async function downloadModel(
     const accessKey = await deadline.run(() =>
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
+    const fetchImpl = environment.fetchImpl ?? fetch
     const response = await deadline.run(() =>
-      (environment.fetchImpl ?? fetch)(getModelUrl(), createModelFetchInit(deadline.signal, accessKey)),
+      fetchImpl(getModelUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
     if (!response.ok) {
       await cancelResponseBody(response, deadline)
@@ -326,7 +399,7 @@ export async function downloadModel(
       const sha256 = await deadline.run(() => computeModelSha256(buffer))
       if (sha256 === integrity.sha256) {
         deadline.throwIfExpired()
-        return buffer
+        return captureModelDownloadConfirmation(response, buffer, accessKey, fetchImpl)
       }
     }
     deadline.throwIfExpired()
@@ -336,7 +409,7 @@ export async function downloadModel(
     if (verifyIntegrity) {
       throw new ModelIntegrityVerificationError(`下载模型 SHA-256 校验失败`)
     }
-    return buffer
+    return captureModelDownloadConfirmation(response, buffer, accessKey, fetchImpl)
   } finally {
     deadline.dispose()
   }

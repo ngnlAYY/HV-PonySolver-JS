@@ -405,15 +405,15 @@ test('fails clearly when README OPTIONS row headers are masked by explanatory te
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(
       readme.includes(
-        '`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`',
+        '`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS`，`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt`',
       ),
     )
     await writeFile(
       readmePath,
       `${readme.replace(
-        '`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`',
+        '`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS`，`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt`',
         '`204` preflight，preflight headers documented elsewhere',
-      )}\n附注：preflight 会发送 \`Access-Control-Allow-Methods: GET, HEAD, OPTIONS\` 和 \`Access-Control-Allow-Headers: Authorization\`。\n`,
+      )}\n附注：preflight 会发送 \`Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS\` 和 \`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt\`。\n`,
     )
 
     const result = await runCheck(fixtureRoot)
@@ -478,7 +478,7 @@ test('fails clearly when Model Worker source allowed methods drift from README',
     const routerSource = await readFile(routerPath, 'utf8')
     const responseSource = await readFile(responsePath, 'utf8')
     assert.ok(routerSource.includes("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'"))
-    assert.ok(responseSource.includes("const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'"))
+    assert.ok(responseSource.includes("const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'"))
     await writeFile(
       routerPath,
       routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'"),
@@ -486,7 +486,7 @@ test('fails clearly when Model Worker source allowed methods drift from README',
     await writeFile(
       responsePath,
       responseSource.replace(
-        "const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'",
+        "const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'",
         "const CORS_ALLOW_METHODS = 'GET, HEAD'",
       ),
     )
@@ -545,11 +545,11 @@ ${routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const AL
     )
     await writeFile(
       responsePath,
-      `/const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'/
+      `/const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'/
 /const CACHE_CONTROL = 'no-store'/
 /if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) }/
 ${responseSource
-  .replace("const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'", "const CORS_ALLOW_METHODS = 'GET, HEAD'")
+  .replace("const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'", "const CORS_ALLOW_METHODS = 'GET, HEAD'")
   .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'private, no-cache'")
   .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404')}`,
     )
@@ -572,8 +572,8 @@ test('fails clearly when Model Worker string facts use runtime expressions', asy
       responseSource
         .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'no-store' + ', max-age=86400'")
         .replace(
-          "const CORS_ALLOW_HEADERS = 'Authorization'",
-          "const CORS_ALLOW_HEADERS = 'Authorization'.toLowerCase()",
+          "const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt'",
+          "const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt'.toLowerCase()",
         ),
     )
 
@@ -602,8 +602,8 @@ test('accepts Model Worker string facts with TypeScript-only annotations', async
       responseSource
         .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL: string = 'no-store' as const")
         .replace(
-          "const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS'",
-          "const CORS_ALLOW_METHODS = 'GET, HEAD, OPTIONS' satisfies string",
+          "const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'",
+          "const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS' satisfies string",
         ),
     )
 
@@ -628,8 +628,8 @@ test('accepts Model Worker string facts with combined TypeScript-only suffixes',
     await writeFile(
       responsePath,
       responseSource.replace(
-        "const CORS_ALLOW_HEADERS = 'Authorization'",
-        "const CORS_ALLOW_HEADERS = 'Authorization' as const satisfies string",
+        "const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt'",
+        "const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt' as const satisfies string",
       ),
     )
 

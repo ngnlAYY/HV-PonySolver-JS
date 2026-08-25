@@ -1,6 +1,6 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 
-import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
+import { MODEL_DOWNLOAD_RECEIPT_HEADER, MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 
 import worker, {
   type Env,
@@ -8,7 +8,11 @@ import worker, {
   type ModelDownloadQuotaNamespace,
   type ModelKeyStore,
 } from '../../src/index'
-import { secondsUntilNextUtcMonth, utcMonthKey } from '../../src/model-download-quota'
+import {
+  MODEL_DOWNLOAD_RESERVATION_TTL_MS,
+  secondsUntilNextUtcMonth,
+  utcMonthKey,
+} from '../../src/model-download-quota'
 
 export type StoredObject = Readonly<{
   body: string
@@ -93,7 +97,10 @@ export class MockR2Bucket implements ModelBucket {
 
 export class MockModelDownloadQuotaNamespace implements ModelDownloadQuotaNamespace {
   readonly requestedIdentities: string[] = []
-  private readonly usage = new Map<string, { month: string; used: number }>()
+  private readonly usage = new Map<
+    string,
+    { month: string; used: number; pending: Map<string, number>; confirmed: Set<string> }
+  >()
 
   constructor(
     private readonly error?: Error,
@@ -114,21 +121,66 @@ export class MockModelDownloadQuotaNamespace implements ModelDownloadQuotaNamesp
         const now = this.now()
         const month = utcMonthKey(now)
         const stored = this.usage.get(identity)
-        const used = stored?.month === month ? Math.min(stored.used, MODEL_MONTHLY_DOWNLOAD_LIMIT) : 0
-        if (new URL(request.url).pathname === '/status') {
+        const state =
+          stored?.month === month
+            ? stored
+            : { month, used: 0, pending: new Map<string, number>(), confirmed: new Set<string>() }
+        for (const [receiptId, expiresAt] of state.pending) {
+          if (expiresAt <= now.getTime()) state.pending.delete(receiptId)
+        }
+        this.usage.set(identity, state)
+        const pathname = new URL(request.url).pathname
+        if (pathname === '/status') {
           return Response.json({
             limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
-            used,
-            remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - used,
+            used: state.used,
+            remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - state.used,
             retryAfterSeconds: secondsUntilNextUtcMonth(now),
           })
         }
-        if (new URL(request.url).pathname !== '/consume') return new Response('Not Found', { status: 404 })
-        if (used >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
-          return Response.json({ allowed: false, retryAfterSeconds: secondsUntilNextUtcMonth(now) })
+        if (pathname === '/confirm') {
+          const receiptId = request.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER)?.toLowerCase() ?? ''
+          if (state.confirmed.has(receiptId)) {
+            return Response.json({
+              confirmed: true,
+              alreadyConfirmed: true,
+              used: state.used,
+              remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - state.used,
+              retryAfterSeconds: secondsUntilNextUtcMonth(now),
+            })
+          }
+          const confirmed = state.pending.delete(receiptId)
+          if (confirmed) {
+            state.used += 1
+            state.confirmed.add(receiptId)
+          }
+          return Response.json({
+            confirmed,
+            alreadyConfirmed: false,
+            used: state.used,
+            remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - state.used,
+            retryAfterSeconds: secondsUntilNextUtcMonth(now),
+          })
         }
-        this.usage.set(identity, { month, used: used + 1 })
-        return Response.json({ allowed: true, retryAfterSeconds: secondsUntilNextUtcMonth(now) })
+        if (pathname !== '/reserve') return new Response('Not Found', { status: 404 })
+        if (state.used >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
+          return Response.json({
+            allowed: false,
+            reason: 'quota-exhausted',
+            retryAfterSeconds: secondsUntilNextUtcMonth(now),
+          })
+        }
+        if (state.used + state.pending.size >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
+          const earliestExpiry = Math.min(...state.pending.values())
+          return Response.json({
+            allowed: false,
+            reason: 'reservations-full',
+            retryAfterSeconds: Math.max(1, Math.ceil((earliestExpiry - now.getTime()) / 1_000)),
+          })
+        }
+        const receiptId = crypto.randomUUID().replaceAll('-', '')
+        state.pending.set(receiptId, now.getTime() + MODEL_DOWNLOAD_RESERVATION_TTL_MS)
+        return Response.json({ allowed: true, receiptId, retryAfterSeconds: secondsUntilNextUtcMonth(now) })
       },
     }
   }

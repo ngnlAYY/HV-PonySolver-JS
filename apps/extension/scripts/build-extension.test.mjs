@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -331,44 +332,48 @@ test('builds deterministic packaged-model fixtures with distinct names and graph
   }
 })
 
-test('production packaged builds stay free of the fixture detect-delay marker', async () => {
-  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-canonical-packaged-'))
-  try {
-    await buildExtensions({ outputRoot: temporaryRoot, modelDelivery: 'packaged', targets: ['chromium'] })
+test(
+  'production packaged builds stay free of the fixture detect-delay marker',
+  { skip: !existsSync(new globalThis.URL('../../../model/yolo26n-640.ort', import.meta.url)) },
+  async () => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-canonical-packaged-'))
+    try {
+      await buildExtensions({ outputRoot: temporaryRoot, modelDelivery: 'packaged', targets: ['chromium'] })
 
-    const archiveName = 'hv-pony-solver-chromium-packaged-0.1.0.zip'
-    const rootFiles = await readdir(temporaryRoot)
-    assert.deepEqual(
-      rootFiles.filter((name) => name.endsWith('.zip')),
-      [archiveName],
-    )
-    assert.equal(
-      rootFiles.some((name) => name.includes('-fixture')),
-      false,
-    )
-    const archive = unzipSync(new Uint8Array(await readFile(path.join(temporaryRoot, archiveName))))
-    assert.equal(
-      new TextDecoder().decode(archive['inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
-      false,
-    )
-    const artifact = JSON.parse(
-      await readFile(path.join(temporaryRoot, 'hv-pony-solver-chromium-packaged-0.1.0.artifact.json'), 'utf8'),
-    )
-    assert.equal(artifact.modelDelivery, 'packaged')
-    assert.equal('fixture' in artifact, false)
+      const archiveName = 'hv-pony-solver-chromium-packaged-0.1.0.zip'
+      const rootFiles = await readdir(temporaryRoot)
+      assert.deepEqual(
+        rootFiles.filter((name) => name.endsWith('.zip')),
+        [archiveName],
+      )
+      assert.equal(
+        rootFiles.some((name) => name.includes('-fixture')),
+        false,
+      )
+      const archive = unzipSync(new Uint8Array(await readFile(path.join(temporaryRoot, archiveName))))
+      assert.equal(
+        new TextDecoder().decode(archive['inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
+        false,
+      )
+      const artifact = JSON.parse(
+        await readFile(path.join(temporaryRoot, 'hv-pony-solver-chromium-packaged-0.1.0.artifact.json'), 'utf8'),
+      )
+      assert.equal(artifact.modelDelivery, 'packaged')
+      assert.equal('fixture' in artifact, false)
 
-    const chromiumDirectory = path.join(temporaryRoot, 'chromium')
-    await auditBuiltExtension(chromiumDirectory, 'chromium', { modelDelivery: 'packaged' })
-    const optionsPath = path.join(chromiumDirectory, 'options.js')
-    await writeFile(optionsPath, `${await readFile(optionsPath, 'utf8')};;//hv-pony-fixture-detect-delay\n`)
-    await assert.rejects(
-      auditBuiltExtension(chromiumDirectory, 'chromium', { modelDelivery: 'packaged' }),
-      /chromium options\.js contains the fixture detect-delay marker/u,
-    )
-  } finally {
-    await rm(temporaryRoot, { recursive: true, force: true })
-  }
-})
+      const chromiumDirectory = path.join(temporaryRoot, 'chromium')
+      await auditBuiltExtension(chromiumDirectory, 'chromium', { modelDelivery: 'packaged' })
+      const optionsPath = path.join(chromiumDirectory, 'options.js')
+      await writeFile(optionsPath, `${await readFile(optionsPath, 'utf8')};;//hv-pony-fixture-detect-delay\n`)
+      await assert.rejects(
+        auditBuiltExtension(chromiumDirectory, 'chromium', { modelDelivery: 'packaged' }),
+        /chromium options\.js contains the fixture detect-delay marker/u,
+      )
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true })
+    }
+  },
+)
 
 test('rejects invalid fixture input and targets before replacing existing output', async () => {
   for (const runInvalidBuild of [

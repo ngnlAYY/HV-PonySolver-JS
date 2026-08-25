@@ -349,6 +349,52 @@ describe('default remote options entry', () => {
     await expect(downloadPromise).rejects.toThrow('模型下载失败: HTTP 429')
   })
 
+  it('reconnects once when a quota query Port is interrupted', async () => {
+    vi.useFakeTimers()
+    const interruptedPort = controlledHostPort()
+    const replacementPort = successfulHostPort()
+    platformMocks.runtimeConnect.mockReset().mockReturnValueOnce(interruptedPort).mockReturnValueOnce(replacementPort)
+    const { requestHost } = await import('../../src/options/remote')
+    const quotaPromise = requestHost({
+      protocol: 'hv-pony-solver/2',
+      type: 'query-model-quota',
+      requestId: 'quota-reconnect',
+    })
+    interruptedPort.emitDisconnect()
+
+    await vi.advanceTimersByTimeAsync(100)
+
+    await expect(quotaPromise).resolves.toMatchObject({ ok: true, requestId: 'quota-reconnect' })
+    expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(2)
+    expect(replacementPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'query-model-quota', requestId: 'quota-reconnect' }),
+    )
+  })
+
+  it('stops after one quota reconnect and preserves the second transport error', async () => {
+    vi.useFakeTimers()
+    const interruptedPort = controlledHostPort()
+    const failedReplacementPort = controlledHostPort('后台进程无法建立连接')
+    platformMocks.runtimeConnect
+      .mockReset()
+      .mockReturnValueOnce(interruptedPort)
+      .mockReturnValueOnce(failedReplacementPort)
+    const { requestHost } = await import('../../src/options/remote')
+    const quotaPromise = requestHost({
+      protocol: 'hv-pony-solver/2',
+      type: 'query-model-quota',
+      requestId: 'quota-reconnect-failure',
+    })
+    interruptedPort.emitDisconnect()
+    await vi.advanceTimersByTimeAsync(100)
+    await vi.waitFor(() => expect(failedReplacementPort.postMessage).toHaveBeenCalledTimes(1))
+
+    failedReplacementPort.emitDisconnect()
+
+    await expect(quotaPromise).rejects.toThrow('后台进程无法建立连接')
+    expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects an already-aborted request without opening a Port', async () => {
     const controller = new AbortController()
     controller.abort()

@@ -293,10 +293,10 @@ try {
   // they verify first inference, warm-idle close, and recreation only.
   if (fixtureArtifact) {
     const targetsBeforeRestart = await getExtensionTargets(cdp, extensionId)
-    const offscreenBeforeRestart = targetsBeforeRestart.find(
-      (target) =>
-        target.type === 'background_page' && target.url === `chrome-extension://${extensionId}/offscreen.html`,
-    )
+    const offscreenUrl = `chrome-extension://${extensionId}/offscreen.html`
+    const isOffscreenTarget = (target) =>
+      (target.type === 'background_page' || target.type === 'page') && target.url === offscreenUrl
+    const offscreenBeforeRestart = targetsBeforeRestart.find(isOffscreenTarget)
     assert.ok(offscreenBeforeRestart, `Offscreen target not found: ${JSON.stringify(targetsBeforeRestart)}`)
     const oldInferenceWorkerTargetId = await discoverInferenceWorkerTarget(
       cdp,
@@ -331,10 +331,7 @@ try {
           )
           await waitForOffscreenDocumentCount(options, 1, 15_000, 'Offscreen document was lost during restart')
           const targetsAfterRestart = await getExtensionTargets(cdp, extensionId)
-          const offscreensAfterRestart = targetsAfterRestart.filter(
-            (target) =>
-              target.type === 'background_page' && target.url === `chrome-extension://${extensionId}/offscreen.html`,
-          )
+          const offscreensAfterRestart = targetsAfterRestart.filter(isOffscreenTarget)
           assert.equal(offscreensAfterRestart.length, 1)
           assert.equal(offscreensAfterRestart[0].targetId, offscreenBeforeRestart.targetId)
         },

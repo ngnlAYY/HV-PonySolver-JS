@@ -21,7 +21,7 @@ vi.mock(import('../src/model-access'), async (importOriginal) => {
   }
 })
 
-import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
+import { MODEL_DOWNLOAD_RECEIPT_HEADER, MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 
 import { addCorsHeaders, modelObjectResponse, textResponse } from '../src/model-response'
 import {
@@ -65,6 +65,26 @@ function authorizedModelRequest(
     ...headers,
     authorization: `Bearer ${token}`,
   })
+}
+
+async function confirmDownloadedModel(
+  fixture: ReturnType<typeof createModelFixture>,
+  env: Parameters<typeof fetchWorker>[1],
+  download: Response,
+  token: string = fixture.validKey,
+): Promise<Response> {
+  const receiptId = download.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER)
+  expect(receiptId).toMatch(/^[0-9a-f]{32}$/)
+  expect(download.headers.get('access-control-expose-headers')).toBe(MODEL_DOWNLOAD_RECEIPT_HEADER)
+  const response = await fetchWorker(
+    quotaRequest(fixture, 'POST', undefined, {
+      authorization: `Bearer ${token}`,
+      [MODEL_DOWNLOAD_RECEIPT_HEADER]: receiptId!,
+    }),
+    env,
+  )
+  expect(response.status).toBe(200)
+  return response
 }
 
 describe('model worker', () => {
@@ -352,8 +372,8 @@ describe('model worker', () => {
 
     expect(response.status).toBe(204)
     expect(response.headers.get('access-control-allow-origin')).toBe(HENTAIVERSE_ORIGIN)
-    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
-    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization')
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, POST, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization, X-HV-Model-Download-Receipt')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.text()).toBe('')
     expectVaryOrigin(response.headers)
@@ -372,8 +392,8 @@ describe('model worker', () => {
 
     expect(response.status).toBe(204)
     expect(response.headers.get('access-control-allow-origin')).toBeNull()
-    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
-    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization')
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, POST, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization, X-HV-Model-Download-Receipt')
     expectVaryOrigin(response.headers)
   })
 
@@ -386,8 +406,8 @@ describe('model worker', () => {
 
     expect(response.status).toBe(204)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
-    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
-    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization')
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, POST, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization, X-HV-Model-Download-Receipt')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.text()).toBe('')
   })
@@ -663,6 +683,11 @@ describe('model worker', () => {
 
     const download = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
     await download.arrayBuffer()
+    const beforeConfirmation = await fetchWorker(quotaRequest(fixture, 'GET', undefined, headers), env)
+    await expect(beforeConfirmation.json()).resolves.toEqual(
+      expect.objectContaining({ used: 0, remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT }),
+    )
+    await confirmDownloadedModel(fixture, env, download)
     const afterDownload = await fetchWorker(quotaRequest(fixture, 'GET', undefined, headers), env)
     await expect(afterDownload.json()).resolves.toEqual(
       expect.objectContaining({ used: 1, remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - 1 }),
@@ -678,6 +703,33 @@ describe('model worker', () => {
     expect(response.status).toBe(403)
     expect(await response.text()).toBe('Forbidden')
     expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toEqual([])
+  })
+
+  it('rejects missing, malformed, and expired download confirmations without increasing usage', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+    const authorization = `Bearer ${fixture.validKey}`
+
+    for (const receiptId of ['', 'invalid']) {
+      const response = await fetchWorker(
+        quotaRequest(fixture, 'POST', undefined, {
+          authorization,
+          ...(receiptId ? { [MODEL_DOWNLOAD_RECEIPT_HEADER]: receiptId } : {}),
+        }),
+        env,
+      )
+      expect(response.status).toBe(400)
+    }
+    const expired = await fetchWorker(
+      quotaRequest(fixture, 'POST', undefined, {
+        authorization,
+        [MODEL_DOWNLOAD_RECEIPT_HEADER]: 'f'.repeat(32),
+      }),
+      env,
+    )
+    expect(expired.status).toBe(409)
+    const status = await fetchWorker(quotaRequest(fixture, 'GET', undefined, { authorization }), env)
+    await expect(status.json()).resolves.toMatchObject({ used: 0 })
   })
 
   it('returns a disabled quota status and does not call quota storage when enforcement is off', async () => {
@@ -698,6 +750,14 @@ describe('model worker', () => {
       remaining: null,
       retryAfterSeconds: null,
     })
+    const disabledConfirmation = await fetchWorker(
+      quotaRequest(fixture, 'POST', undefined, {
+        authorization: `Bearer ${fixture.validKey}`,
+        [MODEL_DOWNLOAD_RECEIPT_HEADER]: 'a'.repeat(32),
+      }),
+      env,
+    )
+    await expect(disabledConfirmation.json()).resolves.toEqual({ confirmed: true, alreadyConfirmed: false })
     for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT + 1; index += 1) {
       const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
       expect(response.status).toBe(200)
@@ -713,9 +773,9 @@ describe('model worker', () => {
       quotaError: new Error('quota status unavailable'),
     })
 
-    const methodResponse = await fetchWorker(quotaRequest(fixture, 'POST'), env)
+    const methodResponse = await fetchWorker(quotaRequest(fixture, 'HEAD'), env)
     expect(methodResponse.status).toBe(405)
-    expect(methodResponse.headers.get('allow')).toBe('GET, OPTIONS')
+    expect(methodResponse.headers.get('allow')).toBe('GET, POST, OPTIONS')
 
     const failureResponse = await fetchWorker(
       quotaRequest(fixture, 'GET', undefined, { authorization: `Bearer ${fixture.validKey}` }),
@@ -934,6 +994,7 @@ describe('model worker', () => {
       const response = await fetchWorker(request, env)
       expect(response.status).toBe(200)
       await response.arrayBuffer()
+      await confirmDownloadedModel(fixture, env, response, CANONICAL_ACCESS_TOKEN)
     }
 
     const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', CANONICAL_ACCESS_TOKEN, { origin }), env)
@@ -946,7 +1007,7 @@ describe('model worker', () => {
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
 
     const quota = env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace
-    expect(quota.requestedIdentities).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT + 1)
+    expect(quota.requestedIdentities).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT * 2 + 1)
     expect(new Set(quota.requestedIdentities).size).toBe(1)
     expect(quota.requestedIdentities[0]).toMatch(/^[0-9a-f]{64}$/)
     expect(quota.requestedIdentities[0]).not.toContain(CANONICAL_ACCESS_TOKEN)
@@ -962,8 +1023,12 @@ describe('model worker', () => {
     )
 
     expect(responses.filter(({ status }) => status === 200)).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT)
-    expect(responses.filter(({ status }) => status === 429)).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT)
+    expect(responses.filter(({ status }) => status === 503)).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT)
     await Promise.all(responses.map((response) => response.arrayBuffer()))
+    for (const response of responses.filter(({ status }) => status === 200)) {
+      await confirmDownloadedModel(fixture, env, response)
+    }
+    expect((await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).status).toBe(429)
   })
 
   it('does not consume quota for HEAD, OPTIONS, decoy, or runtime requests', async () => {
@@ -982,9 +1047,10 @@ describe('model worker', () => {
       const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
       expect(response.status).toBe(200)
       await response.arrayBuffer()
+      await confirmDownloadedModel(fixture, env, response)
     }
     expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toHaveLength(
-      MODEL_MONTHLY_DOWNLOAD_LIMIT,
+      MODEL_MONTHLY_DOWNLOAD_LIMIT * 2,
     )
   })
 
@@ -993,7 +1059,9 @@ describe('model worker', () => {
     const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
 
     for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
-      await (await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).arrayBuffer()
+      const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+      await response.arrayBuffer()
+      await confirmDownloadedModel(fixture, env, response)
     }
     expect((await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).status).toBe(429)
 
@@ -1006,7 +1074,7 @@ describe('model worker', () => {
     expect(headResponse.headers.get('content-length')).toBe(String(fixture.realBody.length))
     expect(headResponse.headers.get('retry-after')).toBeNull()
     expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toHaveLength(
-      MODEL_MONTHLY_DOWNLOAD_LIMIT + 1,
+      MODEL_MONTHLY_DOWNLOAD_LIMIT * 2 + 1,
     )
   })
 
@@ -1038,7 +1106,9 @@ describe('model worker', () => {
       quotaNow: () => now,
     })
     for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
-      await (await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).arrayBuffer()
+      const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+      await response.arrayBuffer()
+      await confirmDownloadedModel(fixture, env, response)
     }
     expect((await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).status).toBe(429)
 
@@ -1060,7 +1130,9 @@ describe('model worker', () => {
 
     for (const key of [fixture.validKey, otherKey]) {
       for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
-        await (await fetchWorker(authorizedModelRequest(fixture, 'GET', key), env)).arrayBuffer()
+        const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', key), env)
+        await response.arrayBuffer()
+        await confirmDownloadedModel(fixture, env, response, key)
       }
       expect((await fetchWorker(authorizedModelRequest(fixture, 'GET', key), env)).status).toBe(429)
     }

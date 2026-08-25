@@ -4,12 +4,14 @@ import { env } from 'cloudflare:workers'
 import { reset, runInDurableObject } from 'cloudflare:test'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
+import { MODEL_DOWNLOAD_RECEIPT_HEADER, MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 
 import type { ModelDownloadQuota } from '../src/model-download-quota'
 import {
-  consumeModelDownloadQuota,
+  confirmModelDownloadQuota,
+  MODEL_DOWNLOAD_RESERVATION_TTL_MS,
   readModelDownloadQuota,
+  reserveModelDownloadQuota,
   secondsUntilNextUtcMonth,
   utcMonthKey,
 } from '../src/model-download-quota'
@@ -17,6 +19,7 @@ import type { ModelDownloadQuotaNamespace } from '../src/worker-types'
 
 const quotaNamespace = (env as unknown as { MODEL_DOWNLOAD_QUOTAS: DurableObjectNamespace<ModelDownloadQuota> })
   .MODEL_DOWNLOAD_QUOTAS
+const RECEIPT_ID = 'a'.repeat(32)
 
 function createQuotaStub(): DurableObjectStub<ModelDownloadQuota> {
   return quotaNamespace.getByName(crypto.randomUUID())
@@ -29,117 +32,180 @@ function responseQuotaNamespace(response: Response): ModelDownloadQuotaNamespace
   }
 }
 
+async function reserve(quota: DurableObjectStub<ModelDownloadQuota>): Promise<string> {
+  const value = (await (
+    await quota.fetch(new Request('https://quota.internal/reserve', { method: 'POST' }))
+  ).json()) as { receiptId: string }
+  return value.receiptId
+}
+
+async function confirm(quota: DurableObjectStub<ModelDownloadQuota>, receiptId: string): Promise<Response> {
+  return quota.fetch(
+    new Request('https://quota.internal/confirm', {
+      method: 'POST',
+      headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: receiptId },
+    }),
+  )
+}
+
 describe('ModelDownloadQuota', () => {
   afterEach(async () => {
     vi.useRealTimers()
     await reset()
   })
 
-  it('rejects requests outside the internal consume contract', async () => {
+  it('rejects requests outside the internal reserve, confirm, and status contract', async () => {
     const quota = createQuotaStub()
-    expect((await quota.fetch(new Request('https://quota.internal/consume'))).status).toBe(404)
+    expect((await quota.fetch(new Request('https://quota.internal/reserve'))).status).toBe(404)
     expect((await quota.fetch(new Request('https://quota.internal/status'))).status).toBe(404)
     expect((await quota.fetch(new Request('https://quota.internal/other', { method: 'POST' }))).status).toBe(404)
+    expect((await quota.fetch(new Request('https://quota.internal/confirm', { method: 'POST' }))).status).toBe(400)
   })
 
-  it('reads a non-consuming status before and after a consume', async () => {
+  it('counts only a cache confirmation and makes repeated confirmation idempotent', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'))
     const quota = createQuotaStub()
 
+    const receiptId = await reserve(quota)
     await expect(
       (await quota.fetch(new Request('https://quota.internal/status', { method: 'POST' }))).json(),
-    ).resolves.toEqual({
-      limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
-      used: 0,
-      remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT,
-      retryAfterSeconds: 1_857_600,
-    })
-    await quota.fetch(new Request('https://quota.internal/consume', { method: 'POST' }))
-    await expect(
-      (await quota.fetch(new Request('https://quota.internal/status', { method: 'POST' }))).json(),
-    ).resolves.toEqual({
-      limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+    ).resolves.toMatchObject({ used: 0, remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT })
+
+    await expect((await confirm(quota, receiptId)).json()).resolves.toEqual({
+      confirmed: true,
+      alreadyConfirmed: false,
       used: 1,
       remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - 1,
       retryAfterSeconds: 1_857_600,
     })
+    await expect((await confirm(quota, receiptId)).json()).resolves.toMatchObject({
+      confirmed: true,
+      alreadyConfirmed: true,
+      used: 1,
+    })
   })
 
-  it('allows five requests and rejects subsequent requests in the same UTC month', async () => {
+  it('does not inherit legacy request-time charges into receipt-backed counters', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'))
     const quota = createQuotaStub()
+    await runInDurableObject(quota, async (_instance, state) => {
+      await state.storage.put('monthly-download-quota', { month: '2026-08', used: MODEL_MONTHLY_DOWNLOAD_LIMIT })
+    })
+
+    await expect(
+      (await quota.fetch(new Request('https://quota.internal/status', { method: 'POST' }))).json(),
+    ).resolves.toMatchObject({ used: 0, remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT })
+  })
+
+  it('holds at most five reservations and reports exhaustion only after all five are confirmed', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'))
+    const quota = createQuotaStub()
+    const receiptIds: string[] = []
 
     for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
-      await expect(
-        (await quota.fetch(new Request('https://quota.internal/consume', { method: 'POST' }))).json(),
-      ).resolves.toMatchObject({ allowed: true })
+      receiptIds.push(await reserve(quota))
     }
     await expect(
-      (await quota.fetch(new Request('https://quota.internal/consume', { method: 'POST' }))).json(),
-    ).resolves.toEqual({ allowed: false, retryAfterSeconds: 1_857_600 })
+      (await quota.fetch(new Request('https://quota.internal/reserve', { method: 'POST' }))).json(),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: 'reservations-full',
+      retryAfterSeconds: MODEL_DOWNLOAD_RESERVATION_TTL_MS / 1_000,
+    })
+
+    for (const receiptId of receiptIds) await confirm(quota, receiptId)
+    await expect(
+      (await quota.fetch(new Request('https://quota.internal/reserve', { method: 'POST' }))).json(),
+    ).resolves.toEqual({ allowed: false, reason: 'quota-exhausted', retryAfterSeconds: 1_857_600 })
   })
 
-  it('starts a new counter after UTC month rollover and ignores corrupt stored state', async () => {
+  it('releases unconfirmed reservations after their TTL and starts fresh on month rollover or corrupt state', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-08-31T23:59:59.500Z'))
+    vi.setSystemTime(new Date('2026-08-31T23:40:00.000Z'))
     const quota = createQuotaStub()
-    await runInDurableObject(quota, async (_instance, state) => {
-      await state.storage.put('monthly-download-quota', { month: 1, used: -1 })
-    })
+    for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) await reserve(quota)
 
+    vi.advanceTimersByTime(MODEL_DOWNLOAD_RESERVATION_TTL_MS)
     await expect(
-      (await quota.fetch(new Request('https://quota.internal/consume', { method: 'POST' }))).json(),
-    ).resolves.toEqual({ allowed: true, retryAfterSeconds: 1 })
+      (await quota.fetch(new Request('https://quota.internal/reserve', { method: 'POST' }))).json(),
+    ).resolves.toMatchObject({ allowed: true })
+
     await runInDurableObject(quota, async (_instance, state) => {
-      await state.storage.put('monthly-download-quota', { month: '2026-08', used: -1 })
+      await state.storage.put('monthly-download-quota-v2', { month: 1, used: -1 })
     })
     await expect(
-      (await quota.fetch(new Request('https://quota.internal/consume', { method: 'POST' }))).json(),
-    ).resolves.toMatchObject({ allowed: true })
+      (await quota.fetch(new Request('https://quota.internal/status', { method: 'POST' }))).json(),
+    ).resolves.toMatchObject({ used: 0 })
+
     vi.setSystemTime(new Date('2026-09-01T00:00:00.000Z'))
-    await expect(
-      (await quota.fetch(new Request('https://quota.internal/consume', { method: 'POST' }))).json(),
-    ).resolves.toMatchObject({ allowed: true })
+    await expect((await confirm(quota, RECEIPT_ID)).json()).resolves.toMatchObject({ confirmed: false, used: 0 })
   })
 
-  it('rejects failed and malformed internal quota responses', async () => {
+  it('validates failed and malformed internal quota responses and receipt input', async () => {
+    const unavailable = responseQuotaNamespace(new Response('Unavailable', { status: 503 }))
+    await expect(reserveModelDownloadQuota(unavailable, 'token')).rejects.toThrow('quota service failed')
+    await expect(readModelDownloadQuota(unavailable, 'token')).rejects.toThrow('quota service failed')
+    await expect(confirmModelDownloadQuota(unavailable, 'token', RECEIPT_ID)).rejects.toThrow('quota service failed')
+    await expect(confirmModelDownloadQuota(unavailable, 'token', 'invalid')).rejects.toThrow('receipt is invalid')
+
+    for (const operation of [
+      () => reserveModelDownloadQuota(responseQuotaNamespace(Response.json(null)), 'token'),
+      () =>
+        reserveModelDownloadQuota(
+          responseQuotaNamespace(Response.json({ allowed: true, receiptId: 'bad', retryAfterSeconds: 60 })),
+          'token',
+        ),
+      () =>
+        reserveModelDownloadQuota(
+          responseQuotaNamespace(Response.json({ allowed: true, receiptId: RECEIPT_ID, retryAfterSeconds: 0 })),
+          'token',
+        ),
+      () => readModelDownloadQuota(responseQuotaNamespace(Response.json(null)), 'token'),
+      () => confirmModelDownloadQuota(responseQuotaNamespace(Response.json(null)), 'token', RECEIPT_ID),
+      () =>
+        confirmModelDownloadQuota(
+          responseQuotaNamespace(
+            Response.json({
+              confirmed: false,
+              alreadyConfirmed: true,
+              used: 0,
+              remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+              retryAfterSeconds: 60,
+            }),
+          ),
+          'token',
+          RECEIPT_ID,
+        ),
+    ]) {
+      await expect(operation()).rejects.toThrow('invalid response')
+    }
+  })
+
+  it('accepts valid internal reserve, confirmation, and status responses', async () => {
     await expect(
-      consumeModelDownloadQuota(responseQuotaNamespace(new Response('Unavailable', { status: 503 })), 'token'),
-    ).rejects.toThrow('Model download quota service failed')
-    await expect(consumeModelDownloadQuota(responseQuotaNamespace(Response.json(null)), 'token')).rejects.toThrow(
-      'Model download quota service returned an invalid response',
-    )
-    await expect(
-      consumeModelDownloadQuota(
-        responseQuotaNamespace(Response.json({ allowed: true, retryAfterSeconds: 0 })),
+      reserveModelDownloadQuota(
+        responseQuotaNamespace(Response.json({ allowed: true, receiptId: RECEIPT_ID, retryAfterSeconds: 60 })),
         'token',
       ),
-    ).rejects.toThrow('Model download quota service returned an invalid response')
+    ).resolves.toEqual({ allowed: true, receiptId: RECEIPT_ID, retryAfterSeconds: 60 })
     await expect(
-      readModelDownloadQuota(responseQuotaNamespace(new Response('Unavailable', { status: 503 })), 'token'),
-    ).rejects.toThrow('Model download quota service failed')
-    await expect(readModelDownloadQuota(responseQuotaNamespace(Response.json(null)), 'token')).rejects.toThrow(
-      'Model download quota service returned an invalid response',
-    )
-    await expect(
-      readModelDownloadQuota(
+      confirmModelDownloadQuota(
         responseQuotaNamespace(
-          Response.json({ limit: MODEL_MONTHLY_DOWNLOAD_LIMIT, used: 1, remaining: 1, retryAfterSeconds: 60 }),
+          Response.json({
+            confirmed: true,
+            alreadyConfirmed: false,
+            used: 2,
+            remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - 2,
+            retryAfterSeconds: 60,
+          }),
         ),
         'token',
+        RECEIPT_ID,
       ),
-    ).rejects.toThrow('Model download quota service returned an invalid response')
-  })
-
-  it('accepts a valid internal quota response', async () => {
-    await expect(
-      consumeModelDownloadQuota(
-        responseQuotaNamespace(Response.json({ allowed: true, retryAfterSeconds: 60 })),
-        'token',
-      ),
-    ).resolves.toEqual({ allowed: true, retryAfterSeconds: 60 })
+    ).resolves.toMatchObject({ confirmed: true, used: 2 })
     await expect(
       readModelDownloadQuota(
         responseQuotaNamespace(
@@ -152,31 +218,28 @@ describe('ModelDownloadQuota', () => {
         ),
         'token',
       ),
-    ).resolves.toEqual({
-      limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
-      used: 2,
-      remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - 2,
-      retryAfterSeconds: 60,
-    })
+    ).resolves.toMatchObject({ used: 2 })
   })
 
-  it('aborts a hanging internal quota request after its deadline', async () => {
+  it('aborts hanging internal quota requests after their deadline', async () => {
     vi.useFakeTimers()
     const namespace = {
       idFromName: (name: string) => ({ toString: () => name }) as DurableObjectId,
       get: () => ({
         fetch: (request: Request) =>
           new Promise<Response>((_resolve, reject) => {
-            request.signal.addEventListener('abort', () => reject(new Error('quota request timed out')), {
-              once: true,
-            })
+            request.signal.addEventListener('abort', () => reject(new Error('quota request timed out')), { once: true })
           }),
       }),
     } as unknown as ModelDownloadQuotaNamespace
 
-    const pending = expect(consumeModelDownloadQuota(namespace, 'token')).rejects.toThrow('quota request timed out')
+    const pending = [
+      expect(reserveModelDownloadQuota(namespace, 'token')).rejects.toThrow('quota request timed out'),
+      expect(readModelDownloadQuota(namespace, 'token')).rejects.toThrow('quota request timed out'),
+      expect(confirmModelDownloadQuota(namespace, 'token', RECEIPT_ID)).rejects.toThrow('quota request timed out'),
+    ]
     await vi.advanceTimersByTimeAsync(5_000)
-    await pending
+    await Promise.all(pending)
   })
 
   it('calculates UTC month and retry boundaries deterministically', () => {

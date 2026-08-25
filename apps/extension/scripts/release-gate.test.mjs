@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -325,49 +326,57 @@ test('verify-monorepo pins Firefox load tooling and binds Android evidence to th
   assert.ok(androidStep.indexOf('case "$event" in') < androidStep.indexOf('gh run download'))
 })
 
-test('CLI preflight verifies only the transferred, hash-bound ZIP products and rejects wrong packaged CSP', async (context) => {
-  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-release-gate-'))
-  context.after(() => rm(outputRoot, { recursive: true, force: true }))
-  const records = await Promise.all(
-    ['chromium', 'firefox'].map((target) => writeTransferredArtifact(outputRoot, target)),
-  )
-  const attestation = createCanonicalAttestation({
-    chromium: evidence('chromium', { archive: records[0].archive }),
-    firefox: evidence('firefox', { archive: records[1].archive }),
-  })
-  await Promise.all([
-    writeFile(path.join(outputRoot, 'canonical-gate-attestation.json'), `${JSON.stringify(attestation)}\n`),
-    writeFile(
-      path.join(outputRoot, 'firefox-android-142-evidence.json'),
-      `${JSON.stringify(androidEvidence({ archive: records[1].archive }))}\n`,
-    ),
-  ])
-  const environmentOverrides = {
-    ...process.env,
-    PACKAGED_MODEL_URL: environment.PACKAGED_MODEL_URL,
-    PACKAGED_MODEL_AUTH_REQUIRED: 'false',
-  }
-  const run = () =>
-    spawnSync(process.execPath, ['scripts/release-gate.mjs', 'preflight', '--output-root', outputRoot], {
-      cwd: new URL('..', import.meta.url),
-      env: environmentOverrides,
-      encoding: 'utf8',
+test(
+  'CLI preflight verifies only the transferred, hash-bound ZIP products and rejects wrong packaged CSP',
+  { skip: !existsSync(new URL('../../../model/yolo26n-640.ort', import.meta.url)) },
+  async (context) => {
+    const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-release-gate-'))
+    context.after(() => rm(outputRoot, { recursive: true, force: true }))
+    const records = await Promise.all(
+      ['chromium', 'firefox'].map((target) => writeTransferredArtifact(outputRoot, target)),
+    )
+    const attestation = createCanonicalAttestation({
+      chromium: evidence('chromium', { archive: records[0].archive }),
+      firefox: evidence('firefox', { archive: records[1].archive }),
     })
-  const passed = run()
-  assert.equal(passed.status, 0, passed.stderr)
+    await Promise.all([
+      writeFile(path.join(outputRoot, 'canonical-gate-attestation.json'), `${JSON.stringify(attestation)}\n`),
+      writeFile(
+        path.join(outputRoot, 'firefox-android-142-evidence.json'),
+        `${JSON.stringify(androidEvidence({ archive: records[1].archive }))}\n`,
+      ),
+    ])
+    const environmentOverrides = {
+      ...process.env,
+      PACKAGED_MODEL_URL: environment.PACKAGED_MODEL_URL,
+      PACKAGED_MODEL_AUTH_REQUIRED: 'false',
+    }
+    const run = () =>
+      spawnSync(process.execPath, ['scripts/release-gate.mjs', 'preflight', '--output-root', outputRoot], {
+        cwd: new URL('..', import.meta.url),
+        env: environmentOverrides,
+        encoding: 'utf8',
+      })
+    const passed = run()
+    assert.equal(passed.status, 0, passed.stderr)
 
-  await writeFile(path.join(outputRoot, records[0].archive.archiveName), 'tampered archive')
-  const tampered = run()
-  assert.equal(tampered.status, 1)
-  assert.match(tampered.stderr, /archive bytes do not match artifact metadata/u)
+    await writeFile(path.join(outputRoot, records[0].archive.archiveName), 'tampered archive')
+    const tampered = run()
+    assert.equal(tampered.status, 1)
+    assert.match(tampered.stderr, /archive bytes do not match artifact metadata/u)
 
-  const wrongCspRecord = await rewriteTransferredArchive(outputRoot, records[0], "script-src 'self'; object-src 'none'")
-  attestation.targets.chromium.archive = { ...wrongCspRecord.archive }
-  await writeFile(path.join(outputRoot, 'canonical-gate-attestation.json'), `${JSON.stringify(attestation)}\n`)
-  const wrongCsp = run()
-  assert.equal(wrongCsp.status, 1)
-  assert.match(wrongCsp.stderr, /packaged manifest has an unexpected extension page CSP/u)
-})
+    const wrongCspRecord = await rewriteTransferredArchive(
+      outputRoot,
+      records[0],
+      "script-src 'self'; object-src 'none'",
+    )
+    attestation.targets.chromium.archive = { ...wrongCspRecord.archive }
+    await writeFile(path.join(outputRoot, 'canonical-gate-attestation.json'), `${JSON.stringify(attestation)}\n`)
+    const wrongCsp = run()
+    assert.equal(wrongCsp.status, 1)
+    assert.match(wrongCsp.stderr, /packaged manifest has an unexpected extension page CSP/u)
+  },
+)
 
 test('release gate CLI rejects option values that look like further options', () => {
   assert.throws(() => parseArguments(['nonsense']), /Usage: release-gate\.mjs/u)

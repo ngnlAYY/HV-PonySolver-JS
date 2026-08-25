@@ -20,8 +20,8 @@ const PROBE_ID = 'run 123/attempt-2'
 function contractHeaders(origin, extra = {}) {
   return {
     'access-control-allow-origin': origin,
-    'access-control-allow-methods': 'OPTIONS, GET, HEAD',
-    'access-control-allow-headers': 'Authorization',
+    'access-control-allow-methods': 'OPTIONS, GET, HEAD, POST',
+    'access-control-allow-headers': 'Authorization, X-HV-Model-Download-Receipt',
     'cache-control': 'no-store',
     vary: 'Accept-Encoding, Origin',
     ...extra,
@@ -126,7 +126,10 @@ test('decoy 模式验证两个 Origin，且只发送无授权的 OPTIONS/HEAD', 
   }
   const optionsHeaders = requests[0].headers
   assert.equal(optionsHeaders.get('access-control-request-method'), 'GET')
-  assert.equal(optionsHeaders.get('access-control-request-headers'), 'Authorization')
+  assert.equal(
+    optionsHeaders.get('access-control-request-headers'),
+    'Authorization, X-HV-Model-Download-Receipt',
+  )
 })
 
 test('error 模式接受无 Key HEAD 403', async () => {
@@ -217,7 +220,7 @@ test('拒绝缺失 Authorization 的 preflight 响应', async () => {
         return fixtureResponse(204, contractHeaders(origin, { 'access-control-allow-headers': '' }))
       },
     }),
-    /access-control-allow-headers mismatch; expected=\[authorization\] actual=\[<missing>\]/,
+    /access-control-allow-headers mismatch; expected=\[authorization, x-hv-model-download-receipt\] actual=\[<missing>\]/,
   )
 })
 
@@ -234,8 +237,8 @@ test('OPTIONS token 集合忽略顺序与大小写', async () => {
         return fixtureResponse(
           204,
           contractHeaders(origin, {
-            'access-control-allow-methods': 'head,OPTIONS,get',
-            'access-control-allow-headers': 'AUTHORIZATION',
+            'access-control-allow-methods': 'head,OPTIONS,post,get',
+            'access-control-allow-headers': 'X-HV-MODEL-DOWNLOAD-RECEIPT, AUTHORIZATION',
           }),
         )
       }
@@ -254,7 +257,7 @@ for (const mismatch of [
   {
     name: '额外 allow-method',
     method: 'OPTIONS',
-    headers: { 'access-control-allow-methods': 'GET, HEAD, OPTIONS, POST' },
+    headers: { 'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS, PUT' },
     expected: /access-control-allow-methods mismatch/,
   },
   {
@@ -409,10 +412,7 @@ test('在发起请求前拒绝非法配置', async () => {
   await assert.rejects(checkDeploymentContract({ ...base, modelUrl: 'http://models.example/model.onnx' }), /HTTPS/)
   await assert.rejects(checkDeploymentContract({ ...base, origins: ['https://example.com/path'] }), /Invalid Origin/)
   await assert.rejects(checkDeploymentContract({ ...base, probeId: '' }), /probeId/)
-  await assert.rejects(
-    checkDeploymentContract({ ...base, ortModelUrl: ORT_MODEL_URL }),
-    /must be provided together/,
-  )
+  await assert.rejects(checkDeploymentContract({ ...base, ortModelUrl: ORT_MODEL_URL }), /must be provided together/)
   assert.equal(fetchCalls, 0)
 })
 

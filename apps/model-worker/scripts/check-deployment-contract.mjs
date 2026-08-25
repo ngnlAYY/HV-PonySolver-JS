@@ -6,8 +6,8 @@ import { URL } from 'node:url'
 import { isDirectRun } from '../../../scripts/lib/direct-run.mjs'
 
 const ALLOWED_ORIGINS = Object.freeze(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
-const EXPECTED_METHODS = Object.freeze(['get', 'head', 'options'])
-const EXPECTED_HEADERS = Object.freeze(['authorization'])
+const EXPECTED_METHODS = Object.freeze(['get', 'head', 'post', 'options'])
+const EXPECTED_HEADERS = Object.freeze(['authorization', 'x-hv-model-download-receipt'])
 const DEFAULT_ATTEMPTS = 5
 const DEFAULT_RETRY_DELAY_MS = 7_500
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
@@ -150,7 +150,7 @@ function createOptionsRequest(origin) {
     headers: {
       Origin: origin,
       'Access-Control-Request-Method': 'GET',
-      'Access-Control-Request-Headers': 'Authorization',
+      'Access-Control-Request-Headers': 'Authorization, X-HV-Model-Download-Receipt',
     },
   }
 }

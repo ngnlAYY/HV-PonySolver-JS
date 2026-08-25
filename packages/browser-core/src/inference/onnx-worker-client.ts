@@ -2,6 +2,7 @@ import type { VerifiedModelDetectorService, YoloParseResult } from './inference-
 import { inferenceRecoveryConfig, inferenceTimeoutConfig } from './inference-config'
 import { WorkerRequestBridge, WorkerRequestTimeoutError } from './worker-request-bridge'
 import type { InferenceStatusSink } from '../status-panel/status-panel-types'
+import { copyModelDownloadConfirmation } from '../model/model-download-confirmation-store'
 import { raceAbort } from '../utils/abort-race'
 
 export interface ModelRepository {
@@ -335,9 +336,11 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     source: PreparationSource,
   ): Promise<{ modelBuffer: ArrayBuffer; cacheBuffer: ArrayBuffer | null }> {
     if (source.type === 'verified-buffer') {
+      const cacheBuffer = source.modelBuffer.slice(0)
+      copyModelDownloadConfirmation(source.modelBuffer, cacheBuffer)
       return {
         modelBuffer: source.modelBuffer,
-        cacheBuffer: source.modelBuffer.slice(0),
+        cacheBuffer,
       }
     }
 
@@ -352,9 +355,13 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       (await raceAbort(this.modelCache.download(controller.signal), controller.signal, () =>
         signalError(controller.signal, '操作已取消'),
       ))
+    const cacheBuffer = cachedModel ? null : modelBuffer.slice(0)
+    if (cacheBuffer) {
+      copyModelDownloadConfirmation(modelBuffer, cacheBuffer)
+    }
     return {
       modelBuffer,
-      cacheBuffer: cachedModel ? null : modelBuffer.slice(0),
+      cacheBuffer,
     }
   }
 

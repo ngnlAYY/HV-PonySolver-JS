@@ -2,6 +2,7 @@ import type * as ModelIntegrityModule from '../../src/model/model-integrity'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../src/model/model-downloader', () => ({
+  confirmCachedModelDownload: vi.fn(async () => undefined),
   downloadModel: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
 }))
 vi.mock('../../src/model/model-integrity', async (importOriginal) => {
@@ -14,7 +15,7 @@ vi.mock('../../src/model/model-integrity', async (importOriginal) => {
 
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import { createCachedModelRow, ModelCache, readCachedModelBuffer } from '../../src/model/model-cache'
-import { downloadModel } from '../../src/model/model-downloader'
+import { confirmCachedModelDownload, downloadModel } from '../../src/model/model-downloader'
 import { verifyModelIntegrity } from '../../src/model/model-integrity'
 import { modelConfig } from '../../src/model/model-config'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
@@ -460,13 +461,22 @@ describe('ModelCache', () => {
     })
   })
 
-  it('reports elapsed time when cache write completes', async () => {
-    stubIndexedDb()
+  it('confirms quota usage only after the cache transaction completes', async () => {
+    const { transactions } = stubIndexedDb({ deferTransactionCompletion: true })
     const panel = createStatusPanel()
     const cache = new ModelCache(panel)
+    const buffer = bufferFromBytes([9, 9, 9])
+    const confirmDownload = vi.mocked(confirmCachedModelDownload)
+    confirmDownload.mockClear()
+    const writePromise = cache.putCached(buffer, false)
 
-    await expect(cache.putCached(bufferFromBytes([9, 9, 9]), false)).resolves.toBeUndefined()
+    await vi.waitFor(() => expect(transactions).toHaveLength(1))
+    expect(confirmDownload).not.toHaveBeenCalled()
+    transactions[0]!.oncomplete?.(new Event('complete'))
 
+    await expect(writePromise).resolves.toBeUndefined()
+
+    expect(confirmDownload).toHaveBeenCalledWith(buffer, undefined)
     expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^已缓存 \d+ms$/) })
   })
 

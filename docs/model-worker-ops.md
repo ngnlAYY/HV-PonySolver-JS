@@ -11,7 +11,9 @@
 
 ## 部署与分层验收
 
-Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。GitHub 手动部署 workflow 的 `enable_model_download_quota` 默认开启；关闭时真实模型 GET 不执行月度额度限制，也不递增计数。
+Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。GitHub 手动部署 workflow 的 `enable_model_download_quota` 默认开启；关闭时真实模型 GET 不执行月度额度限制，也不保存确认次数。
+
+回执确认协议使用独立的 v2 状态键。首次部署该协议时，旧版在响应体到达客户端前产生、无法验证的计数不会迁入 v2；之后只保留客户端完成缓存后确认的使用次数。
 
 ### 1. 区分 dry-run 与实际发布
 
@@ -61,7 +63,7 @@ pnpm --filter @hv-pony-solver/model-worker check:deployment
 
 浏览器请求必须继续使用标准 `fetch` 和 `Authorization: Bearer <key>`。不要改用 `GM_xmlhttpRequest` / `GM.xmlHttpRequest` 绕过 CORS，也不要关闭 byteLength 或 SHA-256 完整性校验。
 
-Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。扩展设置页的“查询下载次数”使用已保存 Key 调用只读 `/quota`，返回本月上限、已用和剩余次数；模型实际 GET 收到 `429` 才表示 Key 已通过鉴权但本月 5 次额度已经用完。
+Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。扩展设置页的“查询下载次数”使用已保存 Key 调用只读 `GET /quota`，返回本月上限、已确认使用和剩余次数。真实模型 GET 仅预留一个十分钟有效的回执；客户端完整读取、校验并完成 IndexedDB 缓存后，才调用 `POST /quota` 确认并计数。确认接口按回执幂等，缓存未完成或回执失效均不计数；收到 `429` 才表示该 Key 当月已经确认使用 5 次。
 
 ### 4. 次级故障分流
 
