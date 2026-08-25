@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 import { browserSupport } from './browser-support.mjs'
 import {
+  DEFAULT_GECKODRIVER_DOWNLOAD_ATTEMPTS,
   MAX_GECKODRIVER_ARCHIVE_BYTES,
   assertSafeGeckodriverOutputDirectory,
   fetchGeckodriverArchive,
@@ -101,6 +102,11 @@ test('geckodriver downloader rejects declared and streamed oversize bodies', asy
   assert.equal(fetchCalled, false)
 
   await assert.rejects(
+    fetchGeckodriverArchive({ attempts: DEFAULT_GECKODRIVER_DOWNLOAD_ATTEMPTS + 1 }),
+    /download attempts must be between/u,
+  )
+
+  await assert.rejects(
     fetchGeckodriverArchive({
       fetchImpl: async () => new globalThis.Response(Uint8Array.from([1]), { headers: { 'content-length': '9' } }),
       maxBytes: 8,
@@ -172,6 +178,7 @@ test('geckodriver downloader reports HTTP, missing-body, and stream errors', asy
   await assert.rejects(
     fetchGeckodriverArchive({
       fetchImpl: async () => new globalThis.Response('denied', { status: 503 }),
+      attempts: 1,
       timeoutMs: 1_000,
     }),
     /HTTP 503/u,
@@ -198,4 +205,51 @@ test('geckodriver downloader reports HTTP, missing-body, and stream errors', asy
       error?.message === 'geckodriver archive body stream failed' &&
       /broken geckodriver stream/u.test(error.cause?.message),
   )
+})
+
+test('geckodriver downloader retries only bounded transient request failures', async () => {
+  let requestCount = 0
+  const retryDelays = []
+  await assert.rejects(
+    fetchGeckodriverArchive({
+      attempts: DEFAULT_GECKODRIVER_DOWNLOAD_ATTEMPTS,
+      fetchImpl: async () => {
+        requestCount += 1
+        if (requestCount === 1) {
+          return new globalThis.Response('temporary gateway failure', { status: 502 })
+        }
+        if (requestCount === 2) {
+          throw new TypeError('temporary network failure')
+        }
+        return new globalThis.Response(Uint8Array.from([1]))
+      },
+      retryDelayImpl: async (milliseconds, signal) => {
+        assert.equal(signal.aborted, false)
+        retryDelays.push(milliseconds)
+      },
+      timeoutMs: 1_000,
+    }),
+    /archive SHA-256 mismatch/u,
+  )
+  assert.equal(requestCount, DEFAULT_GECKODRIVER_DOWNLOAD_ATTEMPTS)
+  assert.equal(retryDelays.length, DEFAULT_GECKODRIVER_DOWNLOAD_ATTEMPTS - 1)
+  assert.ok(retryDelays.every((delay) => Number.isSafeInteger(delay) && delay > 0))
+
+  let permanentRequestCount = 0
+  let permanentRetryCount = 0
+  await assert.rejects(
+    fetchGeckodriverArchive({
+      fetchImpl: async () => {
+        permanentRequestCount += 1
+        return new globalThis.Response('not found', { status: 404 })
+      },
+      retryDelayImpl: async () => {
+        permanentRetryCount += 1
+      },
+      timeoutMs: 1_000,
+    }),
+    /HTTP 404/u,
+  )
+  assert.equal(permanentRequestCount, 1)
+  assert.equal(permanentRetryCount, 0)
 })

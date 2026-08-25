@@ -15,8 +15,10 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const extensionRoot = path.resolve(scriptDirectory, '..')
 const repositoryRoot = path.resolve(extensionRoot, '../..')
 const HASH_CHUNK_BYTES = 1024 * 1024
+const GECKODRIVER_RETRY_DELAYS_MS = [250, 1_000]
 
 export const DEFAULT_GECKODRIVER_TIMEOUT_MS = 60_000
+export const DEFAULT_GECKODRIVER_DOWNLOAD_ATTEMPTS = GECKODRIVER_RETRY_DELAYS_MS.length + 1
 export const MAX_GECKODRIVER_ARCHIVE_BYTES = 32 * 1024 * 1024
 
 function isPathWithin(candidate, root) {
@@ -270,6 +272,68 @@ async function sha256WithSignal(bytes, signal) {
   return hash.digest('hex')
 }
 
+function isRetryableDownloadStatus(status) {
+  return status === 408 || status === 429 || (status >= 500 && status <= 599)
+}
+
+function defaultRetryDelay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+async function fetchGeckodriverResponse(options, signal) {
+  const attempts = options.attempts ?? DEFAULT_GECKODRIVER_DOWNLOAD_ATTEMPTS
+  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > DEFAULT_GECKODRIVER_DOWNLOAD_ATTEMPTS) {
+    throw new RangeError(`geckodriver download attempts must be between 1 and ${DEFAULT_GECKODRIVER_DOWNLOAD_ATTEMPTS}`)
+  }
+  const retryDelayImpl = options.retryDelayImpl ?? defaultRetryDelay
+  if (typeof retryDelayImpl !== 'function') {
+    throw new TypeError('geckodriver retry delay implementation must be a function')
+  }
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let response
+    try {
+      response = await awaitWithSignal(
+        () =>
+          (options.fetchImpl ?? globalThis.fetch)(browserSupport.geckodriver.linuxArchiveUrl, {
+            redirect: 'follow',
+            signal,
+          }),
+        signal,
+        'geckodriver download',
+      )
+    } catch (error) {
+      if (signal.aborted) {
+        throw error
+      }
+      if (attempt === attempts) {
+        throw new Error(`geckodriver download request failed after ${attempts} attempt(s)`, { cause: error })
+      }
+      await awaitWithSignal(
+        () => retryDelayImpl(GECKODRIVER_RETRY_DELAYS_MS[attempt - 1], signal),
+        signal,
+        'geckodriver download retry',
+      )
+      continue
+    }
+
+    if (response.ok) {
+      return response
+    }
+    cancelBody(response)
+    const statusError = new Error(`geckodriver download failed with HTTP ${response.status}`)
+    if (!isRetryableDownloadStatus(response.status) || attempt === attempts) {
+      throw statusError
+    }
+    await awaitWithSignal(
+      () => retryDelayImpl(GECKODRIVER_RETRY_DELAYS_MS[attempt - 1], signal),
+      signal,
+      'geckodriver download retry',
+    )
+  }
+  throw new Error('geckodriver download attempts were exhausted')
+}
+
 export async function fetchGeckodriverArchive(options = {}) {
   const timeoutMs = options.timeoutMs ?? DEFAULT_GECKODRIVER_TIMEOUT_MS
   const maxBytes = options.maxBytes ?? MAX_GECKODRIVER_ARCHIVE_BYTES
@@ -278,19 +342,7 @@ export async function fetchGeckodriverArchive(options = {}) {
   }
   const deadline = createDeadlineSignal(options.signal, timeoutMs, 'geckodriver download')
   try {
-    const response = await awaitWithSignal(
-      () =>
-        (options.fetchImpl ?? globalThis.fetch)(browserSupport.geckodriver.linuxArchiveUrl, {
-          redirect: 'follow',
-          signal: deadline.signal,
-        }),
-      deadline.signal,
-      'geckodriver download',
-    )
-    if (!response.ok) {
-      cancelBody(response)
-      throw new Error(`geckodriver download failed with HTTP ${response.status}`)
-    }
+    const response = await fetchGeckodriverResponse(options, deadline.signal)
     const archive = await readBoundedArchiveBody(response, maxBytes, deadline.signal)
     const digest = await sha256WithSignal(archive, deadline.signal)
     if (digest !== browserSupport.geckodriver.linuxArchiveSha256) {
