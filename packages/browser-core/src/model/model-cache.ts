@@ -25,6 +25,13 @@ type OpenAttempt = {
   settled: boolean
 }
 
+type SharedDownload = {
+  readonly controller: AbortController
+  readonly promise: Promise<ArrayBuffer>
+  owners: number
+  settled: boolean
+}
+
 class ModelCacheLifecycleError extends Error {
   constructor(message: string) {
     super(message)
@@ -78,7 +85,7 @@ export class ModelCache {
   private generation = 0
   private lifecycleController = new AbortController()
   private readonly activeTransactionAborts = new Set<() => void>()
-  private readonly activeDownloads = new Map<string, Promise<ArrayBuffer>>()
+  private readonly activeDownloads = new Map<string, SharedDownload>()
 
   constructor(
     private readonly statusSink: CacheStatusSink,
@@ -125,25 +132,34 @@ export class ModelCache {
       throw new Error('模型缓存操作已取消')
     }
     const startedAt = Date.now()
+    const lifecycleSignal = this.lifecycleController.signal
     this.statusSink.setStatus({ model: '下载中' })
     // Concurrent callers share one in-flight download so a single monthly-quota
     // GET serves all of them; each caller still honors its own abort signal.
     const downloadKey = `${verifyIntegrity ? 'verified' : 'unverified'}:${accessKeyOverride ?? ''}`
-    let sharedDownload = this.activeDownloads.get(downloadKey)
-    if (!sharedDownload) {
+    let shared = this.activeDownloads.get(downloadKey)
+    if (!shared) {
       const options: ModelIntegrityOptions =
         accessKeyOverride === undefined ? { verifyIntegrity } : { accessKeyOverride, verifyIntegrity }
-      sharedDownload = this.downloadModelImpl(signal, options).finally(() => {
+      shared = this.createSharedDownload(downloadKey, options)
+      this.activeDownloads.set(downloadKey, shared)
+    }
+    shared.owners += 1
+    try {
+      const signals = signal ? [signal, lifecycleSignal] : [lifecycleSignal]
+      const buffer = await raceAbort(shared.promise, signals, () => new ModelCacheLifecycleError('模型缓存操作已取消'))
+      if (signal?.aborted || lifecycleSignal.aborted || lifecycleSignal !== this.lifecycleController.signal) {
+        throw new ModelCacheLifecycleError('模型缓存操作已取消')
+      }
+      this.statusSink.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
+      return buffer
+    } finally {
+      shared.owners -= 1
+      if (shared.owners === 0 && !shared.settled && this.activeDownloads.get(downloadKey) === shared) {
         this.activeDownloads.delete(downloadKey)
-      })
-      this.activeDownloads.set(downloadKey, sharedDownload)
+        shared.controller.abort(new ModelCacheLifecycleError('模型缓存操作已取消'))
+      }
     }
-    const buffer = await raceAbort(sharedDownload, signal, () => new Error('模型缓存操作已取消'))
-    if (signal?.aborted) {
-      throw new Error('模型缓存操作已取消')
-    }
-    this.statusSink.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
-    return buffer
   }
 
   async putCached(
@@ -180,9 +196,27 @@ export class ModelCache {
       abort()
     }
     this.activeTransactionAborts.clear()
+    for (const shared of this.activeDownloads.values()) {
+      shared.controller.abort(closedError)
+    }
+    this.activeDownloads.clear()
     this.db?.close()
     this.db = null
     lifecycleController.abort(closedError)
+  }
+
+  private createSharedDownload(downloadKey: string, options: ModelIntegrityOptions): SharedDownload {
+    const controller = new AbortController()
+    const promise = Promise.resolve()
+      .then(() => this.downloadModelImpl(controller.signal, options))
+      .finally(() => {
+        const active = this.activeDownloads.get(downloadKey)
+        if (active?.controller === controller) {
+          active.settled = true
+          this.activeDownloads.delete(downloadKey)
+        }
+      })
+    return { controller, promise, owners: 0, settled: false }
   }
 
   private createOperationContext(signal: AbortSignal | undefined, deadline: number): CacheOperationContext {

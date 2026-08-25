@@ -128,6 +128,14 @@ describe('extension protocol', () => {
     expect([...new Uint8Array(await decoded.arrayBuffer())]).toEqual([1, 2, 3, 4])
   })
 
+  it('cancels an in-progress image encoding through AbortSignal', async () => {
+    const controller = new AbortController()
+    const encoding = encodeImage(new Blob([new Uint8Array(1024 * 1024)], { type: 'image/png' }), controller.signal)
+    controller.abort()
+
+    await expect(encoding).rejects.toThrow('验证码图片读取已取消')
+  })
+
   it('decodes without a full request rescan but keeps type, shape, and size validation', async () => {
     type DetectRequestLike = Parameters<typeof decodeImage>[0]
     // Upstream isOffscreenRequest already ran the full isHostRequest gate, so
@@ -148,14 +156,16 @@ describe('extension protocol', () => {
   })
 
   it('rejects oversized, malformed, and credential-shaped messages', () => {
-    // The exact floor-formula boundary still validates; one quad above it cannot.
-    const maxBase64Length = Math.floor(MAX_IMAGE_BYTE_LENGTH / 3) * 4
+    // MAX_IMAGE_BYTE_LENGTH leaves two source bytes in its final base64 quad.
+    // Padding distinguishes that valid boundary from MAX + 1 bytes at the same encoded length.
+    const maxBase64Length = Math.ceil(MAX_IMAGE_BYTE_LENGTH / 3) * 4
+    const exactLimitBase64 = `${'A'.repeat(maxBase64Length - 1)}=`
     expect(
       isHostRequest({
         protocol: PROTOCOL_VERSION,
         type: 'detect',
         requestId: 'request-1',
-        imageBase64: 'A'.repeat(maxBase64Length),
+        imageBase64: exactLimitBase64,
         mimeType: 'image/png',
       }),
     ).toBe(true)
@@ -164,7 +174,16 @@ describe('extension protocol', () => {
         protocol: PROTOCOL_VERSION,
         type: 'detect',
         requestId: 'request-1b',
-        imageBase64: `${'A'.repeat(maxBase64Length)}AAAA`,
+        imageBase64: 'A'.repeat(maxBase64Length),
+        mimeType: 'image/png',
+      }),
+    ).toBe(false)
+    expect(
+      isHostRequest({
+        protocol: PROTOCOL_VERSION,
+        type: 'detect',
+        requestId: 'request-1c',
+        imageBase64: 'A'.repeat(maxBase64Length + 4),
         mimeType: 'image/png',
       }),
     ).toBe(false)
@@ -238,14 +257,14 @@ describe('extension protocol', () => {
       type: 'hv-pony-solver:offscreen-request',
       operation: 'request',
       epoch: 'epoch-1',
-      requestId: 'offscreen-1',
+      requestId: 'transport-clear-1',
       request: clearRequest,
     } as const
     const cancel = {
       type: 'hv-pony-solver:offscreen-request',
       operation: 'cancel',
       epoch: 'epoch-1',
-      requestId: 'offscreen-1',
+      requestId: 'clear-1',
     } as const
     const confirmIdle = {
       type: 'hv-pony-solver:offscreen-request',
@@ -256,6 +275,9 @@ describe('extension protocol', () => {
 
     expect(isOffscreenClaimRequest(claim)).toBe(true)
     expect(isOffscreenRequest(request)).toBe(true)
+    // Transport IDs intentionally differ from Host request IDs so cancellation
+    // remains scoped to one service-worker epoch.
+    expect(isOffscreenRequest({ ...request, requestId: 'transport-clear-2' })).toBe(true)
     expect(isOffscreenCancelRequest(cancel)).toBe(true)
     expect(isOffscreenIdleConfirmationRequest(confirmIdle)).toBe(true)
     expect(isOffscreenRequest({ ...request, epoch: 'invalid epoch' })).toBe(false)

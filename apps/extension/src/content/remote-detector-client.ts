@@ -76,8 +76,9 @@ export class RemoteDetectorClient implements DetectorService {
     resetPrefetchMisses()
     let image: Awaited<ReturnType<typeof encodeImage>>
     try {
-      image = await encodeImage(blob)
+      image = await encodeImage(blob, signal)
     } catch (error) {
+      this.assertNotAborted(signal)
       throw new Error(`验证码图片编码失败: ${formatErrorMessage(error)}`, { cause: error })
     }
     this.assertNotAborted(signal)

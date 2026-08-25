@@ -17,4 +17,4 @@ The matching WASM is fetched from the content-addressed first-party URL declared
 `ort.env.wasm.wasmBinary`.
 
 Run `pnpm build:onnx-runtime` to reproduce the isolated artifacts. Pass `--install` to replace the tracked bundle and
-operator config only after reviewing the printed hashes.
+regenerate the Git-ignored operator config only after reviewing the printed hashes.

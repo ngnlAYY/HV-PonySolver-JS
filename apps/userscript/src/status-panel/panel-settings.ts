@@ -7,8 +7,11 @@ import {
   getPanelPositionSync as getCorePanelPositionSync,
   isPanelCompactMode as isCorePanelCompactMode,
   isPanelCompactModeSync as isCorePanelCompactModeSync,
+  isPanelCspVisibilityRequired as isCorePanelCspVisibilityRequired,
+  isPanelCspVisibilityRequiredSync as isCorePanelCspVisibilityRequiredSync,
   serializePanelPosition,
   setPanelCompactMode as setCorePanelCompactMode,
+  setPanelCspVisibilityRequired as setCorePanelCspVisibilityRequired,
   setPanelHistoryLimit as setCorePanelHistoryLimit,
   setPanelPosition as setCorePanelPosition,
   type PanelPosition,
@@ -51,6 +54,18 @@ export function clearPanelCompactMode(): Promise<void> {
   return setCorePanelCompactMode(gmSettingsStorage, false)
 }
 
+export function isPanelCspVisibilityRequiredSync(): boolean {
+  return isCorePanelCspVisibilityRequiredSync(gmSettingsStorage)
+}
+
+export function isPanelCspVisibilityRequired(): Promise<boolean> {
+  return isCorePanelCspVisibilityRequired(gmSettingsStorage)
+}
+
+export function setPanelCspVisibilityRequired(enabled: boolean): Promise<void> {
+  return setCorePanelCspVisibilityRequired(gmSettingsStorage, enabled)
+}
+
 export function getPanelHistoryLimitSync(): number {
   return getCorePanelHistoryLimitSync(gmSettingsStorage)
 }
@@ -69,7 +84,7 @@ export function clearPanelHistoryLimit(): Promise<void> {
 
 export async function setPanelPositionFromPrompt(): Promise<void> {
   const currentPosition = await getPanelPosition()
-  const input = promptUser('请输入面板位置 top,left，例如 150,1240', serializePanelPosition(currentPosition))
+  const input = promptUser('请输入面板位置 top,left，例如 155,1240', serializePanelPosition(currentPosition))
   if (input === null) {
     return
   }
@@ -90,6 +105,16 @@ export async function enablePanelCompactMode(): Promise<void> {
 export async function disablePanelCompactMode(): Promise<void> {
   await clearPanelCompactMode()
   alertUser('精简版已关闭，刷新页面后生效')
+}
+
+export async function enablePanelCspVisibilityLimit(): Promise<void> {
+  await setPanelCspVisibilityRequired(true)
+  alertUser('面板显示限制已开启，刷新页面后生效')
+}
+
+export async function disablePanelCspVisibilityLimit(): Promise<void> {
+  await setPanelCspVisibilityRequired(false)
+  alertUser('面板显示限制已关闭，刷新页面后生效')
 }
 
 export async function setPanelHistoryLimitFromPrompt(): Promise<void> {

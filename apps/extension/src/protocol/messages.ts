@@ -1,12 +1,13 @@
 import type { Detection, YoloParseResult } from '@hv-pony-solver/browser-core/inference/inference-types'
 import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
+import { MODEL_ACCESS_TOKEN_PATTERN } from '@hv-pony-solver/shared/token'
 
 export const PROTOCOL_VERSION = 'hv-pony-solver/2' as const
 export const CONTENT_PORT_NAME = 'hv-pony-solver:content' as const
 export const OPTIONS_PORT_NAME = 'hv-pony-solver:options' as const
 export const OFFSCREEN_MESSAGE_TYPE = 'hv-pony-solver:offscreen-request' as const
 export const MAX_IMAGE_BYTE_LENGTH = 2 * 1024 * 1024
-export const MODEL_ACCESS_KEY_LENGTH = 64
+const MAX_IMAGE_BASE64_LENGTH = Math.ceil(MAX_IMAGE_BYTE_LENGTH / 3) * 4
 
 type RequestBase = Readonly<{
   protocol: typeof PROTOCOL_VERSION
@@ -25,6 +26,7 @@ export type DetectRequest = RequestBase &
 export type VerifyKeyRequest = RequestBase & Readonly<{ type: 'verify-key'; candidateKey: string }>
 export type ClearKeyRequest = RequestBase & Readonly<{ type: 'clear-key' }>
 export type KeyIntentRequest = VerifyKeyRequest | ClearKeyRequest | QueryModelQuotaRequest
+export type SerializedModelRequest = KeyIntentRequest | DownloadModelRequest
 export type HostRequest = PrepareRequest | DownloadModelRequest | DetectRequest | KeyIntentRequest
 
 /**
@@ -172,12 +174,18 @@ function isMimeType(value: unknown): value is string {
 }
 
 function isBase64(value: unknown): value is string {
-  // floor() keeps the worst-case decoded size at or below MAX_IMAGE_BYTE_LENGTH;
-  // ceil() would admit an encoding that decodes to exactly one byte too many.
-  if (typeof value !== 'string' || value.length === 0 || value.length > Math.floor(MAX_IMAGE_BYTE_LENGTH / 3) * 4) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > MAX_IMAGE_BASE64_LENGTH ||
+    value.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(value)
+  ) {
     return false
   }
-  return value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value)
+  const paddingLength = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0
+  const decodedLength = (value.length / 4) * 3 - paddingLength
+  return decodedLength >= 1 && decodedLength <= MAX_IMAGE_BYTE_LENGTH
 }
 
 function isHostErrorKind(value: unknown): value is HostErrorKind {
@@ -185,7 +193,7 @@ function isHostErrorKind(value: unknown): value is HostErrorKind {
 }
 
 export function isModelAccessKey(value: unknown): value is string {
-  return typeof value === 'string' && new RegExp(`^[0-9a-f]{${MODEL_ACCESS_KEY_LENGTH}}$`, 'i').test(value.trim())
+  return typeof value === 'string' && MODEL_ACCESS_TOKEN_PATTERN.test(value.trim())
 }
 
 function isDetection(value: unknown): value is Detection {
@@ -466,27 +474,64 @@ export function successResponse(requestId: string, result?: YoloParseResult, not
   }
 }
 
-function readBlobBase64(blob: Blob): Promise<string> {
+function readBlobBase64(blob: Blob, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onerror = () => reject(reader.error ?? new Error('验证码图片读取失败'))
-    reader.onabort = () => reject(new Error('验证码图片读取已取消'))
+    let settled = false
+    const cleanup = (): void => {
+      signal?.removeEventListener('abort', onSignalAbort)
+      reader.onerror = null
+      reader.onabort = null
+      reader.onload = null
+    }
+    const finish = (callback: () => void): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      cleanup()
+      callback()
+    }
+    const cancel = (): void => finish(() => reject(new Error('验证码图片读取已取消')))
+    const onSignalAbort = (): void => {
+      try {
+        if (reader.readyState === FileReader.LOADING) {
+          reader.abort()
+        }
+      } finally {
+        cancel()
+      }
+    }
+    reader.onerror = () => finish(() => reject(reader.error ?? new Error('验证码图片读取失败')))
+    reader.onabort = cancel
     reader.onload = () => {
       if (typeof reader.result === 'string') {
         const separator = reader.result.indexOf(',')
         const encoded = separator >= 0 ? reader.result.slice(separator + 1) : ''
         if (isBase64(encoded)) {
-          resolve(encoded)
+          finish(() => resolve(encoded))
           return
         }
       }
-      reject(new Error('验证码图片读取结果无效'))
+      finish(() => reject(new Error('验证码图片读取结果无效')))
     }
-    reader.readAsDataURL(blob)
+    signal?.addEventListener('abort', onSignalAbort, { once: true })
+    if (signal?.aborted) {
+      onSignalAbort()
+      return
+    }
+    try {
+      reader.readAsDataURL(blob)
+    } catch (error) {
+      finish(() => reject(error instanceof Error ? error : new Error(String(error))))
+    }
   })
 }
 
-export async function encodeImage(blob: Blob): Promise<Pick<DetectRequest, 'imageBase64' | 'mimeType'>> {
+export async function encodeImage(
+  blob: Blob,
+  signal?: AbortSignal,
+): Promise<Pick<DetectRequest, 'imageBase64' | 'mimeType'>> {
   if (blob.size < 1 || blob.size > MAX_IMAGE_BYTE_LENGTH) {
     throw new Error('验证码图片大小无效')
   }
@@ -494,7 +539,7 @@ export async function encodeImage(blob: Blob): Promise<Pick<DetectRequest, 'imag
     throw new Error('验证码图片类型不受支持')
   }
   return {
-    imageBase64: await readBlobBase64(blob),
+    imageBase64: await readBlobBase64(blob, signal),
     mimeType: blob.type,
   }
 }

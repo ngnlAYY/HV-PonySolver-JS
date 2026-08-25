@@ -6,8 +6,9 @@ import { URL } from 'node:url'
 import { isDirectRun } from '../../../scripts/lib/direct-run.mjs'
 
 const ALLOWED_ORIGINS = Object.freeze(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
-const EXPECTED_METHODS = Object.freeze(['get', 'head', 'post', 'options'])
-const EXPECTED_HEADERS = Object.freeze(['authorization', 'x-hv-model-download-receipt'])
+const EXPECTED_METHODS = Object.freeze(['get', 'head', 'options'])
+const EXPECTED_HEADERS = Object.freeze(['authorization'])
+const EXPECTED_PREFLIGHT_MAX_AGE = '86400'
 const DEFAULT_ATTEMPTS = 5
 const DEFAULT_RETRY_DELAY_MS = 7_500
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
@@ -150,7 +151,7 @@ function createOptionsRequest(origin) {
     headers: {
       Origin: origin,
       'Access-Control-Request-Method': 'GET',
-      'Access-Control-Request-Headers': 'Authorization, X-HV-Model-Download-Receipt',
+      'Access-Control-Request-Headers': 'Authorization',
     },
   }
 }
@@ -197,6 +198,7 @@ function assertOptionsContract(response, origin, assetName) {
   assertHeaderEquals(response, 'access-control-allow-origin', origin, context)
   assertExactTokenSet(response, 'access-control-allow-methods', EXPECTED_METHODS, context)
   assertExactTokenSet(response, 'access-control-allow-headers', EXPECTED_HEADERS, context)
+  assertHeaderEquals(response, 'access-control-max-age', EXPECTED_PREFLIGHT_MAX_AGE, context)
   assertHeaderEqualsIgnoreCase(response, 'cache-control', 'no-store', context)
   assertVaryOrigin(response, context)
 }

@@ -20,10 +20,12 @@ import {
 } from './model-response'
 import type { Env, WorkerConfig } from './worker-types'
 
-import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
+import { MODEL_DOWNLOAD_RECEIPT_HEADER, normalizeModelDownloadReceiptId } from '@hv-pony-solver/shared'
 
 const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'
 const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'
+const MODEL_ALLOWED_HEADERS = 'Authorization'
+const QUOTA_ALLOWED_HEADERS = `Authorization, ${MODEL_DOWNLOAD_RECEIPT_HEADER}`
 const LEGACY_MODEL_FILENAME = 'yolo26n-640.onnx'
 const ORT_MODEL_FILENAME = 'yolo26n-640.ort'
 const QUOTA_FAILURE_RETRY_AFTER_SECONDS = 5
@@ -130,8 +132,8 @@ async function serveQuota(request: Request, env: Env, config: WorkerConfig): Pro
   }
   try {
     if (request.method === 'POST') {
-      const receiptId = request.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER)?.trim() ?? ''
-      if (!/^[0-9a-f]{32}$/i.test(receiptId)) {
+      const receiptId = normalizeModelDownloadReceiptId(request.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER))
+      if (receiptId === null) {
         return textResponse(request, 'Invalid model download receipt', 400)
       }
       const confirmation = await confirmModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, access.canonicalToken, receiptId)
@@ -170,7 +172,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       return textResponse(request, 'Not Found', 404)
     }
     if (request.method === 'OPTIONS') {
-      return preflightResponse(request, isRuntime)
+      return preflightResponse(request, {
+        allowMethods: isQuota ? QUOTA_ALLOWED_METHODS : ALLOWED_METHODS,
+        ...(isRuntime ? {} : { allowHeaders: isQuota ? QUOTA_ALLOWED_HEADERS : MODEL_ALLOWED_HEADERS }),
+        isPublic: isRuntime,
+      })
     }
     const methodAllowed = isQuota
       ? request.method === 'GET' || request.method === 'POST'

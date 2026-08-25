@@ -8,7 +8,7 @@ import {
   successResponse,
   type HostRequest,
   type HostResponse,
-  type KeyIntentRequest,
+  type SerializedModelRequest,
 } from '../protocol/messages'
 
 export type InferenceHostDependencies = Readonly<{
@@ -20,23 +20,28 @@ export type InferenceHostDependencies = Readonly<{
   close?(): void | Promise<void>
 }>
 
-type ActiveKeyIntent = Readonly<{
+type ActiveModelIntent = Readonly<{
   controller: AbortController
   generation: number
 }>
 
 export class InferenceHost {
   private readonly destroyController = new AbortController()
-  private keyOperationTail: Promise<void> = Promise.resolve()
-  private activeKeyIntent: ActiveKeyIntent | null = null
-  private keyGeneration = 0
+  private modelOperationTail: Promise<void> = Promise.resolve()
+  private activeModelIntent: ActiveModelIntent | null = null
+  private modelOperationGeneration = 0
   private destroyed = false
 
   constructor(private readonly dependencies: InferenceHostDependencies) {}
 
   async handle(request: HostRequest, callerSignal?: AbortSignal): Promise<HostResponse> {
-    if (request.type === 'verify-key' || request.type === 'clear-key' || request.type === 'query-model-quota') {
-      return this.handleKeyIntent(request, callerSignal)
+    if (
+      request.type === 'verify-key' ||
+      request.type === 'clear-key' ||
+      request.type === 'download-model' ||
+      request.type === 'query-model-quota'
+    ) {
+      return this.handleModelIntent(request, callerSignal)
     }
     const controller = new AbortController()
     const abort = (): void => controller.abort()
@@ -44,14 +49,6 @@ export class InferenceHost {
     this.destroyController.signal.addEventListener('abort', abort, { once: true })
     try {
       this.assertActive(callerSignal)
-      if (request.type === 'download-model') {
-        if (!this.dependencies.downloadModel) {
-          throw new Error('当前扩展版本不支持手动下载模型')
-        }
-        const notice = await this.dependencies.downloadModel(controller.signal)
-        this.assertActive(callerSignal)
-        return successResponse(request.requestId, undefined, notice)
-      }
       if (request.type === 'prepare') {
         await this.dependencies.detector.prepare(controller.signal)
         this.assertActive(callerSignal)
@@ -77,9 +74,9 @@ export class InferenceHost {
       return
     }
     this.destroyed = true
-    this.keyGeneration += 1
-    this.activeKeyIntent?.controller.abort(new Error('推理 Host 已关闭'))
-    this.activeKeyIntent = null
+    this.modelOperationGeneration += 1
+    this.activeModelIntent?.controller.abort(new Error('推理 Host 已关闭'))
+    this.activeModelIntent = null
     this.destroyController.abort()
     this.dependencies.detector.destroy()
     try {
@@ -92,19 +89,19 @@ export class InferenceHost {
     }
   }
 
-  private async handleKeyIntent(request: KeyIntentRequest, callerSignal?: AbortSignal): Promise<HostResponse> {
+  private async handleModelIntent(request: SerializedModelRequest, callerSignal?: AbortSignal): Promise<HostResponse> {
     try {
       this.assertActive(callerSignal)
     } catch (error) {
       return errorResponse(request.requestId, formatErrorMessage(error))
     }
 
-    const generation = ++this.keyGeneration
-    this.activeKeyIntent?.controller.abort(new Error('模型 Key 操作已被更新操作取代'))
+    const generation = ++this.modelOperationGeneration
+    this.activeModelIntent?.controller.abort(new Error('模型管理操作已被更新操作取代'))
     const controller = new AbortController()
-    const intent: ActiveKeyIntent = { controller, generation }
-    this.activeKeyIntent = intent
-    const abortFromCaller = (): void => controller.abort(new Error('模型 Key 操作已取消'))
+    const intent: ActiveModelIntent = { controller, generation }
+    this.activeModelIntent = intent
+    const abortFromCaller = (): void => controller.abort(new Error('模型管理操作已取消'))
     const abortFromDestroy = (): void => controller.abort(new Error('推理 Host 已关闭'))
     callerSignal?.addEventListener('abort', abortFromCaller, { once: true })
     this.destroyController.signal.addEventListener('abort', abortFromDestroy, { once: true })
@@ -114,8 +111,8 @@ export class InferenceHost {
       abortFromDestroy()
     }
 
-    const operation = this.keyOperationTail.then(async () => {
-      this.assertKeyIntentActive(intent, callerSignal)
+    const operation = this.modelOperationTail.then(async () => {
+      this.assertModelIntentActive(intent, callerSignal)
       let notice: string | undefined
       if (request.type === 'verify-key') {
         if (!this.dependencies.verifyKey) {
@@ -127,16 +124,21 @@ export class InferenceHost {
           throw new Error('当前扩展版本不支持清除模型 Key')
         }
         await this.dependencies.clearKey(controller.signal)
+      } else if (request.type === 'download-model') {
+        if (!this.dependencies.downloadModel) {
+          throw new Error('当前扩展版本不支持手动下载模型')
+        }
+        notice = await this.dependencies.downloadModel(controller.signal)
       } else {
         if (!this.dependencies.queryModelQuota) {
           throw new Error('当前扩展版本不支持查询模型下载次数')
         }
         notice = await this.dependencies.queryModelQuota(controller.signal)
       }
-      this.assertKeyIntentActive(intent, callerSignal)
+      this.assertModelIntentActive(intent, callerSignal)
       return notice
     })
-    this.keyOperationTail = operation.then(
+    this.modelOperationTail = operation.then(
       () => undefined,
       () => undefined,
     )
@@ -153,20 +155,20 @@ export class InferenceHost {
     } finally {
       callerSignal?.removeEventListener('abort', abortFromCaller)
       this.destroyController.signal.removeEventListener('abort', abortFromDestroy)
-      if (this.activeKeyIntent === intent) {
-        this.activeKeyIntent = null
+      if (this.activeModelIntent === intent) {
+        this.activeModelIntent = null
       }
     }
   }
 
-  private assertKeyIntentActive(intent: ActiveKeyIntent, callerSignal?: AbortSignal): void {
+  private assertModelIntentActive(intent: ActiveModelIntent, callerSignal?: AbortSignal): void {
     this.assertActive(callerSignal)
     if (
-      intent.generation !== this.keyGeneration ||
-      this.activeKeyIntent !== intent ||
+      intent.generation !== this.modelOperationGeneration ||
+      this.activeModelIntent !== intent ||
       intent.controller.signal.aborted
     ) {
-      throw new Error('模型 Key 操作已取消')
+      throw new Error('模型管理操作已取消')
     }
   }
 

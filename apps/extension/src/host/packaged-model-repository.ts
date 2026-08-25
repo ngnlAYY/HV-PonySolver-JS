@@ -5,7 +5,7 @@ import { loadPackagedModel } from './packaged-model'
 export class PackagedModelRepository implements ModelRepository {
   constructor(
     private readonly loadModel: (signal?: AbortSignal) => Promise<ArrayBuffer> = (signal) =>
-      loadPackagedModel(fetch, signal),
+      loadPackagedModel(undefined, signal),
   ) {}
 
   getCached(signal?: AbortSignal): Promise<ArrayBuffer> {

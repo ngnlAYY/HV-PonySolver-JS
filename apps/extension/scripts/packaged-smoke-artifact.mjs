@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 
@@ -8,6 +8,12 @@ import { unzipSync } from 'fflate'
 
 const packagedTargets = new Set(['chromium', 'firefox'])
 const answerCount = 6
+export const PACKAGED_ARCHIVE_LIMITS = Object.freeze({
+  archiveByteLength: 32 * 1024 * 1024,
+  entryByteLength: 16 * 1024 * 1024,
+  entryCount: 128,
+  treeByteLength: 32 * 1024 * 1024,
+})
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -93,14 +99,32 @@ function validatePackagedArtifact(artifact, target, label) {
     throw new Error(`${label} archive has an invalid filename`)
   }
   assertFileIdentity(artifact.archive, `${label} archive`)
+  if (artifact.archive.byteLength > PACKAGED_ARCHIVE_LIMITS.archiveByteLength) {
+    throw new Error(`${label} archive exceeds the compressed size limit`)
+  }
 
   assertPlainObject(artifact.files, `${label} files`)
   if (Object.hasOwn(artifact.files, 'build-manifest.json')) {
     throw new Error(`${label} files must not self-attest build-manifest.json`)
   }
-  for (const [name, identity] of Object.entries(artifact.files)) {
+  const fileEntries = Object.entries(artifact.files)
+  if (fileEntries.length + 1 > PACKAGED_ARCHIVE_LIMITS.entryCount) {
+    throw new Error(`${label} files exceed the entry-count limit`)
+  }
+  let declaredTreeByteLength = 0
+  for (const [name, identity] of fileEntries) {
     assertSafeArchiveName(name, `${label} file`)
     assertFileIdentity(identity, `${label} file ${name}`)
+    if (identity.byteLength > PACKAGED_ARCHIVE_LIMITS.entryByteLength) {
+      throw new Error(`${label} file ${name} exceeds the uncompressed entry size limit`)
+    }
+    declaredTreeByteLength += identity.byteLength
+    if (
+      !Number.isSafeInteger(declaredTreeByteLength) ||
+      declaredTreeByteLength > PACKAGED_ARCHIVE_LIMITS.treeByteLength
+    ) {
+      throw new Error(`${label} files exceed the uncompressed tree size limit`)
+    }
   }
   const modelPath = `model/${artifact.model.filename}`
   if (
@@ -115,6 +139,44 @@ function validatePackagedArtifact(artifact, target, label) {
     throw new Error(`${label} must attest exactly one ORT model`)
   }
   return oracle
+}
+
+function unzipPackagedArchive(packagedArtifact, archiveBytes) {
+  const label = `${packagedArtifact.target} packaged archive`
+  const expectedNames = new Set([...Object.keys(packagedArtifact.artifact.files), 'build-manifest.json'])
+  const seenNames = new Set()
+  let treeByteLength = 0
+  return unzipSync(new Uint8Array(archiveBytes), {
+    filter(file) {
+      assertSafeArchiveName(file.name, `${label} entry`)
+      if (seenNames.has(file.name)) {
+        throw new Error(`${label} contains a duplicate entry: ${file.name}`)
+      }
+      seenNames.add(file.name)
+      if (seenNames.size > PACKAGED_ARCHIVE_LIMITS.entryCount) {
+        throw new Error(`${label} exceeds the entry-count limit`)
+      }
+      if (!expectedNames.has(file.name)) {
+        throw new Error(`${label} contains an unexpected entry: ${file.name}`)
+      }
+      if (
+        !Number.isSafeInteger(file.originalSize) ||
+        file.originalSize < 0 ||
+        file.originalSize > PACKAGED_ARCHIVE_LIMITS.entryByteLength
+      ) {
+        throw new Error(`${label} entry ${file.name} exceeds the uncompressed entry size limit`)
+      }
+      const declaredIdentity = packagedArtifact.artifact.files[file.name]
+      if (declaredIdentity && file.originalSize !== declaredIdentity.byteLength) {
+        throw new Error(`${label} entry ${file.name} size does not match artifact metadata`)
+      }
+      treeByteLength += file.originalSize
+      if (!Number.isSafeInteger(treeByteLength) || treeByteLength > PACKAGED_ARCHIVE_LIMITS.treeByteLength) {
+        throw new Error(`${label} exceeds the uncompressed tree size limit`)
+      }
+      return true
+    },
+  })
 }
 
 function parseJsonBytes(bytes, label) {
@@ -212,6 +274,17 @@ function verifyArchiveEntries(packagedArtifact, entries, actualArchive) {
 }
 
 async function readAndVerifyPackagedArchive(packagedArtifact) {
+  const archiveStats = await lstat(packagedArtifact.archivePath)
+  if (
+    archiveStats.isSymbolicLink() ||
+    !archiveStats.isFile() ||
+    archiveStats.size !== packagedArtifact.artifact.archive.byteLength
+  ) {
+    throw new Error(`${packagedArtifact.target} archive bytes do not match artifact metadata`)
+  }
+  if (archiveStats.size > PACKAGED_ARCHIVE_LIMITS.archiveByteLength) {
+    throw new Error(`${packagedArtifact.target} archive exceeds the compressed size limit`)
+  }
   const archiveBytes = await readFile(packagedArtifact.archivePath)
   const actualArchive = {
     archiveName: path.basename(packagedArtifact.archivePath),
@@ -228,7 +301,7 @@ async function readAndVerifyPackagedArchive(packagedArtifact) {
 
   let entries
   try {
-    entries = unzipSync(new Uint8Array(archiveBytes))
+    entries = unzipPackagedArchive(packagedArtifact, archiveBytes)
   } catch (error) {
     throw new Error(`${packagedArtifact.target} archive is not a valid ZIP`, { cause: error })
   }

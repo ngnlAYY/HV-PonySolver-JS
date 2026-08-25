@@ -22,8 +22,12 @@ function deferred<T>(): Readonly<{
   }
 }
 
-function settingsStorage(compact = false): SettingsStorage {
-  const getValue = (key: string): string | null => (compact && key === 'hvPonySolverPanelCompact' ? '1' : null)
+function settingsStorage(compact = false, requireCsp = true): SettingsStorage {
+  const getValue = (key: string): string | null => {
+    if (compact && key === 'hvPonySolverPanelCompact') return '1'
+    if (!requireCsp && key === 'hvPonySolverPanelRequireCsp') return '0'
+    return null
+  }
   return {
     getSync: getValue,
     get: async (key) => getValue(key),
@@ -131,10 +135,41 @@ describe('StatusPanel history persistence', () => {
     resolveGet('hvPonySolverPanelCompact', '1')
     resolveGet('hvPonySolverHistoryLimit', '42')
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(document.querySelector<HTMLElement>('.ponyLog')?.style.top).toBe('150px')
+    expect(document.querySelector<HTMLElement>('.ponyLog')?.style.top).toBe('155px')
 
     resolveGet('hvPonySolverPanelPosition', '300,200')
     await vi.waitFor(() => expect(document.querySelector<HTMLElement>('.ponyLog')?.style.top).toBe('300px'))
     expect(document.querySelector<HTMLElement>('.ponyLog')?.style.left).toBe('200px')
+  })
+
+  it('shows only while a div#csp exists when the default visibility limit is enabled', async () => {
+    const panel = new StatusPanel(historyStore(Promise.resolve([])), settingsStorage())
+    panel.create()
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+
+    expect(element.hidden).toBe(true)
+    const wrongElement = document.createElement('span')
+    wrongElement.id = 'csp'
+    document.body.appendChild(wrongElement)
+    await Promise.resolve()
+    expect(element.hidden).toBe(true)
+    wrongElement.remove()
+
+    const captchaWindow = document.createElement('div')
+    captchaWindow.id = 'csp'
+    document.body.appendChild(captchaWindow)
+    await vi.waitFor(() => expect(element.hidden).toBe(false))
+
+    captchaWindow.id = 'captcha-closed'
+    await vi.waitFor(() => expect(element.hidden).toBe(true))
+    panel.destroy()
+  })
+
+  it('keeps the panel visible without div#csp when the visibility limit is disabled', () => {
+    const panel = new StatusPanel(historyStore(Promise.resolve([])), settingsStorage(false, false))
+    panel.create()
+
+    expect(document.querySelector<HTMLDivElement>('.ponyLog')?.hidden).toBe(false)
+    panel.destroy()
   })
 })

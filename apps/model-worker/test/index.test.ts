@@ -372,8 +372,9 @@ describe('model worker', () => {
 
     expect(response.status).toBe(204)
     expect(response.headers.get('access-control-allow-origin')).toBe(HENTAIVERSE_ORIGIN)
-    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, POST, OPTIONS')
-    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization, X-HV-Model-Download-Receipt')
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization')
+    expect(response.headers.get('access-control-max-age')).toBe('86400')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.text()).toBe('')
     expectVaryOrigin(response.headers)
@@ -392,8 +393,28 @@ describe('model worker', () => {
 
     expect(response.status).toBe(204)
     expect(response.headers.get('access-control-allow-origin')).toBeNull()
-    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, POST, OPTIONS')
-    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization, X-HV-Model-Download-Receipt')
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization')
+    expect(response.headers.get('access-control-max-age')).toBe('86400')
+    expectVaryOrigin(response.headers)
+  })
+
+  it('returns quota-specific preflight methods and headers', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      quotaRequest(fixture, 'OPTIONS', undefined, {
+        origin: HENTAIVERSE_ORIGIN,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': `authorization, ${MODEL_DOWNLOAD_RECEIPT_HEADER}`,
+      }),
+      createEnv(fixture),
+    )
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get('access-control-allow-origin')).toBe(HENTAIVERSE_ORIGIN)
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, POST, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBe(`Authorization, ${MODEL_DOWNLOAD_RECEIPT_HEADER}`)
+    expect(response.headers.get('access-control-max-age')).toBe('86400')
     expectVaryOrigin(response.headers)
   })
 
@@ -406,8 +427,9 @@ describe('model worker', () => {
 
     expect(response.status).toBe(204)
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
-    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, POST, OPTIONS')
-    expect(response.headers.get('access-control-allow-headers')).toBe('Authorization, X-HV-Model-Download-Receipt')
+    expect(response.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
+    expect(response.headers.get('access-control-allow-headers')).toBeNull()
+    expect(response.headers.get('access-control-max-age')).toBe('86400')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.text()).toBe('')
   })

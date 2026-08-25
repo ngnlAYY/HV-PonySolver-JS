@@ -1,8 +1,7 @@
 import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
 
 const ALLOWED_ORIGINS = new Set(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])
-const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'
-const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt'
+const CORS_PREFLIGHT_MAX_AGE_SECONDS = 86_400
 const CACHE_CONTROL = 'no-store'
 const INTERNAL_ERROR_MESSAGE = 'Internal Server Error'
 const QUOTA_EXCEEDED_MESSAGE = 'Monthly model download quota exceeded'
@@ -78,13 +77,19 @@ export function modelQuotaStatusResponse(request: Request, status: unknown): Res
   return Response.json(status, { headers })
 }
 
-export function preflightResponse(request: Request, isPublic: boolean): Response {
+export function preflightResponse(
+  request: Request,
+  policy: Readonly<{ allowHeaders?: string; allowMethods: string; isPublic: boolean }>,
+): Response {
   const headers = new Headers({
-    'access-control-allow-methods': CORS_ALLOW_METHODS,
-    'access-control-allow-headers': CORS_ALLOW_HEADERS,
+    'access-control-allow-methods': policy.allowMethods,
+    'access-control-max-age': String(CORS_PREFLIGHT_MAX_AGE_SECONDS),
     'cache-control': CACHE_CONTROL,
   })
-  if (isPublic) {
+  if (policy.allowHeaders) {
+    headers.set('access-control-allow-headers', policy.allowHeaders)
+  }
+  if (policy.isPublic) {
     addPublicCorsHeaders(headers)
   } else {
     addCorsHeaders(headers, request)
@@ -99,10 +104,11 @@ function setObjectEtag(headers: Headers, object: R2Object): void {
 }
 
 function createModelHeaders(request: Request, object: R2Object, filename: string): Headers {
+  const quotedFilename = filename.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
   const headers = addCorsHeaders(
     new Headers({
       'content-type': 'application/octet-stream',
-      'content-disposition': `inline; filename="${filename}"`,
+      'content-disposition': `inline; filename="${quotedFilename}"`,
       'cache-control': CACHE_CONTROL,
       'x-content-type-options': 'nosniff',
     }),

@@ -66,6 +66,28 @@ describe('InferenceHost', () => {
     expect(deps.downloadModel).toHaveBeenCalledWith(expect.any(AbortSignal))
   })
 
+  it('lets a newer clear intent cancel an in-flight manual download before clearing credentials', async () => {
+    const deps = dependencies()
+    let downloadSignal: AbortSignal | undefined
+    vi.mocked(deps.downloadModel!).mockImplementationOnce(
+      (signal) =>
+        new Promise<string>((_resolve, reject) => {
+          downloadSignal = signal
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        }),
+    )
+    const host = new InferenceHost(deps)
+    const download = host.handle({ protocol: PROTOCOL_VERSION, type: 'download-model', requestId: 'download-stale' })
+    await vi.waitFor(() => expect(downloadSignal).toBeInstanceOf(AbortSignal))
+
+    const clear = host.handle({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-newest' })
+
+    await expect(download).resolves.toMatchObject({ ok: false, requestId: 'download-stale' })
+    await expect(clear).resolves.toMatchObject({ ok: true, requestId: 'clear-newest' })
+    expect(downloadSignal?.aborted).toBe(true)
+    expect(deps.clearKey).toHaveBeenCalledTimes(1)
+  })
+
   it('queries model quota through the serialized Key intent path', async () => {
     const deps = dependencies()
     const host = new InferenceHost(deps)

@@ -15,7 +15,7 @@ describe('userscript build output', () => {
     expect(output).toContain('// ==UserScript==')
     expect(output).toContain('// @name        HV-PonySolver-Local')
     // @version is injected from apps/userscript/package.json at build time.
-    expect(output).toMatch(new RegExp(`^// @version     ${version.replace(/\./g, '\\.')}$`, 'm'))
+    expect(output.split(/\r?\n/u)).toContain(`// @version     ${version}`)
     expect(output).not.toContain('__HV_PONY_SOLVER_VERSION__')
     expect(output).toContain('DOMContentLoaded')
     expect(output).toContain('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js')

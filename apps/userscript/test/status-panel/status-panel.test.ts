@@ -138,7 +138,7 @@ describe('StatusPanel', () => {
     panel.create()
     const element = document.querySelector('.ponyLog') as HTMLDivElement
 
-    expect(element.style.top).toBe('150px')
+    expect(element.style.top).toBe('155px')
     expect(element.style.left).toBe('1240px')
     await vi.waitFor(() => expect(element.style.top).toBe('12px'))
     expect(element.style.left).toBe('34px')

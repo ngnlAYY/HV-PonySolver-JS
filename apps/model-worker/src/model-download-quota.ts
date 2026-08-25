@@ -1,6 +1,10 @@
 import { DurableObject } from 'cloudflare:workers'
 
-import { MODEL_DOWNLOAD_RECEIPT_HEADER, MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
+import {
+  MODEL_DOWNLOAD_RECEIPT_HEADER,
+  MODEL_MONTHLY_DOWNLOAD_LIMIT,
+  normalizeModelDownloadReceiptId,
+} from '@hv-pony-solver/shared'
 
 import type { ModelDownloadQuotaNamespace, ModelDownloadQuotaStub } from './worker-types'
 
@@ -17,7 +21,7 @@ const INTERNAL_STATUS_URL = `https://model-download-quota.internal${STATUS_PATH}
 const QUOTA_REQUEST_TIMEOUT_MS = 5_000
 export const MODEL_DOWNLOAD_RESERVATION_TTL_MS = 10 * 60 * 1_000
 
-const RECEIPT_ID_PATTERN = /^[0-9a-f]{32}$/
+const UTC_MONTH_KEY_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/
 
 type StoredQuotaState = Readonly<{
   month: string
@@ -70,28 +74,38 @@ function isStoredQuotaState(value: unknown): value is StoredQuotaState {
   const used = candidate.used
   const pending = candidate.pending
   const confirmed = candidate.confirmed
+  if (
+    typeof candidate.month !== 'string' ||
+    !UTC_MONTH_KEY_PATTERN.test(candidate.month) ||
+    typeof used !== 'number' ||
+    !Number.isSafeInteger(used) ||
+    used < 0 ||
+    used > MODEL_MONTHLY_DOWNLOAD_LIMIT ||
+    typeof pending !== 'object' ||
+    pending === null ||
+    Array.isArray(pending) ||
+    !Array.isArray(confirmed)
+  ) {
+    return false
+  }
+
+  const pendingEntries = Object.entries(pending)
+  const confirmedIds = new Set(confirmed)
   return (
-    typeof candidate.month === 'string' &&
-    typeof used === 'number' &&
-    Number.isSafeInteger(used) &&
-    used >= 0 &&
-    used <= MODEL_MONTHLY_DOWNLOAD_LIMIT &&
-    typeof pending === 'object' &&
-    pending !== null &&
-    !Array.isArray(pending) &&
-    Object.entries(pending).every(
+    pendingEntries.length + used <= MODEL_MONTHLY_DOWNLOAD_LIMIT &&
+    pendingEntries.every(
       ([receiptId, expiresAt]) =>
-        RECEIPT_ID_PATTERN.test(receiptId) &&
+        normalizeModelDownloadReceiptId(receiptId) === receiptId &&
         typeof expiresAt === 'number' &&
         Number.isSafeInteger(expiresAt) &&
-        expiresAt > 0,
+        expiresAt > 0 &&
+        !confirmedIds.has(receiptId),
     ) &&
-    Object.keys(pending).length <= MODEL_MONTHLY_DOWNLOAD_LIMIT &&
-    Array.isArray(confirmed) &&
-    confirmed.length <= MODEL_MONTHLY_DOWNLOAD_LIMIT &&
     confirmed.length === used &&
-    confirmed.every((receiptId) => typeof receiptId === 'string' && RECEIPT_ID_PATTERN.test(receiptId)) &&
-    new Set(confirmed).size === confirmed.length
+    confirmed.every(
+      (receiptId) => typeof receiptId === 'string' && normalizeModelDownloadReceiptId(receiptId) === receiptId,
+    ) &&
+    confirmedIds.size === confirmed.length
   )
 }
 
@@ -110,7 +124,7 @@ function isQuotaReservation(value: unknown): value is ModelDownloadQuotaReservat
     return false
   }
   if (candidate.allowed === true) {
-    return typeof candidate.receiptId === 'string' && RECEIPT_ID_PATTERN.test(candidate.receiptId)
+    return normalizeModelDownloadReceiptId(candidate.receiptId) === candidate.receiptId
   }
   return (
     candidate.allowed === false && (candidate.reason === 'quota-exhausted' || candidate.reason === 'reservations-full')
@@ -171,7 +185,10 @@ function createEmptyState(month: string): StoredQuotaState {
 }
 
 function currentState(stored: unknown, month: string, nowMs: number): StoredQuotaState {
-  const state = isStoredQuotaState(stored) && stored.month === month ? stored : createEmptyState(month)
+  if (stored !== undefined && !isStoredQuotaState(stored)) {
+    throw new Error('Model download quota state is invalid')
+  }
+  const state = stored === undefined || stored.month !== month ? createEmptyState(month) : stored
   return {
     ...state,
     pending: Object.fromEntries(Object.entries(state.pending).filter(([, expiresAt]) => expiresAt > nowMs)),
@@ -208,8 +225,8 @@ export class ModelDownloadQuota extends DurableObject<Record<string, never>> {
       return new Response('Not Found', { status: 404 })
     }
 
-    const receiptId = request.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER)?.trim().toLowerCase() ?? ''
-    if (pathname === CONFIRM_PATH && !RECEIPT_ID_PATTERN.test(receiptId)) {
+    const receiptId = normalizeModelDownloadReceiptId(request.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER)) ?? ''
+    if (pathname === CONFIRM_PATH && receiptId === '') {
       return new Response('Bad Request', { status: 400 })
     }
 
@@ -217,26 +234,25 @@ export class ModelDownloadQuota extends DurableObject<Record<string, never>> {
     const nowMs = now.getTime()
     const month = utcMonthKey(now)
     const retryAfterSeconds = secondsUntilNextUtcMonth(now)
+    if (pathname === STATUS_PATH) {
+      const stored = await this.ctx.storage.get<StoredQuotaState>(QUOTA_STATE_KEY)
+      const state = currentState(stored, month, nowMs)
+      return jsonResponse({
+        limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+        used: state.used,
+        remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - state.used,
+        retryAfterSeconds,
+      })
+    }
+
     const result = await this.ctx.storage.transaction(async (transaction) => {
       const stored = await transaction.get<StoredQuotaState>(QUOTA_STATE_KEY)
       const state = currentState(stored, month, nowMs)
-      if (pathname === STATUS_PATH) {
-        await transaction.put(QUOTA_STATE_KEY, state)
-        return {
-          limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
-          used: state.used,
-          remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - state.used,
-          retryAfterSeconds,
-        } satisfies ModelDownloadQuotaStatus
-      }
-
       if (pathname === CONFIRM_PATH) {
         if (state.confirmed.includes(receiptId)) {
-          await transaction.put(QUOTA_STATE_KEY, state)
           return confirmationResult(state, retryAfterSeconds, true, true)
         }
-        if (!(receiptId in state.pending) || state.used >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
-          await transaction.put(QUOTA_STATE_KEY, state)
+        if (!Object.hasOwn(state.pending, receiptId) || state.used >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
           return confirmationResult(state, retryAfterSeconds, false, false)
         }
         const pending = { ...state.pending }
@@ -252,11 +268,9 @@ export class ModelDownloadQuota extends DurableObject<Record<string, never>> {
       }
 
       if (state.used >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
-        await transaction.put(QUOTA_STATE_KEY, state)
         return { allowed: false, reason: 'quota-exhausted', retryAfterSeconds } as const
       }
       if (state.used + Object.keys(state.pending).length >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
-        await transaction.put(QUOTA_STATE_KEY, state)
         return {
           allowed: false,
           reason: 'reservations-full',
@@ -265,7 +279,7 @@ export class ModelDownloadQuota extends DurableObject<Record<string, never>> {
       }
       let nextReceiptId = createReceiptId()
       /* istanbul ignore next -- a UUID collision is guarded but cannot be induced through the public crypto API */
-      while (nextReceiptId in state.pending || state.confirmed.includes(nextReceiptId)) {
+      while (Object.hasOwn(state.pending, nextReceiptId) || state.confirmed.includes(nextReceiptId)) {
         nextReceiptId = createReceiptId()
       }
       const reservedState: StoredQuotaState = {
@@ -288,45 +302,21 @@ function quotaStub(namespace: ModelDownloadQuotaNamespace, canonicalToken: strin
   return sha256Hex(canonicalToken).then((identity) => namespace.get(namespace.idFromName(identity)))
 }
 
-export async function reserveModelDownloadQuota(
+async function requestQuotaService<T>(
   namespace: ModelDownloadQuotaNamespace,
   canonicalToken: string,
-): Promise<ModelDownloadQuotaReservation> {
-  const stub = await quotaStub(namespace, canonicalToken)
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), QUOTA_REQUEST_TIMEOUT_MS)
-  try {
-    const response = await stub.fetch(new Request(INTERNAL_RESERVE_URL, { method: 'POST', signal: controller.signal }))
-    if (!response.ok) {
-      throw new Error('Model download quota service failed')
-    }
-    const result: unknown = await response.json()
-    if (!isQuotaReservation(result)) {
-      throw new Error('Model download quota service returned an invalid response')
-    }
-    return result
-  } finally {
-    clearTimeout(timeoutId)
-  }
-}
-
-export async function confirmModelDownloadQuota(
-  namespace: ModelDownloadQuotaNamespace,
-  canonicalToken: string,
-  receiptId: string,
-): Promise<ModelDownloadQuotaConfirmation> {
-  const normalizedReceiptId = receiptId.trim().toLowerCase()
-  if (!RECEIPT_ID_PATTERN.test(normalizedReceiptId)) {
-    throw new Error('Model download receipt is invalid')
-  }
+  url: string,
+  validate: (value: unknown) => value is T,
+  headers?: HeadersInit,
+): Promise<T> {
   const stub = await quotaStub(namespace, canonicalToken)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), QUOTA_REQUEST_TIMEOUT_MS)
   try {
     const response = await stub.fetch(
-      new Request(INTERNAL_CONFIRM_URL, {
+      new Request(url, {
         method: 'POST',
-        headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: normalizedReceiptId },
+        ...(headers === undefined ? {} : { headers }),
         signal: controller.signal,
       }),
     )
@@ -334,7 +324,7 @@ export async function confirmModelDownloadQuota(
       throw new Error('Model download quota service failed')
     }
     const result: unknown = await response.json()
-    if (!isQuotaConfirmation(result)) {
+    if (!validate(result)) {
       throw new Error('Model download quota service returned an invalid response')
     }
     return result
@@ -343,24 +333,30 @@ export async function confirmModelDownloadQuota(
   }
 }
 
+export async function reserveModelDownloadQuota(
+  namespace: ModelDownloadQuotaNamespace,
+  canonicalToken: string,
+): Promise<ModelDownloadQuotaReservation> {
+  return requestQuotaService(namespace, canonicalToken, INTERNAL_RESERVE_URL, isQuotaReservation)
+}
+
+export async function confirmModelDownloadQuota(
+  namespace: ModelDownloadQuotaNamespace,
+  canonicalToken: string,
+  receiptId: string,
+): Promise<ModelDownloadQuotaConfirmation> {
+  const normalizedReceiptId = normalizeModelDownloadReceiptId(receiptId)
+  if (normalizedReceiptId === null) {
+    throw new Error('Model download receipt is invalid')
+  }
+  return requestQuotaService(namespace, canonicalToken, INTERNAL_CONFIRM_URL, isQuotaConfirmation, {
+    [MODEL_DOWNLOAD_RECEIPT_HEADER]: normalizedReceiptId,
+  })
+}
+
 export async function readModelDownloadQuota(
   namespace: ModelDownloadQuotaNamespace,
   canonicalToken: string,
 ): Promise<ModelDownloadQuotaStatus> {
-  const stub = await quotaStub(namespace, canonicalToken)
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), QUOTA_REQUEST_TIMEOUT_MS)
-  try {
-    const response = await stub.fetch(new Request(INTERNAL_STATUS_URL, { method: 'POST', signal: controller.signal }))
-    if (!response.ok) {
-      throw new Error('Model download quota service failed')
-    }
-    const result: unknown = await response.json()
-    if (!isQuotaStatus(result)) {
-      throw new Error('Model download quota service returned an invalid response')
-    }
-    return result
-  } finally {
-    clearTimeout(timeoutId)
-  }
+  return requestQuotaService(namespace, canonicalToken, INTERNAL_STATUS_URL, isQuotaStatus)
 }

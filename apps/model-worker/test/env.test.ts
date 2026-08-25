@@ -130,7 +130,7 @@ describe('readWorkerConfig', () => {
 
     const error = readWorkerConfigError(env)
 
-    expect(error.message).toBe('PUBLIC_MODEL_PATH must not contain quotes')
+    expect(error.message).toBe('PUBLIC_MODEL_PATH must not contain quotes or backslashes')
   })
 
   it('rejects single quotes in configured public paths', () => {
@@ -138,7 +138,7 @@ describe('readWorkerConfig', () => {
     const env = createEnv(fixture)
     env.PUBLIC_ORT_MODEL_PATH = `${fixture.publicOrtModelPath}'`
 
-    expect(() => readWorkerConfig(env)).toThrow('PUBLIC_ORT_MODEL_PATH must not contain quotes')
+    expect(() => readWorkerConfig(env)).toThrow('PUBLIC_ORT_MODEL_PATH must not contain quotes or backslashes')
   })
 
   it('rejects backticks in configured public paths', () => {
@@ -146,7 +146,15 @@ describe('readWorkerConfig', () => {
     const env = createEnv(fixture)
     env.PUBLIC_RUNTIME_WASM_PATH = `${fixture.publicRuntimeWasmPath}\``
 
-    expect(() => readWorkerConfig(env)).toThrow('PUBLIC_RUNTIME_WASM_PATH must not contain quotes')
+    expect(() => readWorkerConfig(env)).toThrow('PUBLIC_RUNTIME_WASM_PATH must not contain quotes or backslashes')
+  })
+
+  it('rejects backslashes in configured public paths', () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    env.PUBLIC_QUOTA_PATH = `${fixture.publicQuotaPath}\\unsafe`
+
+    expect(() => readWorkerConfig(env)).toThrow('PUBLIC_QUOTA_PATH must not contain quotes or backslashes')
   })
 
   it('reuses the validated config for the same env object without re-validating', () => {

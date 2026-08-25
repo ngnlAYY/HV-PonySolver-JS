@@ -9,6 +9,8 @@ import {
   getPanelHistoryLimitSync,
   getPanelPosition,
   getPanelPositionSync,
+  isPanelCspVisibilityRequired,
+  isPanelCspVisibilityRequiredSync,
   isPanelCompactMode,
   isPanelCompactModeSync,
 } from './panel-settings'
@@ -20,6 +22,8 @@ function getWorld(): World {
 
 export class StatusPanel implements StatusPanelContract {
   private el: HTMLDivElement | null = null
+  private cspVisibilityObserver: MutationObserver | null = null
+  private cspVisibilityRequired = true
   private readonly world: World = getWorld()
   private compactMode = false
   private records: HistoryRecord[] = []
@@ -55,6 +59,7 @@ export class StatusPanel implements StatusPanelContract {
     this.records = this.history.get(this.world)
     this.recordsVersion += 1
     this.compactMode = isPanelCompactModeSync(this.settingsStorage)
+    this.cspVisibilityRequired = isPanelCspVisibilityRequiredSync(this.settingsStorage)
     this.el = document.createElement('div')
     this.el.className = 'ponyLog'
     const syncPosition = getPanelPositionSync(this.settingsStorage)
@@ -77,6 +82,13 @@ export class StatusPanel implements StatusPanelContract {
       this.compactMode = compactMode
       this.scheduleRender()
     })
+    isPanelCspVisibilityRequired(this.settingsStorage).then((required) => {
+      if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || required === this.cspVisibilityRequired) {
+        return
+      }
+      this.cspVisibilityRequired = required
+      this.configureCspVisibility()
+    })
     getPanelHistoryLimit(this.settingsStorage).then((historyLimit) => {
       if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || historyLimit === this.historyLimit) {
         return
@@ -85,6 +97,7 @@ export class StatusPanel implements StatusPanelContract {
       this.scheduleRender()
     })
     document.body.appendChild(this.el)
+    this.configureCspVisibility()
     this.render()
   }
 
@@ -134,6 +147,8 @@ export class StatusPanel implements StatusPanelContract {
     this.lifecycleGeneration += 1
     this.renderQueued = false
     this.lastRenderKey = ''
+    this.cspVisibilityObserver?.disconnect()
+    this.cspVisibilityObserver = null
     this.el?.remove()
     this.el = null
   }
@@ -177,6 +192,57 @@ export class StatusPanel implements StatusPanelContract {
     }
     this.renderQueued = true
     queueMicrotask(() => this.flushRender())
+  }
+
+  private configureCspVisibility(): void {
+    this.cspVisibilityObserver?.disconnect()
+    this.cspVisibilityObserver = null
+    if (!this.el) {
+      return
+    }
+    if (!this.cspVisibilityRequired) {
+      this.el.hidden = false
+      return
+    }
+
+    this.syncCspVisibility()
+    const root = document.documentElement
+    if (!root || typeof MutationObserver === 'undefined') {
+      return
+    }
+    this.cspVisibilityObserver = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => this.mutationMayChangeCspVisibility(mutation))) {
+        this.syncCspVisibility()
+      }
+    })
+    this.cspVisibilityObserver.observe(root, {
+      attributeFilter: ['id'],
+      attributeOldValue: true,
+      attributes: true,
+      childList: true,
+      subtree: true,
+    })
+  }
+
+  private mutationMayChangeCspVisibility(mutation: MutationRecord): boolean {
+    if (mutation.type === 'attributes') {
+      const target = mutation.target
+      return (
+        target instanceof Element && target.tagName === 'DIV' && (target.id === 'csp' || mutation.oldValue === 'csp')
+      )
+    }
+    return [...mutation.addedNodes, ...mutation.removedNodes].some((node) => {
+      if (!(node instanceof Element)) {
+        return false
+      }
+      return (node.tagName === 'DIV' && node.id === 'csp') || node.querySelector('div#csp') !== null
+    })
+  }
+
+  private syncCspVisibility(): void {
+    if (this.el) {
+      this.el.hidden = document.querySelector('div#csp') === null
+    }
   }
 
   private flushRender(): void {

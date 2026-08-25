@@ -17,23 +17,27 @@ function checkModelWorkerDocs(readme, facts) {
     errors.push('README.md Model Worker authorized HEAD row must mention Authorization: Bearer')
   }
 
-  const optionsLine = findModelWorkerHttpRow(lines, 'OPTIONS')
-  if (
-    facts.corsAllowMethods &&
-    !lineMentionsHeaderValue(optionsLine, 'Access-Control-Allow-Methods', facts.corsAllowMethods)
-  ) {
-    errors.push(
-      `README.md Model Worker OPTIONS docs must mention Access-Control-Allow-Methods: ${facts.corsAllowMethods}`,
-    )
-  }
-  if (
-    facts.corsAllowHeaders &&
-    !lineMentionsHeaderValue(optionsLine, 'Access-Control-Allow-Headers', facts.corsAllowHeaders)
-  ) {
-    errors.push(
-      `README.md Model Worker OPTIONS docs must mention Access-Control-Allow-Headers: ${facts.corsAllowHeaders}`,
-    )
-  }
+  checkPreflightDocs(
+    errors,
+    findModelWorkerHttpRow(lines, 'OPTIONS', '/yolo26n-640.onnx'),
+    'model',
+    facts.allowedMethods,
+    facts.modelAllowedHeaders,
+  )
+  checkPreflightDocs(
+    errors,
+    findModelWorkerHttpRow(lines, 'OPTIONS', '/quota'),
+    'quota',
+    facts.quotaAllowedMethods,
+    facts.quotaAllowedHeaders,
+  )
+  checkPreflightDocs(
+    errors,
+    findModelWorkerHttpRow(lines, 'OPTIONS', '/runtime/'),
+    'runtime',
+    facts.allowedMethods,
+    null,
+  )
 
   const methodNotAllowedLine = findMethodNotAllowedDocsLine(lines)
   if (facts.allowedMethods && !lineMentionsHeaderValue(methodNotAllowedLine, 'Allow', facts.allowedMethods)) {
@@ -73,9 +77,26 @@ function checkModelWorkerDocs(readme, facts) {
   return errors
 }
 
-function findModelWorkerHttpRow(lines, method) {
+function checkPreflightDocs(errors, line, routeName, allowMethods, allowHeaders) {
+  if (allowMethods && !lineMentionsHeaderValue(line, 'Access-Control-Allow-Methods', allowMethods)) {
+    errors.push(
+      `README.md Model Worker ${routeName} OPTIONS docs must mention Access-Control-Allow-Methods: ${allowMethods}`,
+    )
+  }
+  if (allowHeaders && !lineMentionsHeaderValue(line, 'Access-Control-Allow-Headers', allowHeaders)) {
+    errors.push(
+      `README.md Model Worker ${routeName} OPTIONS docs must mention Access-Control-Allow-Headers: ${allowHeaders}`,
+    )
+  }
+  if (!allowHeaders && line.includes('Access-Control-Allow-Headers')) {
+    errors.push(`README.md Model Worker ${routeName} OPTIONS docs must not document request headers`)
+  }
+}
+
+function findModelWorkerHttpRow(lines, method, pathPrefix = '/') {
   const escapedMethod = escapeRegExp(method)
-  const rowPattern = new RegExp(`^\\|\\s*\`${escapedMethod}\\s+/`)
+  const escapedPathPrefix = escapeRegExp(pathPrefix)
+  const rowPattern = new RegExp(`^\\|\\s*\`${escapedMethod}\\s+${escapedPathPrefix}`)
   return lines.find((line) => rowPattern.test(line)) ?? ''
 }
 

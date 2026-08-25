@@ -89,7 +89,6 @@ Cloudflare Model Worker
 | `apps/model-worker`     | Cloudflare Model Worker、Wrangler 配置和部署契约检查            |
 | `packages/browser-core` | 用户脚本与扩展共用的标准浏览器 DOM、答题、推理、模型和渲染逻辑  |
 | `packages/shared`       | 用户脚本和 Model Worker 共用的模型、令牌及 ORT 资产契约         |
-| `config/onnxruntime`    | 精简 ONNX Runtime 所需的算子与类型配置                          |
 | `docs`                  | 运行时、运维和架构补充文档                                      |
 | `other`                 | 可供人工上传或归档的精简运行时生成物                            |
 | `scripts`               | 仓库级构建、校验、文档漂移和发布辅助脚本                        |
@@ -197,12 +196,14 @@ https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262a
 | emsdk             | `4.0.23`                                                           |
 | 算子配置 SHA-256  | `2abe2e2987496ab518de97a7f4b157cec1bd1817c621d3523073034fb47591fe` |
 
-权威配置位于：
+受版本控制的运行时契约位于：
 
 ```text
 apps/userscript/src/inference/onnx-runtime-assets.ts
-config/onnxruntime/required_operators_and_types.config
 ```
+
+算子与类型配置由固定模型在构建时生成到
+`config/onnxruntime/required_operators_and_types.config`；该本地输出已被 Git 忽略，以免把可再生文件当成源码。
 
 更详细的构建约束见 [`docs/onnx-runtime.md`](docs/onnx-runtime.md)。
 
@@ -267,7 +268,7 @@ Safari、其他移动浏览器和 Manifest V2 不在当前范围内。Firefox De
 - Edge：打开 `edge://extensions`，启用开发人员模式，加载同一个 `chromium` 目录。
 - Firefox：打开 `about:debugging#/runtime/this-firefox`，选择“临时载入附加组件”，打开 `apps/extension/dist/firefox/manifest.json`。
 
-点击工具栏按钮会打开扩展设置页。远程版本可配置模型 Key；Key 只保存在扩展源的 IndexedDB 中且不会回显，验证使用不计额度的 HEAD 探测，新增的“下载模型”按钮会使用已保存 Key 下载、校验并缓存模型，已有有效缓存时不会重复消耗额度。内置版本不读取也不删除旧 Key，Key 控件保持置灰并显示“当前版本已内置模型，无需配置模型 Key。”。两种版本都可配置自动/手动模式、失败随机答案、点击/提交时间、面板位置、紧凑模式和历史条数；这些小型设置与分世界历史保存在 `storage.local`。
+点击工具栏按钮会打开扩展设置页。远程版本可配置模型 Key；Key 只保存在扩展源的 IndexedDB 中且不会回显，验证使用不计额度的 HEAD 探测，新增的“下载模型”按钮会使用已保存 Key 下载、校验并缓存模型，已有有效缓存时不会重复消耗额度。内置版本不读取也不删除旧 Key，Key 控件保持置灰并显示“当前版本已内置模型，无需配置模型 Key。”。两种版本都可配置自动/手动模式、失败随机答案、保留手动勾选、点击/提交时间、面板位置、仅在 `div#csp` 存在时显示面板（默认开启）、紧凑模式和历史条数；这些小型设置与分世界历史保存在 `storage.local`。
 
 不要在同一浏览器配置中同时启用用户脚本版和扩展版，否则两者可能同时处理并提交同一个验证码。
 
@@ -518,17 +519,19 @@ GET, HEAD, OPTIONS
 
 ### 响应矩阵
 
-| 请求或情况                                                                           | HTTP 契约                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中  | `200` 真实模型，模型响应使用 `Cache-Control: no-store` 并返回临时回执；`GET /yolo26n-640.ort` 使用相同契约                                                                                                                    |
-| `GET /quota` 携带有效 Bearer token                                                   | `200` JSON 额度状态；只报告已确认的缓存下载，不消耗下载次数                                                                                                                                                              |
-| `POST /quota` 携带有效 Bearer token 和 `X-HV-Model-Download-Receipt`                 | 有效待确认回执返回 `200` 并将该 Key 的已用次数递增一次；重复提交已确认回执仍返回 `200` 且不重复计数，失效或未知回执返回 `409`                                                                                            |
-| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200`，只读取 R2 元数据且不返回响应体；`HEAD /yolo26n-640.ort` 使用相同契约                                                                                                                                              |
-| `OPTIONS /yolo26n-640.onnx`                                                          | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS`，`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt`；`OPTIONS /yolo26n-640.ort` 和 `OPTIONS /quota` 使用相同 CORS 契约 |
-| 非 `GET` / `HEAD` / `OPTIONS` 方法                                                   | 模型路由返回 `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`                                                                                                                                                        |
-| 同一 Key 当月已确认 5 次后再次请求真实模型                                           | `429 Too Many Requests`，包含到下个 UTC 月的 `Retry-After`，并通过 `Access-Control-Expose-Headers` 暴露该响应头                                                                                                          |
-| 同一 Key 已占满 5 个待确认/已确认槽位，但仍有未失效回执                              | `503 Service Unavailable`，`Retry-After` 指向最早待确认回执的失效时间；避免并发请求越过硬上限                                                                                                                            |
-| 选中的 R2 object 缺失                                                                | `500 Internal Server Error`                                                                                                                                                                                              |
+| 请求或情况                                                                           | HTTP 契约                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中  | `200` 真实模型，模型响应使用 `Cache-Control: no-store` 并返回临时回执；`GET /yolo26n-640.ort` 使用相同契约                                                                           |
+| `GET /quota` 携带有效 Bearer token                                                   | `200` JSON 额度状态；只报告已确认的缓存下载，不消耗下载次数                                                                                                                          |
+| `POST /quota` 携带有效 Bearer token 和 `X-HV-Model-Download-Receipt`                 | 有效待确认回执返回 `200` 并将该 Key 的已用次数递增一次；重复提交已确认回执仍返回 `200` 且不重复计数，失效或未知回执返回 `409`                                                        |
+| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200`，只读取 R2 元数据且不返回响应体；`HEAD /yolo26n-640.ort` 使用相同契约                                                                                                          |
+| `OPTIONS /yolo26n-640.onnx`                                                          | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`；`OPTIONS /yolo26n-640.ort` 使用相同策略，预检缓存上限为 86400 秒 |
+| `OPTIONS /quota`                                                                     | `204` preflight，`Access-Control-Allow-Methods: GET, POST, OPTIONS`，`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt`，预检缓存上限为 86400 秒             |
+| `OPTIONS /runtime/ort-wasm-simd-<sha256>.wasm`                                       | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Origin: *`，不声明允许的请求头，预检缓存上限为 86400 秒                                   |
+| 非 `GET` / `HEAD` / `OPTIONS` 方法                                                   | 模型路由返回 `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`                                                                                                                   |
+| 同一 Key 当月已确认 5 次后再次请求真实模型                                           | `429 Too Many Requests`，包含到下个 UTC 月的 `Retry-After`，并通过 `Access-Control-Expose-Headers` 暴露该响应头                                                                      |
+| 同一 Key 已占满 5 个待确认/已确认槽位，但仍有未失效回执                              | `503 Service Unavailable`，`Retry-After` 指向最早待确认回执的失效时间；避免并发请求越过硬上限                                                                                        |
+| 选中的 R2 object 缺失                                                                | `500 Internal Server Error`                                                                                                                                                          |
 
 选中的 R2 object 缺失时不会回退到其他对象。
 

@@ -20,7 +20,7 @@ import {
 // 这里有意只做窄范围源码事实提取，用于 README drift 检查。
 // 它不是通用 TypeScript parser；运行时 HTTP 行为应由 apps/model-worker 的 Worker tests 覆盖。
 // 本文件只保证文档检查读取的是预期源码事实，并避免被注释、字符串、regex 和死代码误导。
-function readModelWorkerHttpFacts(requestRouterSource, modelAccessSource, modelResponseSource) {
+function readModelWorkerHttpFacts(requestRouterSource, modelAccessSource, modelResponseSource, sharedModelSource) {
   const errors = []
   const allowedMethods = readStringConstant(
     requestRouterSource,
@@ -28,18 +28,25 @@ function readModelWorkerHttpFacts(requestRouterSource, modelAccessSource, modelR
     'apps/model-worker/src/request-router.ts',
     errors,
   )
-  const corsAllowMethods = readStringConstant(
-    modelResponseSource,
-    'CORS_ALLOW_METHODS',
-    'apps/model-worker/src/model-response.ts',
+  const quotaAllowedMethods = readStringConstant(
+    requestRouterSource,
+    'QUOTA_ALLOWED_METHODS',
+    'apps/model-worker/src/request-router.ts',
     errors,
   )
-  const corsAllowHeaders = readStringConstant(
-    modelResponseSource,
-    'CORS_ALLOW_HEADERS',
-    'apps/model-worker/src/model-response.ts',
+  const modelAllowedHeaders = readStringConstant(
+    requestRouterSource,
+    'MODEL_ALLOWED_HEADERS',
+    'apps/model-worker/src/request-router.ts',
     errors,
   )
+  const receiptHeader = readStringConstant(
+    sharedModelSource,
+    'MODEL_DOWNLOAD_RECEIPT_HEADER',
+    'packages/shared/src/model.ts',
+    errors,
+  )
+  const quotaAllowedHeaders = modelAllowedHeaders && receiptHeader ? `${modelAllowedHeaders}, ${receiptHeader}` : null
   const cacheControl = readStringConstant(
     modelResponseSource,
     'CACHE_CONTROL',
@@ -68,9 +75,10 @@ function readModelWorkerHttpFacts(requestRouterSource, modelAccessSource, modelR
   return {
     allowedMethods,
     cacheControl,
-    corsAllowHeaders,
-    corsAllowMethods,
     errors,
+    modelAllowedHeaders,
+    quotaAllowedHeaders,
+    quotaAllowedMethods,
     selectedObjectMissingMessage,
     selectedObjectMissingStatus,
   }
@@ -90,17 +98,41 @@ function validateModelWorkerHttpUseSites(requestRouterSource, modelResponseSourc
   if (!hasIdentifierPropertyWithIdentifierValue(handleRequestBody, 'allow', 'ALLOWED_METHODS')) {
     errors.push('apps/model-worker/src/request-router.ts must use ALLOWED_METHODS for HTTP 405 Allow responses')
   }
+  if (!hasIdentifierPropertyWithIdentifierValue(handleRequestBody, 'allow', 'QUOTA_ALLOWED_METHODS')) {
+    errors.push('apps/model-worker/src/request-router.ts must use QUOTA_ALLOWED_METHODS for quota HTTP 405 responses')
+  }
+
+  const normalizedHandleRequestBody = stripIgnoredSyntax(handleRequestBody)
+  if (
+    !/allowMethods\s*:\s*isQuota\s*\?\s*QUOTA_ALLOWED_METHODS\s*:\s*ALLOWED_METHODS/.test(normalizedHandleRequestBody)
+  ) {
+    errors.push('apps/model-worker/src/request-router.ts must select route-specific preflight methods')
+  }
+  if (
+    !/allowHeaders\s*:\s*isQuota\s*\?\s*QUOTA_ALLOWED_HEADERS\s*:\s*MODEL_ALLOWED_HEADERS/.test(
+      normalizedHandleRequestBody,
+    )
+  ) {
+    errors.push('apps/model-worker/src/request-router.ts must select route-specific preflight headers')
+  }
 
   const preflightResponseBody = readFunctionBodySource(modelResponseSource, 'preflightResponse')
   if (
-    !hasStringPropertyWithIdentifierValue(preflightResponseBody, 'access-control-allow-headers', 'CORS_ALLOW_HEADERS')
+    !hasMemberCallWithStringAndMemberArgument(
+      preflightResponseBody,
+      'headers',
+      'set',
+      'access-control-allow-headers',
+      'policy',
+      'allowHeaders',
+    )
   ) {
-    errors.push('apps/model-worker/src/model-response.ts must use CORS_ALLOW_HEADERS for Access-Control-Allow-Headers')
+    errors.push('apps/model-worker/src/model-response.ts must use policy.allowHeaders for Access-Control-Allow-Headers')
   }
   if (
-    !hasStringPropertyWithIdentifierValue(preflightResponseBody, 'access-control-allow-methods', 'CORS_ALLOW_METHODS')
+    !hasStringPropertyWithMemberValue(preflightResponseBody, 'access-control-allow-methods', 'policy', 'allowMethods')
   ) {
-    errors.push('apps/model-worker/src/model-response.ts must use CORS_ALLOW_METHODS for Access-Control-Allow-Methods')
+    errors.push('apps/model-worker/src/model-response.ts must use policy.allowMethods for Access-Control-Allow-Methods')
   }
   if (!hasStringPropertyWithIdentifierValue(preflightResponseBody, 'cache-control', 'CACHE_CONTROL')) {
     errors.push('apps/model-worker/src/model-response.ts must use CACHE_CONTROL for OPTIONS Cache-Control')
@@ -123,6 +155,77 @@ function validateModelWorkerHttpUseSites(requestRouterSource, modelResponseSourc
   if (!hasStringPropertyWithIdentifierValue(createModelHeadersBody, 'cache-control', 'CACHE_CONTROL')) {
     errors.push('apps/model-worker/src/model-response.ts must use CACHE_CONTROL for model responses')
   }
+}
+
+function memberExpressionAt(source, startIndex, objectName, propertyName) {
+  if (!identifierAt(source, startIndex, objectName)) {
+    return false
+  }
+  const dotIndex = skipWhitespaceAndComments(source, startIndex + objectName.length)
+  const propertyStart = skipWhitespaceAndComments(source, dotIndex + 1)
+  return source[dotIndex] === '.' && identifierAt(source, propertyStart, propertyName)
+}
+
+function hasStringPropertyWithMemberValue(source, propertyName, objectName, memberName) {
+  for (let index = 0; index < source.length; index += 1) {
+    const skipped = skipIgnoredCommentOrTemplateOrRegex(source, index)
+    if (skipped !== index) {
+      index = skipped - 1
+      continue
+    }
+    const parsed = parseStringLiteral(source, index)
+    if (!parsed) {
+      continue
+    }
+    if (parsed.value.toLowerCase() === propertyName.toLowerCase()) {
+      const colonIndex = skipWhitespaceAndComments(source, parsed.end)
+      const valueIndex = skipWhitespaceAndComments(source, colonIndex + 1)
+      if (source[colonIndex] === ':' && memberExpressionAt(source, valueIndex, objectName, memberName)) {
+        return true
+      }
+    }
+    index = parsed.end - 1
+  }
+  return false
+}
+
+function hasMemberCallWithStringAndMemberArgument(
+  source,
+  objectName,
+  methodName,
+  stringArgument,
+  argumentObjectName,
+  argumentMemberName,
+) {
+  for (let index = 0; index < source.length; index += 1) {
+    const skipped = skipIgnoredSyntaxAndRegexLiteral(source, index)
+    if (skipped !== index) {
+      index = skipped - 1
+      continue
+    }
+    if (!identifierAt(source, index, objectName)) {
+      continue
+    }
+    const dotIndex = skipWhitespaceAndComments(source, index + objectName.length)
+    const methodStart = skipWhitespaceAndComments(source, dotIndex + 1)
+    const openParenIndex = skipWhitespaceAndComments(source, methodStart + methodName.length)
+    if (source[dotIndex] !== '.' || !identifierAt(source, methodStart, methodName) || source[openParenIndex] !== '(') {
+      continue
+    }
+    const firstArgument = parseStringLiteral(source, skipWhitespaceAndComments(source, openParenIndex + 1))
+    if (!firstArgument || firstArgument.value.toLowerCase() !== stringArgument.toLowerCase()) {
+      continue
+    }
+    const commaIndex = skipWhitespaceAndComments(source, firstArgument.end)
+    const secondArgumentStart = skipWhitespaceAndComments(source, commaIndex + 1)
+    if (
+      source[commaIndex] === ',' &&
+      memberExpressionAt(source, secondArgumentStart, argumentObjectName, argumentMemberName)
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
 function hasStringPropertyWithIdentifierValue(source, propertyName, identifierName) {

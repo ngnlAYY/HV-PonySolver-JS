@@ -48,7 +48,7 @@ const packagedModelSource = path.join(repositoryRoot, 'model', ORT_MODEL_FILENAM
 const packagedModelIdentityModule = path.join(extensionRoot, 'src', 'host', 'packaged-model-identity.ts')
 const fixtureIdentityNamespace = 'fixture-packaged-model-identity'
 const fixtureDetectHookModule = path.join(extensionRoot, 'src', 'host', 'fixture-detect-hook.ts')
-const fixtureDetectHookNamespace = 'fixture-detect-hook'
+const fixtureDetectDelayModule = path.join(extensionRoot, 'src', 'host', 'fixture-detect-delay.ts')
 const fixtureDetectDelayMarker = 'hv-pony-fixture-detect-delay'
 
 const contentMatches = ['https://hentaiverse.org/*', 'https://alt.hentaiverse.org/*']
@@ -337,14 +337,14 @@ function packagedModelIdentityPlugin(identity) {
         return { path: 'identity', namespace: fixtureIdentityNamespace }
       })
       buildApi.onLoad({ filter: /.*/, namespace: fixtureIdentityNamespace }, () => ({
-        contents: [
-          `export const PACKAGED_MODEL_FILENAME = ${JSON.stringify(identity.filename)};`,
-          `export const PACKAGED_MODEL_INTEGRITY = Object.freeze(${JSON.stringify({
+        contents: JSON.stringify({
+          PACKAGED_MODEL_FILENAME: identity.filename,
+          PACKAGED_MODEL_INTEGRITY: {
             byteLength: identity.byteLength,
             sha256: identity.sha256,
-          })});`,
-        ].join('\n'),
-        loader: 'js',
+          },
+        }),
+        loader: 'json',
       }))
     },
   }
@@ -352,21 +352,15 @@ function packagedModelIdentityPlugin(identity) {
 
 function fixtureDetectHookPlugin() {
   return {
-    name: fixtureDetectHookNamespace,
+    name: 'fixture-detect-hook',
     setup(buildApi) {
       buildApi.onResolve({ filter: /^\.\/fixture-detect-hook$/ }, (args) => {
         const resolved = path.resolve(args.resolveDir, `${args.path}.ts`)
         if (resolved !== fixtureDetectHookModule) {
           return undefined
         }
-        return { path: 'fixture-detect-hook', namespace: fixtureDetectHookNamespace }
+        return { path: fixtureDetectDelayModule }
       })
-      buildApi.onLoad({ filter: /.*/, namespace: fixtureDetectHookNamespace }, () => ({
-        contents: `export const fixtureBeforeDetect = () => new Promise((resolve) => setTimeout(resolve, 5000, ${JSON.stringify(
-          fixtureDetectDelayMarker,
-        )}));`,
-        loader: 'js',
-      }))
     },
   }
 }

@@ -416,6 +416,76 @@ describe('ModelCache', () => {
     expect(downloadModelImpl).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps a shared download alive when only one concurrent caller aborts', async () => {
+    let resolveDownload!: (buffer: ArrayBuffer) => void
+    let sharedSignal: AbortSignal | undefined
+    const downloadModelImpl = vi.fn(
+      (signal?: AbortSignal) =>
+        new Promise<ArrayBuffer>((resolve) => {
+          sharedSignal = signal
+          resolveDownload = resolve
+        }),
+    )
+    const cache = new ModelCache(createStatusPanel(), downloadModelImpl)
+    const firstController = new AbortController()
+    const first = cache.download(firstController.signal, false)
+    const second = cache.download(undefined, false)
+    await vi.waitFor(() => expect(downloadModelImpl).toHaveBeenCalledTimes(1))
+
+    firstController.abort()
+    await expect(first).rejects.toThrow('模型缓存操作已取消')
+    expect(sharedSignal?.aborted).toBe(false)
+
+    const buffer = bufferFromBytes([4, 5, 6])
+    resolveDownload(buffer)
+    await expect(second).resolves.toBe(buffer)
+  })
+
+  it('aborts and discards a shared download after every caller leaves', async () => {
+    const signals: AbortSignal[] = []
+    const downloadModelImpl = vi.fn((signal?: AbortSignal) => {
+      if (!signal) throw new Error('missing shared signal')
+      signals.push(signal)
+      if (signals.length > 1) return Promise.resolve(bufferFromBytes([7, 8, 9]))
+      return new Promise<ArrayBuffer>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    })
+    const cache = new ModelCache(createStatusPanel(), downloadModelImpl)
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+    const first = cache.download(firstController.signal, false)
+    const second = cache.download(secondController.signal, false)
+    await vi.waitFor(() => expect(downloadModelImpl).toHaveBeenCalledTimes(1))
+
+    firstController.abort()
+    secondController.abort()
+    await expect(first).rejects.toThrow('模型缓存操作已取消')
+    await expect(second).rejects.toThrow('模型缓存操作已取消')
+    expect(signals[0]?.aborted).toBe(true)
+
+    await expect(cache.download(undefined, false)).resolves.toHaveProperty('byteLength', 3)
+    expect(downloadModelImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('aborts an active shared download when the cache closes', async () => {
+    let sharedSignal: AbortSignal | undefined
+    const downloadModelImpl = vi.fn((signal?: AbortSignal) => {
+      sharedSignal = signal
+      return new Promise<ArrayBuffer>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    })
+    const cache = new ModelCache(createStatusPanel(), downloadModelImpl)
+    const download = cache.download(undefined, false)
+    await vi.waitFor(() => expect(downloadModelImpl).toHaveBeenCalledTimes(1))
+
+    cache.close()
+
+    await expect(download).rejects.toThrow('模型缓存操作已取消')
+    expect(sharedSignal?.aborted).toBe(true)
+  })
+
   it('does not reuse a finished download for later callers', async () => {
     const downloadModelImpl = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
     const cache = new ModelCache(createStatusPanel(), downloadModelImpl)
@@ -455,10 +525,11 @@ describe('ModelCache', () => {
     await cache.download(signal, false, ' candidate-token ')
 
     expect(downloadModel).toHaveBeenCalledTimes(1)
-    expect(downloadModel).toHaveBeenCalledWith(signal, {
+    expect(downloadModel).toHaveBeenCalledWith(expect.any(AbortSignal), {
       accessKeyOverride: ' candidate-token ',
       verifyIntegrity: false,
     })
+    expect(vi.mocked(downloadModel).mock.calls[0]?.[0]).not.toBe(signal)
   })
 
   it('confirms quota usage only after the cache transaction completes', async () => {

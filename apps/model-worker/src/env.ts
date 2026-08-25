@@ -12,9 +12,9 @@ const LEGACY_MODEL_PUBLIC_PATH = '/yolo26n-640.onnx'
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 // Paths flow verbatim into the Content-Disposition quoted-string emitted by model-response.ts,
 // so quote-like characters are rejected for parity with scripts/wrangler-guard's TOML string rule.
-const FORBIDDEN_PATH_CHARACTER_PATTERN = /["'`]/
+const FORBIDDEN_PATH_CHARACTER_PATTERN = /["'`\\]/
 const PATH_MUST_BE_ABSOLUTE_MESSAGE = 'must be an absolute pathname'
-const PATH_MUST_NOT_CONTAIN_QUOTES_MESSAGE = 'must not contain quotes'
+const PATH_MUST_NOT_CONTAIN_QUOTES_MESSAGE = 'must not contain quotes or backslashes'
 const MODEL_DOWNLOAD_QUOTA_ENABLED_DEFAULT = true
 
 // Worker env objects live for the whole isolate; validated configs are cached per env object so

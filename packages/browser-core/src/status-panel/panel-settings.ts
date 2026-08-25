@@ -5,10 +5,11 @@ import { warn } from '../utils/logger'
 export const PANEL_POSITION_STORAGE_KEY = 'hvPonySolverPanelPosition'
 export const PANEL_COMPACT_MODE_STORAGE_KEY = 'hvPonySolverPanelCompact'
 export const PANEL_HISTORY_LIMIT_STORAGE_KEY = 'hvPonySolverHistoryLimit'
-export const DEFAULT_PANEL_POSITION: PanelPosition = { top: 150, left: 1240 }
+export const PANEL_CSP_VISIBILITY_STORAGE_KEY = 'hvPonySolverPanelRequireCsp'
+export const DEFAULT_PANEL_POSITION: PanelPosition = { top: 155, left: 1240 }
 export const DEFAULT_PANEL_HISTORY_LIMIT = 5
 export const MAX_PANEL_POSITION = 1_000_000
-const INVALID_POSITION_MESSAGE = '面板位置格式无效，请输入非负整数 top,left，例如 150,1240'
+const INVALID_POSITION_MESSAGE = '面板位置格式无效，请输入非负整数 top,left，例如 155,1240'
 const INVALID_HISTORY_LIMIT_MESSAGE = '答题记录条数无效，请输入 1 到 50 之间的整数'
 
 export type PanelPosition = Readonly<{
@@ -101,6 +102,26 @@ export async function setPanelCompactMode(storage: SettingsStorage, enabled: boo
     return
   }
   await storage.remove(PANEL_COMPACT_MODE_STORAGE_KEY)
+}
+
+export function isPanelCspVisibilityRequiredSync(storage: SettingsStorage): boolean {
+  try {
+    return storage.getSync(PANEL_CSP_VISIBILITY_STORAGE_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export async function isPanelCspVisibilityRequired(storage: SettingsStorage): Promise<boolean> {
+  try {
+    return (await storage.get(PANEL_CSP_VISIBILITY_STORAGE_KEY)) !== '0'
+  } catch {
+    return true
+  }
+}
+
+export async function setPanelCspVisibilityRequired(storage: SettingsStorage, enabled: boolean): Promise<void> {
+  await storage.set(PANEL_CSP_VISIBILITY_STORAGE_KEY, enabled ? '1' : '0')
 }
 
 export async function getPanelHistoryLimit(storage: SettingsStorage): Promise<number> {

@@ -1,3 +1,5 @@
+import { resolveFetchImplementation } from '@hv-pony-solver/browser-core/platform/fetch'
+
 export type PackagedAssetIntegrity = Readonly<{
   byteLength: number
   sha256: string
@@ -129,14 +131,14 @@ export async function loadPackagedAsset(
   url: string,
   integrity: PackagedAssetIntegrity,
   label: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl?: typeof fetch,
   signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
   const init: RequestInit = { cache: 'force-cache', redirect: 'error' }
   if (signal) {
     init.signal = signal
   }
-  const response = await fetchImpl(url, init)
+  const response = await resolveFetchImplementation(fetchImpl)(url, init)
   if (signal?.aborted) {
     await cancelBody(response.body)
     throw new Error(`${label} 加载已取消`)

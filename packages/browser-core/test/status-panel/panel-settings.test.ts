@@ -5,8 +5,11 @@ import {
   MAX_PANEL_POSITION,
   getPanelPosition,
   getPanelPositionSync,
+  isPanelCspVisibilityRequired,
+  isPanelCspVisibilityRequiredSync,
   parsePanelPosition,
   serializePanelPosition,
+  setPanelCspVisibilityRequired,
 } from '../../src/status-panel/panel-settings'
 import type { SettingsStorage } from '../../src/platform/storage'
 
@@ -45,7 +48,7 @@ describe('panel position parser', () => {
     expect(warnSpy).toHaveBeenCalledWith(
       '[PonySolverLocal]',
       '读取面板位置设置失败，使用默认值:',
-      'Error: 面板位置格式无效，请输入非负整数 top,left，例如 150,1240',
+      'Error: 面板位置格式无效，请输入非负整数 top,left，例如 155,1240',
     )
   })
 
@@ -64,5 +67,15 @@ describe('panel position parser', () => {
       '读取面板位置设置失败，使用默认值:',
       'Error: storage unavailable',
     )
+  })
+
+  it('requires div#csp by default and persists an explicit visibility opt-out', async () => {
+    expect(isPanelCspVisibilityRequiredSync(storage(null))).toBe(true)
+    await expect(isPanelCspVisibilityRequired(storage(null))).resolves.toBe(true)
+    expect(isPanelCspVisibilityRequiredSync(storage('0'))).toBe(false)
+
+    const set = vi.fn(async () => undefined)
+    await setPanelCspVisibilityRequired({ ...storage(null), set }, false)
+    expect(set).toHaveBeenCalledWith('hvPonySolverPanelRequireCsp', '0')
   })
 })

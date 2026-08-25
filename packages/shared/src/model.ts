@@ -7,9 +7,18 @@ export const DEFAULT_PUBLIC_MODEL_PATH = `/${MODEL_FILENAME}`
 export const MODEL_VERSION = 'yolo26n-640-2026-05-14'
 export const MODEL_MONTHLY_DOWNLOAD_LIMIT = 5
 export const MODEL_DOWNLOAD_RECEIPT_HEADER = 'X-HV-Model-Download-Receipt'
+const MODEL_DOWNLOAD_RECEIPT_ID_PATTERN = /^[0-9a-f]{32}$/
 export const MODEL_INTEGRITY = {
   byteLength: 9809075,
   sha256: '318e96a0c32202fea2f4c0aed6010f5ba4a13952f5206a9b1cddc9a4fcf1f070',
 } as const
 
 export type ModelAccessDecision = 'real' | 'decoy' | 'forbidden'
+
+export function normalizeModelDownloadReceiptId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const normalized = value.trim().toLowerCase()
+  return MODEL_DOWNLOAD_RECEIPT_ID_PATTERN.test(normalized) ? normalized : null
+}

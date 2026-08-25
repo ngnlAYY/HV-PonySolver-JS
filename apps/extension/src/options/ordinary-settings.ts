@@ -19,6 +19,7 @@ import {
   DEFAULT_PANEL_HISTORY_LIMIT,
   DEFAULT_PANEL_POSITION,
   PANEL_COMPACT_MODE_STORAGE_KEY,
+  PANEL_CSP_VISIBILITY_STORAGE_KEY,
   PANEL_HISTORY_LIMIT_STORAGE_KEY,
   PANEL_POSITION_STORAGE_KEY,
   parsePanelHistoryLimit,
@@ -61,6 +62,7 @@ type OrdinaryField =
   | 'multiClickDelay'
   | 'panelPosition'
   | 'panelCompact'
+  | 'panelRequireCsp'
   | 'randomOnFail'
   | 'preserveCheckedAnswers'
   | 'historyLimit'
@@ -87,6 +89,7 @@ const ordinaryFields: readonly OrdinaryField[] = [
   'multiClickDelay',
   'panelPosition',
   'panelCompact',
+  'panelRequireCsp',
   'randomOnFail',
   'preserveCheckedAnswers',
   'historyLimit',
@@ -110,9 +113,21 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
   const multiClickDelay = optionsElement<HTMLInputElement>('multi-click-delay')
   const panelPosition = optionsElement<HTMLInputElement>('panel-position')
   const panelCompact = optionsElement<HTMLInputElement>('panel-compact')
+  const panelRequireCsp = optionsElement<HTMLInputElement>('panel-require-csp')
   const randomOnFail = optionsElement<HTMLInputElement>('random-on-fail')
   const preserveCheckedAnswers = optionsElement<HTMLInputElement>('preserve-checked-answers')
   const historyLimit = optionsElement<HTMLInputElement>('history-limit')
+  const fieldElements: Record<OrdinaryField, HTMLInputElement | HTMLSelectElement> = {
+    answerMode,
+    submitDelay,
+    multiClickDelay,
+    panelPosition,
+    panelCompact,
+    panelRequireCsp,
+    randomOnFail,
+    preserveCheckedAnswers,
+    historyLimit,
+  }
   const saveButtonElement = form.querySelector<HTMLButtonElement>('button[type="submit"]')
   if (!saveButtonElement) {
     throw new Error('设置页缺少保存按钮')
@@ -153,6 +168,13 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
       read: () => (panelCompact.checked ? '1' : '0'),
       write: (value) => {
         panelCompact.checked = value === '1'
+      },
+    },
+    panelRequireCsp: {
+      storageKey: PANEL_CSP_VISIBILITY_STORAGE_KEY,
+      read: () => (panelRequireCsp.checked ? '1' : '0'),
+      write: (value) => {
+        panelRequireCsp.checked = value !== '0'
       },
     },
     randomOnFail: {
@@ -212,25 +234,9 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
   }
 
   for (const field of ordinaryFields) {
-    const element =
-      field === 'answerMode'
-        ? answerMode
-        : field === 'submitDelay'
-          ? submitDelay
-          : field === 'multiClickDelay'
-            ? multiClickDelay
-            : field === 'panelPosition'
-              ? panelPosition
-              : field === 'panelCompact'
-                ? panelCompact
-                : field === 'randomOnFail'
-                  ? randomOnFail
-                  : field === 'preserveCheckedAnswers'
-                    ? preserveCheckedAnswers
-                    : historyLimit
     const onChange = (): void => markDirty(field)
-    element.addEventListener('input', onChange)
-    element.addEventListener('change', onChange)
+    fieldElements[field].addEventListener('input', onChange)
+    fieldElements[field].addEventListener('change', onChange)
   }
 
   function loadedValues(values: Record<string, unknown>): Record<OrdinaryField, string> {
@@ -249,6 +255,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
         serializePanelPosition(parsePanelPosition(value)),
       ),
       panelCompact: values[PANEL_COMPACT_MODE_STORAGE_KEY] === '1' ? '1' : '0',
+      panelRequireCsp: values[PANEL_CSP_VISIBILITY_STORAGE_KEY] === '0' ? '0' : '1',
       randomOnFail: parseRandomOnFail(values[RANDOM_ON_FAIL_STORAGE_KEY]) ? '1' : '0',
       preserveCheckedAnswers: parsePreserveCheckedAnswers(values[PRESERVE_CHECKED_ANSWERS_STORAGE_KEY]) ? '1' : '0',
       historyLimit: parseStoredValue(
@@ -272,6 +279,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
       case 'panelPosition':
         return serializePanelPosition(parsePanelPosition(value))
       case 'panelCompact':
+      case 'panelRequireCsp':
       case 'randomOnFail':
       case 'preserveCheckedAnswers':
         return value === '1' ? '1' : '0'

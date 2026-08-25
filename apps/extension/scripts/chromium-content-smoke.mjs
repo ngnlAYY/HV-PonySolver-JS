@@ -27,12 +27,14 @@ function captchaHtml({ precheckedIndex = -1 } = {}) {
   const submitDisabled = precheckedIndex < 0 ? ' disabled' : ''
   return `<!doctype html>
     <html><body>
-      <div id="riddlemaster">
-        <form name="riddleform">
-          ${answers}
-          <input id="riddlesubmit" type="button" data-submit-count="0"${submitDisabled}>
-        </form>
-        <div id="riddleimage"><img src="/captcha.png"></div>
+      <div id="csp">
+        <div id="riddlemaster">
+          <form name="riddleform">
+            ${answers}
+            <input id="riddlesubmit" type="button" data-submit-count="0"${submitDisabled}>
+          </form>
+          <div id="riddleimage"><img src="/captcha.png"></div>
+        </div>
       </div>
       <script>
         const answers = [...document.querySelectorAll('input[name="riddleanswer[]"]')]
@@ -66,26 +68,43 @@ function bfcacheFixtureHtml() {
     </body></html>`
 }
 
-function installCaptchaScript() {
-  const answers = Array.from({ length: 6 }, () => '<input name="riddleanswer[]" type="checkbox">').join('')
-  const markup = `<form name="riddleform">${answers}<input id="riddlesubmit" type="button" data-submit-count="0" disabled></form><div id="riddleimage"><img src="/captcha.png"></div>`
-  return `
-    const container = document.createElement('div')
-    container.id = 'riddlemaster'
-    container.innerHTML = ${JSON.stringify(markup)}
-    document.body.append(container)
-    const answers = [...document.querySelectorAll('input[name="riddleanswer[]"]')]
-    const submit = document.querySelector('#riddlesubmit')
-    const updateSubmit = () => {
-      const selectedCount = answers.filter((answer) => answer.checked).length
-      submit.disabled = selectedCount === 0 || selectedCount >= 4
-    }
-    answers.forEach((answer) => answer.addEventListener('change', updateSubmit))
-    submit.addEventListener('click', (event) => {
-      const button = event.currentTarget
-      button.dataset.submitCount = String(Number(button.dataset.submitCount || '0') + 1)
-    })
-  `
+function installCaptcha() {
+  const captchaWindow = globalThis.document.createElement('div')
+  captchaWindow.id = 'csp'
+  const container = globalThis.document.createElement('div')
+  container.id = 'riddlemaster'
+  const form = globalThis.document.createElement('form')
+  form.setAttribute('name', 'riddleform')
+  const answers = Array.from({ length: 6 }, () => {
+    const answer = globalThis.document.createElement('input')
+    answer.type = 'checkbox'
+    answer.name = 'riddleanswer[]'
+    form.appendChild(answer)
+    return answer
+  })
+  const submit = globalThis.document.createElement('input')
+  submit.id = 'riddlesubmit'
+  submit.type = 'button'
+  submit.disabled = true
+  submit.dataset.submitCount = '0'
+  form.appendChild(submit)
+  const imageContainer = globalThis.document.createElement('div')
+  imageContainer.id = 'riddleimage'
+  const image = globalThis.document.createElement('img')
+  image.src = '/captcha.png'
+  imageContainer.appendChild(image)
+  container.append(form, imageContainer)
+  captchaWindow.appendChild(container)
+  globalThis.document.body.appendChild(captchaWindow)
+
+  const updateSubmit = () => {
+    const selectedCount = answers.filter((answer) => answer.checked).length
+    submit.disabled = selectedCount === 0 || selectedCount >= 4
+  }
+  answers.forEach((answer) => answer.addEventListener('change', updateSubmit))
+  submit.addEventListener('click', () => {
+    submit.dataset.submitCount = String(Number(submit.dataset.submitCount || '0') + 1)
+  })
 }
 
 await buildExtensions({ outputRoot: temporaryRoot, targets: ['chromium'], fixtureHost: true })
@@ -127,7 +146,11 @@ try {
     await route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html })
   })
   await context.route('https://example.com/extension-bfcache-destination', (route) =>
-    route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: '<!doctype html><title>Destination</title>' }),
+    route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><title>Destination</title>',
+    }),
   )
 
   const automaticPage = await context.newPage()
@@ -198,11 +221,14 @@ try {
       { timeout: 15_000 },
     )
   } catch (error) {
-    throw new Error(`Chromium did not restore the content fixture from BFCache: ${JSON.stringify(bfcacheDiagnostics)}`, {
-      cause: error,
-    })
+    throw new Error(
+      `Chromium did not restore the content fixture from BFCache: ${JSON.stringify(bfcacheDiagnostics)}`,
+      {
+        cause: error,
+      },
+    )
   }
-  await bfcachePage.evaluate(installCaptchaScript())
+  await bfcachePage.evaluate(installCaptcha)
   await bfcachePage.locator('#riddlesubmit[data-submit-count="1"]').waitFor({ timeout: 15_000 })
   assert.equal(await bfcachePage.locator('.ponyLog').count(), 1)
   assert.equal(await bfcachePage.locator('input[name="riddleanswer[]"]:checked').count(), 1)

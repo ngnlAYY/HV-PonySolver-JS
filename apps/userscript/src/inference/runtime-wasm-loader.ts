@@ -1,3 +1,5 @@
+import { resolveFetchImplementation } from '@hv-pony-solver/browser-core/platform/fetch'
+
 type RuntimeWasmAsset = Readonly<{
   url: string
   byteLength: number
@@ -70,10 +72,13 @@ async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
 }
 
 export async function loadVerifiedRuntimeWasm(
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch | undefined = undefined,
   expected: RuntimeWasmAsset = configuredRuntimeWasmAsset(),
 ): Promise<ArrayBuffer> {
-  const response = await fetchImpl(expected.url, { cache: 'force-cache', redirect: 'error' })
+  const response = await resolveFetchImplementation(fetchImpl)(expected.url, {
+    cache: 'force-cache',
+    redirect: 'error',
+  })
   if (!response.ok) {
     throw new Error(`ONNX Runtime WASM 下载失败: HTTP ${response.status}`)
   }

@@ -1,4 +1,4 @@
-name: Verify Monorepo
+name: Repository CI
 
 on:
   pull_request:

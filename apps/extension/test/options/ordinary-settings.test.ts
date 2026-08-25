@@ -4,6 +4,7 @@ import {
   ANSWER_MODE_STORAGE_KEY,
   MULTI_CLICK_DELAY_STORAGE_KEY,
   PANEL_COMPACT_MODE_STORAGE_KEY,
+  PANEL_CSP_VISIBILITY_STORAGE_KEY,
   PANEL_POSITION_STORAGE_KEY,
   PRESERVE_CHECKED_ANSWERS_STORAGE_KEY,
   RANDOM_ON_FAIL_STORAGE_KEY,
@@ -79,7 +80,7 @@ describe('ordinary options settings lifecycle', () => {
       [ANSWER_MODE_STORAGE_KEY]: 'auto',
       [SUBMIT_DELAY_STORAGE_KEY]: '3000-5000',
       [MULTI_CLICK_DELAY_STORAGE_KEY]: '1000-1500',
-      [PANEL_POSITION_STORAGE_KEY]: '150,1240',
+      [PANEL_POSITION_STORAGE_KEY]: '155,1240',
       [RANDOM_ON_FAIL_STORAGE_KEY]: '1',
     })
     const answerMode = optionsElement<HTMLSelectElement>('answer-mode')
@@ -199,7 +200,7 @@ describe('ordinary options settings lifecycle', () => {
 
     expect(optionsElement<HTMLInputElement>('random-on-fail').checked).toBe(true)
     expect(optionsElement<HTMLInputElement>('preserve-checked-answers').checked).toBe(true)
-    expect(optionsElement<HTMLInputElement>('panel-position').value).toBe('150,1240')
+    expect(optionsElement<HTMLInputElement>('panel-position').value).toBe('155,1240')
   })
 
   it('defaults to preserving checked answers and persists the opt-out', async () => {
@@ -214,6 +215,22 @@ describe('ordinary options settings lifecycle', () => {
     await vi.waitFor(() =>
       expect(platformMocks.storageSet).toHaveBeenCalledWith({
         [PRESERVE_CHECKED_ANSWERS_STORAGE_KEY]: '0',
+      }),
+    )
+  })
+
+  it('defaults to requiring div#csp for panel visibility and persists the opt-out', async () => {
+    await installAndLoad()
+    const requireCsp = optionsElement<HTMLInputElement>('panel-require-csp')
+    expect(requireCsp.checked).toBe(true)
+
+    requireCsp.checked = false
+    requireCsp.dispatchEvent(new Event('change', { bubbles: true }))
+    submitForm()
+
+    await vi.waitFor(() =>
+      expect(platformMocks.storageSet).toHaveBeenCalledWith({
+        [PANEL_CSP_VISIBILITY_STORAGE_KEY]: '0',
       }),
     )
   })

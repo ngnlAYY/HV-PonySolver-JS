@@ -33,9 +33,9 @@ The matching Emscripten glue is embedded only by `build:bundled-runtime`.
 
 Upload these exact bytes; do not rename the WASM without also changing its content-addressed manifest:
 
-| Request path | R2 object key | Size | SHA-256 |
-| --- | --- | ---: | --- |
-| `/yolo26n-640.ort` | `real/yolo26n-640.ort` | 9,914,448 | `4e771776d9356679539ffed53ee40ea012394f9b586aa92a76267e8fee38094c` |
+| Request path                                                                                   | R2 object key                                                                                 |      Size | SHA-256                                                            |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------: | ------------------------------------------------------------------ |
+| `/yolo26n-640.ort`                                                                             | `real/yolo26n-640.ort`                                                                        | 9,914,448 | `4e771776d9356679539ffed53ee40ea012394f9b586aa92a76267e8fee38094c` |
 | `/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 1,267,937 | `25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa` |
 
 The ORT route uses the same Bearer/KV authorization and decoy behavior as the legacy ONNX route. The WASM route is
@@ -51,5 +51,6 @@ pnpm build:onnx-runtime
 
 Artifacts are written under `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`. The minimal WASM filename
 contains its SHA-256 and can be uploaded directly under the printed `runtime/<filename>` R2 object key. The command
-performs no R2 upload and no Worker deployment. `pnpm build:onnx-runtime -- --install` additionally replaces only the
-tracked glue bundle and operator config; update the manifest hashes deliberately if the output changes.
+performs no R2 upload and no Worker deployment. `pnpm build:onnx-runtime -- --install` additionally replaces the
+tracked glue bundle and regenerates the Git-ignored `config/onnxruntime/required_operators_and_types.config`; update
+the manifest hashes deliberately if the output changes.

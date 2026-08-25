@@ -8,7 +8,9 @@ import {
 } from '../model/model-settings'
 import {
   clearSavedPanelPosition,
+  disablePanelCspVisibilityLimit,
   disablePanelCompactMode,
+  enablePanelCspVisibilityLimit,
   enablePanelCompactMode,
   setPanelHistoryLimitFromPrompt,
   setPanelPositionFromPrompt,
@@ -46,6 +48,8 @@ async function chooseSettingsAction(options: SettingsMenuOptions): Promise<void>
     { label: '开启精简版', errorPrefix: '精简版设置失败', run: enablePanelCompactMode },
     { label: '关闭精简版', errorPrefix: '精简版设置失败', run: disablePanelCompactMode },
     { label: '查询模型下载次数', errorPrefix: '模型下载次数查询失败', run: querySavedModelDownloadQuota },
+    { label: '仅在验证码窗口出现时显示面板', errorPrefix: '面板显示限制设置失败', run: enablePanelCspVisibilityLimit },
+    { label: '始终显示面板', errorPrefix: '面板显示限制设置失败', run: disablePanelCspVisibilityLimit },
   ]
   const input = promptUser(actions.map((action, index) => `${index + 1}. ${action.label}`).join('\n'), '1')
   if (input === null) {

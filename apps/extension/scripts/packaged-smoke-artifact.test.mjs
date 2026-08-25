@@ -11,6 +11,7 @@ import { zipSync } from 'fflate'
 import { createPackagedFixtureModelIdentity } from './build-packaged-fixture.mjs'
 import { createPackagedE2eRecord, validatePackagedInferenceObservation } from './packaged-e2e-evidence.mjs'
 import {
+  PACKAGED_ARCHIVE_LIMITS,
   discoverPackagedArtifact,
   extractAndVerifyPackagedArchive,
   verifyExtractedPackagedTree,
@@ -25,9 +26,11 @@ function jsonBytes(value) {
   return Buffer.from(`${JSON.stringify(value, null, 2)}\n`)
 }
 
-async function createFixtureArtifact(outputRoot, { includeOracle = true } = {}) {
+async function createFixtureArtifact(
+  outputRoot,
+  { includeOracle = true, modelBytes = Buffer.from([1, 2, 3, 4]) } = {},
+) {
   const target = 'chromium'
-  const modelBytes = Buffer.from([1, 2, 3, 4])
   const model = {
     filename: 'deterministic-captcha.ort',
     byteLength: modelBytes.byteLength,
@@ -137,6 +140,16 @@ test('archive verification rejects ZIP-byte tampering', async (context) => {
   const packagedArtifact = await discoverPackagedArtifact(outputRoot, 'chromium')
   await writeFile(path.join(outputRoot, archiveName), 'tampered ZIP bytes')
   await assert.rejects(verifyPackagedArchive(packagedArtifact), /archive bytes do not match artifact metadata/u)
+})
+
+test('artifact discovery rejects oversized uncompressed ZIP entries before extraction', async (context) => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-packaged-zip-bomb-'))
+  context.after(() => rm(outputRoot, { recursive: true, force: true }))
+  await createFixtureArtifact(outputRoot, {
+    modelBytes: Buffer.alloc(PACKAGED_ARCHIVE_LIMITS.entryByteLength + 1),
+  })
+
+  await assert.rejects(discoverPackagedArtifact(outputRoot, 'chromium'), /uncompressed entry size limit/u)
 })
 
 test('extracted tree verification rejects post-extraction tampering', async (context) => {

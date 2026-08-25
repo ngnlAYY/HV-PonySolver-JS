@@ -1,6 +1,7 @@
 import { inferenceTimeoutConfig } from '../inference/inference-config'
+import { resolveFetchImplementation } from '../platform/fetch'
 import { raceAbort } from '../utils/abort-race'
-import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
+import { MODEL_DOWNLOAD_RECEIPT_HEADER, normalizeModelDownloadReceiptId } from '@hv-pony-solver/shared'
 import {
   clearModelDownloadConfirmation,
   getModelDownloadConfirmation,
@@ -17,8 +18,6 @@ export type ModelDownloadEnvironment = Readonly<{
   fetchImpl?: typeof fetch
   getAccessKey?: (signal?: AbortSignal) => Promise<string>
 }>
-
-const receiptIdPattern = /^[0-9a-f]{32}$/
 
 export { copyModelDownloadConfirmation } from './model-download-confirmation-store'
 
@@ -96,14 +95,6 @@ function getQuotaUrl(): string {
     throw new Error('模型下载次数查询地址未配置')
   }
   return modelConfig.quotaUrl
-}
-
-function resolveFetchImpl(fetchImpl: typeof fetch | undefined): typeof fetch {
-  if (fetchImpl) {
-    return fetchImpl
-  }
-  const globalFetch = globalThis.fetch
-  return (input, init) => globalFetch.call(globalThis, input, init)
 }
 
 async function getRequestAccessKey(
@@ -195,8 +186,8 @@ function captureModelDownloadConfirmation(
   if (rawReceiptId === null) {
     return buffer
   }
-  const receiptId = rawReceiptId.trim().toLowerCase()
-  if (!receiptIdPattern.test(receiptId)) {
+  const receiptId = normalizeModelDownloadReceiptId(rawReceiptId)
+  if (receiptId === null) {
     throw new Error('模型下载确认凭证无效')
   }
   registerModelDownloadConfirmation(buffer, { accessKey, fetchImpl, receiptId })
@@ -377,7 +368,7 @@ export async function downloadModel(
     const accessKey = await deadline.run(() =>
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
-    const fetchImpl = resolveFetchImpl(environment.fetchImpl)
+    const fetchImpl = resolveFetchImplementation(environment.fetchImpl)
     const response = await deadline.run(() =>
       fetchImpl(getModelUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
@@ -492,7 +483,7 @@ export async function queryModelDownloadQuota(
     const accessKey = await deadline.run(() =>
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
-    const fetchImpl = resolveFetchImpl(environment.fetchImpl)
+    const fetchImpl = resolveFetchImplementation(environment.fetchImpl)
     const response = await deadline.run(() =>
       fetchImpl(getQuotaUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
@@ -541,7 +532,7 @@ export async function probeModelAccessKey(
     const accessKey = await deadline.run(() =>
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
-    const fetchImpl = resolveFetchImpl(environment.fetchImpl)
+    const fetchImpl = resolveFetchImplementation(environment.fetchImpl)
     const response = await deadline.run(() =>
       fetchImpl(getModelUrl(), createModelProbeInit(deadline.signal, accessKey)),
     )

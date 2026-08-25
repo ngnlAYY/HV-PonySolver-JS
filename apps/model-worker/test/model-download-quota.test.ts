@@ -122,7 +122,7 @@ describe('ModelDownloadQuota', () => {
     ).resolves.toEqual({ allowed: false, reason: 'quota-exhausted', retryAfterSeconds: 1_857_600 })
   })
 
-  it('releases unconfirmed reservations after their TTL and starts fresh on month rollover or corrupt state', async () => {
+  it('releases unconfirmed reservations after their TTL and starts fresh on month rollover', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-31T23:40:00.000Z'))
     const quota = createQuotaStub()
@@ -133,15 +133,45 @@ describe('ModelDownloadQuota', () => {
       (await quota.fetch(new Request('https://quota.internal/reserve', { method: 'POST' }))).json(),
     ).resolves.toMatchObject({ allowed: true })
 
-    await runInDurableObject(quota, async (_instance, state) => {
-      await state.storage.put('monthly-download-quota-v2', { month: 1, used: -1 })
-    })
-    await expect(
-      (await quota.fetch(new Request('https://quota.internal/status', { method: 'POST' }))).json(),
-    ).resolves.toMatchObject({ used: 0 })
-
     vi.setSystemTime(new Date('2026-09-01T00:00:00.000Z'))
     await expect((await confirm(quota, RECEIPT_ID)).json()).resolves.toMatchObject({ confirmed: false, used: 0 })
+  })
+
+  it('fails closed and preserves malformed persisted quota states', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'))
+    const malformedStates = [
+      'invalid',
+      { month: 'invalid', used: 0, pending: {}, confirmed: [] },
+      { month: '2026-08', used: 4, pending: { [RECEIPT_ID]: Date.now() + 60_000 }, confirmed: [] },
+    ]
+
+    for (const malformedState of malformedStates) {
+      const quota = createQuotaStub()
+      await runInDurableObject(quota, async (_instance, state) => {
+        await state.storage.put('monthly-download-quota-v2', malformedState)
+      })
+
+      await expect(
+        runInDurableObject(quota, (instance) =>
+          instance.fetch(new Request('https://quota.internal/status', { method: 'POST' })),
+        ),
+      ).rejects.toThrow('quota state is invalid')
+      await expect(
+        runInDurableObject(quota, async (_instance, state) => state.storage.get('monthly-download-quota-v2')),
+      ).resolves.toEqual(malformedState)
+    }
+  })
+
+  it('does not create persisted state for read-only status queries', async () => {
+    const quota = createQuotaStub()
+
+    await expect(
+      (await quota.fetch(new Request('https://quota.internal/status', { method: 'POST' }))).json(),
+    ).resolves.toMatchObject({ used: 0, remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT })
+    await expect(
+      runInDurableObject(quota, async (_instance, state) => state.storage.get('monthly-download-quota-v2')),
+    ).resolves.toBeUndefined()
   })
 
   it('validates failed and malformed internal quota responses and receipt input', async () => {

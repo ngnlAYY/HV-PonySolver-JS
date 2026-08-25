@@ -6,6 +6,7 @@ import {
   MODEL_INTEGRITY,
   MODEL_MONTHLY_DOWNLOAD_LIMIT,
   MODEL_VERSION,
+  normalizeModelDownloadReceiptId,
 } from '../src/model'
 
 describe('model manifest', () => {
@@ -22,5 +23,12 @@ describe('model manifest', () => {
 
   it('defines the shared monthly model download limit', () => {
     expect(MODEL_MONTHLY_DOWNLOAD_LIMIT).toBe(5)
+  })
+
+  it('normalizes model download receipt IDs through one shared contract', () => {
+    expect(normalizeModelDownloadReceiptId(`  ${'A'.repeat(32)}  `)).toBe('a'.repeat(32))
+    expect(normalizeModelDownloadReceiptId('a'.repeat(31))).toBeNull()
+    expect(normalizeModelDownloadReceiptId('g'.repeat(32))).toBeNull()
+    expect(normalizeModelDownloadReceiptId(null)).toBeNull()
   })
 })

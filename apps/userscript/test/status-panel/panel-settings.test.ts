@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const STORAGE_KEY = 'hvPonySolverPanelPosition'
 const COMPACT_STORAGE_KEY = 'hvPonySolverPanelCompact'
 const HISTORY_LIMIT_STORAGE_KEY = 'hvPonySolverHistoryLimit'
+const CSP_VISIBILITY_STORAGE_KEY = 'hvPonySolverPanelRequireCsp'
 
 describe('panel settings', () => {
   beforeEach(() => {
@@ -16,7 +17,7 @@ describe('panel settings', () => {
     it('returns the default position when no position is saved', async () => {
       const { getPanelPositionSync } = await import('../../src/status-panel/panel-settings')
 
-      expect(getPanelPositionSync()).toEqual({ top: 150, left: 1240 })
+      expect(getPanelPositionSync()).toEqual({ top: 155, left: 1240 })
     })
 
     it('parses a valid position from localStorage', async () => {
@@ -30,7 +31,7 @@ describe('panel settings', () => {
       localStorage.setItem('hvPonySolverPanelPosition', 'not-valid')
       const { getPanelPositionSync } = await import('../../src/status-panel/panel-settings')
 
-      expect(getPanelPositionSync()).toEqual({ top: 150, left: 1240 })
+      expect(getPanelPositionSync()).toEqual({ top: 155, left: 1240 })
     })
 
     it('returns the default position when localStorage throws', async () => {
@@ -39,14 +40,14 @@ describe('panel settings', () => {
       })
       const { getPanelPositionSync } = await import('../../src/status-panel/panel-settings')
 
-      expect(getPanelPositionSync()).toEqual({ top: 150, left: 1240 })
+      expect(getPanelPositionSync()).toEqual({ top: 155, left: 1240 })
     })
   })
 
   it('reads the default position when no position is saved', async () => {
     const { getPanelPosition } = await import('../../src/status-panel/panel-settings')
 
-    await expect(getPanelPosition()).resolves.toEqual({ top: 150, left: 1240 })
+    await expect(getPanelPosition()).resolves.toEqual({ top: 155, left: 1240 })
   })
 
   it('trims and persists panel position through localStorage fallback', async () => {
@@ -61,18 +62,21 @@ describe('panel settings', () => {
   it('rejects invalid panel position input', async () => {
     const { setPanelPosition } = await import('../../src/status-panel/panel-settings')
 
-    await expect(setPanelPosition('top:200;left:900')).rejects.toThrow('面板位置格式无效，请输入非负整数 top,left，例如 150,1240')
+    await expect(setPanelPosition('top:200;left:900')).rejects.toThrow(
+      '面板位置格式无效，请输入非负整数 top,left，例如 155,1240',
+    )
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
   })
 
   it('clears saved panel position through localStorage fallback', async () => {
-    const { clearPanelPosition, getPanelPosition, setPanelPosition } = await import('../../src/status-panel/panel-settings')
+    const { clearPanelPosition, getPanelPosition, setPanelPosition } =
+      await import('../../src/status-panel/panel-settings')
 
     await setPanelPosition('200,900')
     await clearPanelPosition()
 
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
-    await expect(getPanelPosition()).resolves.toEqual({ top: 150, left: 1240 })
+    await expect(getPanelPosition()).resolves.toEqual({ top: 155, left: 1240 })
   })
 
   it('reads compact mode from localStorage fallback', async () => {
@@ -84,7 +88,8 @@ describe('panel settings', () => {
   })
 
   it('persists and clears compact mode through localStorage fallback', async () => {
-    const { clearPanelCompactMode, isPanelCompactMode, setPanelCompactMode } = await import('../../src/status-panel/panel-settings')
+    const { clearPanelCompactMode, isPanelCompactMode, setPanelCompactMode } =
+      await import('../../src/status-panel/panel-settings')
 
     await setPanelCompactMode(true)
     expect(localStorage.getItem(COMPACT_STORAGE_KEY)).toBe('1')
@@ -95,6 +100,17 @@ describe('panel settings', () => {
     await expect(isPanelCompactMode()).resolves.toBe(false)
   })
 
+  it('requires div#csp by default and persists the visibility switch', async () => {
+    const { isPanelCspVisibilityRequired, isPanelCspVisibilityRequiredSync, setPanelCspVisibilityRequired } =
+      await import('../../src/status-panel/panel-settings')
+
+    expect(isPanelCspVisibilityRequiredSync()).toBe(true)
+    await expect(isPanelCspVisibilityRequired()).resolves.toBe(true)
+    await setPanelCspVisibilityRequired(false)
+    expect(localStorage.getItem(CSP_VISIBILITY_STORAGE_KEY)).toBe('0')
+    expect(isPanelCspVisibilityRequiredSync()).toBe(false)
+  })
+
   it('uses GM storage for compact mode when available', async () => {
     const getValue = vi.fn(async () => '1')
     const setValue = vi.fn(async () => undefined)
@@ -102,7 +118,8 @@ describe('panel settings', () => {
     vi.stubGlobal('GM_getValue', getValue)
     vi.stubGlobal('GM_setValue', setValue)
     vi.stubGlobal('GM_deleteValue', deleteValue)
-    const { clearPanelCompactMode, isPanelCompactMode, setPanelCompactMode } = await import('../../src/status-panel/panel-settings')
+    const { clearPanelCompactMode, isPanelCompactMode, setPanelCompactMode } =
+      await import('../../src/status-panel/panel-settings')
 
     await expect(isPanelCompactMode()).resolves.toBe(true)
     await setPanelCompactMode(true)
@@ -120,7 +137,8 @@ describe('panel settings', () => {
     vi.stubGlobal('GM_getValue', getValue)
     vi.stubGlobal('GM_setValue', setValue)
     vi.stubGlobal('GM_deleteValue', deleteValue)
-    const { clearPanelPosition, getPanelPosition, setPanelPosition } = await import('../../src/status-panel/panel-settings')
+    const { clearPanelPosition, getPanelPosition, setPanelPosition } =
+      await import('../../src/status-panel/panel-settings')
 
     await expect(getPanelPosition()).resolves.toEqual({ top: 200, left: 900 })
     await setPanelPosition('300,1000')
@@ -138,7 +156,7 @@ describe('panel settings', () => {
     vi.stubGlobal('GM_getValue', getValue)
     const { getPanelPosition } = await import('../../src/status-panel/panel-settings')
 
-    await expect(getPanelPosition()).resolves.toEqual({ top: 150, left: 1240 })
+    await expect(getPanelPosition()).resolves.toEqual({ top: 155, left: 1240 })
   })
 
   it('reads the default history limit when no value is saved', async () => {
@@ -149,7 +167,8 @@ describe('panel settings', () => {
   })
 
   it('persists and clears the history limit through localStorage fallback', async () => {
-    const { clearPanelHistoryLimit, getPanelHistoryLimit, setPanelHistoryLimit } = await import('../../src/status-panel/panel-settings')
+    const { clearPanelHistoryLimit, getPanelHistoryLimit, setPanelHistoryLimit } =
+      await import('../../src/status-panel/panel-settings')
 
     await setPanelHistoryLimit('3')
     expect(localStorage.getItem(HISTORY_LIMIT_STORAGE_KEY)).toBe('3')
@@ -169,5 +188,4 @@ describe('panel settings', () => {
     await expect(setPanelHistoryLimit('0x10')).rejects.toThrow('答题记录条数无效，请输入 1 到 50 之间的整数')
     expect(localStorage.getItem(HISTORY_LIMIT_STORAGE_KEY)).toBeNull()
   })
-
 })

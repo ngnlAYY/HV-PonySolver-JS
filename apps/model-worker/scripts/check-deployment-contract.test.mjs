@@ -20,8 +20,9 @@ const PROBE_ID = 'run 123/attempt-2'
 function contractHeaders(origin, extra = {}) {
   return {
     'access-control-allow-origin': origin,
-    'access-control-allow-methods': 'OPTIONS, GET, HEAD, POST',
-    'access-control-allow-headers': 'Authorization, X-HV-Model-Download-Receipt',
+    'access-control-allow-methods': 'OPTIONS, GET, HEAD',
+    'access-control-allow-headers': 'Authorization',
+    'access-control-max-age': '86400',
     'cache-control': 'no-store',
     vary: 'Accept-Encoding, Origin',
     ...extra,
@@ -126,10 +127,7 @@ test('decoy 模式验证两个 Origin，且只发送无授权的 OPTIONS/HEAD', 
   }
   const optionsHeaders = requests[0].headers
   assert.equal(optionsHeaders.get('access-control-request-method'), 'GET')
-  assert.equal(
-    optionsHeaders.get('access-control-request-headers'),
-    'Authorization, X-HV-Model-Download-Receipt',
-  )
+  assert.equal(optionsHeaders.get('access-control-request-headers'), 'Authorization')
 })
 
 test('error 模式接受无 Key HEAD 403', async () => {
@@ -220,7 +218,7 @@ test('拒绝缺失 Authorization 的 preflight 响应', async () => {
         return fixtureResponse(204, contractHeaders(origin, { 'access-control-allow-headers': '' }))
       },
     }),
-    /access-control-allow-headers mismatch; expected=\[authorization, x-hv-model-download-receipt\] actual=\[<missing>\]/,
+    /access-control-allow-headers mismatch; expected=\[authorization\] actual=\[<missing>\]/,
   )
 })
 
@@ -237,8 +235,8 @@ test('OPTIONS token 集合忽略顺序与大小写', async () => {
         return fixtureResponse(
           204,
           contractHeaders(origin, {
-            'access-control-allow-methods': 'head,OPTIONS,post,get',
-            'access-control-allow-headers': 'X-HV-MODEL-DOWNLOAD-RECEIPT, AUTHORIZATION',
+            'access-control-allow-methods': 'head,OPTIONS,get',
+            'access-control-allow-headers': 'AUTHORIZATION',
           }),
         )
       }

@@ -293,7 +293,7 @@ describe('settings menu', () => {
     await registerMenuCommand.mock.calls[0][1]()
 
     expect(prompt).toHaveBeenNthCalledWith(1, expect.stringContaining('7. 设置面板位置'), '1')
-    expect(prompt).toHaveBeenNthCalledWith(2, '请输入面板位置 top,left，例如 150,1240', '150,1240')
+    expect(prompt).toHaveBeenNthCalledWith(2, '请输入面板位置 top,left，例如 155,1240', '155,1240')
     expect(localStorage.getItem('hvPonySolverPanelPosition')).toBe('250,800')
     expect(alert).toHaveBeenCalledWith('面板位置已保存，刷新页面后生效')
   })
@@ -348,7 +348,7 @@ describe('settings menu', () => {
 
     expect(localStorage.getItem('hvPonySolverPanelPosition')).toBeNull()
     expect(alert).toHaveBeenCalledWith(
-      '面板位置设置失败: Error: 面板位置格式无效，请输入非负整数 top,left，例如 150,1240',
+      '面板位置设置失败: Error: 面板位置格式无效，请输入非负整数 top,left，例如 155,1240',
     )
   })
 
@@ -395,5 +395,24 @@ describe('settings menu', () => {
 
     expect(prompt).toHaveBeenCalledWith(expect.stringContaining('11. 查询模型下载次数'), '1')
     expect(alert).toHaveBeenCalledWith('无次数限制（模型下载次数限制未开启）')
+  })
+
+  it('toggles the div#csp panel visibility limit through the top-level settings menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn().mockReturnValueOnce('12').mockReturnValueOnce('13')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+    expect(localStorage.getItem('hvPonySolverPanelRequireCsp')).toBe('1')
+
+    await registerMenuCommand.mock.calls[0][1]()
+    expect(localStorage.getItem('hvPonySolverPanelRequireCsp')).toBe('0')
+    expect(alert).toHaveBeenNthCalledWith(1, '面板显示限制已开启，刷新页面后生效')
+    expect(alert).toHaveBeenNthCalledWith(2, '面板显示限制已关闭，刷新页面后生效')
   })
 })

@@ -65,6 +65,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     modelWorkerRequestRouterSource,
     modelWorkerAccessSource,
     modelWorkerResponseSource,
+    modelSource,
   )
 
   return [
