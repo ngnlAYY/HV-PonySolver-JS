@@ -399,27 +399,27 @@ test('fails clearly when README authorized GET row Bearer auth is masked by expl
   })
 })
 
-test('fails clearly when README OPTIONS row headers are masked by explanatory text', async () => {
+test('fails clearly when README quota OPTIONS row headers are masked by explanatory text', async () => {
   await withFixture(async (fixtureRoot) => {
     const readmePath = join(fixtureRoot, 'README.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(
       readme.includes(
-        '`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS`，`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt`',
+        '`204` preflight，`Access-Control-Allow-Methods: GET, POST, OPTIONS`，`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt`',
       ),
     )
     await writeFile(
       readmePath,
       `${readme.replace(
-        '`204` preflight，`Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS`，`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt`',
+        '`204` preflight，`Access-Control-Allow-Methods: GET, POST, OPTIONS`，`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt`',
         '`204` preflight，preflight headers documented elsewhere',
-      )}\n附注：preflight 会发送 \`Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS\` 和 \`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt\`。\n`,
+      )}\n附注：preflight 会发送 \`Access-Control-Allow-Methods: GET, POST, OPTIONS\` 和 \`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt\`。\n`,
     )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*OPTIONS docs must mention Access-Control-Allow-Methods/s)
-    assert.match(result.stderr, /README.md.*OPTIONS docs must mention Access-Control-Allow-Headers/s)
+    assert.match(result.stderr, /README.md.*quota OPTIONS docs must mention Access-Control-Allow-Methods/s)
+    assert.match(result.stderr, /README.md.*quota OPTIONS docs must mention Access-Control-Allow-Headers/s)
   })
 })
 
@@ -474,27 +474,25 @@ test('fails clearly when README selected R2 missing row is masked by explanatory
 test('fails clearly when Model Worker source allowed methods drift from README', async () => {
   await withFixture(async (fixtureRoot) => {
     const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
-    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
     const routerSource = await readFile(routerPath, 'utf8')
-    const responseSource = await readFile(responsePath, 'utf8')
     assert.ok(routerSource.includes("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'"))
-    assert.ok(responseSource.includes("const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'"))
+    assert.ok(routerSource.includes("const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'"))
     await writeFile(
       routerPath,
-      routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'"),
-    )
-    await writeFile(
-      responsePath,
-      responseSource.replace(
-        "const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'",
-        "const CORS_ALLOW_METHODS = 'GET, HEAD'",
-      ),
+      routerSource
+        .replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'")
+        .replace("const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'", "const QUOTA_ALLOWED_METHODS = 'GET, OPTIONS'"),
     )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /README.md.*405 docs must mention Allow: GET, HEAD/s)
-    assert.match(result.stderr, /README.md.*OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
+    assert.match(result.stderr, /README.md.*model OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
+    assert.match(
+      result.stderr,
+      /README.md.*quota OPTIONS docs must mention Access-Control-Allow-Methods: GET, OPTIONS/s,
+    )
+    assert.match(result.stderr, /README.md.*runtime OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
   })
 })
 
@@ -541,15 +539,16 @@ test('fails clearly when Model Worker source string facts drift is masked by reg
     await writeFile(
       routerPath,
       `/const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'/
-${routerSource.replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'")}`,
+/const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'/
+${routerSource
+  .replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'")
+  .replace("const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'", "const QUOTA_ALLOWED_METHODS = 'GET, OPTIONS'")}`,
     )
     await writeFile(
       responsePath,
-      `/const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'/
-/const CACHE_CONTROL = 'no-store'/
+      `/const CACHE_CONTROL = 'no-store'/
 /if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) }/
 ${responseSource
-  .replace("const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'", "const CORS_ALLOW_METHODS = 'GET, HEAD'")
   .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'private, no-cache'")
   .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404')}`,
     )
@@ -557,7 +556,11 @@ ${responseSource
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /README.md.*405 docs must mention Allow: GET, HEAD/s)
-    assert.match(result.stderr, /README.md.*OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
+    assert.match(result.stderr, /README.md.*model OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
+    assert.match(
+      result.stderr,
+      /README.md.*quota OPTIONS docs must mention Access-Control-Allow-Methods: GET, OPTIONS/s,
+    )
     assert.match(result.stderr, /README.md.*authorized real-model row must mention Cache-Control: private, no-cache/s)
     assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 404 Internal Server Error/s)
   })
@@ -565,22 +568,29 @@ ${responseSource
 
 test('fails clearly when Model Worker string facts use runtime expressions', async () => {
   await withFixture(async (fixtureRoot) => {
+    const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
     const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const routerSource = await readFile(routerPath, 'utf8')
     const responseSource = await readFile(responsePath, 'utf8')
     await writeFile(
+      routerPath,
+      routerSource.replace(
+        "const MODEL_ALLOWED_HEADERS = 'Authorization'",
+        "const MODEL_ALLOWED_HEADERS = 'Authorization'.toLowerCase()",
+      ),
+    )
+    await writeFile(
       responsePath,
-      responseSource
-        .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'no-store' + ', max-age=86400'")
-        .replace(
-          "const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt'",
-          "const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt'.toLowerCase()",
-        ),
+      responseSource.replace(
+        "const CACHE_CONTROL = 'no-store'",
+        "const CACHE_CONTROL = 'no-store' + ', max-age=86400'",
+      ),
     )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CACHE_CONTROL.*string literal/s)
-    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_HEADERS.*string literal/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/request-router\.ts.*MODEL_ALLOWED_HEADERS.*string literal/s)
   })
 })
 
@@ -592,19 +602,19 @@ test('accepts Model Worker string facts with TypeScript-only annotations', async
     const responseSource = await readFile(responsePath, 'utf8')
     await writeFile(
       routerPath,
-      routerSource.replace(
-        "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'",
-        "const ALLOWED_METHODS: string = 'GET, HEAD, OPTIONS' as const",
-      ),
+      routerSource
+        .replace(
+          "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'",
+          "const ALLOWED_METHODS: string = 'GET, HEAD, OPTIONS' as const",
+        )
+        .replace(
+          "const MODEL_ALLOWED_HEADERS = 'Authorization'",
+          "const MODEL_ALLOWED_HEADERS: string = 'Authorization' as const",
+        ),
     )
     await writeFile(
       responsePath,
-      responseSource
-        .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL: string = 'no-store' as const")
-        .replace(
-          "const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS'",
-          "const CORS_ALLOW_METHODS = 'GET, HEAD, POST, OPTIONS' satisfies string",
-        ),
+      responseSource.replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL: string = 'no-store' as const"),
     )
 
     const result = await runCheck(fixtureRoot)
@@ -615,22 +625,18 @@ test('accepts Model Worker string facts with TypeScript-only annotations', async
 test('accepts Model Worker string facts with combined TypeScript-only suffixes', async () => {
   await withFixture(async (fixtureRoot) => {
     const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
-    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
     const routerSource = await readFile(routerPath, 'utf8')
-    const responseSource = await readFile(responsePath, 'utf8')
     await writeFile(
       routerPath,
-      routerSource.replace(
-        "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'",
-        "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS' as const satisfies string",
-      ),
-    )
-    await writeFile(
-      responsePath,
-      responseSource.replace(
-        "const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt'",
-        "const CORS_ALLOW_HEADERS = 'Authorization, X-HV-Model-Download-Receipt' as const satisfies string",
-      ),
+      routerSource
+        .replace(
+          "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'",
+          "const ALLOWED_METHODS = 'GET, HEAD, OPTIONS' as const satisfies string",
+        )
+        .replace(
+          "const MODEL_ALLOWED_HEADERS = 'Authorization'",
+          "const MODEL_ALLOWED_HEADERS = 'Authorization' as const satisfies string",
+        ),
     )
 
     const result = await runCheck(fixtureRoot)
@@ -640,23 +646,36 @@ test('accepts Model Worker string facts with combined TypeScript-only suffixes',
 
 test('fails clearly when Model Worker response header use-sites bypass source facts', async () => {
   await withFixture(async (fixtureRoot) => {
+    const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
     const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const routerSource = await readFile(routerPath, 'utf8')
     const responseSource = await readFile(responsePath, 'utf8')
+    await writeFile(
+      routerPath,
+      routerSource
+        .replace('allowMethods: isQuota ? QUOTA_ALLOWED_METHODS : ALLOWED_METHODS', "allowMethods: 'GET, HEAD'")
+        .replace(
+          'allowHeaders: isQuota ? QUOTA_ALLOWED_HEADERS : MODEL_ALLOWED_HEADERS',
+          "allowHeaders: 'X-Model-Token'",
+        ),
+    )
     await writeFile(
       responsePath,
       responseSource
         .replace(
-          "'access-control-allow-headers': CORS_ALLOW_HEADERS",
-          "'access-control-allow-headers': 'X-Model-Token'",
+          "headers.set('access-control-allow-headers', policy.allowHeaders)",
+          "headers.set('access-control-allow-headers', 'X-Model-Token')",
         )
-        .replace("'access-control-allow-methods': CORS_ALLOW_METHODS", "'access-control-allow-methods': 'GET, HEAD'")
+        .replace("'access-control-allow-methods': policy.allowMethods", "'access-control-allow-methods': 'GET, HEAD'")
         .replaceAll("'cache-control': CACHE_CONTROL", "'cache-control': 'private, no-cache'"),
     )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_HEADERS/s)
-    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_METHODS/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/request-router\.ts.*route-specific preflight methods/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/request-router\.ts.*route-specific preflight headers/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*policy\.allowHeaders/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*policy\.allowMethods/s)
     assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CACHE_CONTROL/s)
   })
 })
@@ -667,22 +686,20 @@ test('fails clearly when Model Worker response header use-site drift is masked b
     const responseSource = await readFile(responsePath, 'utf8')
     await writeFile(
       responsePath,
-      responseSource
-        .replace(
-          "'access-control-allow-headers': CORS_ALLOW_HEADERS",
-          "'access-control-allow-headers': 'X-Model-Token'",
-        )
-        .replace("'access-control-allow-methods': CORS_ALLOW_METHODS", "'access-control-allow-methods': 'GET, HEAD'")
-        .replace(
-          'export function preflightResponse(request: Request): Response {\n  const headers',
-          `export function preflightResponse(request: Request): Response {\n  /['access-control-allow-headers': CORS_ALLOW_HEADERS]/\n  /['access-control-allow-methods': CORS_ALLOW_METHODS]/\n  const headers`,
-        ),
+      `/headers\\.set\\('access-control-allow-headers', policy\\.allowHeaders\\)/
+/'access-control-allow-methods': policy\\.allowMethods/
+${responseSource
+  .replace(
+    "headers.set('access-control-allow-headers', policy.allowHeaders)",
+    "headers.set('access-control-allow-headers', 'X-Model-Token')",
+  )
+  .replace("'access-control-allow-methods': policy.allowMethods", "'access-control-allow-methods': 'GET, HEAD'")}`,
     )
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_HEADERS/s)
-    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*CORS_ALLOW_METHODS/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*policy\.allowHeaders/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*policy\.allowMethods/s)
   })
 })
 

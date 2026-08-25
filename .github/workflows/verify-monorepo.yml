@@ -117,6 +117,9 @@ jobs:
 
       - name: Analyze
         uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          # Keep the former standalone workflow category so GitHub can reconcile and close its existing alerts.
+          category: '.github/workflows/security-scan.yml:codeql'
 
   dependency-review:
     if: ${{ github.event_name == 'pull_request' }}
