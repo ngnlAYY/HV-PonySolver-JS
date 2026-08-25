@@ -28,6 +28,14 @@ function readOptionalInvalidKeyMode(values) {
   return mode
 }
 
+function readOptionalQuotaEnabled(values) {
+  const enabled = (values.MODEL_DOWNLOAD_QUOTA_ENABLED ?? 'true').trim().toLowerCase() || 'true'
+  if (enabled !== 'true' && enabled !== 'false') {
+    throw new Error('MODEL_DOWNLOAD_QUOTA_ENABLED must be true or false')
+  }
+  return enabled
+}
+
 function escapeTomlString(value) {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
@@ -43,9 +51,12 @@ function renderWranglerConfig(
   template,
   { values = process.env, renderMode = process.env.HV_PONY_SOLVER_RENDER_ENV || '', mainPath } = {},
 ) {
-  const rendered = requiredVariables.reduce((content, name) => {
-    return content.replaceAll('${' + name + '}', readRequiredValue(name, values, renderMode))
-  }, template).replaceAll('${INVALID_KEY_MODE}', readOptionalInvalidKeyMode(values))
+  const rendered = requiredVariables
+    .reduce((content, name) => {
+      return content.replaceAll('${' + name + '}', readRequiredValue(name, values, renderMode))
+    }, template)
+    .replaceAll('${INVALID_KEY_MODE}', readOptionalInvalidKeyMode(values))
+    .replaceAll('${MODEL_DOWNLOAD_QUOTA_ENABLED}', readOptionalQuotaEnabled(values))
   return replaceMainPath(rendered, mainPath)
 }
 

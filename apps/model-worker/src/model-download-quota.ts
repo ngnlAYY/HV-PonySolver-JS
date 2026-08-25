@@ -6,7 +6,9 @@ import type { ModelDownloadQuotaNamespace } from './worker-types'
 
 const QUOTA_STATE_KEY = 'monthly-download-quota'
 const CONSUME_PATH = '/consume'
+const STATUS_PATH = '/status'
 const INTERNAL_CONSUME_URL = `https://model-download-quota.internal${CONSUME_PATH}`
+const INTERNAL_STATUS_URL = `https://model-download-quota.internal${STATUS_PATH}`
 const QUOTA_REQUEST_TIMEOUT_MS = 5_000
 
 type StoredQuotaState = Readonly<{
@@ -16,6 +18,13 @@ type StoredQuotaState = Readonly<{
 
 export type ModelDownloadQuotaResult = Readonly<{
   allowed: boolean
+  retryAfterSeconds: number
+}>
+
+export type ModelDownloadQuotaStatus = Readonly<{
+  limit: number
+  used: number
+  remaining: number
   retryAfterSeconds: number
 }>
 
@@ -51,13 +60,31 @@ function isQuotaResult(value: unknown): value is ModelDownloadQuotaResult {
   )
 }
 
-function jsonResponse(value: ModelDownloadQuotaResult): Response {
+function isQuotaStatus(value: unknown): value is ModelDownloadQuotaStatus {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const candidate = value as Partial<ModelDownloadQuotaStatus>
+  const numbers = [candidate.limit, candidate.used, candidate.remaining, candidate.retryAfterSeconds]
+  return (
+    numbers.every((number) => typeof number === 'number' && Number.isSafeInteger(number)) &&
+    candidate.limit! > 0 &&
+    candidate.used! >= 0 &&
+    candidate.used! <= candidate.limit! &&
+    candidate.remaining! >= 0 &&
+    candidate.remaining! === candidate.limit! - candidate.used! &&
+    candidate.retryAfterSeconds! > 0
+  )
+}
+
+function jsonResponse(value: ModelDownloadQuotaResult | ModelDownloadQuotaStatus): Response {
   return Response.json(value, { headers: { 'cache-control': 'no-store' } })
 }
 
 export class ModelDownloadQuota extends DurableObject<Record<string, never>> {
   async fetch(request: Request): Promise<Response> {
-    if (request.method !== 'POST' || new URL(request.url).pathname !== CONSUME_PATH) {
+    const pathname = new URL(request.url).pathname
+    if ((pathname !== CONSUME_PATH && pathname !== STATUS_PATH) || request.method !== 'POST') {
       return new Response('Not Found', { status: 404 })
     }
 
@@ -66,7 +93,16 @@ export class ModelDownloadQuota extends DurableObject<Record<string, never>> {
     const retryAfterSeconds = secondsUntilNextUtcMonth(now)
     const result = await this.ctx.storage.transaction(async (transaction) => {
       const stored = await transaction.get<StoredQuotaState>(QUOTA_STATE_KEY)
-      const used = isStoredQuotaState(stored) && stored.month === month ? stored.used : 0
+      const used =
+        isStoredQuotaState(stored) && stored.month === month ? Math.min(stored.used, MODEL_MONTHLY_DOWNLOAD_LIMIT) : 0
+      if (pathname === STATUS_PATH) {
+        return {
+          limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+          used,
+          remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - used,
+          retryAfterSeconds,
+        } satisfies ModelDownloadQuotaStatus
+      }
       if (used >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
         return { allowed: false, retryAfterSeconds } as const
       }
@@ -97,6 +133,29 @@ export async function consumeModelDownloadQuota(
     }
     const result: unknown = await response.json()
     if (!isQuotaResult(result)) {
+      throw new Error('Model download quota service returned an invalid response')
+    }
+    return result
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+export async function readModelDownloadQuota(
+  namespace: ModelDownloadQuotaNamespace,
+  canonicalToken: string,
+): Promise<ModelDownloadQuotaStatus> {
+  const identity = await sha256Hex(canonicalToken)
+  const stub = namespace.get(namespace.idFromName(identity))
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), QUOTA_REQUEST_TIMEOUT_MS)
+  try {
+    const response = await stub.fetch(new Request(INTERNAL_STATUS_URL, { method: 'POST', signal: controller.signal }))
+    if (!response.ok) {
+      throw new Error('Model download quota service failed')
+    }
+    const result: unknown = await response.json()
+    if (!isQuotaStatus(result)) {
       throw new Error('Model download quota service returned an invalid response')
     }
     return result

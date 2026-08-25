@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ANSWER_CODES } from '@hv-pony-solver/shared/answer'
 import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 
 function createSubmitter(
   submitDelay: readonly [number, number] = [1000, 1000],
   multiClickDelay: readonly [number, number] = [500, 500],
+  preserveCheckedAnswers = true,
 ): AnswerSubmitter {
   return new AnswerSubmitter(
     async () => submitDelay,
     async () => multiClickDelay,
+    () => preserveCheckedAnswers,
   )
 }
 
@@ -51,6 +54,85 @@ describe('AnswerSubmitter', () => {
 
     expect(onError).toHaveBeenCalledWith('未找到提交按钮')
     expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual(initialState)
+  })
+
+  it('preserves checked answers and removes the lowest-confidence automatic answers above four selections', async () => {
+    const form = createForm(true)
+    const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+    for (const checkbox of checkboxes) {
+      checkbox.checked = false
+    }
+    checkboxes[0]!.checked = true
+    checkboxes[1]!.checked = true
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.click = vi.fn()
+    const onSubmitted = vi.fn()
+
+    await createSubmitter([0, 0], [0, 0]).submit(form, ['FS', 'RD', 'PP'], vi.fn(), onSubmitted, {
+      confidences: { FS: 0.91, RD: 0.32, PP: 0.71 },
+    })
+
+    expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual([true, true, true, false, false, false])
+    expect(button.click).toHaveBeenCalledTimes(1)
+    expect(onSubmitted).toHaveBeenCalledTimes(1)
+  })
+
+  it('never removes prechecked answers even when automatic answers cannot bring the total below three', async () => {
+    const form = createForm(true)
+    const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+    for (const checkbox of checkboxes) {
+      checkbox.checked = false
+    }
+    for (const checkbox of checkboxes.slice(0, 4)) {
+      checkbox.checked = true
+    }
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.click = vi.fn()
+
+    await createSubmitter([0, 0], [0, 0]).submit(form, ['PP', 'AJ'], vi.fn(), vi.fn(), {
+      confidences: { PP: 0.1, AJ: 0.9 },
+    })
+
+    expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual([true, true, true, true, false, false])
+  })
+
+  it('keeps previous automatic answers eligible for confidence-based removal', async () => {
+    const form = createForm(true)
+    const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+    for (const checkbox of checkboxes) {
+      checkbox.checked = false
+    }
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.click = vi.fn()
+    const submitter = createSubmitter([0, 0], [0, 0])
+
+    await submitter.submit(form, ['FS', 'RD'], vi.fn(), vi.fn(), {
+      confidences: { FS: 0.9, RD: 0.2 },
+    })
+
+    const manualIndex = ANSWER_CODES.indexOf('AJ')
+    checkboxes[manualIndex]!.checked = true
+
+    await submitter.submit(form, ['FS', 'RD', 'PP', 'TS', 'AJ'], vi.fn(), vi.fn(), {
+      confidences: { FS: 0.9, RD: 0.8, PP: 0.1, TS: 0.6, AJ: 0.5 },
+    })
+
+    expect(checkboxes[ANSWER_CODES.indexOf('FS')]).toHaveProperty('checked', true)
+    expect(checkboxes[ANSWER_CODES.indexOf('RD')]).toHaveProperty('checked', true)
+    expect(checkboxes[ANSWER_CODES.indexOf('PP')]).toHaveProperty('checked', false)
+    expect(checkboxes[manualIndex]).toHaveProperty('checked', true)
+  })
+
+  it('clears prechecked answers when preservation is disabled', async () => {
+    const form = createForm(true)
+    const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+    checkboxes[1]!.checked = true
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.click = vi.fn()
+
+    await createSubmitter([0, 0], [0, 0], false).submit(form, ['FS'], vi.fn(), vi.fn())
+
+    expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual([false, false, true, false, false, false])
   })
 
   describe('AbortSignal support', () => {

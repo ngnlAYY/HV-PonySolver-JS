@@ -5,9 +5,12 @@ import type { DelayRange } from './timing-settings'
 
 export type SubmitErrorHandler = (message: string) => void
 
+export type AnswerConfidenceMap = Partial<Record<AnswerCode, number>>
+
 export type SubmitOptions = {
   signal?: AbortSignal
   isCurrent?: () => boolean
+  confidences?: AnswerConfidenceMap
 }
 
 export interface AnswerSubmissionService {
@@ -21,6 +24,7 @@ export interface AnswerSubmissionService {
 }
 
 export type DelayRangeProvider = () => Promise<DelayRange>
+export type PreserveCheckedAnswersProvider = () => boolean
 
 type SubmissionControls = Readonly<{
   checkboxes: readonly HTMLInputElement[]
@@ -55,11 +59,90 @@ function controlsAreUsable(form: HTMLFormElement, controls: SubmissionControls):
   )
 }
 
+function uniqueIndices(indices: readonly number[]): number[] {
+  return [...new Set(indices)]
+}
+
+function confidenceForIndex(
+  index: number,
+  confidences: AnswerConfidenceMap | undefined,
+  fallbackConfidences?: ReadonlyMap<number, number>,
+): number {
+  const pony = ANSWER_CODES[index]
+  const confidence = pony === undefined ? undefined : confidences?.[pony]
+  if (typeof confidence === 'number' && Number.isFinite(confidence)) {
+    return confidence
+  }
+  const fallback = fallbackConfidences?.get(index)
+  return typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : Number.NEGATIVE_INFINITY
+}
+
+function selectAutomaticIndices(
+  indices: readonly number[],
+  manuallyChecked: ReadonlySet<number>,
+  previouslyAutomatic: ReadonlyMap<number, number>,
+  preserveCheckedAnswers: boolean,
+  confidences: AnswerConfidenceMap | undefined,
+): number[] {
+  const unique = uniqueIndices(indices)
+  if (!preserveCheckedAnswers) {
+    return unique
+  }
+
+  const automatic = uniqueIndices([...previouslyAutomatic.keys(), ...unique]).filter(
+    (index) => !manuallyChecked.has(index),
+  )
+  const totalSelected = manuallyChecked.size + automatic.length
+  if (totalSelected <= 4) {
+    return automatic
+  }
+
+  const removeCount = totalSelected - 3
+  const lowestConfidence = [...automatic]
+    .sort((left, right) => {
+      const difference =
+        confidenceForIndex(left, confidences, previouslyAutomatic) -
+        confidenceForIndex(right, confidences, previouslyAutomatic)
+      return Number.isNaN(difference) ? left - right : difference || left - right
+    })
+    .slice(0, removeCount)
+  const removed = new Set(lowestConfidence)
+  return automatic.filter((index) => !removed.has(index))
+}
+
 export class AnswerSubmitter implements AnswerSubmissionService {
+  private readonly automaticConfidences = new WeakMap<HTMLInputElement, number>()
+
+  private readonly observedCheckboxes = new WeakSet<HTMLInputElement>()
+
+  private programmaticCheckboxClick = false
+
   constructor(
     private readonly getSubmitDelayRange: DelayRangeProvider,
     private readonly getMultiClickDelayRange: DelayRangeProvider,
+    private readonly getPreserveCheckedAnswers: PreserveCheckedAnswersProvider = () => true,
   ) {}
+
+  private observeCheckbox(checkbox: HTMLInputElement): void {
+    if (this.observedCheckboxes.has(checkbox)) {
+      return
+    }
+    this.observedCheckboxes.add(checkbox)
+    checkbox.addEventListener('change', () => {
+      if (!this.programmaticCheckboxClick) {
+        this.automaticConfidences.delete(checkbox)
+      }
+    })
+  }
+
+  private clickCheckbox(checkbox: HTMLInputElement): void {
+    this.programmaticCheckboxClick = true
+    try {
+      checkbox.click()
+    } finally {
+      this.programmaticCheckboxClick = false
+    }
+  }
 
   async submit(
     form: HTMLFormElement,
@@ -94,6 +177,9 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       onError('答案控件不可用')
       return
     }
+    for (const checkbox of expectedControls.checkboxes) {
+      this.observeCheckbox(checkbox)
+    }
 
     const currentControls = (): SubmissionControls | null => {
       if (shouldStop()) {
@@ -116,14 +202,60 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       return
     }
 
+    const manuallyChecked = new Set<number>()
+    const previouslyAutomatic = new Map<number, number>()
     for (let i = 0; i < expectedControls.checkboxes.length; i += 1) {
-      const controls = currentControls()
-      if (!controls) {
-        return
+      const checkbox = expectedControls.checkboxes[i]
+      if (!checkbox?.checked) {
+        continue
       }
-      const checkbox = controls.checkboxes[i]
-      if (checkbox?.checked) {
-        checkbox.click()
+      const automaticConfidence = this.automaticConfidences.get(checkbox)
+      if (automaticConfidence === undefined) {
+        manuallyChecked.add(i)
+      } else {
+        previouslyAutomatic.set(i, automaticConfidence)
+      }
+    }
+    const preserveCheckedAnswers = this.getPreserveCheckedAnswers()
+    const automaticIndices = selectAutomaticIndices(
+      indices,
+      manuallyChecked,
+      previouslyAutomatic,
+      preserveCheckedAnswers,
+      options?.confidences,
+    )
+
+    if (!preserveCheckedAnswers) {
+      for (let i = 0; i < expectedControls.checkboxes.length; i += 1) {
+        const controls = currentControls()
+        if (!controls) {
+          return
+        }
+        const checkbox = controls.checkboxes[i]
+        if (checkbox?.checked) {
+          this.clickCheckbox(checkbox)
+        }
+        if (checkbox) {
+          this.automaticConfidences.delete(checkbox)
+        }
+      }
+    } else {
+      const selectedAutomatic = new Set(automaticIndices)
+      for (const index of previouslyAutomatic.keys()) {
+        if (selectedAutomatic.has(index)) {
+          continue
+        }
+        const controls = currentControls()
+        if (!controls) {
+          return
+        }
+        const checkbox = controls.checkboxes[index]
+        if (checkbox?.checked) {
+          this.clickCheckbox(checkbox)
+        }
+        if (checkbox) {
+          this.automaticConfidences.delete(checkbox)
+        }
       }
     }
 
@@ -135,19 +267,25 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       return
     }
 
-    const order = shuffle(indices)
+    const order = shuffle(automaticIndices)
     for (let i = 0; i < order.length; i += 1) {
       const controls = currentControls()
       if (!controls) {
         return
       }
       const index = order[i]
-      const checkbox = index === undefined ? undefined : controls.checkboxes[index]
+      if (index === undefined) {
+        continue
+      }
+      const checkbox = controls.checkboxes[index]
       if (!checkbox) {
         continue
       }
       if (!checkbox.checked) {
-        checkbox.click()
+        this.clickCheckbox(checkbox)
+      }
+      if (checkbox.checked) {
+        this.automaticConfidences.set(checkbox, confidenceForIndex(index, options?.confidences, previouslyAutomatic))
       }
       if (i < order.length - 1) {
         await sleep(randDelay(multiClickDelay), signal)

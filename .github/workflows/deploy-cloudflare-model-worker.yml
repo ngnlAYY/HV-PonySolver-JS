@@ -16,6 +16,11 @@ on:
         options:
           - decoy
           - error
+      enable_model_download_quota:
+        description: 'Enable per-Key monthly model download limits'
+        type: boolean
+        required: true
+        default: true
 
 permissions:
   contents: read
@@ -75,6 +80,7 @@ jobs:
           MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
           INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
+          MODEL_DOWNLOAD_QUOTA_ENABLED: ${{ inputs.enable_model_download_quota }}
         run: pnpm --filter @hv-pony-solver/model-worker render-config
 
       - name: Typecheck
@@ -91,6 +97,7 @@ jobs:
           MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
           INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
+          MODEL_DOWNLOAD_QUOTA_ENABLED: ${{ inputs.enable_model_download_quota }}
         run: |
           pnpm --filter @hv-pony-solver/model-worker exec node scripts/validate-wrangler-config.mjs
           pnpm --filter @hv-pony-solver/model-worker exec wrangler deploy --dry-run
@@ -103,4 +110,5 @@ jobs:
           MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
           INVALID_KEY_MODE: ${{ inputs.invalid_key_mode }}
+          MODEL_DOWNLOAD_QUOTA_ENABLED: ${{ inputs.enable_model_download_quota }}
         run: pnpm --filter @hv-pony-solver/model-worker run deploy

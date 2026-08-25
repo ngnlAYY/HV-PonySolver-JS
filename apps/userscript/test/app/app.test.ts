@@ -13,10 +13,15 @@ const modelDownload = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
 const modelPutCached = vi.fn(async () => undefined)
 const modelClose = vi.fn()
 const { probeModelAccessKey } = vi.hoisted(() => ({
-  probeModelAccessKey: vi.fn<(signal?: AbortSignal, options?: { accessKeyOverride?: string }) => Promise<{
-    valid: boolean
-    quotaExceededRetryAfterSeconds: number | null
-  }>>(),
+  probeModelAccessKey: vi.fn<
+    (
+      signal?: AbortSignal,
+      options?: { accessKeyOverride?: string },
+    ) => Promise<{
+      valid: boolean
+      quotaExceededRetryAfterSeconds: number | null
+    }>
+  >(),
 }))
 const apps: Array<{ destroy: () => void }> = []
 
@@ -181,7 +186,7 @@ describe('App', () => {
     expect(prepare).toHaveBeenCalledTimes(1)
   })
 
-  it('retries the same captcha after a failed solve', async () => {
+  it('suppresses the same captcha during the failure cooldown and retries afterward', async () => {
     const { App } = await import('../../src/app/app')
     // A rejecting detector fails the solve for good (no random fallback can
     // rescue it), keeping the retry-on-mutation behavior observable.
@@ -198,7 +203,12 @@ describe('App', () => {
     captcha.appendChild(document.createElement('span'))
     await Promise.resolve()
     await vi.runAllTimersAsync()
+    expect(prepare).toHaveBeenCalledTimes(1)
 
+    vi.setSystemTime(Date.now() + 30_000)
+    captcha.appendChild(document.createElement('strong'))
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
     expect(prepare).toHaveBeenCalledTimes(2)
   })
 

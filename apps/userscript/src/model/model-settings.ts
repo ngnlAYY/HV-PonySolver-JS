@@ -3,6 +3,7 @@ import {
   clearModelAccessKey as clearCoreModelAccessKey,
   formatErrorMessage,
   getModelAccessKey as getCoreModelAccessKey,
+  queryModelDownloadQuota as queryCoreModelDownloadQuota,
   setModelAccessKey as setCoreModelAccessKey,
 } from '@hv-pony-solver/browser-core'
 
@@ -25,6 +26,15 @@ export function setModelAccessKey(value: string): Promise<void> {
 
 export function clearModelAccessKey(): Promise<void> {
   return clearCoreModelAccessKey(modelAccessKeyStorage)
+}
+
+export async function querySavedModelDownloadQuota(): Promise<void> {
+  const quota = await queryCoreModelDownloadQuota(undefined, {}, { getAccessKey: () => getModelAccessKey() })
+  if (!quota.enabled) {
+    alertUser('无次数限制（模型下载次数限制未开启）')
+    return
+  }
+  alertUser(`本月模型下载额度：已用 ${quota.used}/${quota.limit} 次，剩余 ${quota.remaining ?? 0} 次`)
 }
 
 export async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKey): Promise<void> {

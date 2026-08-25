@@ -1,9 +1,14 @@
 import { readWorkerConfig } from './env'
 import { logWorkerError, logWorkerWarning, workerErrorName, type WorkerLogRoute } from './logger'
 import { selectModelAccess } from './model-access'
-import { consumeModelDownloadQuota } from './model-download-quota'
+import {
+  consumeModelDownloadQuota,
+  readModelDownloadQuota,
+  type ModelDownloadQuotaStatus,
+} from './model-download-quota'
 import {
   modelObjectResponse,
+  modelQuotaStatusResponse,
   internalErrorResponse,
   preflightResponse,
   quotaExceededResponse,
@@ -14,6 +19,7 @@ import {
 import type { Env, WorkerConfig } from './worker-types'
 
 const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'
+const QUOTA_ALLOWED_METHODS = 'GET, OPTIONS'
 const LEGACY_MODEL_FILENAME = 'yolo26n-640.onnx'
 const ORT_MODEL_FILENAME = 'yolo26n-640.ort'
 const QUOTA_FAILURE_RETRY_AFTER_SECONDS = 5
@@ -22,6 +28,14 @@ type ModelRoute = Readonly<{
   filename: string
   logRoute: WorkerLogRoute
   realObjectKey: string
+}>
+
+type PublicQuotaStatus = Readonly<{
+  enabled: boolean
+  limit: number
+  used: number
+  remaining: number | null
+  retryAfterSeconds: number | null
 }>
 
 function filenameForPath(pathname: string, fallback: string): string {
@@ -55,7 +69,7 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
     return internalErrorResponse(request)
   }
   const response = modelObjectResponse(request, object, route.filename)
-  if (access.decision !== 'real' || request.method !== 'GET') {
+  if (access.decision !== 'real' || request.method !== 'GET' || !config.downloadQuotaEnabled) {
     return response
   }
 
@@ -90,23 +104,66 @@ async function serveRuntime(request: Request, env: Env, config: WorkerConfig): P
   return runtimeObjectResponse(request, object)
 }
 
+async function serveQuota(request: Request, env: Env, config: WorkerConfig): Promise<Response> {
+  const access = await selectModelAccess(request, env.MODEL_KEYS, config.invalidKeyMode)
+  if (access.decision !== 'real' || !access.canonicalToken) {
+    return textResponse(request, 'Forbidden', 403)
+  }
+  if (!config.downloadQuotaEnabled) {
+    const status: PublicQuotaStatus = {
+      enabled: false,
+      limit: 0,
+      used: 0,
+      remaining: null,
+      retryAfterSeconds: null,
+    }
+    return modelQuotaStatusResponse(request, status)
+  }
+  try {
+    const quota: ModelDownloadQuotaStatus = await readModelDownloadQuota(
+      env.MODEL_DOWNLOAD_QUOTAS,
+      access.canonicalToken,
+    )
+    const status: PublicQuotaStatus = { enabled: true, ...quota }
+    return modelQuotaStatusResponse(request, status)
+  } catch (error) {
+    logWorkerWarning({
+      route: 'quota',
+      errorKind: 'quota-storage-unavailable',
+      errorName: workerErrorName(error),
+    })
+    return serviceUnavailableResponse(request, QUOTA_FAILURE_RETRY_AFTER_SECONDS)
+  }
+}
+
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
   let logRoute: WorkerLogRoute = 'request'
   try {
     const config = readWorkerConfig(env)
     const pathname = new URL(request.url).pathname
     const isLegacyModel = pathname === config.publicModelPath
+    const isQuota = pathname === config.publicQuotaPath
     const isOrtModel = pathname === config.publicOrtModelPath
     const isRuntime = pathname === config.publicRuntimeWasmPath
 
-    if (!isLegacyModel && !isOrtModel && !isRuntime) {
+    if (!isLegacyModel && !isQuota && !isOrtModel && !isRuntime) {
       return textResponse(request, 'Not Found', 404)
     }
     if (request.method === 'OPTIONS') {
       return preflightResponse(request, isRuntime)
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
+      if (isQuota) {
+        return textResponse(request, 'Method Not Allowed', 405, { allow: QUOTA_ALLOWED_METHODS })
+      }
       return textResponse(request, 'Method Not Allowed', 405, { allow: ALLOWED_METHODS })
+    }
+    if (isQuota) {
+      logRoute = 'quota'
+      if (request.method !== 'GET') {
+        return textResponse(request, 'Method Not Allowed', 405, { allow: QUOTA_ALLOWED_METHODS })
+      }
+      return await serveQuota(request, env, config)
     }
     if (isRuntime) {
       logRoute = 'runtime'

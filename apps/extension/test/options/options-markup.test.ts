@@ -13,6 +13,8 @@ describe('options base markup', () => {
     expect(fieldset.disabled).toBe(true)
     expect(fieldset.contains(optionsElement('model-key'))).toBe(true)
     expect(fieldset.contains(optionsElement('verify-key'))).toBe(true)
+    expect(fieldset.contains(optionsElement('query-model-quota'))).toBe(true)
+    expect(fieldset.contains(optionsElement('download-model'))).toBe(true)
     expect(fieldset.contains(optionsElement('clear-key'))).toBe(true)
     const cancelKeyOperation = optionsElement<HTMLButtonElement>('cancel-key-op')
     expect(fieldset.contains(cancelKeyOperation)).toBe(true)

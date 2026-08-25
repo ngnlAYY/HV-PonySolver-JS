@@ -42,6 +42,10 @@
           <input id="random-on-fail" type="checkbox" />
           识别失败时随机选择一个答案
         </label>
+        <label class="checkbox">
+          <input id="preserve-checked-answers" type="checkbox" checked />
+          自动答题前保留已勾选答案，允许手动参与选择
+        </label>
         <div class="actions">
           <button type="submit" disabled>保存设置</button>
         </div>
@@ -53,6 +57,8 @@
           </label>
           <div class="actions">
             <button id="verify-key" type="button">验证并保存 Key</button>
+            <button id="query-model-quota" type="button">查询下载次数</button>
+            <button id="download-model" type="button">下载模型</button>
             <button id="clear-key" type="button" class="secondary">清除 Key</button>
             <button id="cancel-key-op" type="button" class="secondary" disabled>取消进行中的 Key 操作</button>
           </div>

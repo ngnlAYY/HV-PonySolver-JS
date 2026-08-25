@@ -267,7 +267,7 @@ Safari、其他移动浏览器和 Manifest V2 不在当前范围内。Firefox De
 - Edge：打开 `edge://extensions`，启用开发人员模式，加载同一个 `chromium` 目录。
 - Firefox：打开 `about:debugging#/runtime/this-firefox`，选择“临时载入附加组件”，打开 `apps/extension/dist/firefox/manifest.json`。
 
-点击工具栏按钮会打开扩展设置页。远程版本可配置模型 Key；Key 只保存在扩展源的 IndexedDB 中且不会回显，验证会实际下载并校验模型，可能消耗月度额度。内置版本不读取也不删除旧 Key，Key 控件保持置灰并显示“当前版本已内置模型，无需配置模型 Key。”。两种版本都可配置自动/手动模式、失败随机答案、点击/提交时间、面板位置、紧凑模式和历史条数；这些小型设置与分世界历史保存在 `storage.local`。
+点击工具栏按钮会打开扩展设置页。远程版本可配置模型 Key；Key 只保存在扩展源的 IndexedDB 中且不会回显，验证使用不计额度的 HEAD 探测，新增的“下载模型”按钮会使用已保存 Key 下载、校验并缓存模型，已有有效缓存时不会重复消耗额度。内置版本不读取也不删除旧 Key，Key 控件保持置灰并显示“当前版本已内置模型，无需配置模型 Key。”。两种版本都可配置自动/手动模式、失败随机答案、点击/提交时间、面板位置、紧凑模式和历史条数；这些小型设置与分世界历史保存在 `storage.local`。
 
 不要在同一浏览器配置中同时启用用户脚本版和扩展版，否则两者可能同时处理并提交同一个验证码。
 
@@ -460,16 +460,18 @@ apps/model-worker/wrangler.template.toml
 
 ### 运行时变量
 
-| 变量                        | 作用                                         |
-| --------------------------- | -------------------------------------------- |
-| `PUBLIC_MODEL_PATH`         | 旧版 ONNX 公开路径，默认 `/yolo26n-640.onnx` |
-| `REAL_MODEL_OBJECT_KEY`     | 旧版真实 ONNX 的 R2 对象键，必填             |
-| `DECOY_MODEL_OBJECT_KEY`    | 鉴权失败时使用的诱饵对象键，必填             |
-| `PUBLIC_ORT_MODEL_PATH`     | 新版 ORT 公开路径，默认 `/yolo26n-640.ort`   |
-| `REAL_ORT_MODEL_OBJECT_KEY` | 新版真实 ORT 的 R2 对象键，默认来自共享契约  |
-| `PUBLIC_RUNTIME_WASM_PATH`  | 精简 WASM 公开路径，默认来自共享契约         |
-| `RUNTIME_WASM_OBJECT_KEY`   | 精简 WASM 的 R2 对象键，默认来自共享契约     |
-| `INVALID_KEY_MODE`          | 无效 token 策略，只允许 `decoy` 或 `error`   |
+| 变量                           | 作用                                         |
+| ------------------------------ | -------------------------------------------- |
+| `PUBLIC_MODEL_PATH`            | 旧版 ONNX 公开路径，默认 `/yolo26n-640.onnx` |
+| `REAL_MODEL_OBJECT_KEY`        | 旧版真实 ONNX 的 R2 对象键，必填             |
+| `DECOY_MODEL_OBJECT_KEY`       | 鉴权失败时使用的诱饵对象键，必填             |
+| `PUBLIC_ORT_MODEL_PATH`        | 新版 ORT 公开路径，默认 `/yolo26n-640.ort`   |
+| `REAL_ORT_MODEL_OBJECT_KEY`    | 新版真实 ORT 的 R2 对象键，默认来自共享契约  |
+| `PUBLIC_RUNTIME_WASM_PATH`     | 精简 WASM 公开路径，默认来自共享契约         |
+| `RUNTIME_WASM_OBJECT_KEY`      | 精简 WASM 的 R2 对象键，默认来自共享契约     |
+| `PUBLIC_QUOTA_PATH`            | Key 月度下载次数查询路径，默认 `/quota`      |
+| `INVALID_KEY_MODE`             | 无效 token 策略，只允许 `decoy` 或 `error`   |
+| `MODEL_DOWNLOAD_QUOTA_ENABLED` | 是否启用每 Key 月度下载次数限制，默认 `true` |
 
 ### 生成 Wrangler 配置
 
@@ -477,22 +479,24 @@ apps/model-worker/wrangler.template.toml
 MODEL_KEYS_KV_NAMESPACE_ID=<kv-namespace-id> \
 MODEL_BUCKET_NAME=<r2-bucket-name> \
 INVALID_KEY_MODE=decoy \
+MODEL_DOWNLOAD_QUOTA_ENABLED=true \
 pnpm --filter @hv-pony-solver/model-worker render-config
 
 pnpm --filter @hv-pony-solver/model-worker exec node scripts/validate-wrangler-config.mjs
 ```
 
-部署模式会拒绝测试占位值。`INVALID_KEY_MODE` 省略时使用项目默认策略。
+部署模式会拒绝测试占位值。`INVALID_KEY_MODE` 和 `MODEL_DOWNLOAD_QUOTA_ENABLED` 省略时使用项目默认策略。
 
 ## Model Worker HTTP 契约
 
 ### 路由
 
-| 路径                                   | 鉴权         | R2 对象                | 缓存策略          |
-| -------------------------------------- | ------------ | ---------------------- | ----------------- |
-| `/yolo26n-640.onnx`                    | Bearer token | 旧版真实模型或诱饵对象 | `no-store`        |
-| `/yolo26n-640.ort`                     | Bearer token | 新版真实模型或诱饵对象 | `no-store`        |
-| `/runtime/ort-wasm-simd-<sha256>.wasm` | 公开         | 精简 WASM              | 一年、`immutable` |
+| 路径                                   | 鉴权         | R2 对象                    | 缓存策略          |
+| -------------------------------------- | ------------ | -------------------------- | ----------------- |
+| `/yolo26n-640.onnx`                    | Bearer token | 旧版真实模型或诱饵对象     | `no-store`        |
+| `/yolo26n-640.ort`                     | Bearer token | 新版真实模型或诱饵对象     | `no-store`        |
+| `/quota`                               | Bearer token | 本 Key 的月度下载次数 JSON | `no-store`        |
+| `/runtime/ort-wasm-simd-<sha256>.wasm` | 公开         | 精简 WASM                  | 一年、`immutable` |
 
 支持的方法：
 
@@ -506,13 +510,15 @@ GET, HEAD, OPTIONS
 - 模型响应使用 `application/octet-stream` 和 `Cache-Control: no-store`。
 - WASM 响应使用 `application/wasm` 和 `Cache-Control: public, max-age=31536000, immutable`。
 - 文本错误响应使用 `no-store` 和 `X-Content-Type-Options: nosniff`。
-- 同一 Key 的 ONNX 与 ORT 真实模型 `GET` 共用每个 UTC 自然月 5 次额度；`HEAD`、`OPTIONS`、诱饵模型和 Runtime 不计数。
+- `GET /quota` 只读并返回 `enabled`、`limit`、`used`、`remaining` 和 `retryAfterSeconds`，不会消耗次数。
+- 同一 Key 的 ONNX 与 ORT 真实模型 `GET` 共用每个 UTC 自然月 5 次额度；`HEAD`、`OPTIONS`、诱饵模型和 Runtime 不计数。`MODEL_DOWNLOAD_QUOTA_ENABLED=false` 时不执行额度限制，也不递增计数。
 
 ### 响应矩阵
 
 | 请求或情况                                                                           | HTTP 契约                                                                                                                                                   |
 | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中  | `200` 真实模型，模型响应使用 `Cache-Control: no-store`；`GET /yolo26n-640.ort` 使用相同契约                                                                 |
+| `GET /quota` 携带有效 Bearer token                                                   | `200` JSON 额度状态；不消耗下载次数                                                                                                                         |
 | `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200`，只读取 R2 元数据且不返回响应体；`HEAD /yolo26n-640.ort` 使用相同契约                                                                                 |
 | `OPTIONS /yolo26n-640.onnx`                                                          | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`；`OPTIONS /yolo26n-640.ort` 使用相同契约 |
 | 非 `GET` / `HEAD` / `OPTIONS` 方法                                                   | `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`                                                                                                       |
@@ -686,6 +692,7 @@ CI 中的 E2E 和用户脚本产物发布默认不是每次运行都执行。
 `.github/workflows/deploy-cloudflare-model-worker.yml` 仅支持手动触发：
 
 - 默认只渲染配置、执行检查并运行 Wrangler dry-run。
+- 手动输入 `enable_model_download_quota` 控制是否启用每 Key 月度下载限制，默认开启；关闭后模型请求不受 5 次限制，额度查询会提示限制未开启。
 - 只有 `publish_model_worker=true` 且所需 secrets 完整时才实际部署。
 - 部署完成后运行公开契约检查。
 
@@ -703,7 +710,7 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - 默认外部 profile 信任固定版本的 jsDelivr 运行时资源。
 - 内置 profile 只对首方精简 WASM 执行内容完整性校验。
 - 扩展产物不加载远程 JS/WASM；ORT glue、module Worker 和内容寻址 WASM 均随包分发。远程 `.ort` 下载和包内 `.ort` 都按固定长度与 SHA-256 校验；包内模型不加密，也不具备机密性。
-- 扩展内容脚本不接收模型 Key 或模型字节。远程版本只有设置页可发起 Key 验证请求；内置版本不构建 Key 存储、验证或远程下载能力。
+- 扩展内容脚本不接收模型 Key 或模型字节。远程版本只有设置页可发起 Key 验证和模型下载请求；内置版本不构建 Key 存储、验证或远程下载能力。
 - 验证码图片为兼容扩展 JSON 消息边界继续使用有上限的 Base64；模型从 Host 以一次可转移的二进制 `ArrayBuffer` 交给推理 Worker，不使用 Base64 或分片。
 - 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致。
 - 原始 Key、规范化 Key、配额对象标识和配额状态均不得写入日志或响应。

@@ -45,7 +45,7 @@ function successfulHostPort(): Readonly<{
   }
 }
 
-function controlledHostPort(): Readonly<{
+function controlledHostPort(disconnectError?: string): Readonly<{
   disconnect: ReturnType<typeof vi.fn>
   emitDisconnect(): void
   emitMessage(message: unknown): void
@@ -56,6 +56,7 @@ function controlledHostPort(): Readonly<{
   let disconnectListener: (() => void) | undefined
   return {
     name: 'hv-pony-solver:options',
+    ...(disconnectError ? { error: { message: disconnectError } } : {}),
     onMessage: {
       addListener(listener: MessageListener) {
         messageListener = listener
@@ -137,6 +138,50 @@ describe('default remote options entry', () => {
     )
     await vi.waitFor(() => {
       expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型 Key 已清除')
+    })
+  })
+
+  it('requests model download through the Host without exposing the saved Key to the page', async () => {
+    await import('../../src/options/main')
+
+    optionsElement<HTMLButtonElement>('download-model').click()
+
+    await vi.waitFor(() => expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(1))
+    const downloadPort = platformMocks.runtimeConnect.mock.results[0]?.value as {
+      postMessage: ReturnType<typeof vi.fn>
+    }
+    expect(downloadPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: 'hv-pony-solver/2',
+        type: 'download-model',
+      }),
+    )
+    const request = downloadPort.postMessage.mock.calls[0]![0] as Record<string, unknown>
+    expect(request).not.toHaveProperty('candidateKey')
+    await vi.waitFor(() => {
+      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型下载成功')
+    })
+  })
+
+  it('requests quota status through the Host without exposing a Key to the page', async () => {
+    await import('../../src/options/main')
+
+    optionsElement<HTMLButtonElement>('query-model-quota').click()
+
+    await vi.waitFor(() => expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(1))
+    const quotaPort = platformMocks.runtimeConnect.mock.results[0]?.value as {
+      postMessage: ReturnType<typeof vi.fn>
+    }
+    expect(quotaPort.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: 'hv-pony-solver/2',
+        type: 'query-model-quota',
+      }),
+    )
+    const request = quotaPort.postMessage.mock.calls[0]![0] as Record<string, unknown>
+    expect(request).not.toHaveProperty('candidateKey')
+    await vi.waitFor(() => {
+      expect(optionsElement<HTMLOutputElement>('status').textContent).toBe('模型下载次数查询成功')
     })
   })
 
@@ -286,6 +331,22 @@ describe('default remote options entry', () => {
     controller.abort()
     await expect(clearPromise).rejects.toThrow('Key 清除已取消')
     expect(abortPort.disconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces the browser-provided reason when a model download Port disconnects', async () => {
+    const downloadPort = controlledHostPort('模型下载失败: HTTP 429')
+    platformMocks.runtimeConnect.mockReset().mockReturnValue(downloadPort)
+    const { requestHost } = await import('../../src/options/remote')
+    const downloadPromise = requestHost({
+      protocol: 'hv-pony-solver/2',
+      type: 'download-model',
+      requestId: 'download-disconnect',
+    })
+    await vi.waitFor(() => expect(downloadPort.postMessage).toHaveBeenCalledTimes(1))
+
+    downloadPort.emitDisconnect()
+
+    await expect(downloadPromise).rejects.toThrow('模型下载失败: HTTP 429')
   })
 
   it('rejects an already-aborted request without opening a Port', async () => {

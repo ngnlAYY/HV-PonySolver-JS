@@ -21,6 +21,7 @@ export interface Env {
   MODEL_BUCKET: ModelBucket
   MODEL_DOWNLOAD_QUOTAS: ModelDownloadQuotaNamespace
   PUBLIC_MODEL_PATH?: string
+  PUBLIC_QUOTA_PATH?: string
   REAL_MODEL_OBJECT_KEY: string
   DECOY_MODEL_OBJECT_KEY: string
   PUBLIC_ORT_MODEL_PATH?: string
@@ -28,12 +29,14 @@ export interface Env {
   PUBLIC_RUNTIME_WASM_PATH?: string
   RUNTIME_WASM_OBJECT_KEY?: string
   INVALID_KEY_MODE?: string
+  MODEL_DOWNLOAD_QUOTA_ENABLED?: string
 }
 
 export type InvalidKeyMode = 'decoy' | 'error'
 
 export interface WorkerConfig {
   publicModelPath: string
+  publicQuotaPath: string
   publicOrtModelPath: string
   publicRuntimeWasmPath: string
   realModelObjectKey: string
@@ -41,4 +44,5 @@ export interface WorkerConfig {
   decoyModelObjectKey: string
   runtimeWasmObjectKey: string
   invalidKeyMode: InvalidKeyMode
+  downloadQuotaEnabled: boolean
 }

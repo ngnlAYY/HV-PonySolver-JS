@@ -72,7 +72,7 @@ Packaged mode constructs none of those remote capabilities. It fetches the exten
 | Model access Key          | secret IndexedDB | not read or changed   | No                          |
 | Ordinary settings/history | `storage.local`  | `storage.local`       | Through an in-memory mirror |
 
-The remote options page enables the initially disabled Key fieldset after its handlers exist. It never echoes the stored Key. “Verify and save” settles Key validity with an unmetered HEAD probe and persists the Key without spending a monthly download; the full download and integrity verification happen at first inference. A hanging Key operation can be cancelled from the page, which aborts the in-flight request on both sides.
+The remote options page enables the initially disabled Key fieldset after its handlers exist. It never echoes the stored Key. “Verify and save” settles Key validity with an unmetered HEAD probe and persists the Key without spending a monthly download. “Query download count” reads the saved Key's current monthly status without spending a download. “Download model” uses the saved Key to download, verify and cache the model; if a valid local cache already exists, it reports the cache hit without spending another download. A hanging Key, quota, or model operation can be cancelled from the page, which aborts the in-flight request on both sides.
 
 The packaged entry does not open Key storage or a Key Port. Its Key controls remain disabled and it shows exactly:
 

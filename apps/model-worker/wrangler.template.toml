@@ -8,6 +8,7 @@ routes = [
 
 [vars]
 PUBLIC_MODEL_PATH = "/yolo26n-640.onnx"
+PUBLIC_QUOTA_PATH = "/quota"
 REAL_MODEL_OBJECT_KEY = "real/yolo26n-640.onnx"
 DECOY_MODEL_OBJECT_KEY = "decoy/yolo26n-640.onnx"
 PUBLIC_ORT_MODEL_PATH = "/yolo26n-640.ort"
@@ -15,6 +16,7 @@ REAL_ORT_MODEL_OBJECT_KEY = "real/yolo26n-640.ort"
 PUBLIC_RUNTIME_WASM_PATH = "/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm"
 RUNTIME_WASM_OBJECT_KEY = "runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm"
 INVALID_KEY_MODE = "${INVALID_KEY_MODE}"
+MODEL_DOWNLOAD_QUOTA_ENABLED = "${MODEL_DOWNLOAD_QUOTA_ENABLED}"
 
 [[kv_namespaces]]
 binding = "MODEL_KEYS"

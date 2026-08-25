@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { DEFAULT_ANSWER_MODE, getAnswerMode, setAnswerMode } from '../../src/captcha/answer-mode-settings'
+import {
+  DEFAULT_PRESERVE_CHECKED_ANSWERS,
+  getPreserveCheckedAnswers,
+  getPreserveCheckedAnswersSync,
+  setPreserveCheckedAnswers,
+} from '../../src/captcha/answer-selection-settings'
 import { DEFAULT_RANDOM_ON_FAIL, getRandomOnFailSync } from '../../src/captcha/fallback-settings'
 import { timingConfig } from '../../src/captcha/timing-config'
 import {
@@ -55,6 +61,19 @@ describe('portable captcha settings', () => {
     expect(getRandomOnFailSync(store)).toBe(false)
     store.values.set('hvPonySolverRandomOnFail', 'invalid')
     expect(getRandomOnFailSync(store)).toBe(DEFAULT_RANDOM_ON_FAIL)
+  })
+
+  it('preserves the checked-answer default and supports explicit opt-out', async () => {
+    const store = storage()
+    expect(getPreserveCheckedAnswersSync(store)).toBe(DEFAULT_PRESERVE_CHECKED_ANSWERS)
+    await expect(getPreserveCheckedAnswers(store)).resolves.toBe(DEFAULT_PRESERVE_CHECKED_ANSWERS)
+
+    await setPreserveCheckedAnswers(store, false)
+    expect(getPreserveCheckedAnswersSync(store)).toBe(false)
+    await expect(getPreserveCheckedAnswers(store)).resolves.toBe(false)
+
+    store.values.set('hvPonySolverPreserveCheckedAnswers', 'invalid')
+    expect(getPreserveCheckedAnswersSync(store)).toBe(DEFAULT_PRESERVE_CHECKED_ANSWERS)
   })
 
   it('reads, normalizes, and writes both timing ranges', async () => {

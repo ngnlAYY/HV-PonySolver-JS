@@ -93,6 +93,7 @@ test('renderWranglerConfigFile writes generated test config from the template', 
     assert.equal(rendered, await readFile(outputPath, 'utf8'))
     assert.match(rendered, /main = "src\/index\.ts"/)
     assert.match(rendered, /INVALID_KEY_MODE = "decoy"/)
+    assert.match(rendered, /MODEL_DOWNLOAD_QUOTA_ENABLED = "true"/)
     assert.match(rendered, /id = "test-kv"/)
     assert.match(rendered, /bucket_name = "test-bucket"/)
     assert.match(rendered, /\[\[durable_objects\.bindings\]\]\nname = "MODEL_DOWNLOAD_QUOTAS"/)
@@ -139,6 +140,33 @@ test('renderWranglerConfig accepts INVALID_KEY_MODE error', async () => {
   assert.match(rendered, /INVALID_KEY_MODE = "error"/)
 })
 
+test('renderWranglerConfig accepts an explicit quota enforcement switch', async () => {
+  const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+
+  const template =
+    'MODEL_DOWNLOAD_QUOTA_ENABLED = "${MODEL_DOWNLOAD_QUOTA_ENABLED}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
+  const rendered = renderWranglerConfig(template, {
+    values: { ...testWranglerConfigEnv, MODEL_DOWNLOAD_QUOTA_ENABLED: 'false' },
+  })
+
+  assert.match(rendered, /MODEL_DOWNLOAD_QUOTA_ENABLED = "false"/)
+})
+
+test('renderWranglerConfig rejects invalid quota enforcement switches', async () => {
+  const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+
+  const template =
+    'MODEL_DOWNLOAD_QUOTA_ENABLED = "${MODEL_DOWNLOAD_QUOTA_ENABLED}"\nid = "${MODEL_KEYS_KV_NAMESPACE_ID}"\nbucket_name = "${MODEL_BUCKET_NAME}"\n'
+
+  assert.throws(
+    () =>
+      renderWranglerConfig(template, {
+        values: { ...testWranglerConfigEnv, MODEL_DOWNLOAD_QUOTA_ENABLED: 'sometimes' },
+      }),
+    /MODEL_DOWNLOAD_QUOTA_ENABLED must be true or false/,
+  )
+})
+
 test('renderWranglerConfig rejects unsupported INVALID_KEY_MODE values', async () => {
   const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
 
@@ -158,6 +186,7 @@ test('render-wrangler-config renders test placeholders outside production mode',
   })
 
   assert.match(result.wrangler, /INVALID_KEY_MODE = "decoy"/)
+  assert.match(result.wrangler, /MODEL_DOWNLOAD_QUOTA_ENABLED = "true"/)
   assert.match(result.wrangler, /id = "test-kv"/)
   assert.match(result.wrangler, /bucket_name = "test-bucket"/)
 })
@@ -170,6 +199,16 @@ test('render-wrangler-config renders INVALID_KEY_MODE error from env', async () 
   })
 
   assert.match(result.wrangler, /INVALID_KEY_MODE = "error"/)
+})
+
+test('render-wrangler-config renders quota enforcement switch from env', async () => {
+  const result = await runRender({
+    MODEL_KEYS_KV_NAMESPACE_ID: 'test-kv',
+    MODEL_BUCKET_NAME: 'test-bucket',
+    MODEL_DOWNLOAD_QUOTA_ENABLED: 'false',
+  })
+
+  assert.match(result.wrangler, /MODEL_DOWNLOAD_QUOTA_ENABLED = "false"/)
 })
 
 test('model-worker vitest config keeps test placeholders isolated from deploy render mode', async () => {
@@ -311,6 +350,15 @@ test('validate-wrangler-config rejects unsupported INVALID_KEY_MODE values befor
       `INVALID_KEY_MODE = "allow"\nid = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\nbinding = "MODEL_KEYS"\nbinding = "MODEL_BUCKET"\n`,
     ),
     /wrangler\.toml INVALID_KEY_MODE must be one of: decoy, error/,
+  )
+})
+
+test('validate-wrangler-config rejects unsupported quota enforcement switches before deploy', async () => {
+  await assert.rejects(
+    runValidate(
+      `MODEL_DOWNLOAD_QUOTA_ENABLED = "sometimes"\nid = "${validKvNamespaceId}"\nbucket_name = "${validBucketName}"\nbinding = "MODEL_KEYS"\nbinding = "MODEL_BUCKET"\n`,
+    ),
+    /wrangler\.toml MODEL_DOWNLOAD_QUOTA_ENABLED must be true or false/,
   )
 })
 

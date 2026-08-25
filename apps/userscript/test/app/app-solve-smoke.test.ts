@@ -215,7 +215,7 @@ describe('App solve smoke', () => {
 
     expect(detect).toHaveBeenCalledTimes(2)
     expect(captcha.checkboxes[0]?.checked).toBe(true)
-    expect(captcha.checkboxes[2]?.checked).toBe(false)
+    expect(captcha.checkboxes[2]?.checked).toBe(true)
     expect(captcha.submitButton.click).toHaveBeenCalledTimes(1)
     expect(panelInstances[0]?.addSuccess).toHaveBeenCalledTimes(1)
   })

@@ -23,9 +23,13 @@ import {
   BROKER_DEFAULT_TIMEOUT_MS,
   BROKER_DETECT_TIMEOUT_MS,
   MAX_GLOBAL_DETECT_REQUESTS,
+  MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS,
+  MAX_GLOBAL_QUERY_MODEL_QUOTA_REQUESTS,
   MAX_GLOBAL_VERIFY_KEY_REQUESTS,
   MAX_PORT_DETECT_REQUESTS,
+  MAX_PORT_DOWNLOAD_MODEL_REQUESTS,
   MAX_PORT_PREPARE_REQUESTS,
+  MAX_PORT_QUERY_MODEL_QUOTA_REQUESTS,
   MAX_PORT_VERIFY_KEY_REQUESTS,
   isTrustedPort,
   registerBroker,
@@ -95,6 +99,22 @@ function prepareRequest(index: number): Record<string, unknown> {
     protocol: PROTOCOL_VERSION,
     type: 'prepare',
     requestId: `prepare-${index}`,
+  }
+}
+
+function downloadModelRequest(index: number): Record<string, unknown> {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: 'download-model',
+    requestId: `download-${index}`,
+  }
+}
+
+function queryModelQuotaRequest(index: number): Record<string, unknown> {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: 'query-model-quota',
+    requestId: `quota-${index}`,
   }
 }
 
@@ -344,6 +364,89 @@ describe('broker queue and privilege boundaries', () => {
 
     expect(client.disconnect).toHaveBeenCalledTimes(1)
     expect(invokeHost).not.toHaveBeenCalled()
+  })
+
+  it('allows model downloads only from options Ports and bounds their concurrency', async () => {
+    const pending = new Map<string, (response: HostResponse) => void>()
+    const invokeHost = vi.fn(
+      (request: { requestId: string }) =>
+        new Promise<HostResponse>((resolve) => {
+          pending.set(request.requestId, resolve)
+        }),
+    )
+    registerBroker(invokeHost)
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(options)
+    platformMocks.connectListener?.(content)
+
+    options.emitMessage(downloadModelRequest(0))
+    options.emitMessage(downloadModelRequest(1))
+    expect(MAX_PORT_DOWNLOAD_MODEL_REQUESTS).toBe(1)
+    expect(MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS).toBe(2)
+    expect(invokeHost).toHaveBeenCalledTimes(1)
+    expect(options.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'download-1', ok: false, error: expect.stringContaining('繁忙') }),
+    )
+
+    content.emitMessage(downloadModelRequest(2))
+    expect(content.disconnect).toHaveBeenCalledTimes(1)
+    expect(invokeHost).toHaveBeenCalledTimes(1)
+
+    pending.get('download-0')?.({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'download-0',
+      ok: true,
+    })
+    await vi.waitFor(() =>
+      expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'download-0', ok: true })),
+    )
+  })
+
+  it('allows quota queries only from options Ports and bounds their concurrency', async () => {
+    const pending = new Map<string, (response: HostResponse) => void>()
+    const invokeHost = vi.fn(
+      (request: { requestId: string }) =>
+        new Promise<HostResponse>((resolve) => {
+          pending.set(request.requestId, resolve)
+        }),
+    )
+    registerBroker(invokeHost)
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(options)
+    platformMocks.connectListener?.(content)
+
+    options.emitMessage(queryModelQuotaRequest(0))
+    options.emitMessage(queryModelQuotaRequest(1))
+    expect(MAX_PORT_QUERY_MODEL_QUOTA_REQUESTS).toBe(1)
+    expect(MAX_GLOBAL_QUERY_MODEL_QUOTA_REQUESTS).toBe(2)
+    expect(invokeHost).toHaveBeenCalledTimes(1)
+    expect(options.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'quota-1', ok: false, error: expect.stringContaining('繁忙') }),
+    )
+
+    content.emitMessage(queryModelQuotaRequest(2))
+    expect(content.disconnect).toHaveBeenCalledTimes(1)
+    expect(invokeHost).toHaveBeenCalledTimes(1)
+
+    pending.get('quota-0')?.({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'quota-0',
+      ok: true,
+      notice: '本月模型下载额度：已用 0/5 次，剩余 5 次',
+    })
+    await vi.waitFor(() =>
+      expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'quota-0', ok: true })),
+    )
   })
 
   it('applies independent per-Port and global verify-key limits and releases capacity', async () => {

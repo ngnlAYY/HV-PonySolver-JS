@@ -3,6 +3,10 @@ import {
   DEFAULT_ANSWER_MODE,
   isAnswerMode,
 } from '@hv-pony-solver/browser-core/captcha/answer-mode-settings'
+import {
+  parsePreserveCheckedAnswers,
+  PRESERVE_CHECKED_ANSWERS_STORAGE_KEY,
+} from '@hv-pony-solver/browser-core/captcha/answer-selection-settings'
 import { parseRandomOnFail, RANDOM_ON_FAIL_STORAGE_KEY } from '@hv-pony-solver/browser-core/captcha/fallback-settings'
 import { timingConfig } from '@hv-pony-solver/browser-core/captcha/timing-config'
 import {
@@ -52,7 +56,14 @@ export function createOptionsStatus(): OptionsStatus {
 }
 
 type OrdinaryField =
-  'answerMode' | 'submitDelay' | 'multiClickDelay' | 'panelPosition' | 'panelCompact' | 'randomOnFail' | 'historyLimit'
+  | 'answerMode'
+  | 'submitDelay'
+  | 'multiClickDelay'
+  | 'panelPosition'
+  | 'panelCompact'
+  | 'randomOnFail'
+  | 'preserveCheckedAnswers'
+  | 'historyLimit'
 
 type FieldState = Readonly<{
   read(): string
@@ -77,6 +88,7 @@ const ordinaryFields: readonly OrdinaryField[] = [
   'panelPosition',
   'panelCompact',
   'randomOnFail',
+  'preserveCheckedAnswers',
   'historyLimit',
 ]
 
@@ -99,6 +111,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
   const panelPosition = optionsElement<HTMLInputElement>('panel-position')
   const panelCompact = optionsElement<HTMLInputElement>('panel-compact')
   const randomOnFail = optionsElement<HTMLInputElement>('random-on-fail')
+  const preserveCheckedAnswers = optionsElement<HTMLInputElement>('preserve-checked-answers')
   const historyLimit = optionsElement<HTMLInputElement>('history-limit')
   const saveButtonElement = form.querySelector<HTMLButtonElement>('button[type="submit"]')
   if (!saveButtonElement) {
@@ -147,6 +160,13 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
       read: () => (randomOnFail.checked ? '1' : '0'),
       write: (value) => {
         randomOnFail.checked = value === '1'
+      },
+    },
+    preserveCheckedAnswers: {
+      storageKey: PRESERVE_CHECKED_ANSWERS_STORAGE_KEY,
+      read: () => (preserveCheckedAnswers.checked ? '1' : '0'),
+      write: (value) => {
+        preserveCheckedAnswers.checked = value === '1'
       },
     },
     historyLimit: {
@@ -205,7 +225,9 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
                 ? panelCompact
                 : field === 'randomOnFail'
                   ? randomOnFail
-                  : historyLimit
+                  : field === 'preserveCheckedAnswers'
+                    ? preserveCheckedAnswers
+                    : historyLimit
     const onChange = (): void => markDirty(field)
     element.addEventListener('input', onChange)
     element.addEventListener('change', onChange)
@@ -228,6 +250,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
       ),
       panelCompact: values[PANEL_COMPACT_MODE_STORAGE_KEY] === '1' ? '1' : '0',
       randomOnFail: parseRandomOnFail(values[RANDOM_ON_FAIL_STORAGE_KEY]) ? '1' : '0',
+      preserveCheckedAnswers: parsePreserveCheckedAnswers(values[PRESERVE_CHECKED_ANSWERS_STORAGE_KEY]) ? '1' : '0',
       historyLimit: parseStoredValue(
         values[PANEL_HISTORY_LIMIT_STORAGE_KEY],
         String(DEFAULT_PANEL_HISTORY_LIMIT),
@@ -250,6 +273,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
         return serializePanelPosition(parsePanelPosition(value))
       case 'panelCompact':
       case 'randomOnFail':
+      case 'preserveCheckedAnswers':
         return value === '1' ? '1' : '0'
       case 'historyLimit':
         return String(parsePanelHistoryLimit(value))

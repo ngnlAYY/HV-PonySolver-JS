@@ -8,6 +8,7 @@ import {
   isModelAccessKey,
   type HostResponse,
   type HostSuccessResponse,
+  type DownloadModelRequest,
   type KeyIntentRequest,
 } from '../protocol/messages'
 import { createOptionsStatus, installOrdinarySettingsController, optionsElement } from './ordinary-settings'
@@ -18,12 +19,15 @@ const keyFieldset = optionsElement<HTMLFieldSetElement>('model-key-fieldset')
 const packagedModelHint = optionsElement<HTMLParagraphElement>('packaged-model-hint')
 const modelKey = optionsElement<HTMLInputElement>('model-key')
 const verifyKeyButton = optionsElement<HTMLButtonElement>('verify-key')
+const downloadModelButton = optionsElement<HTMLButtonElement>('download-model')
+const queryModelQuotaButton = optionsElement<HTMLButtonElement>('query-model-quota')
 const clearKeyButton = optionsElement<HTMLButtonElement>('clear-key')
 const cancelKeyOperationButton = optionsElement<HTMLButtonElement>('cancel-key-op')
 let requestSequence = 0
 let keyGeneration = 0
 let keyOperationTail: Promise<void> = Promise.resolve()
 let activeKeyController: AbortController | null = null
+let activeOperationLabel = 'Key'
 
 function nextRequestId(): string {
   requestSequence += 1
@@ -31,11 +35,18 @@ function nextRequestId(): string {
 }
 
 export function requestHost(
-  request: KeyIntentRequest,
+  request: KeyIntentRequest | DownloadModelRequest,
   options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }> = {},
 ): Promise<HostSuccessResponse> {
   const { signal, timeoutMs = 95_000 } = options
-  const operationName = request.type === 'verify-key' ? 'Key 验证' : 'Key 清除'
+  const operationName =
+    request.type === 'verify-key'
+      ? 'Key 验证'
+      : request.type === 'clear-key'
+        ? 'Key 清除'
+        : request.type === 'query-model-quota'
+          ? '额度查询'
+          : '模型下载'
   if (signal?.aborted) {
     return Promise.reject(new Error(`${operationName}已取消`))
   }
@@ -82,7 +93,8 @@ export function requestHost(
       }
       settled = true
       cleanup()
-      reject(new Error(`${operationName}连接已断开`))
+      const disconnectMessage = port.error?.message?.trim()
+      reject(new Error(disconnectMessage || `${operationName}连接已断开`))
     }
     const timeoutId = setTimeout(() => {
       settle(() => reject(new Error(`${operationName}超时`)))
@@ -119,12 +131,14 @@ function assertCurrentOperation(generation: number, signal: AbortSignal): void {
 function enqueueKeyOperation(
   operation: (signal: AbortSignal, generation: number) => Promise<void>,
   pendingStatus?: string,
+  operationLabel: string = 'Key',
 ): void {
   keyGeneration += 1
   const generation = keyGeneration
   activeKeyController?.abort()
   const controller = new AbortController()
   activeKeyController = controller
+  activeOperationLabel = operationLabel
   cancelKeyOperationButton.disabled = false
   if (pendingStatus) {
     status.set(pendingStatus)
@@ -160,7 +174,7 @@ cancelKeyOperationButton.addEventListener('click', () => {
   activeKeyController.abort()
   activeKeyController = null
   cancelKeyOperationButton.disabled = true
-  status.set('Key 操作已取消')
+  status.set(`${activeOperationLabel} 操作已取消`)
 })
 
 verifyKeyButton.addEventListener('click', () => {
@@ -206,6 +220,50 @@ clearKeyButton.addEventListener('click', () => {
   }, '正在清除模型 Key…')
 })
 
+downloadModelButton.addEventListener('click', () => {
+  enqueueKeyOperation(
+    async (signal, generation) => {
+      if (isCurrentOperation(generation, signal)) {
+        status.set('正在下载模型…')
+      }
+      const response = await requestHost(
+        {
+          protocol: PROTOCOL_VERSION,
+          type: 'download-model',
+          requestId: nextRequestId(),
+        },
+        { signal },
+      )
+      assertCurrentOperation(generation, signal)
+      status.set(response.notice ?? '模型下载成功')
+    },
+    '正在下载模型…',
+    '模型下载',
+  )
+})
+
+queryModelQuotaButton.addEventListener('click', () => {
+  enqueueKeyOperation(
+    async (signal, generation) => {
+      if (isCurrentOperation(generation, signal)) {
+        status.set('正在查询模型下载次数…')
+      }
+      const response = await requestHost(
+        {
+          protocol: PROTOCOL_VERSION,
+          type: 'query-model-quota',
+          requestId: nextRequestId(),
+        },
+        { signal },
+      )
+      assertCurrentOperation(generation, signal)
+      status.set(response.notice ?? '模型下载次数查询成功')
+    },
+    '正在查询模型下载次数…',
+    '额度查询',
+  )
+})
+
 // Install every Key handler before exposing the controls to remote-artifact users.
 keyFieldset.disabled = false
 packagedModelHint.hidden = true
@@ -224,7 +282,7 @@ void ordinarySettings
   .load()
   .then(() => {
     if (keyGeneration === initialKeyGeneration) {
-      status.set('模型 Key 不会回显，可验证新 Key 或清除已保存 Key')
+      status.set('模型 Key 不会回显，可验证新 Key、查询下载次数、下载模型或清除已保存 Key')
     }
   })
   .catch((error: unknown) => {

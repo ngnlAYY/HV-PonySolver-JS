@@ -372,4 +372,28 @@ describe('settings menu', () => {
     expect(deleteValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey')
     expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: delete failed')
   })
+
+  it('queries model download quota through the top-level settings menu', async () => {
+    const registerMenuCommand = vi.fn()
+    const prompt = vi.fn(() => '11')
+    const alert = vi.fn()
+    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    vi.stubGlobal(
+      'GM_getValue',
+      vi.fn(async () => VALID_KEY),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null })),
+    )
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', alert)
+    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+
+    registerSettingsMenu()
+    await registerMenuCommand.mock.calls[0][1]()
+
+    expect(prompt).toHaveBeenCalledWith(expect.stringContaining('11. 查询模型下载次数'), '1')
+    expect(alert).toHaveBeenCalledWith('无次数限制（模型下载次数限制未开启）')
+  })
 })

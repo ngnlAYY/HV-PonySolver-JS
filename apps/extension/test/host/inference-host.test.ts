@@ -24,6 +24,8 @@ function dependencies(): InferenceHostDependencies {
     detector,
     verifyKey: vi.fn(async () => undefined),
     clearKey: vi.fn(async () => undefined),
+    downloadModel: vi.fn(async () => '模型下载和校验成功，已缓存'),
+    queryModelQuota: vi.fn(async () => '本月模型下载额度：已用 2/5 次，剩余 3 次'),
     close: vi.fn(),
   }
 }
@@ -46,6 +48,38 @@ describe('InferenceHost', () => {
       }),
     ).resolves.toMatchObject({ ok: true, requestId: 'detect-1', result: detectionResult })
     expect(deps.detector.detect).toHaveBeenCalledWith(expect.any(Blob), expect.any(AbortSignal))
+  })
+
+  it('downloads the model through the Host without exposing model bytes', async () => {
+    const deps = dependencies()
+    const host = new InferenceHost(deps)
+
+    await expect(
+      host.handle({ protocol: PROTOCOL_VERSION, type: 'download-model', requestId: 'download-1' }),
+    ).resolves.toEqual({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'download-1',
+      ok: true,
+      notice: '模型下载和校验成功，已缓存',
+    })
+    expect(deps.downloadModel).toHaveBeenCalledWith(expect.any(AbortSignal))
+  })
+
+  it('queries model quota through the serialized Key intent path', async () => {
+    const deps = dependencies()
+    const host = new InferenceHost(deps)
+
+    await expect(
+      host.handle({ protocol: PROTOCOL_VERSION, type: 'query-model-quota', requestId: 'quota-1' }),
+    ).resolves.toEqual({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'quota-1',
+      ok: true,
+      notice: '本月模型下载额度：已用 2/5 次，剩余 3 次',
+    })
+    expect(deps.queryModelQuota).toHaveBeenCalledWith(expect.any(AbortSignal))
   })
 
   it('classifies only permanent model failures as permanent protocol errors', async () => {
@@ -253,6 +287,15 @@ describe('InferenceHost', () => {
     await expect(
       host.handle({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-unsupported' }),
     ).resolves.toMatchObject({ ok: false, error: expect.stringContaining('不支持清除模型 Key') })
+  })
+
+  it('fails closed when the host has no quota query capability', async () => {
+    const deps = dependencies()
+    const host = new InferenceHost({ detector: deps.detector })
+
+    await expect(
+      host.handle({ protocol: PROTOCOL_VERSION, type: 'query-model-quota', requestId: 'quota-unsupported' }),
+    ).resolves.toMatchObject({ ok: false, error: expect.stringContaining('不支持查询模型下载次数') })
   })
 
   it('aborts an active Key intent when its caller disconnects', async () => {

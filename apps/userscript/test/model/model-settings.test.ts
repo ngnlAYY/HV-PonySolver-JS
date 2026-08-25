@@ -71,7 +71,10 @@ describe('model settings', () => {
         store.set(key, value)
       }),
     )
-    vi.stubGlobal('GM_getValue', vi.fn(async (key: string, fallback: string) => store.get(key) ?? fallback))
+    vi.stubGlobal(
+      'GM_getValue',
+      vi.fn(async (key: string, fallback: string) => store.get(key) ?? fallback),
+    )
     const { getModelAccessKey, setModelAccessKeyFromPrompt } = await import('../../src/model/model-settings')
 
     await setModelAccessKeyFromPrompt()
@@ -111,5 +114,41 @@ describe('model settings', () => {
     expect(getValue).toHaveBeenCalledWith(STORAGE_KEY, '')
     expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN_LOWER)
     expect(deleteValue).toHaveBeenCalledWith(STORAGE_KEY)
+  })
+
+  it('shows the saved Key monthly quota without spending a download', async () => {
+    const alert = vi.fn()
+    vi.stubGlobal('alert', alert)
+    vi.stubGlobal(
+      'GM_getValue',
+      vi.fn(async () => VALID_TOKEN_LOWER),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ enabled: true, limit: 5, used: 2, remaining: 3, retryAfterSeconds: 3600 })),
+    )
+    const { querySavedModelDownloadQuota } = await import('../../src/model/model-settings')
+
+    await querySavedModelDownloadQuota()
+
+    expect(alert).toHaveBeenCalledWith('本月模型下载额度：已用 2/5 次，剩余 3 次')
+  })
+
+  it('shows no limit when the Worker was built without quota enforcement', async () => {
+    const alert = vi.fn()
+    vi.stubGlobal('alert', alert)
+    vi.stubGlobal(
+      'GM_getValue',
+      vi.fn(async () => VALID_TOKEN_LOWER),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null })),
+    )
+    const { querySavedModelDownloadQuota } = await import('../../src/model/model-settings')
+
+    await querySavedModelDownloadQuota()
+
+    expect(alert).toHaveBeenCalledWith('无次数限制（模型下载次数限制未开启）')
   })
 })

@@ -42,8 +42,14 @@ export const MAX_PORT_PREPARE_REQUESTS = 2
 export const MAX_GLOBAL_PREPARE_REQUESTS = 4
 export const MAX_PORT_VERIFY_KEY_REQUESTS = 1
 export const MAX_GLOBAL_VERIFY_KEY_REQUESTS = 2
+export const MAX_PORT_DOWNLOAD_MODEL_REQUESTS = 1
+export const MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS = 2
+export const MAX_PORT_QUERY_MODEL_QUOTA_REQUESTS = 1
+export const MAX_GLOBAL_QUERY_MODEL_QUOTA_REQUESTS = 2
 export const BROKER_DETECT_TIMEOUT_MS = DETECT_DEADLINE_CONFIG.brokerTimeoutMs
 export const BROKER_PREPARE_TIMEOUT_MS = prepareDeadlineConfig.brokerTimeoutMs
+export const BROKER_DOWNLOAD_MODEL_TIMEOUT_MS = prepareDeadlineConfig.brokerTimeoutMs
+export const BROKER_QUERY_MODEL_QUOTA_TIMEOUT_MS = prepareDeadlineConfig.brokerTimeoutMs
 export const BROKER_DEFAULT_TIMEOUT_MS = 105_000
 
 function senderUrl(sender: ExtensionSender | undefined): string {
@@ -80,7 +86,16 @@ function requestTimeoutMs(request: HostRequest): number {
   if (request.type === 'detect') {
     return BROKER_DETECT_TIMEOUT_MS
   }
-  return request.type === 'prepare' ? BROKER_PREPARE_TIMEOUT_MS : BROKER_DEFAULT_TIMEOUT_MS
+  if (request.type === 'prepare') {
+    return BROKER_PREPARE_TIMEOUT_MS
+  }
+  if (request.type === 'download-model') {
+    return BROKER_DOWNLOAD_MODEL_TIMEOUT_MS
+  }
+  if (request.type === 'query-model-quota') {
+    return BROKER_QUERY_MODEL_QUOTA_TIMEOUT_MS
+  }
+  return BROKER_DEFAULT_TIMEOUT_MS
 }
 
 function invokeWithTimeout(
@@ -119,6 +134,8 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
   let globalDetectRequests = 0
   let globalPrepareRequests = 0
   let globalVerifyKeyRequests = 0
+  let globalDownloadModelRequests = 0
+  let globalQueryModelQuotaRequests = 0
   let latestHostStatus: HostStatusUpdate = {}
   const contentPorts = new Map<ExtensionPort, (message: unknown) => boolean>()
 
@@ -151,10 +168,12 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
     let portDetectRequests = 0
     let portPrepareRequests = 0
     let portVerifyKeyRequests = 0
+    let portDownloadModelRequests = 0
+    let portQueryModelQuotaRequests = 0
     type RequestEntry = {
       readonly requestId: string
       readonly controller: AbortController
-      readonly kind: 'detect' | 'prepare' | 'verify-key' | 'other'
+      readonly kind: 'detect' | 'prepare' | 'verify-key' | 'download-model' | 'query-model-quota' | 'other'
       released: boolean
     }
     const entries = new Map<string, RequestEntry>()
@@ -211,6 +230,12 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       } else if (entry.kind === 'verify-key') {
         portVerifyKeyRequests -= 1
         globalVerifyKeyRequests -= 1
+      } else if (entry.kind === 'download-model') {
+        portDownloadModelRequests -= 1
+        globalDownloadModelRequests -= 1
+      } else if (entry.kind === 'query-model-quota') {
+        portQueryModelQuotaRequests -= 1
+        globalQueryModelQuotaRequests -= 1
       }
     }
 
@@ -236,7 +261,13 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         disconnect()
         return
       }
-      if (port.name === OPTIONS_PORT_NAME && message.type !== 'verify-key' && message.type !== 'clear-key') {
+      if (
+        port.name === OPTIONS_PORT_NAME &&
+        message.type !== 'verify-key' &&
+        message.type !== 'clear-key' &&
+        message.type !== 'download-model' &&
+        message.type !== 'query-model-quota'
+      ) {
         disconnect()
         return
       }
@@ -266,8 +297,28 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         post(errorResponse(message.requestId, '模型 Key 验证队列繁忙，请稍后重试'))
         return
       }
+      if (
+        message.type === 'download-model' &&
+        (portDownloadModelRequests >= MAX_PORT_DOWNLOAD_MODEL_REQUESTS ||
+          globalDownloadModelRequests >= MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS)
+      ) {
+        post(errorResponse(message.requestId, '模型下载队列繁忙，请稍后重试'))
+        return
+      }
+      if (
+        message.type === 'query-model-quota' &&
+        (portQueryModelQuotaRequests >= MAX_PORT_QUERY_MODEL_QUOTA_REQUESTS ||
+          globalQueryModelQuotaRequests >= MAX_GLOBAL_QUERY_MODEL_QUOTA_REQUESTS)
+      ) {
+        post(errorResponse(message.requestId, '模型下载次数查询队列繁忙，请稍后重试'))
+        return
+      }
       const kind =
-        message.type === 'detect' || message.type === 'prepare' || message.type === 'verify-key'
+        message.type === 'detect' ||
+        message.type === 'prepare' ||
+        message.type === 'verify-key' ||
+        message.type === 'download-model' ||
+        message.type === 'query-model-quota'
           ? message.type
           : 'other'
       const entry: RequestEntry = {
@@ -286,6 +337,12 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       } else if (entry.kind === 'verify-key') {
         portVerifyKeyRequests += 1
         globalVerifyKeyRequests += 1
+      } else if (entry.kind === 'download-model') {
+        portDownloadModelRequests += 1
+        globalDownloadModelRequests += 1
+      } else if (entry.kind === 'query-model-quota') {
+        portQueryModelQuotaRequests += 1
+        globalQueryModelQuotaRequests += 1
       }
       void invokeWithTimeout(invokeHost, message, entry.controller)
         .then((response) => {

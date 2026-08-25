@@ -12,6 +12,8 @@ export type ExtensionEvent<Listener> = Readonly<{
 export interface ExtensionPort {
   readonly name: string
   readonly sender?: ExtensionSender
+  /** Firefox exposes the reason for a remote Port disconnect here. */
+  readonly error?: Readonly<{ message?: string }>
   readonly onMessage: ExtensionEvent<(message: unknown) => void>
   readonly onDisconnect: ExtensionEvent<() => void>
   postMessage(message: unknown): void

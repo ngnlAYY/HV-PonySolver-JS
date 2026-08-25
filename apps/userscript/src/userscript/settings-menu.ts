@@ -2,6 +2,7 @@ import { setAnswerModeFromPrompt } from '../captcha/answer-mode-settings'
 import { setMultiClickDelayRangeFromPrompt, setSubmitDelayRangeFromPrompt } from '../captcha/timing-settings'
 import {
   clearSavedModelAccessKey,
+  querySavedModelDownloadQuota,
   setModelAccessKeyFromPrompt,
   type VerifyModelAccessKey,
 } from '../model/model-settings'
@@ -44,6 +45,7 @@ async function chooseSettingsAction(options: SettingsMenuOptions): Promise<void>
     { label: '重置面板位置', errorPrefix: '面板位置设置失败', run: clearSavedPanelPosition },
     { label: '开启精简版', errorPrefix: '精简版设置失败', run: enablePanelCompactMode },
     { label: '关闭精简版', errorPrefix: '精简版设置失败', run: disablePanelCompactMode },
+    { label: '查询模型下载次数', errorPrefix: '模型下载次数查询失败', run: querySavedModelDownloadQuota },
   ]
   const input = promptUser(actions.map((action, index) => `${index + 1}. ${action.label}`).join('\n'), '1')
   if (input === null) {

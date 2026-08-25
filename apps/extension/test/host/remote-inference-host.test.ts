@@ -82,13 +82,20 @@ describe('createRemoteKeyVerifier', () => {
 })
 
 describe('createRemoteInferenceHost', () => {
-  it('wires quota-free Key probing, download, worker, Key storage, and terminal cleanup through the production factory', async () => {
+  it('wires quota-free Key probing, quota query, download, worker, Key storage, and terminal cleanup through the production factory', async () => {
     const modelBuffer = new Uint8Array([1, 2, 3]).buffer
     const storageGet = vi.spyOn(IndexedDbStringStorage.prototype, 'get').mockResolvedValue('stored-key')
     const storageSet = vi.spyOn(IndexedDbStringStorage.prototype, 'set').mockResolvedValue()
     const storageRemove = vi.spyOn(IndexedDbStringStorage.prototype, 'remove').mockResolvedValue()
     const storageClose = vi.spyOn(IndexedDbStringStorage.prototype, 'close').mockResolvedValue()
     const workerArguments: unknown[][] = []
+    let quotaResponse: {
+      enabled: boolean
+      limit: number
+      used: number
+      remaining: number | null
+      retryAfterSeconds: number | null
+    } = { enabled: true, limit: 5, used: 2, remaining: 3, retryAfterSeconds: 3600 }
     class TestWorker {
       constructor(...args: unknown[]) {
         workerArguments.push(args)
@@ -103,9 +110,14 @@ describe('createRemoteInferenceHost', () => {
     const requestedMethods: string[] = []
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const method = init?.method ?? 'GET'
         requestedMethods.push(method)
+        if (new URL(input.toString()).pathname === '/quota') {
+          expect(method).toBe('GET')
+          expect(new Headers(init?.headers).get('authorization')).toBe('Bearer stored-key')
+          return Response.json(quotaResponse)
+        }
         if (method === 'HEAD') {
           // The probe must present the candidate Key, never the stored one.
           expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${'f'.repeat(64)}`)
@@ -142,7 +154,9 @@ describe('createRemoteInferenceHost', () => {
       expect(detectorInternals.workerFactory()).toBeInstanceOf(TestWorker)
       expect(workerArguments).toEqual([['moz-extension://test/inference-worker.js', { type: 'module' }]])
 
-      const cacheDownload = vi.spyOn(modelCache, 'download')
+      const cacheGet = vi.spyOn(modelCache, 'getCached').mockResolvedValue(null)
+      const cacheDownload = vi.spyOn(modelCache, 'download').mockResolvedValue(modelBuffer)
+      const cachePut = vi.spyOn(modelCache, 'putCached').mockResolvedValue()
       const cacheClose = vi.spyOn(modelCache, 'close').mockImplementation(() => undefined)
       const detectorDestroy = vi.spyOn(detector, 'destroy').mockImplementation(() => undefined)
 
@@ -158,6 +172,40 @@ describe('createRemoteInferenceHost', () => {
       expect(requestedMethods).toEqual(['GET', 'HEAD'])
       expect(cacheDownload).not.toHaveBeenCalled()
       expect(storageSet).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY, 'f'.repeat(64), expect.any(AbortSignal))
+
+      await expect(
+        host.handle({ protocol: PROTOCOL_VERSION, type: 'download-model', requestId: 'factory-download' }),
+      ).resolves.toEqual({
+        protocol: PROTOCOL_VERSION,
+        type: 'result',
+        requestId: 'factory-download',
+        ok: true,
+        notice: '模型下载和校验成功，已缓存',
+      })
+      expect(cacheGet).toHaveBeenCalledWith(expect.any(AbortSignal))
+      expect(cacheDownload).toHaveBeenCalledWith(expect.any(AbortSignal))
+      expect(cachePut).toHaveBeenCalledWith(modelBuffer, true, true, expect.any(AbortSignal))
+
+      await expect(
+        host.handle({ protocol: PROTOCOL_VERSION, type: 'query-model-quota', requestId: 'factory-quota' }),
+      ).resolves.toEqual({
+        protocol: PROTOCOL_VERSION,
+        type: 'result',
+        requestId: 'factory-quota',
+        ok: true,
+        notice: '本月模型下载额度：已用 2/5 次，剩余 3 次',
+      })
+
+      quotaResponse = { enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null }
+      await expect(
+        host.handle({ protocol: PROTOCOL_VERSION, type: 'query-model-quota', requestId: 'factory-quota-disabled' }),
+      ).resolves.toEqual({
+        protocol: PROTOCOL_VERSION,
+        type: 'result',
+        requestId: 'factory-quota-disabled',
+        ok: true,
+        notice: '无次数限制（模型下载次数限制未开启）',
+      })
 
       await expect(
         host.handle({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'factory-clear' }),

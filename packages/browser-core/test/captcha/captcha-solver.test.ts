@@ -139,7 +139,10 @@ describe('CaptchaSolver', () => {
       ['RA'],
       expect.any(Function),
       expect.any(Function),
-      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      expect.objectContaining({
+        confidences: { RA: 0.97 },
+        isCurrent: expect.any(Function),
+      }),
     )
     expect(panel.addSuccess).toHaveBeenCalledWith(['RA'], { RA: 0.97 }, expect.any(Number))
   })

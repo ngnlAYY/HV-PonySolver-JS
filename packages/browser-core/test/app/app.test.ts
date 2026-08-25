@@ -125,6 +125,29 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(1)
   })
 
+  it('suppresses repeated solver failures for the same captcha during the cooldown', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    harness.trigger.mockImplementation(async (target?: CaptchaTarget) => ({
+      handled: false,
+      captchaKey: target?.captchaKey ?? null,
+    }))
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    vi.setSystemTime(Date.now() + 30_000)
+    captcha.appendChild(document.createElement('strong'))
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+  })
+
   it('waits for a complete captcha target and reacts to nested captcha mutations', async () => {
     const harness = createHarness()
     apps.push(harness.app)

@@ -5,6 +5,7 @@ import {
   MULTI_CLICK_DELAY_STORAGE_KEY,
   PANEL_COMPACT_MODE_STORAGE_KEY,
   PANEL_POSITION_STORAGE_KEY,
+  PRESERVE_CHECKED_ANSWERS_STORAGE_KEY,
   RANDOM_ON_FAIL_STORAGE_KEY,
   SUBMIT_DELAY_STORAGE_KEY,
 } from '@hv-pony-solver/browser-core'
@@ -192,10 +193,28 @@ describe('ordinary options settings lifecycle', () => {
   it('uses parser defaults when random fallback and panel position storage are corrupt', async () => {
     await installAndLoad({
       [RANDOM_ON_FAIL_STORAGE_KEY]: 'corrupt',
+      [PRESERVE_CHECKED_ANSWERS_STORAGE_KEY]: 'corrupt',
       [PANEL_POSITION_STORAGE_KEY]: '999999999999999999999999,20',
     })
 
     expect(optionsElement<HTMLInputElement>('random-on-fail').checked).toBe(true)
+    expect(optionsElement<HTMLInputElement>('preserve-checked-answers').checked).toBe(true)
     expect(optionsElement<HTMLInputElement>('panel-position').value).toBe('150,1240')
+  })
+
+  it('defaults to preserving checked answers and persists the opt-out', async () => {
+    await installAndLoad()
+    const preserve = optionsElement<HTMLInputElement>('preserve-checked-answers')
+    expect(preserve.checked).toBe(true)
+
+    preserve.checked = false
+    preserve.dispatchEvent(new Event('change', { bubbles: true }))
+    submitForm()
+
+    await vi.waitFor(() =>
+      expect(platformMocks.storageSet).toHaveBeenCalledWith({
+        [PRESERVE_CHECKED_ANSWERS_STORAGE_KEY]: '0',
+      }),
+    )
   })
 })

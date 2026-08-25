@@ -26,6 +26,7 @@ const renderedResources = [
   ['r2_buckets', 'MODEL_BUCKET', 'bucket_name'],
 ]
 const invalidKeyModes = new Set(['decoy', 'error'])
+const quotaEnabledValues = new Set(['true', 'false'])
 
 function isProductionMode(renderMode) {
   return productionModes.has(renderMode)
@@ -148,12 +149,26 @@ function validateRenderedInvalidKeyMode(content, sourceName) {
   }
 }
 
+function validateRenderedQuotaEnabled(content, sourceName) {
+  const values = readTomlStringAssignmentValues(content, 'MODEL_DOWNLOAD_QUOTA_ENABLED', sourceName)
+  if (values.length === 0) {
+    return
+  }
+  if (values.length > 1) {
+    throw new Error(`${sourceName} must contain at most one MODEL_DOWNLOAD_QUOTA_ENABLED`)
+  }
+  if (!quotaEnabledValues.has(values[0].trim().toLowerCase())) {
+    throw new Error(`${sourceName} MODEL_DOWNLOAD_QUOTA_ENABLED must be true or false`)
+  }
+}
+
 function validateRenderedWranglerConfig(content, sourceName = 'wrangler.toml', { allowTestPlaceholders = false } = {}) {
   assertNoUnresolvedPlaceholders(content, sourceName)
   for (const [name, assignment] of renderedAssignments) {
     validateConfigValue(name, readTomlStringAssignment(content, assignment, sourceName), { allowTestPlaceholders })
   }
   validateRenderedInvalidKeyMode(content, sourceName)
+  validateRenderedQuotaEnabled(content, sourceName)
   for (const [tableName, binding, assignment] of renderedResources) {
     validateRenderedResource(content, tableName, binding, assignment, sourceName)
   }

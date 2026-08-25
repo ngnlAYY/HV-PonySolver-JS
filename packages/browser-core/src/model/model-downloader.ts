@@ -81,6 +81,13 @@ function getModelUrl(): string {
   return modelConfig.urlBase
 }
 
+function getQuotaUrl(): string {
+  if (!modelConfig.quotaUrl) {
+    throw new Error('模型下载次数查询地址未配置')
+  }
+  return modelConfig.quotaUrl
+}
+
 async function getRequestAccessKey(
   accessKeyOverride: string | undefined,
   getAccessKey: ((signal?: AbortSignal) => Promise<string>) | undefined,
@@ -330,6 +337,97 @@ export async function downloadModel(
       throw new ModelIntegrityVerificationError(`下载模型 SHA-256 校验失败`)
     }
     return buffer
+  } finally {
+    deadline.dispose()
+  }
+}
+
+export type ModelDownloadQuotaStatus = Readonly<{
+  enabled: boolean
+  limit: number
+  used: number
+  remaining: number | null
+  retryAfterSeconds: number | null
+}>
+
+function isSafeNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function parseQuotaStatus(value: unknown): ModelDownloadQuotaStatus {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('模型下载次数查询失败: 响应格式无效')
+  }
+  const candidate = value as Partial<ModelDownloadQuotaStatus>
+  if (typeof candidate.enabled !== 'boolean') {
+    throw new Error('模型下载次数查询失败: 响应格式无效')
+  }
+  if (!candidate.enabled) {
+    if (
+      candidate.limit !== 0 ||
+      candidate.used !== 0 ||
+      candidate.remaining !== null ||
+      candidate.retryAfterSeconds !== null
+    ) {
+      throw new Error('模型下载次数查询失败: 响应格式无效')
+    }
+    return {
+      enabled: false,
+      limit: 0,
+      used: 0,
+      remaining: null,
+      retryAfterSeconds: null,
+    }
+  }
+  if (
+    !isSafeNonNegativeInteger(candidate.limit) ||
+    candidate.limit < 1 ||
+    !isSafeNonNegativeInteger(candidate.used) ||
+    candidate.used > candidate.limit ||
+    !isSafeNonNegativeInteger(candidate.remaining) ||
+    candidate.remaining !== candidate.limit - candidate.used ||
+    !isSafeNonNegativeInteger(candidate.retryAfterSeconds) ||
+    candidate.retryAfterSeconds < 1
+  ) {
+    throw new Error('模型下载次数查询失败: 响应格式无效')
+  }
+  return {
+    enabled: true,
+    limit: candidate.limit,
+    used: candidate.used,
+    remaining: candidate.remaining,
+    retryAfterSeconds: candidate.retryAfterSeconds,
+  }
+}
+
+export async function queryModelDownloadQuota(
+  signal?: AbortSignal,
+  options: ModelIntegrityOptions = {},
+  environment: ModelDownloadEnvironment = {},
+): Promise<ModelDownloadQuotaStatus> {
+  const deadline = createDownloadDeadline(signal, '模型下载次数查询', inferenceTimeoutConfig.modelProbeTimeoutMs)
+  try {
+    deadline.throwIfExpired()
+    const accessKey = await deadline.run(() =>
+      getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
+    )
+    const response = await deadline.run(() =>
+      (environment.fetchImpl ?? fetch)(getQuotaUrl(), createModelFetchInit(deadline.signal, accessKey)),
+    )
+    if (!response.ok) {
+      await cancelResponseBody(response, deadline)
+      deadline.throwIfExpired()
+      if (response.status === 403) {
+        throw new ModelAccessKeyRejectedError()
+      }
+      if (response.status === 429) {
+        throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
+      }
+      throw new Error(`模型下载次数查询失败: HTTP ${response.status}`)
+    }
+    const value: unknown = await deadline.run(() => response.json())
+    deadline.throwIfExpired()
+    return parseQuotaStatus(value)
   } finally {
     deadline.dispose()
   }

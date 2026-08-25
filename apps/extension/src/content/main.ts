@@ -1,13 +1,11 @@
 import { App } from '@hv-pony-solver/browser-core/app/app'
 import { getAnswerMode } from '@hv-pony-solver/browser-core/captcha/answer-mode-settings'
+import { getPreserveCheckedAnswersSync } from '@hv-pony-solver/browser-core/captcha/answer-selection-settings'
 import { AnswerSubmitter } from '@hv-pony-solver/browser-core/captcha/answer-submitter'
 import { CachedImageLoader } from '@hv-pony-solver/browser-core/captcha/captcha-image-loader'
 import { CaptchaSolver } from '@hv-pony-solver/browser-core/captcha/captcha-solver'
 import { getRandomOnFailSync } from '@hv-pony-solver/browser-core/captcha/fallback-settings'
-import {
-  getMultiClickDelayRange,
-  getSubmitDelayRange,
-} from '@hv-pony-solver/browser-core/captcha/timing-settings'
+import { getMultiClickDelayRange, getSubmitDelayRange } from '@hv-pony-solver/browser-core/captcha/timing-settings'
 import { HistoryStore } from '@hv-pony-solver/browser-core/persistence/answer-history-store'
 import { StatusPanel } from '@hv-pony-solver/browser-core/status-panel/status-panel'
 import { logError } from '@hv-pony-solver/browser-core/utils/logger'
@@ -26,6 +24,7 @@ function createContentApp(storage: ExtensionStorageMirror): App {
   const answerSubmitter = new AnswerSubmitter(
     () => getSubmitDelayRange(storage),
     () => getMultiClickDelayRange(storage),
+    () => getPreserveCheckedAnswersSync(storage),
   )
   const solver = new CaptchaSolver(
     panel,

@@ -5,6 +5,7 @@ import {
   downloadModel,
   getModelAccessKey,
   probeModelAccessKey,
+  queryModelDownloadQuota,
   type ModelAccessKeyProbe,
 } from '@hv-pony-solver/browser-core'
 import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
@@ -63,11 +64,27 @@ export function createRemoteInferenceHost(emitStatus?: HostStatusEmitter): Infer
   )
   return new InferenceHost({
     detector,
+    downloadModel: async (signal) => {
+      const cached = await modelCache.getCached(signal)
+      if (cached) {
+        return '模型已在本地缓存'
+      }
+      const buffer = await modelCache.download(signal)
+      await modelCache.putCached(buffer, true, true, signal)
+      return '模型下载和校验成功，已缓存'
+    },
     verifyKey: createRemoteKeyVerifier({
       probe: (signal, candidateKey) => probeModelAccessKey(signal, { accessKeyOverride: candidateKey }),
       set: (key, value, signal) => secretStorage.set(key, value, signal),
     }),
     clearKey: (signal) => secretStorage.remove(MODEL_ACCESS_KEY_STORAGE_KEY, signal),
+    queryModelQuota: async (signal) => {
+      const quota = await queryModelDownloadQuota(signal, {}, { getAccessKey: () => getModelAccessKey(secretStorage) })
+      if (!quota.enabled) {
+        return '无次数限制（模型下载次数限制未开启）'
+      }
+      return `本月模型下载额度：已用 ${quota.used}/${quota.limit} 次，剩余 ${quota.remaining ?? 0} 次`
+    },
     close: async () => {
       modelCache.close()
       await secretStorage.close()

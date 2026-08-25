@@ -6,7 +6,7 @@ import { sleep } from '../utils/delay'
 import { formatErrorMessage } from '../utils/errors'
 import { logError } from '../utils/logger'
 import type { AnswerMode } from './answer-mode-settings'
-import type { AnswerSubmissionService } from './answer-submitter'
+import type { AnswerSubmissionService, SubmitOptions } from './answer-submitter'
 import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from './captcha-target'
 import type { ImageLoader } from './captcha-types'
 import { solverConfig } from './solver-config'
@@ -98,7 +98,11 @@ export class CaptchaSolver {
       this.panel.setStatus({ inference: `错误: ${message}` })
       this.panel.addError(message, elapsed())
     }
-    const submitOptions = signal ? { signal, isCurrent } : { isCurrent }
+    const createSubmitOptions = (confidences?: YoloParseResult['confidences']): SubmitOptions => ({
+      ...(signal ? { signal } : {}),
+      isCurrent,
+      ...(confidences ? { confidences } : {}),
+    })
 
     if (signal?.aborted) {
       return result(false)
@@ -168,7 +172,7 @@ export class CaptchaSolver {
             submitted = true
             this.panel.addSuccess(detectionResult.ponies, detectionResult.confidences, elapsed())
           },
-          submitOptions,
+          createSubmitOptions(detectionResult.confidences),
         )
         return result(submitted)
       }
@@ -195,7 +199,7 @@ export class CaptchaSolver {
           submitted = true
           this.panel.addRandomFailure(pony, elapsed())
         },
-        submitOptions,
+        createSubmitOptions(),
       )
       return result(submitted)
     } catch (error) {

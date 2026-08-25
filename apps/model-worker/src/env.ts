@@ -15,6 +15,7 @@ const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 const FORBIDDEN_PATH_CHARACTER_PATTERN = /["'`]/
 const PATH_MUST_BE_ABSOLUTE_MESSAGE = 'must be an absolute pathname'
 const PATH_MUST_NOT_CONTAIN_QUOTES_MESSAGE = 'must not contain quotes'
+const MODEL_DOWNLOAD_QUOTA_ENABLED_DEFAULT = true
 
 // Worker env objects live for the whole isolate; validated configs are cached per env object so
 // repeated requests skip re-reading and re-validating every variable. Failed validations are
@@ -79,9 +80,24 @@ function readInvalidKeyMode(value: string | undefined): InvalidKeyMode {
   return normalized
 }
 
+function readDownloadQuotaEnabled(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase()
+  if (!normalized) {
+    return MODEL_DOWNLOAD_QUOTA_ENABLED_DEFAULT
+  }
+  if (normalized === 'true') {
+    return true
+  }
+  if (normalized === 'false') {
+    return false
+  }
+  throw new Error('MODEL_DOWNLOAD_QUOTA_ENABLED must be true or false')
+}
+
 function parseWorkerConfig(env: Env): WorkerConfig {
   const config = {
     publicModelPath: readPath(env.PUBLIC_MODEL_PATH, LEGACY_MODEL_PUBLIC_PATH, 'PUBLIC_MODEL_PATH'),
+    publicQuotaPath: readPath(env.PUBLIC_QUOTA_PATH, '/quota', 'PUBLIC_QUOTA_PATH'),
     publicOrtModelPath: readPath(env.PUBLIC_ORT_MODEL_PATH, ORT_MODEL_PUBLIC_PATH, 'PUBLIC_ORT_MODEL_PATH'),
     publicRuntimeWasmPath: readPath(
       env.PUBLIC_RUNTIME_WASM_PATH,
@@ -101,10 +117,12 @@ function parseWorkerConfig(env: Env): WorkerConfig {
       'RUNTIME_WASM_OBJECT_KEY',
     ),
     invalidKeyMode: readInvalidKeyMode(env.INVALID_KEY_MODE),
+    downloadQuotaEnabled: readDownloadQuotaEnabled(env.MODEL_DOWNLOAD_QUOTA_ENABLED),
   }
   assertUniqueValues(
     [
       ['PUBLIC_MODEL_PATH', config.publicModelPath],
+      ['PUBLIC_QUOTA_PATH', config.publicQuotaPath],
       ['PUBLIC_ORT_MODEL_PATH', config.publicOrtModelPath],
       ['PUBLIC_RUNTIME_WASM_PATH', config.publicRuntimeWasmPath],
     ],

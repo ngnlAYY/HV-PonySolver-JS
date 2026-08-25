@@ -36,6 +36,25 @@ describe('readWorkerConfig', () => {
     expect(config.realOrtModelObjectKey).toBe(fixture.realOrtModelObjectKey)
   })
 
+  it('uses the dedicated quota path and defaults quota enforcement on', () => {
+    const fixture = createModelFixture()
+    const config = readWorkerConfig(createEnv(fixture))
+    expect(config.publicQuotaPath).toBe(fixture.publicQuotaPath)
+    expect(config.downloadQuotaEnabled).toBe(true)
+  })
+
+  it('accepts an explicit quota enforcement switch', () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { quotaEnabled: false })
+    expect(readWorkerConfig(env).downloadQuotaEnabled).toBe(false)
+  })
+
+  it('rejects invalid quota enforcement values', () => {
+    const env = createEnv(createModelFixture())
+    env.MODEL_DOWNLOAD_QUOTA_ENABLED = 'sometimes'
+    expect(() => readWorkerConfig(env)).toThrow('MODEL_DOWNLOAD_QUOTA_ENABLED must be true or false')
+  })
+
   it('defaults the optional ORT object key when omitted', () => {
     const env = createEnv(createModelFixture())
     delete env.REAL_ORT_MODEL_OBJECT_KEY
@@ -66,6 +85,18 @@ describe('readWorkerConfig', () => {
 
     expect(error.message).toMatch(/duplicate public path/)
     expect(error.message).toContain('PUBLIC_ORT_MODEL_PATH must differ from PUBLIC_MODEL_PATH')
+    expect(error.message).not.toContain(fixture.publicModelPath)
+  })
+
+  it('rejects a quota path that collides with a model path without embedding the path value', () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    env.PUBLIC_QUOTA_PATH = fixture.publicModelPath
+
+    const error = readWorkerConfigError(env)
+
+    expect(error.message).toMatch(/duplicate public path/)
+    expect(error.message).toContain('PUBLIC_QUOTA_PATH must differ from PUBLIC_MODEL_PATH')
     expect(error.message).not.toContain(fixture.publicModelPath)
   })
 

@@ -213,6 +213,22 @@ describe('extension protocol', () => {
     expect(isHostRequest(clearRequest)).toBe(true)
     expect(isHostRequest({ ...clearRequest, candidateKey: 'a'.repeat(64) })).toBe(false)
 
+    const downloadRequest = {
+      protocol: PROTOCOL_VERSION,
+      type: 'download-model',
+      requestId: 'download-1',
+    } as const
+    expect(isHostRequest(downloadRequest)).toBe(true)
+    expect(isHostRequest({ ...downloadRequest, candidateKey: 'a'.repeat(64) })).toBe(false)
+
+    const quotaRequest = {
+      protocol: PROTOCOL_VERSION,
+      type: 'query-model-quota',
+      requestId: 'quota-1',
+    } as const
+    expect(isHostRequest(quotaRequest)).toBe(true)
+    expect(isHostRequest({ ...quotaRequest, candidateKey: 'a'.repeat(64) })).toBe(false)
+
     const claim = {
       type: 'hv-pony-solver:offscreen-request',
       operation: 'claim',

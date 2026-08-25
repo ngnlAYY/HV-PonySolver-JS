@@ -64,6 +64,18 @@ export function serviceUnavailableResponse(request: Request, retryAfterSeconds: 
   })
 }
 
+export function modelQuotaStatusResponse(request: Request, status: unknown): Response {
+  const headers = addCorsHeaders(
+    new Headers({
+      'cache-control': CACHE_CONTROL,
+      'content-type': 'application/json; charset=utf-8',
+      'x-content-type-options': 'nosniff',
+    }),
+    request,
+  )
+  return Response.json(status, { headers })
+}
+
 export function preflightResponse(request: Request, isPublic: boolean): Response {
   const headers = new Headers({
     'access-control-allow-methods': CORS_ALLOW_METHODS,

@@ -11,7 +11,7 @@
 
 ## 部署与分层验收
 
-Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。
+Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。GitHub 手动部署 workflow 的 `enable_model_download_quota` 默认开启；关闭时真实模型 GET 不执行月度额度限制，也不递增计数。
 
 ### 1. 区分 dry-run 与实际发布
 
@@ -21,7 +21,7 @@ Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。�
 - 只有 `publish_model_worker=true` 且 Cloudflare secrets gate 通过时，才会执行 `Deploy Worker`。
 - 部署证据至少包括 workflow run URL、head SHA、`Deploy Worker` step 的 `success` 状态，以及日志中可获得的 Cloudflare deployment 标识或时间。不得把 secret 值复制到记录中。
 
-触发生产发布前，确认目标 ref、`publish_model_worker` 和 `invalid_key_mode`。发布时使用仓库中受审查的 ref，不从未验证分支临时部署。
+触发生产发布前，确认目标 ref、`publish_model_worker`、`invalid_key_mode` 和 `enable_model_download_quota`。发布时使用仓库中受审查的 ref，不从未验证分支临时部署。
 
 ### 2. 发布后公开契约检查
 
@@ -39,7 +39,7 @@ Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。�
 | `OPTIONS`                   | `204`；`Access-Control-Allow-Origin` 精确回显请求 Origin；`Access-Control-Allow-Methods` 精确为 `GET`、`HEAD`、`OPTIONS`；`Access-Control-Allow-Headers` 精确为 `Authorization`；`Cache-Control: no-store`；`Vary` 包含 `Origin` |
 | 无 Key `HEAD`，`decoy` 模式 | `200`；精确回显 Origin；`Cache-Control: no-store`；`Vary` 包含 `Origin`                                                                                                                                                          |
 | 无 Key `HEAD`，`error` 模式 | `403`；精确回显 Origin；`Cache-Control: no-store`；`Vary` 包含 `Origin`                                                                                                                                                          |
-| 精简 WASM `HEAD`             | `200`；`Access-Control-Allow-Origin: *`；`Content-Type: application/wasm`；一年 immutable 缓存；长度匹配共享契约；存在 ETag                                                                                                    |
+| 精简 WASM `HEAD`            | `200`；`Access-Control-Allow-Origin: *`；`Content-Type: application/wasm`；一年 immutable 缓存；长度匹配共享契约；存在 ETag                                                                                                      |
 
 必要时可在本地手动运行同一检查；`MODEL_WORKER_PROBE_ID` 只能使用不含凭据和用户数据的唯一标识：
 
@@ -61,7 +61,7 @@ pnpm --filter @hv-pony-solver/model-worker check:deployment
 
 浏览器请求必须继续使用标准 `fetch` 和 `Authorization: Bearer <key>`。不要改用 `GM_xmlhttpRequest` / `GM.xmlHttpRequest` 绕过 CORS，也不要关闭 byteLength 或 SHA-256 完整性校验。
 
-Key 验证会执行一次完整真实模型下载，因此会消耗当月 1 次额度。收到 `429` 表示 Key 已通过鉴权但本月 5 次额度已经用完；Userscript 仍保存该 Key，并提示“本月 5 次模型下载额度已用完”。
+Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。扩展设置页的“查询下载次数”使用已保存 Key 调用只读 `/quota`，返回本月上限、已用和剩余次数；模型实际 GET 收到 `429` 才表示 Key 已通过鉴权但本月 5 次额度已经用完。
 
 ### 4. 次级故障分流
 

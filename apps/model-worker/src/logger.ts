@@ -8,7 +8,7 @@ const ALLOWED_FIELD_NAMES: ReadonlySet<string> = new Set(['route', 'errorKind', 
 // eslint-disable-next-line no-control-regex -- These code points are the sanitization target.
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
-export type WorkerLogRoute = 'legacy-model' | 'ort-model' | 'runtime' | 'request'
+export type WorkerLogRoute = 'legacy-model' | 'ort-model' | 'quota' | 'runtime' | 'request'
 
 export type WorkerLogFields = Readonly<{
   route: WorkerLogRoute

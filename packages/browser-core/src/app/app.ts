@@ -10,6 +10,7 @@ import type { AppDependencies } from './app-dependencies'
 const STARTUP_SCAN_DELAY_MS = 100
 const MUTATION_SCAN_DEBOUNCE_MS = 100
 const TRANSIENT_FAILURE_RETRY_AFTER_MS = 30_000
+const SOLVER_FAILURE_RETRY_AFTER_MS = 30_000
 
 type PrepareTargetResult = 'prepared' | 'stale' | 'permanent-failure' | 'transient-failure'
 
@@ -27,6 +28,7 @@ export class App {
   private lastCaptchaTarget: CaptchaTarget | null = null
   private failedCaptchaTarget: CaptchaTarget | null = null
   private transientSuppressionAt: number | null = null
+  private solverFailureSuppressionAt: number | null = null
   private preparingCaptchaTarget: CaptchaTarget | null = null
   private modelCredentialsRevision = 0
   private destroyed = false
@@ -59,6 +61,7 @@ export class App {
     this.modelCredentialsRevision += 1
     this.failedCaptchaTarget = null
     this.transientSuppressionAt = null
+    this.solverFailureSuppressionAt = null
     if (isSameCaptchaTarget(this.lastCaptchaTarget, currentTarget)) {
       this.lastCaptchaTarget = null
     }
@@ -106,6 +109,7 @@ export class App {
     this.lastCaptchaTarget = null
     this.failedCaptchaTarget = null
     this.transientSuppressionAt = null
+    this.solverFailureSuppressionAt = null
     this.preparingCaptchaTarget = null
     this.modelCredentialsRevision += 1
     this.detector.destroy()
@@ -235,9 +239,19 @@ export class App {
         this.failedCaptchaTarget = null
         this.transientSuppressionAt = null
       }
+      if (
+        this.solverFailureSuppressionAt !== null &&
+        Date.now() - this.solverFailureSuppressionAt >= SOLVER_FAILURE_RETRY_AFTER_MS &&
+        isSameCaptchaTarget(target, this.lastCaptchaTarget)
+      ) {
+        this.lastCaptchaTarget = null
+        this.failedCaptchaTarget = null
+        this.solverFailureSuppressionAt = null
+      }
       if (isSameCaptchaTarget(target, this.lastCaptchaTarget)) {
         return
       }
+      this.solverFailureSuppressionAt = null
       const prepareResult = await this.prepareTarget(target, credentialsRevision, signal)
       if (prepareResult !== 'prepared') {
         if (
@@ -252,15 +266,21 @@ export class App {
       }
       this.failedCaptchaTarget = null
       this.transientSuppressionAt = null
+      this.solverFailureSuppressionAt = null
       const result = await this.solver.trigger(target)
       if (result.handled && this.isTargetCurrent(target, signal)) {
         this.lastCaptchaTarget = target
+      } else if (!result.handled && result.captchaKey === target.captchaKey && this.isTargetCurrent(target, signal)) {
+        this.lastCaptchaTarget = target
+        this.failedCaptchaTarget = target
+        this.solverFailureSuppressionAt = Date.now()
       }
     } catch (error) {
       if (target && this.isTargetCurrent(target, signal)) {
         this.lastCaptchaTarget = target
         this.failedCaptchaTarget = target
         this.transientSuppressionAt = null
+        this.solverFailureSuppressionAt = Date.now()
         warn('处理验证码失败:', formatErrorMessage(error))
       }
     } finally {

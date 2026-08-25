@@ -14,6 +14,8 @@ type RequestBase = Readonly<{
 }>
 
 export type PrepareRequest = RequestBase & Readonly<{ type: 'prepare' }>
+export type DownloadModelRequest = RequestBase & Readonly<{ type: 'download-model' }>
+export type QueryModelQuotaRequest = RequestBase & Readonly<{ type: 'query-model-quota' }>
 export type DetectRequest = RequestBase &
   Readonly<{
     type: 'detect'
@@ -22,8 +24,8 @@ export type DetectRequest = RequestBase &
   }>
 export type VerifyKeyRequest = RequestBase & Readonly<{ type: 'verify-key'; candidateKey: string }>
 export type ClearKeyRequest = RequestBase & Readonly<{ type: 'clear-key' }>
-export type KeyIntentRequest = VerifyKeyRequest | ClearKeyRequest
-export type HostRequest = PrepareRequest | DetectRequest | KeyIntentRequest
+export type KeyIntentRequest = VerifyKeyRequest | ClearKeyRequest | QueryModelQuotaRequest
+export type HostRequest = PrepareRequest | DownloadModelRequest | DetectRequest | KeyIntentRequest
 
 /**
  * Asks the broker to abort one still-active request from the same Port.
@@ -223,7 +225,12 @@ export function isHostRequest(value: unknown): value is HostRequest {
   if (!isRecord(value) || value.protocol !== PROTOCOL_VERSION || !isRequestId(value.requestId)) {
     return false
   }
-  if (value.type === 'prepare' || value.type === 'clear-key') {
+  if (
+    value.type === 'prepare' ||
+    value.type === 'download-model' ||
+    value.type === 'query-model-quota' ||
+    value.type === 'clear-key'
+  ) {
     return hasOnlyKeys(value, ['protocol', 'type', 'requestId'])
   }
   if (value.type === 'detect') {

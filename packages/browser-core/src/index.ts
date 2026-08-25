@@ -1,6 +1,7 @@
 export * from './app/app'
 export * from './app/app-dependencies'
 export * from './captcha/answer-mode-settings'
+export * from './captcha/answer-selection-settings'
 export * from './captcha/answer-submitter'
 export * from './captcha/captcha-image-loader'
 export * from './captcha/captcha-selectors'

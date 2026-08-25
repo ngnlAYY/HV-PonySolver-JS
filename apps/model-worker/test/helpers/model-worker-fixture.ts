@@ -18,6 +18,7 @@ export type StoredObject = Readonly<{
 
 export type ModelFixture = Readonly<{
   publicModelPath: string
+  publicQuotaPath: string
   publicOrtModelPath: string
   publicRuntimeWasmPath: string
   realModelObjectKey: string
@@ -47,6 +48,7 @@ export type EnvOptions = Readonly<{
   quotaError?: Error
   quotaNamespace?: ModelDownloadQuotaNamespace
   quotaNow?: () => Date
+  quotaEnabled?: boolean
 }>
 
 export class MockKvNamespace implements ModelKeyStore {
@@ -112,7 +114,16 @@ export class MockModelDownloadQuotaNamespace implements ModelDownloadQuotaNamesp
         const now = this.now()
         const month = utcMonthKey(now)
         const stored = this.usage.get(identity)
-        const used = stored?.month === month ? stored.used : 0
+        const used = stored?.month === month ? Math.min(stored.used, MODEL_MONTHLY_DOWNLOAD_LIMIT) : 0
+        if (new URL(request.url).pathname === '/status') {
+          return Response.json({
+            limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+            used,
+            remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - used,
+            retryAfterSeconds: secondsUntilNextUtcMonth(now),
+          })
+        }
+        if (new URL(request.url).pathname !== '/consume') return new Response('Not Found', { status: 404 })
         if (used >= MODEL_MONTHLY_DOWNLOAD_LIMIT) {
           return Response.json({ allowed: false, retryAfterSeconds: secondsUntilNextUtcMonth(now) })
         }
@@ -136,7 +147,7 @@ export class MockR2Object implements R2Object {
     protected readonly object: StoredObject,
   ) {
     this.size = object.body.length
-    this.httpEtag = object.httpEtag === null ? '' : object.httpEtag ?? object.etag ?? '"mock-etag"'
+    this.httpEtag = object.httpEtag === null ? '' : (object.httpEtag ?? object.etag ?? '"mock-etag"')
   }
 
   get etag(): string {
@@ -155,11 +166,21 @@ export class MockR2ObjectBody extends MockR2Object implements R2ObjectBody {
     this.body = new Response(object.body).body ?? new ReadableStream()
   }
 
-  async arrayBuffer(): Promise<ArrayBuffer> { return new TextEncoder().encode(this.object.body).slice().buffer }
-  async bytes(): Promise<Uint8Array> { return new TextEncoder().encode(this.object.body) }
-  async text(): Promise<string> { return this.object.body }
-  async json<T>(): Promise<T> { return JSON.parse(this.object.body) as T }
-  async blob(): Promise<Blob> { return new Blob([this.object.body]) }
+  async arrayBuffer(): Promise<ArrayBuffer> {
+    return new TextEncoder().encode(this.object.body).slice().buffer
+  }
+  async bytes(): Promise<Uint8Array> {
+    return new TextEncoder().encode(this.object.body)
+  }
+  async text(): Promise<string> {
+    return this.object.body
+  }
+  async json<T>(): Promise<T> {
+    return JSON.parse(this.object.body) as T
+  }
+  async blob(): Promise<Blob> {
+    return new Blob([this.object.body])
+  }
 }
 
 function randomHex(byteLength: number): string {
@@ -182,6 +203,7 @@ export function createModelFixture(): ModelFixture {
   const suffix = randomHex(8)
   return {
     publicModelPath: `/models/${suffix}.onnx`,
+    publicQuotaPath: '/quota',
     publicOrtModelPath: `/models/${suffix}.ort`,
     publicRuntimeWasmPath: `/runtime/ort-wasm-${suffix}.wasm`,
     realModelObjectKey: `real/${suffix}.onnx`,
@@ -203,18 +225,21 @@ export function createModelFixture(): ModelFixture {
 }
 
 export function createEnv(fixture: ModelFixture, options: EnvOptions = {}): Env {
-  const objects = options.objects ?? new Map<string, StoredObject>([
-    [fixture.realModelObjectKey, { body: fixture.realBody, etag: fixture.realEtag }],
-    [fixture.realOrtModelObjectKey, { body: fixture.ortBody, etag: fixture.ortEtag }],
-    [fixture.decoyModelObjectKey, { body: fixture.decoyBody, etag: fixture.decoyEtag }],
-    [fixture.runtimeWasmObjectKey, { body: fixture.runtimeBody, etag: fixture.runtimeEtag }],
-  ])
+  const objects =
+    options.objects ??
+    new Map<string, StoredObject>([
+      [fixture.realModelObjectKey, { body: fixture.realBody, etag: fixture.realEtag }],
+      [fixture.realOrtModelObjectKey, { body: fixture.ortBody, etag: fixture.ortEtag }],
+      [fixture.decoyModelObjectKey, { body: fixture.decoyBody, etag: fixture.decoyEtag }],
+      [fixture.runtimeWasmObjectKey, { body: fixture.runtimeBody, etag: fixture.runtimeEtag }],
+    ])
   const env: Env = {
     MODEL_KEYS: new MockKvNamespace(options.keyValues, options.keyError),
     MODEL_BUCKET: new MockR2Bucket(objects, options.bucketGetError, options.bucketHeadError),
     MODEL_DOWNLOAD_QUOTAS:
       options.quotaNamespace ?? new MockModelDownloadQuotaNamespace(options.quotaError, options.quotaNow),
     PUBLIC_MODEL_PATH: fixture.publicModelPath,
+    PUBLIC_QUOTA_PATH: fixture.publicQuotaPath,
     REAL_MODEL_OBJECT_KEY: fixture.realModelObjectKey,
     DECOY_MODEL_OBJECT_KEY: fixture.decoyModelObjectKey,
     PUBLIC_ORT_MODEL_PATH: fixture.publicOrtModelPath,
@@ -223,6 +248,7 @@ export function createEnv(fixture: ModelFixture, options: EnvOptions = {}): Env 
     RUNTIME_WASM_OBJECT_KEY: fixture.runtimeWasmObjectKey,
   }
   if (options.invalidKeyMode !== undefined) env.INVALID_KEY_MODE = options.invalidKeyMode
+  if (options.quotaEnabled !== undefined) env.MODEL_DOWNLOAD_QUOTA_ENABLED = String(options.quotaEnabled)
   return env
 }
 
@@ -243,6 +269,14 @@ export function assetRequest(path: string, method: string, headers?: HeadersInit
 
 export function modelRequest(fixture: ModelFixture, method: string, key?: string, headers?: HeadersInit): Request {
   const url = new URL(`https://models.example${fixture.publicModelPath}`)
+  if (key !== undefined) url.searchParams.set('key', key)
+  const init: RequestInit = { method }
+  if (headers !== undefined) init.headers = headers
+  return new Request(url, init)
+}
+
+export function quotaRequest(fixture: ModelFixture, method: string, key?: string, headers?: HeadersInit): Request {
+  const url = new URL(`https://models.example${fixture.publicQuotaPath}`)
   if (key !== undefined) url.searchParams.set('key', key)
   const init: RequestInit = { method }
   if (headers !== undefined) init.headers = headers

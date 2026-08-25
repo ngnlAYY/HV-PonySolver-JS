@@ -15,6 +15,8 @@ export type InferenceHostDependencies = Readonly<{
   detector: DetectorService
   verifyKey?(candidateKey: string, signal: AbortSignal): Promise<string | undefined>
   clearKey?(signal: AbortSignal): Promise<void>
+  downloadModel?(signal: AbortSignal): Promise<string | undefined>
+  queryModelQuota?(signal: AbortSignal): Promise<string | undefined>
   close?(): void | Promise<void>
 }>
 
@@ -33,7 +35,7 @@ export class InferenceHost {
   constructor(private readonly dependencies: InferenceHostDependencies) {}
 
   async handle(request: HostRequest, callerSignal?: AbortSignal): Promise<HostResponse> {
-    if (request.type === 'verify-key' || request.type === 'clear-key') {
+    if (request.type === 'verify-key' || request.type === 'clear-key' || request.type === 'query-model-quota') {
       return this.handleKeyIntent(request, callerSignal)
     }
     const controller = new AbortController()
@@ -42,6 +44,14 @@ export class InferenceHost {
     this.destroyController.signal.addEventListener('abort', abort, { once: true })
     try {
       this.assertActive(callerSignal)
+      if (request.type === 'download-model') {
+        if (!this.dependencies.downloadModel) {
+          throw new Error('当前扩展版本不支持手动下载模型')
+        }
+        const notice = await this.dependencies.downloadModel(controller.signal)
+        this.assertActive(callerSignal)
+        return successResponse(request.requestId, undefined, notice)
+      }
       if (request.type === 'prepare') {
         await this.dependencies.detector.prepare(controller.signal)
         this.assertActive(callerSignal)
@@ -112,11 +122,16 @@ export class InferenceHost {
           throw new Error('当前扩展版本不支持模型 Key')
         }
         notice = await this.dependencies.verifyKey(request.candidateKey.trim(), controller.signal)
-      } else {
+      } else if (request.type === 'clear-key') {
         if (!this.dependencies.clearKey) {
           throw new Error('当前扩展版本不支持清除模型 Key')
         }
         await this.dependencies.clearKey(controller.signal)
+      } else {
+        if (!this.dependencies.queryModelQuota) {
+          throw new Error('当前扩展版本不支持查询模型下载次数')
+        }
+        notice = await this.dependencies.queryModelQuota(controller.signal)
       }
       this.assertKeyIntentActive(intent, callerSignal)
       return notice

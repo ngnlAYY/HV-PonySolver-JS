@@ -33,6 +33,7 @@ import {
   type MockKvNamespace,
   type MockR2Bucket,
   modelRequest,
+  quotaRequest,
   randomText,
   readResponseBody,
   type StoredObject,
@@ -632,6 +633,97 @@ describe('model worker', () => {
     expect(response.headers.get('allow')).toBe('GET, HEAD, OPTIONS')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+  })
+
+  it('returns a per-Key quota status without consuming a download', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+    const headers = { authorization: `Bearer ${fixture.validKey}`, origin: HENTAIVERSE_ORIGIN }
+
+    const first = await fetchWorker(quotaRequest(fixture, 'GET', undefined, headers), env)
+    const second = await fetchWorker(quotaRequest(fixture, 'GET', undefined, headers), env)
+
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    await expect(first.json()).resolves.toEqual({
+      enabled: true,
+      limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+      used: 0,
+      remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+      retryAfterSeconds: expect.any(Number),
+    })
+    await expect(second.json()).resolves.toEqual(
+      expect.objectContaining({ used: 0, remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT }),
+    )
+    expect(first.headers.get('content-type')).toContain('application/json')
+    expect(first.headers.get('cache-control')).toBe('no-store')
+    expect(first.headers.get('access-control-allow-origin')).toBe(HENTAIVERSE_ORIGIN)
+    expectVaryOrigin(first.headers)
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toHaveLength(2)
+
+    const download = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+    await download.arrayBuffer()
+    const afterDownload = await fetchWorker(quotaRequest(fixture, 'GET', undefined, headers), env)
+    await expect(afterDownload.json()).resolves.toEqual(
+      expect.objectContaining({ used: 1, remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - 1 }),
+    )
+  })
+
+  it('requires a valid Bearer Key for quota status even in decoy mode', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+
+    const response = await fetchWorker(quotaRequest(fixture, 'GET', fixture.validKey), env)
+
+    expect(response.status).toBe(403)
+    expect(await response.text()).toBe('Forbidden')
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toEqual([])
+  })
+
+  it('returns a disabled quota status and does not call quota storage when enforcement is off', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map([[fixture.validKey, '1']]),
+      quotaEnabled: false,
+    })
+
+    const quota = await fetchWorker(
+      quotaRequest(fixture, 'GET', undefined, { authorization: `Bearer ${fixture.validKey}` }),
+      env,
+    )
+    await expect(quota.json()).resolves.toEqual({
+      enabled: false,
+      limit: 0,
+      used: 0,
+      remaining: null,
+      retryAfterSeconds: null,
+    })
+    for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT + 1; index += 1) {
+      const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+      expect(response.status).toBe(200)
+      await response.arrayBuffer()
+    }
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toEqual([])
+  })
+
+  it('uses a quota-specific Allow header and returns a retryable error when status storage fails', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map([[fixture.validKey, '1']]),
+      quotaError: new Error('quota status unavailable'),
+    })
+
+    const methodResponse = await fetchWorker(quotaRequest(fixture, 'POST'), env)
+    expect(methodResponse.status).toBe(405)
+    expect(methodResponse.headers.get('allow')).toBe('GET, OPTIONS')
+
+    const failureResponse = await fetchWorker(
+      quotaRequest(fixture, 'GET', undefined, { authorization: `Bearer ${fixture.validKey}` }),
+      env,
+    )
+    expect(failureResponse.status).toBe(503)
+    expect(failureResponse.headers.get('retry-after')).toBe('5')
+    expect(await failureResponse.text()).toBe('Service Unavailable')
   })
 
   it('returns 500 text when the selected R2 object is missing', async () => {

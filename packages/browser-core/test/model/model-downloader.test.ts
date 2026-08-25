@@ -5,6 +5,7 @@ import type { ModelDownloadQuotaExceededError } from '../../src/model/model-down
 import { PermanentModelError } from '../../src/model/permanent-model-error'
 import {
   downloadModel as downloadCoreModel,
+  queryModelDownloadQuota,
   probeModelAccessKey,
   type ModelAccessKeyProbe,
   type ModelIntegrityOptions,
@@ -21,6 +22,7 @@ const TEST_INTEGRITY = {
   sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
 } as const
 const MODEL_URL = 'https://models.ngnl.host/yolo26n-640.ort'
+const QUOTA_URL = 'https://models.ngnl.host/quota'
 
 function getFetchCall(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit] {
   const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
@@ -875,6 +877,118 @@ describe('downloadModel', () => {
         verifyIntegrity: false,
       }),
     ).rejects.toThrow('下载模型大小校验失败: 4 > 3')
+  })
+})
+
+describe('queryModelDownloadQuota', () => {
+  function query(
+    signal?: AbortSignal,
+    options: ModelIntegrityOptions = {},
+  ): ReturnType<typeof queryModelDownloadQuota> {
+    return queryModelDownloadQuota(signal, options, { getAccessKey: getModelAccessKey })
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    getModelAccessKey.mockResolvedValue('')
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('queries the quota endpoint with the saved Key and does not put the Key in the URL', async () => {
+    getModelAccessKey.mockResolvedValue('saved-token')
+    const fetchMock = vi.fn(async () =>
+      Response.json({ enabled: true, limit: 5, used: 2, remaining: 3, retryAfterSeconds: 3600 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(query()).resolves.toEqual({
+      enabled: true,
+      limit: 5,
+      used: 2,
+      remaining: 3,
+      retryAfterSeconds: 3600,
+    })
+
+    const [url, init] = getFetchCall(fetchMock)
+    expect(url).toBe(QUOTA_URL)
+    expect(url).not.toContain('saved-token')
+    expect(url).not.toContain('?key=')
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer saved-token')
+    expect(init).toEqual(expect.objectContaining({ cache: 'no-store', signal: expect.any(AbortSignal) }))
+  })
+
+  it('supports a candidate Key override and a disabled quota response', async () => {
+    getModelAccessKey.mockReturnValue(new Promise<string>(() => {}))
+    const fetchMock = vi.fn(async () =>
+      Response.json({ enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(query(undefined, { accessKeyOverride: '  candidate-token  ' })).resolves.toEqual({
+      enabled: false,
+      limit: 0,
+      used: 0,
+      remaining: null,
+      retryAfterSeconds: null,
+    })
+    const [url, init] = getFetchCall(fetchMock)
+    expect(url).toBe(QUOTA_URL)
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer candidate-token')
+  })
+
+  it.each([
+    [403, '模型 Key 无效或已失效，请在设置中重新验证 Key'],
+    [500, '模型下载次数查询失败: HTTP 500'],
+  ])('reports HTTP %s without exposing credentials', async (status, message) => {
+    getModelAccessKey.mockResolvedValue('secret-token')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status })),
+    )
+
+    await expect(query()).rejects.toThrow(message)
+    await expect(query()).rejects.not.toThrow('secret-token')
+  })
+
+  it('preserves quota exhaustion metadata if the query endpoint rejects with 429', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 429, headers: { 'retry-after': '60' } })),
+    )
+
+    await expect(query()).rejects.toMatchObject({
+      name: 'ModelDownloadQuotaExceededError',
+      retryAfterSeconds: 60,
+    })
+  })
+
+  it('rejects malformed enabled and disabled quota responses', async () => {
+    const responses = [
+      null,
+      { enabled: true, limit: 5, used: 1, remaining: 1, retryAfterSeconds: 60 },
+      { enabled: false, limit: 5, used: 0, remaining: null, retryAfterSeconds: null },
+    ]
+    for (const value of responses) {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => Response.json(value)),
+      )
+      await expect(query()).rejects.toThrow('模型下载次数查询失败: 响应格式无效')
+    }
+  })
+
+  it('does not fetch for an already-aborted query', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(query(controller.signal)).rejects.toThrow('模型下载次数查询已取消')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
