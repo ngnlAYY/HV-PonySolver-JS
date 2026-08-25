@@ -54,7 +54,6 @@ function controlsAreUsable(form: HTMLFormElement, controls: SubmissionControls):
     form.isConnected &&
     controls.button.isConnected &&
     controls.button.form === form &&
-    !controls.button.disabled &&
     controls.checkboxes.every((checkbox) => checkbox.isConnected && checkbox.form === form && !checkbox.disabled)
   )
 }
@@ -298,6 +297,10 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     await sleep(randDelay(submitDelay), signal)
     const controls = currentControls()
     if (!controls) {
+      return
+    }
+    if (controls.button.disabled) {
+      onError('提交按钮不可用')
       return
     }
 

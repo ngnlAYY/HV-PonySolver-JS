@@ -24,17 +24,25 @@ function captchaHtml({ precheckedIndex = -1 } = {}) {
     { length: 6 },
     (_, index) => `<input name="riddleanswer[]" type="checkbox"${index === precheckedIndex ? ' checked' : ''}>`,
   ).join('')
+  const submitDisabled = precheckedIndex < 0 ? ' disabled' : ''
   return `<!doctype html>
     <html><body>
       <div id="riddlemaster">
         <form name="riddleform">
           ${answers}
-          <input id="riddlesubmit" type="button" data-submit-count="0">
+          <input id="riddlesubmit" type="button" data-submit-count="0"${submitDisabled}>
         </form>
         <div id="riddleimage"><img src="/captcha.png"></div>
       </div>
       <script>
-        document.querySelector('#riddlesubmit').addEventListener('click', (event) => {
+        const answers = [...document.querySelectorAll('input[name="riddleanswer[]"]')]
+        const submit = document.querySelector('#riddlesubmit')
+        const updateSubmit = () => {
+          const selectedCount = answers.filter((answer) => answer.checked).length
+          submit.disabled = selectedCount === 0 || selectedCount >= 4
+        }
+        answers.forEach((answer) => answer.addEventListener('change', updateSubmit))
+        submit.addEventListener('click', (event) => {
           const button = event.currentTarget
           button.dataset.submitCount = String(Number(button.dataset.submitCount || '0') + 1)
         })
@@ -60,13 +68,20 @@ function bfcacheFixtureHtml() {
 
 function installCaptchaScript() {
   const answers = Array.from({ length: 6 }, () => '<input name="riddleanswer[]" type="checkbox">').join('')
-  const markup = `<form name="riddleform">${answers}<input id="riddlesubmit" type="button" data-submit-count="0"></form><div id="riddleimage"><img src="/captcha.png"></div>`
+  const markup = `<form name="riddleform">${answers}<input id="riddlesubmit" type="button" data-submit-count="0" disabled></form><div id="riddleimage"><img src="/captcha.png"></div>`
   return `
     const container = document.createElement('div')
     container.id = 'riddlemaster'
     container.innerHTML = ${JSON.stringify(markup)}
     document.body.append(container)
-    document.querySelector('#riddlesubmit').addEventListener('click', (event) => {
+    const answers = [...document.querySelectorAll('input[name="riddleanswer[]"]')]
+    const submit = document.querySelector('#riddlesubmit')
+    const updateSubmit = () => {
+      const selectedCount = answers.filter((answer) => answer.checked).length
+      submit.disabled = selectedCount === 0 || selectedCount >= 4
+    }
+    answers.forEach((answer) => answer.addEventListener('change', updateSubmit))
+    submit.addEventListener('click', (event) => {
       const button = event.currentTarget
       button.dataset.submitCount = String(Number(button.dataset.submitCount || '0') + 1)
     })

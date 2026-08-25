@@ -135,6 +135,31 @@ describe('AnswerSubmitter', () => {
     expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual([false, false, true, false, false, false])
   })
 
+  it('supports the live form whose submit button starts disabled until an answer is selected', async () => {
+    const form = createForm(true)
+    const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+    for (const checkbox of checkboxes) {
+      checkbox.checked = false
+    }
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.disabled = true
+    form.addEventListener('change', () => {
+      const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length
+      button.disabled = selectedCount === 0 || selectedCount >= 4
+    })
+    button.click = vi.fn()
+    const onError = vi.fn()
+    const onSubmitted = vi.fn()
+
+    await createSubmitter([0, 0], [0, 0]).submit(form, ['TS'], onError, onSubmitted)
+
+    expect(checkboxes[0]).toHaveProperty('checked', true)
+    expect(button.disabled).toBe(false)
+    expect(button.click).toHaveBeenCalledTimes(1)
+    expect(onSubmitted).toHaveBeenCalledTimes(1)
+    expect(onError).not.toHaveBeenCalled()
+  })
+
   describe('AbortSignal support', () => {
     beforeEach(() => {
       vi.useFakeTimers()

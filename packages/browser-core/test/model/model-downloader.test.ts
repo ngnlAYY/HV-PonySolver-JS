@@ -113,6 +113,31 @@ describe('downloadModel', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps the browser receiver for the default fetch through cache confirmation', async () => {
+    const responses = [
+      new Response(new Uint8Array([1, 2, 3]), {
+        headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: RECEIPT_ID },
+      }),
+      Response.json({ confirmed: true, alreadyConfirmed: false }),
+    ]
+    const fetchMock = vi.fn(function (this: typeof globalThis): Promise<Response> {
+      if (this !== globalThis) {
+        throw new TypeError('Illegal invocation')
+      }
+      const response = responses.shift()
+      if (!response) {
+        throw new Error('unexpected fetch')
+      }
+      return Promise.resolve(response)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY })
+    await confirmCachedModelDownload(buffer)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps unlimited or legacy downloads confirmation-free and rejects malformed receipt headers', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1, 2, 3])))
     const buffer = await downloadCoreModel(undefined, { integrity: TEST_INTEGRITY }, { fetchImpl: fetchMock })
@@ -998,6 +1023,21 @@ describe('queryModelDownloadQuota', () => {
     expect(url).not.toContain('?key=')
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer saved-token')
     expect(init).toEqual(expect.objectContaining({ cache: 'no-store', signal: expect.any(AbortSignal) }))
+  })
+
+  it('keeps the browser receiver when calling the default fetch', async () => {
+    const fetchMock = vi.fn(function (this: typeof globalThis): Promise<Response> {
+      if (this !== globalThis) {
+        throw new TypeError('Illegal invocation')
+      }
+      return Promise.resolve(
+        Response.json({ enabled: true, limit: 5, used: 2, remaining: 3, retryAfterSeconds: 3600 }),
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(query()).resolves.toMatchObject({ enabled: true, remaining: 3 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('supports a candidate Key override and a disabled quota response', async () => {

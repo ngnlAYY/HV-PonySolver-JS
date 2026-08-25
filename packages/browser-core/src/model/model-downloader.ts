@@ -98,6 +98,14 @@ function getQuotaUrl(): string {
   return modelConfig.quotaUrl
 }
 
+function resolveFetchImpl(fetchImpl: typeof fetch | undefined): typeof fetch {
+  if (fetchImpl) {
+    return fetchImpl
+  }
+  const globalFetch = globalThis.fetch
+  return (input, init) => globalFetch.call(globalThis, input, init)
+}
+
 async function getRequestAccessKey(
   accessKeyOverride: string | undefined,
   getAccessKey: ((signal?: AbortSignal) => Promise<string>) | undefined,
@@ -369,7 +377,7 @@ export async function downloadModel(
     const accessKey = await deadline.run(() =>
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
-    const fetchImpl = environment.fetchImpl ?? fetch
+    const fetchImpl = resolveFetchImpl(environment.fetchImpl)
     const response = await deadline.run(() =>
       fetchImpl(getModelUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
@@ -484,8 +492,9 @@ export async function queryModelDownloadQuota(
     const accessKey = await deadline.run(() =>
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
+    const fetchImpl = resolveFetchImpl(environment.fetchImpl)
     const response = await deadline.run(() =>
-      (environment.fetchImpl ?? fetch)(getQuotaUrl(), createModelFetchInit(deadline.signal, accessKey)),
+      fetchImpl(getQuotaUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
     if (!response.ok) {
       await cancelResponseBody(response, deadline)
@@ -532,8 +541,9 @@ export async function probeModelAccessKey(
     const accessKey = await deadline.run(() =>
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
+    const fetchImpl = resolveFetchImpl(environment.fetchImpl)
     const response = await deadline.run(() =>
-      (environment.fetchImpl ?? fetch)(getModelUrl(), createModelProbeInit(deadline.signal, accessKey)),
+      fetchImpl(getModelUrl(), createModelProbeInit(deadline.signal, accessKey)),
     )
     await cancelResponseBody(response, deadline)
     deadline.throwIfExpired()
