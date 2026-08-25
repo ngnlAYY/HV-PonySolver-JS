@@ -8,6 +8,8 @@
 
 HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、Cloudflare Model Worker 和共用浏览器核心。
 
+当前可分发客户端版本以各应用的 `package.json` 为准：用户脚本为 `3.0.0`，浏览器扩展为 `0.1.1`。根包、内部包和 Model Worker 的私有包版本不代表扩展版本，修改时不得为了“统一版本号”而联动升级无关工作区。
+
 必须始终保留以下产品边界：
 
 - 验证码图片预处理、ONNX Runtime Web 推理和答案选择均在浏览器本地完成；图片与识别结果不得发送给 Model Worker。
@@ -34,7 +36,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 | `packages/browser-core` | 用户脚本和扩展共用的 DOM、验证码、答题、推理、模型下载、状态面板与平台接口        |
 | `packages/shared`       | 浏览器端和 Model Worker 共用的模型、答案、令牌及 ORT 资产契约                     |
 | `scripts`               | 仓库级校验、文档漂移、架构门禁、包体预算、E2E 和发布辅助脚本                      |
-| `docs`                  | 扩展架构、Model Worker 运维和 ONNX Runtime 补充文档                               |
+| `docs`                  | 扩展架构、模型缓存策略、Model Worker 运维和 ONNX Runtime 补充文档                 |
 | `model`                 | 内置扩展构建使用的本地固定模型输入；大体积模型不应随意纳入 Git                    |
 | `other`                 | 可供人工上传或归档的运行时生成物，不是默认源码入口                                |
 | `config`                | 本地生成配置；已被 Git 忽略，不得重新跟踪                                         |
@@ -173,6 +175,13 @@ corepack pnpm --filter @hv-pony-solver/model-worker render-config
 - Model Worker 部署默认不应发生。只有手动输入明确允许发布且 Cloudflare secrets 完整时才可执行真实部署。
 - 下载额度开关属于部署配置：构建或部署选择无限制时，客户端额度查询必须显示未启用限制，而不是显示一个虚假的有限次数。
 - 工作流文件数量应保持精简；合并 job 或 workflow 时必须保留权限最小化、条件执行、发布门禁和已有 Code Scanning 连续性。
+
+`Repository CI` 的手动发布入口必须按产品类型区分：
+
+- `publish_userscript_artifact` 只上传用户脚本 Actions artifact，不创建 GitHub Release。
+- `publish_extension_release` 只允许从 `main` 创建 `extension-v<apps/extension/package.json version>`，发布远程模型桌面 Chromium/Firefox ZIP、校验文件和 artifact 元数据；默认关闭，不代表浏览器商店发布或 Firefox Android 验证。
+- `publish_extension_artifact` 发布内置模型扩展 artifact，必须通过 canonical 模型、桌面双浏览器、受保护远程模型和同一 Firefox ZIP 的 Android 142 外部证据门禁。
+- 普通 push、Pull Request 和未勾选发布输入的手动运行不得创建 Release 或发布生产 artifact。
 
 ## Git 与交付纪律
 

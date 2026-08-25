@@ -2,6 +2,8 @@
 
 ## Scope
 
+The current extension release version is `0.1.1`, sourced only from `apps/extension/package.json`. Both manifests, `build-manifest.json`, artifact metadata, ZIP names and the optional GitHub Release tag are derived from that value; root and internal workspace versions are unrelated.
+
 `apps/extension` builds two model-delivery products for Chromium and Firefox:
 
 | Artifact     | Browsers            | Minimum             | Model delivery         | Automated gate                                |
@@ -72,7 +74,9 @@ Packaged mode constructs none of those remote capabilities. It fetches the exten
 | Model access Key          | secret IndexedDB | not read or changed   | No                          |
 | Ordinary settings/history | `storage.local`  | `storage.local`       | Through an in-memory mirror |
 
-The remote options page enables the initially disabled Key fieldset after its handlers exist. It never echoes the stored Key. “Verify and save” settles Key validity with an unmetered HEAD probe and persists the Key without spending a monthly download. “Query download count” reads the saved Key's current monthly status without spending a download. “Download model” uses the saved Key to download, verify and cache the model; if a valid local cache already exists, it reports the cache hit without spending another download. A hanging Key, quota, or model operation can be cancelled from the page, which aborts the in-flight request on both sides.
+The remote options page enables the initially disabled Key fieldset after its handlers exist. It never echoes the stored Key. “Verify and save” settles Key validity with an unmetered HEAD probe and persists the Key without spending a monthly download. “Query download count” reads the saved Key's current monthly status without spending a download; when enforcement is disabled it reports `无次数限制（模型下载次数限制未开启）`. “Download model” uses the saved Key to download, verify and cache the model; if a valid local cache already exists, it reports the cache hit without spending another download. A real-model GET only reserves a ten-minute receipt. The Host confirms that receipt with `POST /quota` after byte-length/SHA-256 verification and a completed model IndexedDB transaction, so an interrupted or uncached response is not counted. A hanging Key, quota, or model operation can be cancelled from the page, which aborts the in-flight request on both sides.
+
+The options transport preserves user-diagnostic errors from the Host instead of replacing every failure with a generic disconnect. A quota query alone retries one transient background Port disconnect after a bounded delay; if the second attempt fails, the actual browser/Host message is shown. Key verification and model download are not automatically replayed because doing so could duplicate a state-changing operation.
 
 The packaged entry does not open Key storage or a Key Port. Its Key controls remain disabled and it shows exactly:
 
@@ -81,6 +85,23 @@ The packaged entry does not open Key storage or a Key Port. Its Key controls rem
 ```
 
 Ordinary settings remain editable. An existing remote-build Key is neither read nor deleted.
+
+## Answer selection and panel behavior
+
+`auto` is the default answer mode. It checks answers and clicks the page's native submit control after the configured delays. `manual` still runs inference and records the detected answers, but it neither changes checkboxes nor submits. Random selection after an empty detection is enabled by default and can be disabled.
+
+“Preserve checked answers” is enabled by default. User and automatic checkbox changes are tracked separately:
+
+- a manual checkbox is never unchecked by the extension;
+- previous automatic selections may be merged with the new detection;
+- when the combined count is at most four, no trimming occurs;
+- when it exceeds four, only automatic selections are removed from lowest confidence upward, targeting at most three total answers;
+- if manual answers alone exceed that target, they all remain;
+- disabling preservation clears the current checked state before the automatic result is applied.
+
+Before and between clicks, the content script revalidates the exact form, six checkboxes, submit control, DOM connection and disabled state captured for the current captcha. Initial failures are reported distinctly: an unexpected checkbox count, a missing submit control, unusable answer controls, or a disabled final submit control. If the page replaces the captcha or any captured control while delays are running, the stale task is cancelled without clicking the replacement. Failures for the same unchanged captcha target are suppressed for 30 seconds, so rapid MutationObserver activity does not add another record during the cooldown; a changed target, credential recovery or expiry of that cooldown permits a fresh attempt. Persisted history is independently capped at 50 records.
+
+The default panel position is `top=155, left=1240`. By default the panel is visible only while a `div#csp` exists; this requirement can be disabled. Hiding the panel does not stop observation or inference. The default visible history count is five and the accepted range is 1–50.
 
 ## Permission matrix
 
@@ -107,6 +128,8 @@ hv-pony-solver-firefox-packaged-<version>.zip
 *.zip.sha256
 *.artifact.json
 ```
+
+For the current release these placeholders resolve to `hv-pony-solver-chromium-0.1.1.zip`, `hv-pony-solver-firefox-0.1.1.zip`, `hv-pony-solver-chromium-packaged-0.1.1.zip` and `hv-pony-solver-firefox-packaged-0.1.1.zip`.
 
 Every unpacked target contains a `build-manifest.json` with `modelDelivery` and per-file identities. Packaged metadata additionally records the canonical model identity. The deterministic test fixture records its committed `expected.classId` and `expected.confidence` oracle in both build and artifact metadata; smoke evidence must match that oracle. ZIP ordering and timestamps are deterministic. Generated `dist` files and the local model source are ignored and must not be staged.
 
@@ -138,7 +161,7 @@ pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 
 Packaged fixture evidence is schema 2 and binds the exact archive name, length, SHA-256, verified tree hash, model identity, browser version, result type, checkbox index and displayed confidence. Both packaged smokes write only successful, confidence-bearing observations and reject `识别失败，随机选择`; fixture results must exactly match the committed oracle. Chromium never substitutes `dist/chromium` for the tested archive: it loads only the temporary tree extracted from that ZIP. Firefox continues to install the ZIP itself.
 
-`REQUIRE_EXACT_MINIMUM_BROWSER=true` changes the packaged smoke from a normal “supported version or newer” check into an exact-major execution gate. CI obtains and executes Chromium 116 and Firefox Desktop 140 separately. A run on the current browser cannot satisfy this job. Chromium 116 uses its headed extension implementation under Xvfb (`PACKAGED_E2E_HEADLESS=false`); the variable accepts only `true` or `false`, so a misspelled setting fails closed. The Firefox packaged gate requires `geckodriver` (or `GECKODRIVER_PATH`) and `openssl`; it creates and deletes its own temporary certificate, proxy and browser sessions.
+`REQUIRE_EXACT_MINIMUM_BROWSER=true` changes the packaged smoke from a normal “supported version or newer” check into an exact-major execution gate. CI obtains and executes Chromium 116 and Firefox Desktop 140 separately. A run on the current browser cannot satisfy this job. Chromium 116 uses its headed extension implementation under Xvfb (`PACKAGED_E2E_HEADLESS=false`); the variable accepts only `true` or `false`, so a misspelled setting fails closed. The Firefox packaged gate requires `geckodriver` (or `GECKODRIVER_PATH`) and `openssl`; it creates and deletes its own temporary certificate, proxy and browser sessions. CI pins geckodriver `0.37.1` and its archive SHA-256. Its installer uses one 60-second deadline and at most three attempts, retrying only network failures and HTTP `408`, `429`, or `5xx`; permanent HTTP, archive, hash, path and extracted-version failures remain fail-closed.
 
 The ordinary production job is deliberately named **load-only**. It never reads `KvKey` and explicitly reports that remote inference was not tested. Its Firefox leg installs the generated ZIP, opens `options.html`, waits for storage initialization, and verifies the current remote-only and ordinary controls. The protected `production-model-smoke` CI environment supplies the `KV_KEY` secret to the authenticated job. Missing or blank secret material skips authenticated verification and keeps extension publication disabled; successful Key verification alone is insufficient because the job must settle a real `detect` request. When `PACKAGED_MODEL_URL` is absent, the canonical packaged-model gate is likewise skipped and packaged artifact publication remains disabled. Never print the Key, pass it as a command-line argument, commit it, or include it in evidence.
 
@@ -150,4 +173,4 @@ For canonical packaged artifact publication, dispatch `Repository CI` with `publ
 
 ### GitHub desktop Release
 
-Dispatch `Repository CI` from `main` with `publish_extension_release=true` to create `extension-v<version>`. The Release contains the remote-model Chromium and Firefox ZIPs, checksum sidecars and artifact metadata generated from the extension package version. The job refuses non-`main` refs and existing tags, validates both archives against their metadata, and has `contents: write` only in the final publication job. It requires the repository, extension, packaged-fixture, exact desktop minimum-version and protected authenticated remote-model gates to pass. This GitHub Release is a desktop sideload distribution; it is not Chrome Web Store/AMO publication and makes no Firefox Android execution claim.
+Dispatch `Repository CI` from `main` with `publish_extension_release=true` to create `extension-v<version>`; for the current package this is `extension-v0.1.1`. The Release contains the remote-model Chromium and Firefox ZIPs, checksum sidecars and artifact metadata generated from the extension package version. The input defaults to false. The job refuses non-`main` refs and existing tags, validates both archives against their metadata, and has `contents: write` only in the final publication job. It requires the repository, extension, packaged-fixture, exact desktop minimum-version and protected authenticated remote-model gates to pass. This GitHub Release is a desktop sideload distribution; it is not Chrome Web Store/AMO publication and makes no Firefox Android execution claim. Normal pushes and pull requests never create this Release.

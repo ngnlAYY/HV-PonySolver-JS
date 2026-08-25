@@ -14,6 +14,15 @@ HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓
 - 扩展版为 Chrome、Edge 和 Firefox 生成 Chromium/Firefox MV3 产物；默认远程下载模型，也可显式构建无需 Key 的内置模型版本；所有可执行 JS、Worker 和 WASM 均随扩展打包。
 - 用户脚本与扩展共用 `packages/browser-core` 的 DOM、答题、推理和模型契约，但拥有独立的平台适配器和构建产物。
 
+当前客户端版本：
+
+| 客户端     | 当前版本 | 版本权威来源                   |
+| ---------- | -------- | ------------------------------ |
+| 用户脚本   | `3.0.0`  | `apps/userscript/package.json` |
+| 浏览器扩展 | `0.1.1`  | `apps/extension/package.json`  |
+
+根包和内部工作区都是私有包，其版本号不代表扩展发布版本。扩展 ZIP、artifact 元数据、清单以及 GitHub Release 标签都从扩展包版本生成。
+
 ## 功能概览
 
 - 在独立 Web Worker 中执行 ONNX Runtime Web 推理，避免阻塞页面主线程。
@@ -25,6 +34,21 @@ HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓
 - 提供默认外部完整版和显式内置精简版两种运行时构建。
 - 提供文档漂移、架构边界、浏览器危险调用、包体预算和部署契约检查。
 - 提供可重复的远程/内置模型 Chromium/Firefox 扩展 ZIP、SHA-256、扩展资源审计和真实浏览器整链测试。
+
+## 答题与面板行为
+
+答题模式默认为 `auto`。自动模式会在识别成功后勾选答案并经过配置的延迟点击页面原生提交按钮；`manual` 模式只把识别结果写入面板，不点击答案或提交。识别失败时随机答案默认开启，可以在扩展设置页关闭。
+
+“保留已勾选答案”默认开启，允许用户在识别过程中手动答题：
+
+- 手动勾选与程序自动勾选会分别跟踪，程序不会取消手动项。
+- 手动项与新旧自动项合计不超过 4 个时保持现状。
+- 合计超过 4 个时，仅从自动项中按置信度由低到高移除，目标为总数至多 3 个；手动项本身已超过目标时仍全部保留。
+- 关闭该开关后，程序会先清空当时已勾选答案，再接管本轮选择与提交。
+
+程序在点击期间持续确认验证码、表单和控件仍属于同一轮。答案框不是预期的 6 个时显示“答案框数量异常”；缺少提交按钮时显示“未找到提交按钮”；表单已脱离页面、提交按钮已脱离或不属于该表单、任一答案框已脱离/不属于表单/被禁用时显示“答案控件不可用”；最终提交按钮被禁用时显示“提交按钮不可用”。若页面在等待期间替换了整组控件，本轮会静默取消，旧任务不会继续点击。相同验证码发生失败后会冷却 30 秒，连续 DOM 刷新在冷却期内不会重复记录；验证码变化、Key 更新或冷却结束后可重新尝试，持久化历史始终受 50 条硬上限约束。
+
+状态面板默认位置为 `top=155, left=1240`，默认只在页面存在 `div#csp` 时显示。关闭该显示限制只改变面板可见性，不会关闭识别。面板默认显示 5 条记录，设置范围为 1–50 条。
 
 ## 架构
 
@@ -237,15 +261,15 @@ pnpm --filter @hv-pony-solver/extension build
 pnpm --filter @hv-pony-solver/extension build:packaged
 ```
 
-`build` 默认等价于 `--model-mode remote`，需要 Key 下载模型；`build:packaged` 等价于 `--model-mode packaged`，只从固定的 `model/yolo26n-640.ort` 读取模型，不接受生产路径覆盖，也不在运行时回退到远程下载。每次构建都会清理并重新生成 `apps/extension/dist/`：
+`build` 默认等价于 `--model-mode remote`，需要 Key 下载模型；`build:packaged` 等价于 `--model-mode packaged`，只从固定的 `model/yolo26n-640.ort` 读取模型，不接受生产路径覆盖，也不在运行时回退到远程下载。当前扩展版本为 `0.1.1`。每次构建都会清理并重新生成 `apps/extension/dist/`：
 
 ```text
 chromium/                                      Chrome、Edge 解压目录
 firefox/                                       Firefox 解压目录
-hv-pony-solver-chromium-<version>.zip          Chromium 安装包
-hv-pony-solver-firefox-<version>.zip           Firefox 安装包
-hv-pony-solver-chromium-packaged-<version>.zip 内置模型 Chromium 安装包
-hv-pony-solver-firefox-packaged-<version>.zip  内置模型 Firefox 安装包
+hv-pony-solver-chromium-0.1.1.zip              远程模型 Chromium 安装包
+hv-pony-solver-firefox-0.1.1.zip               远程模型 Firefox 安装包
+hv-pony-solver-chromium-packaged-0.1.1.zip     内置模型 Chromium 安装包
+hv-pony-solver-firefox-packaged-0.1.1.zip      内置模型 Firefox 安装包
 *.zip.sha256                                   压缩包哈希
 *.artifact.json                                文件长度与 SHA-256 清单
 ```
@@ -268,7 +292,7 @@ Safari、其他移动浏览器和 Manifest V2 不在当前范围内。Firefox De
 - Edge：打开 `edge://extensions`，启用开发人员模式，加载同一个 `chromium` 目录。
 - Firefox：打开 `about:debugging#/runtime/this-firefox`，选择“临时载入附加组件”，打开 `apps/extension/dist/firefox/manifest.json`。
 
-点击工具栏按钮会打开扩展设置页。远程版本可配置模型 Key；Key 只保存在扩展源的 IndexedDB 中且不会回显，验证使用不计额度的 HEAD 探测，新增的“下载模型”按钮会使用已保存 Key 下载、校验并缓存模型，已有有效缓存时不会重复消耗额度。内置版本不读取也不删除旧 Key，Key 控件保持置灰并显示“当前版本已内置模型，无需配置模型 Key。”。两种版本都可配置自动/手动模式、失败随机答案、保留手动勾选、点击/提交时间、面板位置、仅在 `div#csp` 存在时显示面板（默认开启）、紧凑模式和历史条数；这些小型设置与分世界历史保存在 `storage.local`。
+点击工具栏按钮会打开扩展设置页。远程版本可配置模型 Key；Key 只保存在扩展源的 IndexedDB 中且不会回显，验证使用不计额度的 HEAD 探测。“查询下载次数”读取已保存 Key 的当前状态但不计次；后端关闭限制时显示“无次数限制（模型下载次数限制未开启）”。“下载模型”使用已保存 Key 下载、校验并缓存模型，已有有效缓存时不会重复消耗额度；后端只在 IndexedDB 缓存事务完成后接收确认并计次。设置页会保留后端、HTTP、超时或浏览器连接的实际错误信息；额度查询遇到后台 Port 瞬时断开时只重连一次，第二次失败直接显示真实原因。内置版本不读取也不删除旧 Key，Key 控件保持置灰并显示“当前版本已内置模型，无需配置模型 Key。”。两种版本都可配置自动/手动模式、失败随机答案、保留手动勾选、点击/提交时间、面板位置、仅在 `div#csp` 存在时显示面板（默认开启）、紧凑模式和历史条数；这些小型设置与分世界历史保存在 `storage.local`。
 
 不要在同一浏览器配置中同时启用用户脚本版和扩展版，否则两者可能同时处理并提交同一个验证码。
 
@@ -380,7 +404,7 @@ pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 
 CI 的独立最低版本任务下载并实际运行 Chromium 116 与 Firefox Desktop 140，同时设置 `REQUIRE_EXACT_MINIMUM_BROWSER=true`；更高的当前浏览器会被拒绝，不能冒充最低版本覆盖。GitHub runner 当前不能真实自动化 Firefox Android 142。发布可供商店审核的内置模型扩展 artifact 时，必须把 `firefox_android_e2e_run_id` 指向一个成功的外部测试 run；该 run 的命名 artifact 必须包含对同一 Firefox ZIP（名称、长度、SHA-256）的 Android 142 成功推理证据。缺失证据、版本不是 142、使用随机回退或 archive 不一致都会使 release preflight 失败。
 
-手动触发 `Repository CI` 时可选择 `publish_extension_release=true`，从 `main` 创建 `extension-v<扩展版本>` GitHub Release，并附带远程模型版 Chromium/Firefox ZIP、SHA-256 与 artifact 元数据。该入口默认关闭，要求完整仓库门禁、双浏览器 smoke、最低桌面版本和受保护 Key 的真实远程推理全部通过；它不发布到浏览器商店，也不声称 Firefox Android 已验证。内置模型 artifact 仍使用 `publish_extension_artifact=true` 和独立 Android 142 证据。完整格式与受保护 CI 环境配置见 [`docs/browser-extension.md`](docs/browser-extension.md)。
+手动触发 `Repository CI` 时可选择 `publish_extension_release=true`，从 `main` 创建当前版本对应的 `extension-v0.1.1` GitHub Release，并附带远程模型版 Chromium/Firefox ZIP、SHA-256 与 artifact 元数据。该入口默认关闭，要求完整仓库门禁、双浏览器 smoke、最低桌面版本和受保护 Key 的真实远程推理全部通过；它不发布到浏览器商店，也不声称 Firefox Android 已验证。内置模型 artifact 仍使用 `publish_extension_artifact=true` 和独立 Android 142 证据。完整格式与受保护 CI 环境配置见 [`docs/browser-extension.md`](docs/browser-extension.md)。
 
 校验本地 `.ort` 模型：
 
@@ -414,7 +438,7 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 pnpm build:onnx-runtime
 ```
 
-脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。默认输出到 `other/`：
+脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`，并把内容寻址 WASM 复制到 `${ORT_RUNTIME_OUTPUT_DIR:-other}`：
 
 ```text
 other/ort-wasm-simd-<sha256>.wasm
@@ -693,11 +717,12 @@ pnpm verify:onnx-runtime
 - 工作区测试与覆盖率。
 - 默认外部 profile 构建及 `256 KiB` 预算。
 - 显式内置 profile 构建及 `1 MiB` 预算。
-- 按条件执行的 Playwright Chromium E2E。
-- 双目标扩展构建、扩展资源与安全契约审计和 Chromium 扩展整链 fixture。
-- 按手动输入发布的用户脚本构建产物。
+- Pull Request 和 `main` push 执行用户脚本 Playwright Chromium E2E；手动运行由 `run_userscript_e2e` 控制。
+- 执行扩展内容脚本、远程模型 Chromium/Firefox 加载、内置模型双浏览器推理及 Chromium 116/Firefox 140 精确最低版本门禁。
+- 受仓库变量和受保护环境控制的真实远程模型与 canonical 内置模型门禁；缺少生产配置时明确跳过，不能冒充已验证。
+- 手动选择 `publish_userscript_artifact`、`publish_extension_artifact` 或 `publish_extension_release` 时执行对应发布门禁；三个选项默认都关闭。
 
-CI 中的 E2E 和用户脚本产物发布默认不是每次运行都执行。
+普通 push 和 Pull Request 不创建 GitHub Release，也不发布生产扩展 artifact。
 
 ### Model Worker 部署工作流
 
@@ -706,7 +731,7 @@ CI 中的 E2E 和用户脚本产物发布默认不是每次运行都执行。
 - 默认只渲染配置、执行检查并运行 Wrangler dry-run。
 - 手动输入 `enable_model_download_quota` 控制是否启用每 Key 月度下载限制，默认开启；关闭后模型请求不受 5 次限制，额度查询会提示限制未开启。
 - 只有 `publish_model_worker=true` 且所需 secrets 完整时才实际部署。
-- 部署完成后运行公开契约检查。
+- 工作流不自动运行线上公开契约探测；部署完成只证明 Wrangler 发布命令成功。等待边缘传播后，由操作者按 [`docs/model-worker-ops.md`](docs/model-worker-ops.md) 手动执行 `check:deployment`。
 
 dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare 已更新，也不证明 R2、KV 或线上路由正确。
 
@@ -786,6 +811,26 @@ model/yolo26n-640.ort
 pnpm --filter @hv-pony-solver/extension build:packaged
 ```
 
+### 页面显示“答案控件不可用”
+
+这表示识别已到达答题阶段，但保存的表单控件快照不满足安全点击条件。依次检查：
+
+- 当前表单和提交按钮仍连接在页面中，且 `submit.form` 指向该表单；
+- 页面存在同一表单下的 6 个答案 checkbox；
+- 每个 checkbox 仍连接、`checkbox.form` 指向同一表单且没有 `disabled`；
+- 没有同时启用用户脚本版和扩展版；
+- 离线保存的 HTML 是否缺少原页面脚本生成的关联状态。网页存档可以用于复现 DOM 解析，但不保证表单控件与在线页面具有相同可用状态。
+
+当前版本对同一验证码失败冷却 30 秒；冷却期内的 MutationObserver 刷新不会新增同类记录。如果日志在毫秒级持续出现，先确认浏览器实际加载的是扩展 `0.1.1` 的完整新构建，而不是旧 ZIP、旧解压目录或用户脚本与扩展的双重实例。
+
+### 扩展额度查询或模型下载报错
+
+- 先确认远程模型版已保存有效 Key；内置模型版会禁用这些按钮。
+- “查询下载次数”不消耗额度；“下载模型”只有在完整校验并提交 IndexedDB 缓存后才确认一次使用。
+- `HTTP 429` 表示该 Key 本 UTC 月已确认用完 5 次；`HTTP 503` 还可能表示临时回执槽位占满或额度服务不可用，两者不能混为一谈。
+- “连接已断开”是扩展后台 Port 未返回结果，不等同于 Worker 返回额度耗尽。额度查询会自动重连一次，仍失败时保留第二次的真实浏览器错误。
+- `TypeError: Failed to execute 'fetch' on 'Window': Illegal invocation` 通常表示仍在运行旧版或混合构建文件；重新构建并完整替换解压目录后重新加载扩展，不要只覆盖单个 JavaScript 文件。
+
 ### 模型请求返回诱饵内容或 `403`
 
 确认：
@@ -821,6 +866,7 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 
 - [`docs/onnx-runtime.md`](docs/onnx-runtime.md)：精简运行时资产、哈希和复现说明。
 - [`docs/browser-extension.md`](docs/browser-extension.md)：扩展架构、权限、构建、加载、存储和验证边界。
+- [`docs/model-cache-strategy.md`](docs/model-cache-strategy.md)：浏览器缓存、Worker `no-store` 与下载确认计次策略。
 - [`docs/model-worker-ops.md`](docs/model-worker-ops.md)：Model Worker 运维和线上验收矩阵。
 
 本文档中的命令、URL、对象键和哈希属于代码契约。修改相关实现时必须同步测试和文档漂移规则。

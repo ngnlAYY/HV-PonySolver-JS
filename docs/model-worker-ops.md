@@ -1,6 +1,8 @@
-# Model Worker Operations
+# Model Worker 运维手册
 
-## Invalid key mode
+最后复核：2026-08-25。
+
+## 无效 Key 模式
 
 `INVALID_KEY_MODE` 控制缺少 Bearer token、token 格式错误或 KV 未命中的请求如何响应。可选值只有 `decoy` 和 `error`，默认值是 `decoy`。
 
@@ -11,7 +13,7 @@
 
 ## 部署与分层验收
 
-Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。GitHub 手动部署 workflow 的 `enable_model_download_quota` 默认开启；关闭时真实模型 GET 不执行月度额度限制，也不保存确认次数。
+Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。GitHub 手动部署 workflow 的 `enable_model_download_quota` 默认开启；关闭时真实模型 GET 不执行月度额度限制、不创建回执也不保存确认次数，客户端查询显示“无次数限制（模型下载次数限制未开启）”。
 
 回执确认协议使用独立的 v2 状态键。首次部署该协议时，旧版在响应体到达客户端前产生、无法验证的计数不会迁入 v2；之后只保留客户端完成缓存后确认的使用次数。
 
@@ -23,7 +25,7 @@ Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。�
 - 只有 `publish_model_worker=true` 且 Cloudflare secrets gate 通过时，才会执行 `Deploy Worker`。
 - 部署证据至少包括 workflow run URL、head SHA、`Deploy Worker` step 的 `success` 状态，以及日志中可获得的 Cloudflare deployment 标识或时间。不得把 secret 值复制到记录中。
 
-触发生产发布前，确认目标 ref、`publish_model_worker`、`invalid_key_mode` 和 `enable_model_download_quota`。发布时使用仓库中受审查的 ref，不从未验证分支临时部署。
+触发生产发布前，确认目标 ref、`publish_model_worker`、`invalid_key_mode` 和 `enable_model_download_quota`。三个输入分别控制是否真实部署、无效 Key 返回诱饵还是 `403`、是否执行每 Key 月度 5 次限制；后两项不能从线上状态自动推断。发布时使用仓库中受审查的 ref，不从未验证分支临时部署。
 
 ### 2. 发布后公开契约检查
 
@@ -57,13 +59,15 @@ pnpm --filter @hv-pony-solver/model-worker check:deployment
 
 无 Key `HEAD 200` 在 `decoy` 模式只证明 decoy 路径正常，不证明真实模型授权或 artifact 正确。ORT 和 WASM 探测会发现新路由未部署或公开 WASM 对象缺失，但仍不证明真实 ORT 模型内容正确。
 
-### 3. 用户本地 Key 验证
+### 3. 客户端 Key、额度与下载验收
 
-公开契约通过后，由用户在 Userscript 菜单中重新验证已知 Key，再验证保存后的普通下载。Key 只保留在用户本地，不得放入聊天、URL、query string、CLI 参数、GitHub log、测试 fixture 或任务记录。
+公开契约通过后，由用户在 Userscript 菜单或扩展设置页中重新验证已知 Key，再验证保存后的额度查询和普通下载。Key 只保留在用户本地，不得放入聊天、URL、query string、CLI 参数、GitHub log、测试 fixture 或任务记录。
 
 浏览器请求必须继续使用标准 `fetch` 和 `Authorization: Bearer <key>`。不要改用 `GM_xmlhttpRequest` / `GM.xmlHttpRequest` 绕过 CORS，也不要关闭 byteLength 或 SHA-256 完整性校验。
 
-Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。扩展设置页的“查询下载次数”使用已保存 Key 调用只读 `GET /quota`，返回本月上限、已确认使用和剩余次数。真实模型 GET 仅预留一个十分钟有效的回执；客户端完整读取、校验并完成 IndexedDB 缓存后，才调用 `POST /quota` 确认并计数。确认接口按回执幂等，缓存未完成或回执失效均不计数；收到 `429` 才表示该 Key 当月已经确认使用 5 次。
+Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。客户端的次数查询使用已保存 Key 调用只读 `GET /quota`，返回本月上限、已确认使用和剩余次数；关闭限制时返回 `enabled=false`，客户端不得显示虚构的 `0/5`。真实模型 GET 仅预留一个十分钟有效的回执；客户端完整读取、校验并完成 IndexedDB 缓存后，才调用 `POST /quota` 确认并计数。确认接口按回执幂等，缓存未完成或回执失效均不计数；收到 `429` 才表示该 Key 当月已经确认使用 5 次。已确认与待确认槽位合计占满但仍有回执未失效时返回 `503`，它不是月额度已经确认用完。
+
+扩展远程模型版提供“验证并保存”“查询下载次数”“下载模型”和“清除 Key”。有效模型缓存命中不会再次下载或计次。设置页保留 Worker 返回的 HTTP/协议错误和浏览器 Port 错误；只有额度查询会在瞬时 Port 断开后重连一次，第二次失败原样呈现。看到“连接已断开”说明扩展内部传输没有收到 Host 响应，不能据此判定 KV、R2 或 Durable Object 已失败。
 
 ### 4. 次级故障分流
 
@@ -73,8 +77,10 @@ Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。扩展�
 2. `OPTIONS` 正确但无效/有效 Key收到 `403`：核对 deployed `INVALID_KEY_MODE`、Worker 的 KV binding target 与相应 entry；不得输出 entry 的 key/value。
 3. HTTP `200` 后出现 byteLength 或 SHA-256 错误：核对 real/decoy R2 object 选择，并在受控环境中用 `packages/shared/src/model.ts` 的 canonical manifest 校验真实 artifact。
 4. 有效 Key 收到 `429`：确认 `Retry-After`、UTC 月边界和 Durable Object 绑定；不要把它改成 decoy 或放宽为 KV 非原子计数。
-5. 仍为 `Failed to fetch`：收集浏览器 Network 面板中不含 secret 的 CORS、DNS、TLS、status 与 CF-Ray 信息。
-6. 下载和完整性校验通过但缓存失败：单独排查 IndexedDB，不改变授权链路或完整性要求。
+5. 有效 Key 收到 `503`：先区分额度存储不可用与待确认槽位占满；后者等待响应给出的 `Retry-After`，不要手工增加已用次数。
+6. 仍为 `Failed to fetch`：收集浏览器 Network 面板中不含 secret 的 CORS、DNS、TLS、status 与 CF-Ray 信息。
+7. 下载和完整性校验通过但缓存失败：单独排查 IndexedDB；后端不应收到成功确认，不改变授权链路或完整性要求。
+8. 扩展只显示额度/下载连接断开：检查扩展后台是否重启、Port 错误内容和浏览器控制台；额度查询已自动重连一次，不要把重复点击当作后端重试证据。
 
 ## 发布后失败与回滚
 
