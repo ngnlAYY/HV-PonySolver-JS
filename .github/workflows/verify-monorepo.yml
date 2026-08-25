@@ -18,12 +18,17 @@ on:
         required: true
         default: false
       publish_extension_artifact:
-        description: 'Publish Chromium and Firefox extension artifacts from this run'
+        description: 'Publish canonical packaged extension artifacts from this run'
+        type: boolean
+        required: true
+        default: false
+      publish_extension_release:
+        description: 'Create a GitHub Release with remote-model desktop extension packages'
         type: boolean
         required: true
         default: false
       firefox_android_e2e_run_id:
-        description: 'Successful external Firefox Android 142 evidence run ID (required for extension publication)'
+        description: 'Successful Firefox Android 142 evidence run ID (required for packaged artifact publication)'
         type: string
         required: false
         default: ''
@@ -42,6 +47,14 @@ jobs:
 
       - name: Check external Action pins
         run: node scripts/assert-pinned-actions.mjs
+
+      - name: Validate extension Release target
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_extension_release }}
+        run: |
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo '::error title=Invalid extension Release ref::GitHub Releases may only be created from main.'
+            exit 1
+          fi
 
       - name: Validate canonical packaged-model configuration
         if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.RUN_CANONICAL_PACKAGED_GATE == 'true' }}
@@ -315,7 +328,7 @@ jobs:
 
   extension-remote-authenticated-e2e:
     needs: guardrails
-    if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact)) && vars.RUN_PRODUCTION_MODEL_SMOKE == 'true' }}
+    if: ${{ (github.event_name == 'push' && vars.RUN_PRODUCTION_MODEL_SMOKE == 'true') || (github.event_name == 'workflow_dispatch' && (inputs.publish_extension_artifact || inputs.publish_extension_release)) }}
     outputs:
       enabled: ${{ steps.protected_remote_model.outputs.enabled }}
     runs-on: ubuntu-latest
@@ -783,3 +796,94 @@ jobs:
             apps/extension/dist/*.zip.sha256
             apps/extension/dist/*.artifact.json
           if-no-files-found: error
+
+  extension-release:
+    needs:
+      - guardrails
+      - test
+      - coverage-build
+      - extension-e2e
+      - extension-packaged-e2e
+      - extension-minimum-versions-e2e
+      - extension-remote-authenticated-e2e
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_release && github.ref == 'refs/heads/main' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build remote-model desktop extension packages
+        run: pnpm --filter @hv-pony-solver/extension build
+
+      - name: Validate Release assets and version
+        id: release
+        run: |
+          version="$(node -p "JSON.parse(require('node:fs').readFileSync('apps/extension/package.json', 'utf8')).version")"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid extension Release version: $version" >&2
+            exit 1
+          fi
+          for target in chromium firefox; do
+            archive="apps/extension/dist/hv-pony-solver-${target}-${version}.zip"
+            checksum="${archive}.sha256"
+            artifact="apps/extension/dist/hv-pony-solver-${target}-${version}.artifact.json"
+            test -f "$archive"
+            test -f "$checksum"
+            test -f "$artifact"
+            (
+              cd apps/extension/dist
+              sha256sum --check "$(basename "$checksum")"
+            )
+            archive_name="$(basename "$archive")"
+            archive_sha256="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+            archive_size="$(stat -c '%s' "$archive")"
+            jq --exit-status \
+              --arg target "$target" \
+              --arg version "$version" \
+              --arg archive_name "$archive_name" \
+              --arg archive_sha256 "$archive_sha256" \
+              --argjson archive_size "$archive_size" \
+              '.target == $target and .version == $version and .modelDelivery == "remote" and .archive.archiveName == $archive_name and .archive.sha256 == $archive_sha256 and .archive.byteLength == $archive_size and (.fixture | not)' \
+              "$artifact" >/dev/null
+          done
+          {
+            echo "version=$version"
+            echo "tag=extension-v$version"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if gh api --silent "/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release tag already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          assets=()
+          for target in chromium firefox; do
+            prefix="apps/extension/dist/hv-pony-solver-${target}-${RELEASE_VERSION}"
+            assets+=("${prefix}.zip" "${prefix}.zip.sha256" "${prefix}.artifact.json")
+          done
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "HV Pony Solver Extension v$RELEASE_VERSION" \
+            --generate-notes \
+            --latest

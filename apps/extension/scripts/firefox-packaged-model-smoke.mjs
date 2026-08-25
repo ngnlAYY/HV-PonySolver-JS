@@ -277,15 +277,34 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
     await request('POST', `${sessionPath}/moz/context`, { context: 'content' })
     const handles = await request('GET', `${sessionPath}/window/handles`)
     await request('POST', `${sessionPath}/window`, { handle: handles.at(-1) })
-    const optionsState = await request('POST', `${sessionPath}/execute/sync`, {
+    const optionsState = await request('POST', `${sessionPath}/execute/async`, {
       script: `
-        return {
-          title: document.title,
-          disabled: document.querySelector('#model-key-fieldset')?.disabled,
-          inputDisabled: document.querySelector('#model-key')?.matches(':disabled'),
-          hintHidden: document.querySelector('#packaged-model-hint')?.hidden,
-          hint: document.querySelector('#packaged-model-hint')?.textContent?.trim(),
+        const done = arguments[arguments.length - 1]
+        const deadline = Date.now() + 10_000
+        const poll = () => {
+          const saveButton = document.querySelector('button[type="submit"]')
+          if (document.title === 'HV Pony Solver 设置' && saveButton && !saveButton.disabled) {
+            done({
+              title: document.title,
+              disabled: document.querySelector('#model-key-fieldset')?.disabled,
+              inputDisabled: document.querySelector('#model-key')?.matches(':disabled'),
+              quotaButtonDisabled: document.querySelector('#query-model-quota')?.matches(':disabled'),
+              downloadButtonDisabled: document.querySelector('#download-model')?.matches(':disabled'),
+              panelRequireCspChecked: document.querySelector('#panel-require-csp')?.checked,
+              preserveCheckedAnswersChecked: document.querySelector('#preserve-checked-answers')?.checked,
+              panelPosition: document.querySelector('#panel-position')?.value,
+              hintHidden: document.querySelector('#packaged-model-hint')?.hidden,
+              hint: document.querySelector('#packaged-model-hint')?.textContent?.trim(),
+            })
+            return
+          }
+          if (Date.now() > deadline) {
+            done({ error: 'Firefox packaged options did not initialize' })
+            return
+          }
+          setTimeout(poll, 50)
         }
+        poll()
       `,
       args: [],
     })
@@ -293,6 +312,11 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
       title: 'HV Pony Solver 设置',
       disabled: true,
       inputDisabled: true,
+      quotaButtonDisabled: true,
+      downloadButtonDisabled: true,
+      panelRequireCspChecked: true,
+      preserveCheckedAnswersChecked: true,
+      panelPosition: '155,1240',
       hintHidden: false,
       hint: packagedHint,
     })

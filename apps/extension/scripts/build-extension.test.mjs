@@ -23,6 +23,8 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const extensionRoot = path.resolve(scriptDirectory, '..')
 const repositoryRoot = path.resolve(extensionRoot, '../..')
+const extensionPackage = JSON.parse(await readFile(path.join(extensionRoot, 'package.json'), 'utf8'))
+const extensionVersion = extensionPackage.version
 const modelFilename = 'yolo26n-640.ort'
 const contentHosts = ['https://hentaiverse.org/*', 'https://alt.hentaiverse.org/*']
 const remoteCsp =
@@ -147,8 +149,7 @@ test('guards recursive build cleanup with canonical allowed roots', async () => 
 })
 
 test('coverage gate includes every security-critical Node script without exclusions', async () => {
-  const packageJson = JSON.parse(await readFile(path.join(extensionRoot, 'package.json'), 'utf8'))
-  const coverageCommand = packageJson.scripts['test:coverage']
+  const coverageCommand = extensionPackage.scripts['test:coverage']
   for (const script of [
     'scripts/browser-support.mjs',
     'scripts/build-extension.mjs',
@@ -212,7 +213,7 @@ test('keeps default and explicit remote builds deterministic and model-free', as
     )
     for (const target of ['chromium', 'firefox']) {
       await auditBuiltExtension(path.join(temporaryRoot, target), target)
-      const archiveName = `hv-pony-solver-${target}-0.1.0.zip`
+      const archiveName = `hv-pony-solver-${target}-${extensionVersion}.zip`
       const archiveBytes = await readFile(path.join(temporaryRoot, archiveName))
       assert.deepEqual(archiveBytes, await readFile(path.join(comparisonRoot, archiveName)))
       const archive = unzipSync(new Uint8Array(archiveBytes))
@@ -238,7 +239,7 @@ test('keeps default and explicit remote builds deterministic and model-free', as
       assert.equal('model' in buildManifest, false)
       assert.equal('fixture' in buildManifest, false)
       const artifact = JSON.parse(
-        await readFile(path.join(temporaryRoot, `hv-pony-solver-${target}-0.1.0.artifact.json`), 'utf8'),
+        await readFile(path.join(temporaryRoot, `hv-pony-solver-${target}-${extensionVersion}.artifact.json`), 'utf8'),
       )
       assert.equal(artifact.modelDelivery, 'remote')
       assert.equal('model' in artifact, false)
@@ -275,7 +276,7 @@ test('builds deterministic packaged-model fixtures with distinct names and graph
         model,
         fixture: true,
       })
-      const archiveName = `hv-pony-solver-${target}-packaged-fixture-0.1.0.zip`
+      const archiveName = `hv-pony-solver-${target}-packaged-fixture-${extensionVersion}.zip`
       const archiveBytes = await readFile(path.join(temporaryRoot, archiveName))
       assert.deepEqual(archiveBytes, await readFile(path.join(comparisonRoot, archiveName)))
       const archive = unzipSync(new Uint8Array(archiveBytes))
@@ -316,7 +317,7 @@ test('builds deterministic packaged-model fixtures with distinct names and graph
       })
       const artifact = JSON.parse(
         await readFile(
-          path.join(temporaryRoot, `hv-pony-solver-${target}-packaged-fixture-0.1.0.artifact.json`),
+          path.join(temporaryRoot, `hv-pony-solver-${target}-packaged-fixture-${extensionVersion}.artifact.json`),
           'utf8',
         ),
       )
@@ -340,7 +341,7 @@ test(
     try {
       await buildExtensions({ outputRoot: temporaryRoot, modelDelivery: 'packaged', targets: ['chromium'] })
 
-      const archiveName = 'hv-pony-solver-chromium-packaged-0.1.0.zip'
+      const archiveName = `hv-pony-solver-chromium-packaged-${extensionVersion}.zip`
       const rootFiles = await readdir(temporaryRoot)
       assert.deepEqual(
         rootFiles.filter((name) => name.endsWith('.zip')),
@@ -356,7 +357,10 @@ test(
         false,
       )
       const artifact = JSON.parse(
-        await readFile(path.join(temporaryRoot, 'hv-pony-solver-chromium-packaged-0.1.0.artifact.json'), 'utf8'),
+        await readFile(
+          path.join(temporaryRoot, `hv-pony-solver-chromium-packaged-${extensionVersion}.artifact.json`),
+          'utf8',
+        ),
       )
       assert.equal(artifact.modelDelivery, 'packaged')
       assert.equal('fixture' in artifact, false)

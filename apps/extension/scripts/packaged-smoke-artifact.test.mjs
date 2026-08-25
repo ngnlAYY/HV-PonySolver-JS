@@ -59,13 +59,13 @@ async function createFixtureArtifact(
   )
   const buildManifest = {
     target,
-    version: '0.1.0',
+    version: '0.1.1',
     modelDelivery: 'packaged',
     fixture: true,
     model,
     files,
   }
-  const archiveName = 'hv-pony-solver-chromium-packaged-fixture-0.1.0.zip'
+  const archiveName = 'hv-pony-solver-chromium-packaged-fixture-0.1.1.zip'
   const archiveBytes = Buffer.from(
     zipSync({
       ...sourceFiles,

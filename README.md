@@ -332,7 +332,7 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 | `pnpm test:e2e:extension:content`                           | 加载临时 Chromium 扩展并执行确定性内容脚本整链 fixture                                                                                       |
 | `pnpm test:e2e:extension:chromium:load-only`                | 加载生产远程 Chromium 产物，仅验证加载与普通设置，不声称已验证远程模型                                                                       |
 | `pnpm test:e2e:extension:chromium:authenticated`            | 从受保护环境读取 `KvKey`，验证真实模型后至少执行一次 `detect`；缺少 Key 时 fail closed                                                       |
-| `pnpm test:e2e:extension:firefox:load-only`                 | 用 Firefox 临时加载并重载生产远程产物，不声称已执行鉴权推理                                                                                  |
+| `pnpm test:e2e:extension:firefox:load-only`                 | 用 Firefox 临时安装生产远程 ZIP，并验证当前设置页控件；不声称已执行鉴权推理                                                                  |
 | `pnpm --filter @hv-pony-solver/extension test:e2e:packaged` | 在真实 Chromium 和 Firefox 中验证内置模型、无 Key 推理及会话重建                                                                             |
 | `pnpm check:userscript`                                     | 执行用户脚本聚合检查                                                                                                                         |
 | `pnpm check:browser-core`                                   | 执行共用浏览器核心的类型、单元和契约检查                                                                                                     |
@@ -376,9 +376,11 @@ pnpm --filter @hv-pony-solver/extension test:e2e:packaged:firefox
 pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 ```
 
-`test:e2e:content` 使用只存在于临时测试构建中的确定性推理 Host，不访问真实模型服务。`test:e2e:chromium:load-only` 只证明生产远程版本可加载和设置可持久化，明确不验证远程模型。只有受保护的 `test:e2e:chromium:authenticated` 才读取 `KvKey`；它在鉴权下载和完整性校验后必须至少完成一次真实 `detect`，不能停在 `prepare`，缺少 Key 时直接失败。内置模型门禁不读取 Key 并显式关闭随机回退：Chromium 先校验实际 ZIP 与 artifact，再解压到临时目录并只加载该目录；Firefox 用标准 WebDriver 安装已校验的实际 ZIP（需要 `geckodriver` 与 `openssl`）。两者都断言成功类型、准确 checkbox index 和 confidence，证据绑定 archive SHA-256 与解压 tree；确定性 fixture 还必须匹配 artifact 中的 `expected.classId`/`expected.confidence`。各种证据不能互相替代。
+`test:e2e:content` 使用只存在于临时测试构建中的确定性推理 Host，不访问真实模型服务。`test:e2e:chromium:load-only` 只证明生产远程版本可加载和设置可持久化；Firefox load-only 还会打开实际 ZIP 的设置页，核对 Key、次数查询、模型下载、面板显示限制和保留手动答案控件，二者都明确不验证远程模型。只有受保护的 `test:e2e:chromium:authenticated` 才读取 `KvKey`；它在鉴权下载和完整性校验后必须至少完成一次真实 `detect`，不能停在 `prepare`，缺少 Key 时直接失败。内置模型门禁不读取 Key 并显式关闭随机回退：Chromium 先校验实际 ZIP 与 artifact，再解压到临时目录并只加载该目录；Firefox 用标准 WebDriver 安装已校验的实际 ZIP（需要 `geckodriver` 与 `openssl`）。两者都断言成功类型、准确 checkbox index 和 confidence，证据绑定 archive SHA-256 与解压 tree；确定性 fixture 还必须匹配 artifact 中的 `expected.classId`/`expected.confidence`。各种证据不能互相替代。
 
-CI 的独立最低版本任务下载并实际运行 Chromium 116 与 Firefox Desktop 140，同时设置 `REQUIRE_EXACT_MINIMUM_BROWSER=true`；更高的当前浏览器会被拒绝，不能冒充最低版本覆盖。GitHub runner 当前不能真实自动化 Firefox Android 142。发布扩展时必须把 `firefox_android_e2e_run_id` 指向一个成功的外部测试 run；该 run 的命名 artifact 必须包含对同一 Firefox ZIP（名称、长度、SHA-256）的 Android 142 成功推理证据。缺失证据、版本不是 142、使用随机回退或 archive 不一致都会使 release preflight 失败。完整格式与受保护 CI 环境配置见 [`docs/browser-extension.md`](docs/browser-extension.md)。
+CI 的独立最低版本任务下载并实际运行 Chromium 116 与 Firefox Desktop 140，同时设置 `REQUIRE_EXACT_MINIMUM_BROWSER=true`；更高的当前浏览器会被拒绝，不能冒充最低版本覆盖。GitHub runner 当前不能真实自动化 Firefox Android 142。发布可供商店审核的内置模型扩展 artifact 时，必须把 `firefox_android_e2e_run_id` 指向一个成功的外部测试 run；该 run 的命名 artifact 必须包含对同一 Firefox ZIP（名称、长度、SHA-256）的 Android 142 成功推理证据。缺失证据、版本不是 142、使用随机回退或 archive 不一致都会使 release preflight 失败。
+
+手动触发 `Repository CI` 时可选择 `publish_extension_release=true`，从 `main` 创建 `extension-v<扩展版本>` GitHub Release，并附带远程模型版 Chromium/Firefox ZIP、SHA-256 与 artifact 元数据。该入口默认关闭，要求完整仓库门禁、双浏览器 smoke、最低桌面版本和受保护 Key 的真实远程推理全部通过；它不发布到浏览器商店，也不声称 Firefox Android 已验证。内置模型 artifact 仍使用 `publish_extension_artifact=true` 和独立 Android 142 证据。完整格式与受保护 CI 环境配置见 [`docs/browser-extension.md`](docs/browser-extension.md)。
 
 校验本地 `.ort` 模型：
 

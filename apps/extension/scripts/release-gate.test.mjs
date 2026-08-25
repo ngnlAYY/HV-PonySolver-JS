@@ -46,7 +46,7 @@ function artifact(target, overrides = {}) {
     modelDelivery: 'packaged',
     model,
     archive: {
-      archiveName: `hv-pony-solver-${target}-packaged-0.1.0.zip`,
+      archiveName: `hv-pony-solver-${target}-packaged-0.1.1.zip`,
       byteLength: 100,
       sha256: archiveHashes[target],
     },
@@ -84,12 +84,12 @@ async function writeTransferredArtifact(outputRoot, target, contentSecurityPolic
   )
   const buildManifest = {
     target,
-    version: '0.1.0',
+    version: '0.1.1',
     modelDelivery: 'packaged',
     model,
     files,
   }
-  const archiveName = `hv-pony-solver-${target}-packaged-0.1.0.zip`
+  const archiveName = `hv-pony-solver-${target}-packaged-0.1.1.zip`
   const archiveBytes = Buffer.from(zipSync({ ...sourceFiles, 'build-manifest.json': jsonBytes(buildManifest) }))
   const archive = { archiveName, byteLength: archiveBytes.byteLength, sha256: sha256(archiveBytes) }
   const record = { ...buildManifest, archive }
@@ -324,6 +324,28 @@ test('verify-monorepo pins Firefox load tooling and binds Android evidence to th
   assert.match(androidStep, /if \[\[ "\$workflow_id" != "\$FIREFOX_ANDROID_E2E_WORKFLOW_ID" \]\]; then/u)
   assert.match(androidStep, /workflow_dispatch\|repository_dispatch\) ;;/u)
   assert.ok(androidStep.indexOf('case "$event" in') < androidStep.indexOf('gh run download'))
+})
+
+test('GitHub desktop Release stays opt-in, main-only, remote-model, and write-scoped', async () => {
+  const workflow = await readFile(new URL('../../../.github/workflows/verify-monorepo.yml', import.meta.url), 'utf8')
+  assert.match(
+    workflow,
+    /publish_extension_release:\n\s+description: '[^']+'\n\s+type: boolean\n\s+required: true\n\s+default: false/u,
+  )
+  assert.match(workflow, /if \[\[ "\$GITHUB_REF" != 'refs\/heads\/main' \]\]; then/u)
+  assert.match(
+    workflow,
+    /github\.event_name == 'workflow_dispatch' && \(inputs\.publish_extension_artifact \|\| inputs\.publish_extension_release\)/u,
+  )
+
+  const releaseJob = workflow.match(/\n {2}extension-release:\n(?<job>[\s\S]*)$/u)?.groups?.job
+  assert.ok(releaseJob)
+  assert.match(releaseJob, /inputs\.publish_extension_release && github\.ref == 'refs\/heads\/main'/u)
+  assert.match(releaseJob, /\n {4}permissions:\n {6}contents: write\n/u)
+  assert.equal(workflow.match(/contents: write/gu)?.length, 1)
+  assert.match(releaseJob, /\.modelDelivery == "remote"/u)
+  assert.match(releaseJob, /echo "tag=extension-v\$version"/u)
+  assert.match(releaseJob, /gh release create "\$RELEASE_TAG" "\$\{assets\[@\]\}"/u)
 })
 
 test(
