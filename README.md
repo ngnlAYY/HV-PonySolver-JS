@@ -676,7 +676,9 @@ pnpm verify:onnx-runtime
 `.github/workflows/verify-monorepo.yml` 在 Pull Request、`main` 推送和手动触发时执行：
 
 - 使用 runner 提供的 Node.js 运行时和冻结依赖安装。
+- 检查外部 GitHub Action 是否固定到完整 commit SHA。
 - 依赖审计、ESLint 和 TypeScript 类型检查。
+- JavaScript/TypeScript CodeQL 扫描，并在 Pull Request 中执行依赖审查。
 - 文档漂移、架构边界和浏览器危险调用检查。
 - 工作区测试与覆盖率。
 - 默认外部 profile 构建及 `256 KiB` 预算。
@@ -697,10 +699,6 @@ CI 中的 E2E 和用户脚本产物发布默认不是每次运行都执行。
 - 部署完成后运行公开契约检查。
 
 dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare 已更新，也不证明 R2、KV 或线上路由正确。
-
-### 安全扫描
-
-`.github/workflows/security-scan.yml` 执行 JavaScript/TypeScript CodeQL，并在 Pull Request 中执行依赖审查。
 
 ## 安全边界
 

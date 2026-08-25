@@ -31,13 +31,18 @@ on:
 permissions:
   actions: read
   contents: read
+  pull-requests: read
 
 jobs:
-  validate-inputs:
+  guardrails:
     runs-on: ubuntu-latest
     steps:
-      - name: Inputs accepted
-        run: echo "Workflow inputs accepted."
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check external Action pins
+        run: node scripts/assert-pinned-actions.mjs
+
       - name: Validate canonical packaged-model configuration
         if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.RUN_CANONICAL_PACKAGED_GATE == 'true' }}
         env:
@@ -54,13 +59,6 @@ jobs:
             echo '::error title=Missing PACKAGED_MODEL_BEARER_TOKEN::Authentication is required but the repository secret is missing.'
             exit 1
           fi
-
-  guardrails:
-    needs: validate-inputs
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -99,8 +97,44 @@ jobs:
       - name: Browser sink guardrail
         run: pnpm browser-sinks:check
 
+  codeql:
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          languages: javascript-typescript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+
+  dependency-review:
+    if: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
   test:
-    needs: validate-inputs
+    needs: guardrails
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -129,7 +163,7 @@ jobs:
         run: pnpm test
 
   coverage-build:
-    needs: validate-inputs
+    needs: guardrails
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -177,7 +211,7 @@ jobs:
         run: pnpm bundle:check:bundled
 
   userscript-e2e:
-    needs: validate-inputs
+    needs: guardrails
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_userscript_e2e) }}
     runs-on: ubuntu-latest
     steps:
@@ -220,7 +254,7 @@ jobs:
         run: pnpm test:e2e:userscript
 
   extension-e2e:
-    needs: validate-inputs
+    needs: guardrails
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -277,7 +311,7 @@ jobs:
         run: pnpm test:e2e:extension:firefox:load-only
 
   extension-remote-authenticated-e2e:
-    needs: validate-inputs
+    needs: guardrails
     if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact)) && vars.RUN_PRODUCTION_MODEL_SMOKE == 'true' }}
     outputs:
       enabled: ${{ steps.protected_remote_model.outputs.enabled }}
@@ -326,7 +360,7 @@ jobs:
         run: pnpm test:e2e:extension:chromium:authenticated
 
   extension-minimum-versions-e2e:
-    needs: validate-inputs
+    needs: guardrails
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -389,7 +423,7 @@ jobs:
           if-no-files-found: error
 
   extension-packaged-e2e:
-    needs: validate-inputs
+    needs: guardrails
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -443,7 +477,7 @@ jobs:
         run: pnpm --filter @hv-pony-solver/extension test:e2e:packaged:firefox
 
   extension-canonical-packaged-e2e:
-    needs: validate-inputs
+    needs: guardrails
     if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.RUN_CANONICAL_PACKAGED_GATE == 'true' }}
     outputs:
       enabled: ${{ steps.canonical_model_config.outputs.enabled }}
@@ -649,12 +683,11 @@ jobs:
 
   userscript-artifact:
     needs:
-      - validate-inputs
       - guardrails
       - test
       - coverage-build
       - userscript-e2e
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && ((inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'success') || (!inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'skipped')) }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && ((inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'success') || (!inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'skipped')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -697,7 +730,6 @@ jobs:
 
   extension-artifact:
     needs:
-      - validate-inputs
       - guardrails
       - test
       - coverage-build
@@ -707,7 +739,7 @@ jobs:
       - extension-minimum-versions-e2e
       - extension-remote-authenticated-e2e
       - firefox-android-142-release-gate
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs['validate-inputs'].result == 'success' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].outputs.enabled == 'true' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' && needs['firefox-android-142-release-gate'].result == 'success' }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].outputs.enabled == 'true' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' && needs['firefox-android-142-release-gate'].result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
