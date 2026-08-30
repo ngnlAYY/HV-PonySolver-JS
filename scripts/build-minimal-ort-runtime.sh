@@ -6,7 +6,7 @@ ORT_COMMIT=8f0278c77bf44b0cc83c098c6c722b92a36ac4b5
 PIP_VERSION=26.1.1
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 PYTHON_REQUIREMENTS="$ROOT_DIR/scripts/ort-runtime/requirements.txt"
-BUILD_ROOT="${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}"
+BUILD_ROOT="$(node "$ROOT_DIR/scripts/resolve-ort-build-root.mjs" "${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}")"
 ORT_SOURCE="$BUILD_ROOT/onnxruntime"
 MODEL_INPUT="$BUILD_ROOT/model-input"
 MODEL_OUTPUT="$BUILD_ROOT/model-output"
@@ -21,14 +21,6 @@ elif [[ $# -gt 0 ]]; then
   exit 2
 fi
 
-# Guard before any rm -rf: BUILD_ROOT is overridable via ORT_BUILD_ROOT and feeds
-# destructive cleanup below, so refuse empty, root, home, or unexpected locations.
-if [[ -z "$BUILD_ROOT" ]] || [[ "$BUILD_ROOT" == "/" ]] || [[ "$BUILD_ROOT" == "${HOME:-}" ]] || [[ "$BUILD_ROOT" != *hv-pony-ort-* ]]; then
-  printf 'Refusing unsafe ORT build root: refusing to delete outside an hv-pony-ort-* directory (ORT_BUILD_ROOT=%s)\n' \
-    "${BUILD_ROOT:-<empty>}" >&2
-  exit 1
-fi
-
 mkdir -p "$BUILD_ROOT"
 if [[ ! -d "$ORT_SOURCE/.git" ]]; then
   git clone --depth 1 --branch "$ORT_TAG" --recurse-submodules --shallow-submodules \
@@ -39,6 +31,7 @@ if [[ "$actual_commit" != "$ORT_COMMIT" ]]; then
   printf 'Unexpected ONNX Runtime commit: expected=%s actual=%s\n' "$ORT_COMMIT" "$actual_commit" >&2
   exit 1
 fi
+node "$ROOT_DIR/scripts/assert-clean-ort-source.mjs" "$ORT_SOURCE"
 
 python3 -m venv "$BUILD_ROOT/venv"
 # shellcheck disable=SC1091

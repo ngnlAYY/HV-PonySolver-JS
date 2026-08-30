@@ -292,7 +292,25 @@ test('render-wrangler-config rejects unresolved placeholders after rendering', a
 
 test('validate-wrangler-config accepts valid rendered config before deploy', async () => {
   await runValidate(
-    `[[kv_namespaces]]\nbinding = "MODEL_KEYS"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_BUCKET"\nbucket_name = "${validBucketName}"\n`,
+    `[[kv_namespaces]]\nbinding = "MODEL_KEYS"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_BUCKET"\nbucket_name = "${validBucketName}"\n[[durable_objects.bindings]]\nname = "MODEL_DOWNLOAD_QUOTAS"\nclass_name = "ModelDownloadQuota"\n[[migrations]]\ntag = "v1"\nnew_sqlite_classes = ["ModelDownloadQuota"]\n`,
+  )
+})
+
+test('validate-wrangler-config requires the quota Durable Object binding before deploy', async () => {
+  await assert.rejects(
+    runValidate(
+      `[[kv_namespaces]]\nbinding = "MODEL_KEYS"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_BUCKET"\nbucket_name = "${validBucketName}"\n[[migrations]]\ntag = "v1"\nnew_sqlite_classes = ["ModelDownloadQuota"]\n`,
+    ),
+    /durable_objects\.bindings must contain name = "MODEL_DOWNLOAD_QUOTAS" with class_name = "ModelDownloadQuota"/,
+  )
+})
+
+test('validate-wrangler-config requires the quota Durable Object migration before deploy', async () => {
+  await assert.rejects(
+    runValidate(
+      `[[kv_namespaces]]\nbinding = "MODEL_KEYS"\nid = "${validKvNamespaceId}"\n[[r2_buckets]]\nbinding = "MODEL_BUCKET"\nbucket_name = "${validBucketName}"\n[[durable_objects.bindings]]\nname = "MODEL_DOWNLOAD_QUOTAS"\nclass_name = "ModelDownloadQuota"\n`,
+    ),
+    /migrations must contain tag = "v1" with new_sqlite_classes = \["ModelDownloadQuota"\]/,
   )
 })
 

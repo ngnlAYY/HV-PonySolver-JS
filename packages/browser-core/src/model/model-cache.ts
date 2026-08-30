@@ -5,6 +5,7 @@ import { formatErrorMessage } from '../utils/errors'
 import { isRecordObject } from '../utils/guards'
 import { warn } from '../utils/logger'
 import { modelConfig } from './model-config'
+import { copyModelDownloadConfirmation, getModelDownloadConfirmation } from './model-download-confirmation-store'
 import { confirmCachedModelDownload, downloadModel } from './model-downloader'
 import type { ModelIntegrityOptions } from './model-integrity'
 import { resolveIntegrityOptions, verifyModelIntegrity } from './model-integrity'
@@ -42,6 +43,7 @@ class ModelCacheLifecycleError extends Error {
 export async function createCachedModelRow(
   buffer: ArrayBuffer,
   options: ModelIntegrityOptions = {},
+  confirmationPending: boolean = false,
 ): Promise<Record<string, unknown>> {
   const { integrity, verifyIntegrity } = resolveIntegrityOptions(options)
   if (verifyIntegrity) {
@@ -53,6 +55,7 @@ export async function createCachedModelRow(
     byteLength: integrity.byteLength,
     sha256: integrity.sha256,
     buffer,
+    confirmationPending,
     updatedAt: Date.now(),
   }
 }
@@ -65,11 +68,17 @@ export async function readCachedModelBuffer(
   if (!isRecordObject(row) || row.version !== modelConfig.version || !(row.buffer instanceof ArrayBuffer)) {
     return null
   }
-  if (!verifyIntegrity) {
-    return row.buffer
+  // Remote-model rows remain fail-closed until the receipt POST succeeds.
+  // Legacy rows lack proof of that state, so an upgrade intentionally causes
+  // one fresh, confirmable download instead of preserving an ambiguous cache.
+  if (row.confirmationPending !== false) {
+    return null
   }
   if (row.byteLength !== integrity.byteLength || row.sha256 !== integrity.sha256) {
     return null
+  }
+  if (!verifyIntegrity) {
+    return row.buffer
   }
   try {
     await verifyModelIntegrity(row.buffer, integrity, '缓存模型')
@@ -136,11 +145,14 @@ export class ModelCache {
     this.statusSink.setStatus({ model: '下载中' })
     // Concurrent callers share one in-flight download so a single monthly-quota
     // GET serves all of them; each caller still honors its own abort signal.
-    const downloadKey = `${verifyIntegrity ? 'verified' : 'unverified'}:${accessKeyOverride ?? ''}`
+    const normalizedAccessKeyOverride = accessKeyOverride?.trim() || undefined
+    const downloadKey = `${verifyIntegrity ? 'verified' : 'unverified'}:${normalizedAccessKeyOverride ?? ''}`
     let shared = this.activeDownloads.get(downloadKey)
     if (!shared) {
       const options: ModelIntegrityOptions =
-        accessKeyOverride === undefined ? { verifyIntegrity } : { accessKeyOverride, verifyIntegrity }
+        normalizedAccessKeyOverride === undefined
+          ? { verifyIntegrity }
+          : { accessKeyOverride: normalizedAccessKeyOverride, verifyIntegrity }
       shared = this.createSharedDownload(downloadKey, options)
       this.activeDownloads.set(downloadKey, shared)
     }
@@ -152,7 +164,15 @@ export class ModelCache {
         throw new ModelCacheLifecycleError('模型缓存操作已取消')
       }
       this.statusSink.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
-      return buffer
+      if (shared.owners <= 1) {
+        return buffer
+      }
+      // A transferable ArrayBuffer has one owner. Keep the original backing
+      // store intact for the last consumer and give earlier concurrent owners
+      // independent copies while retaining their quota-confirmation receipt.
+      const ownerBuffer = buffer.slice(0)
+      copyModelDownloadConfirmation(buffer, ownerBuffer)
+      return ownerBuffer
     } finally {
       shared.owners -= 1
       if (shared.owners === 0 && !shared.settled && this.activeDownloads.get(downloadKey) === shared) {
@@ -172,10 +192,25 @@ export class ModelCache {
     const context = this.createOperationContext(signal, Date.now() + inferenceTimeoutConfig.modelCacheTimeoutMs)
     try {
       this.assertOperationActive(context)
-      await this.writeCached(buffer, verifyIntegrity, skipIntegrityVerification, context)
+      const confirmationPending = getModelDownloadConfirmation(buffer) !== undefined
+      const cachedRow = await this.writeCached(
+        buffer,
+        verifyIntegrity,
+        skipIntegrityVerification,
+        confirmationPending,
+        context,
+      )
       this.assertOperationActive(context)
       await this.waitForOperation(confirmCachedModelDownload(buffer, context.signal), context, '模型下载缓存确认超时')
       this.assertOperationActive(context)
+      if (confirmationPending) {
+        await this.writeCachedRow(
+          { ...cachedRow, confirmationPending: false, updatedAt: Date.now() },
+          context,
+          '模型下载确认状态写入超时',
+        )
+        this.assertOperationActive(context)
+      }
       this.statusSink.setStatus({ model: `已缓存 ${Date.now() - startedAt}ms` })
     } catch (error) {
       warn('模型缓存或下载次数确认失败，继续使用已下载模型:', formatErrorMessage(error))
@@ -343,16 +378,30 @@ export class ModelCache {
     buffer: ArrayBuffer,
     verifyIntegrity: boolean,
     skipIntegrityVerification: boolean,
+    confirmationPending: boolean,
     context: CacheOperationContext,
-  ): Promise<void> {
+  ): Promise<Record<string, unknown>> {
     this.assertOperationActive(context)
     const row = await this.waitForOperation(
-      createCachedModelRow(buffer, {
-        verifyIntegrity: skipIntegrityVerification ? false : verifyIntegrity,
-      }),
+      createCachedModelRow(
+        buffer,
+        {
+          verifyIntegrity: skipIntegrityVerification ? false : verifyIntegrity,
+        },
+        confirmationPending,
+      ),
       context,
       '模型缓存完整性校验超时',
     )
+    await this.writeCachedRow(row, context, '模型缓存写入超时')
+    return row
+  }
+
+  private async writeCachedRow(
+    row: Record<string, unknown>,
+    context: CacheOperationContext,
+    timeoutMessage: string,
+  ): Promise<void> {
     this.assertOperationActive(context)
     const db = await this.open(context)
     this.assertOperationActive(context)
@@ -367,7 +416,7 @@ export class ModelCache {
       }
       throw error
     }
-    await this.transactionResult(transaction, null, context, '模型缓存写入超时')
+    await this.transactionResult(transaction, null, context, timeoutMessage)
   }
 
   private transactionResult<T>(

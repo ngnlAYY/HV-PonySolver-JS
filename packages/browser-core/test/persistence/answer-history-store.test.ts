@@ -7,6 +7,7 @@ import type { EnumerableTextStorage } from '../../src/platform/storage'
 
 class MemoryEnumerableStorage implements EnumerableTextStorage {
   readonly values = new Map<string, string>()
+  readonly rejectRemoveKeys = new Set<string>()
   rejectNextSet: Error | null = null
 
   getItem(key: string): string | null {
@@ -22,7 +23,10 @@ class MemoryEnumerableStorage implements EnumerableTextStorage {
     this.values.set(key, value)
   }
 
-  removeItem(key: string): void {
+  removeItem(key: string): void | Promise<void> {
+    if (this.rejectRemoveKeys.has(key)) {
+      return Promise.reject(new Error(`remove failed: ${key}`))
+    }
     this.values.delete(key)
   }
 
@@ -170,6 +174,25 @@ describe('HistoryStore', () => {
     expect(storage.values.has(`${HISTORY_ENTRY_PREFIX}main:invalid`)).toBe(false)
     expect(storage.values.has(`${HISTORY_ENTRY_PREFIX}main:new-record`)).toBe(true)
     expect(store.get('main')).toMatchObject([{ answers: 'TS' }])
+  })
+
+  it('keeps a successful keyed write usable when corrupted-record cleanup fails', async () => {
+    const storage = new MemoryEnumerableStorage()
+    const invalidKey = `${HISTORY_ENTRY_PREFIX}main:invalid`
+    storage.values.set(HISTORY_KEY, '{bad json')
+    storage.values.set(invalidKey, '{bad entry')
+    storage.rejectRemoveKeys.add(HISTORY_KEY)
+    storage.rejectRemoveKeys.add(invalidKey)
+    const store = new HistoryStore(storage, () => 'new-record')
+
+    const mutation = store.add('main', { type: 'success', answers: 'TS', elapsed: 12 })
+
+    await expect(mutation.persisted).resolves.toMatchObject([{ answers: 'TS' }])
+    expect(storage.values.has(HISTORY_KEY)).toBe(true)
+    expect(storage.values.has(invalidKey)).toBe(true)
+    expect(storage.values.has(`${HISTORY_ENTRY_PREFIX}main:new-record`)).toBe(true)
+    expect(vi.mocked(globalThis.console.warn).mock.calls.flat().join(' ')).toContain('清理损坏记录失败')
+    expect(vi.mocked(globalThis.console.warn).mock.calls.flat().join(' ')).toContain('清理过期记录失败')
   })
 
   it('detects only strictly valid legacy or keyed history across both worlds', () => {

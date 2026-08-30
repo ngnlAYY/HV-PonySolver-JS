@@ -111,7 +111,7 @@ async function getRequestAccessKey(
 }
 
 function createModelFetchInit(signal: AbortSignal, accessKey: string): RequestInit {
-  const init: RequestInit = { cache: 'no-store', signal }
+  const init: RequestInit = { cache: 'no-store', redirect: 'error', signal }
   if (accessKey) {
     init.headers = { authorization: `Bearer ${accessKey}` }
   }
@@ -123,9 +123,10 @@ function createModelProbeInit(signal: AbortSignal, accessKey: string): RequestIn
 }
 
 function createModelConfirmationInit(signal: AbortSignal, accessKey: string, receiptId: string): RequestInit {
-  const headers = new Headers(createModelFetchInit(signal, accessKey).headers)
+  const base = createModelFetchInit(signal, accessKey)
+  const headers = new Headers(base.headers)
   headers.set(MODEL_DOWNLOAD_RECEIPT_HEADER, receiptId)
-  return { cache: 'no-store', headers, method: 'POST', signal }
+  return { ...base, headers, method: 'POST' }
 }
 
 function parseProbeByteLength(contentLength: string | null): number {
@@ -246,21 +247,6 @@ function parseDeclaredByteLength(contentLength: string | null): number | null {
   return byteLength
 }
 
-function assertDeclaredByteLength(actualByteLength: number, declaredByteLength: number | null): void {
-  if (declaredByteLength !== null && actualByteLength !== declaredByteLength) {
-    throw new Error(`下载模型大小校验失败: ${actualByteLength} != ${declaredByteLength}`)
-  }
-}
-
-function assertModelByteLength(buffer: ArrayBuffer, expectedByteLength: number | null, maxByteLength: number): void {
-  if (expectedByteLength !== null && buffer.byteLength > expectedByteLength) {
-    throw new Error(`下载模型大小校验失败: ${buffer.byteLength} != ${expectedByteLength}`)
-  }
-  if (buffer.byteLength > maxByteLength) {
-    throw new Error(`下载模型大小校验失败: ${buffer.byteLength} > ${maxByteLength}`)
-  }
-}
-
 async function readModelResponse(
   response: Response,
   expectedByteLength: number | null,
@@ -289,12 +275,10 @@ async function readModelResponse(
     throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxByteLength}`)
   }
   if (!response.body) {
-    const buffer = await deadline.run(() => response.arrayBuffer())
-    if (trustDeclared) {
-      assertDeclaredByteLength(buffer.byteLength, declaredByteLength)
-    }
-    assertModelByteLength(buffer, expectedByteLength, maxByteLength)
-    return buffer
+    // Response.arrayBuffer() allocates the full payload before its size can be
+    // checked, which would bypass the streamed hard cap for synthetic or
+    // non-standard bodyless responses.
+    throw new Error('下载模型响应正文不可用')
   }
   // Suspicious declarations collect into chunks instead of a pre-sized buffer:
   // their length claim is unproven until the caller's hash check passes.

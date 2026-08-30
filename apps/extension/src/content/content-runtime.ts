@@ -129,7 +129,14 @@ export async function startContentRuntime<TStorage extends ContentRuntimeStorage
       return
     }
     suspended = false
-    void initialize().catch(reportRestoreError)
+    void initialize().catch((error: unknown) => {
+      reportRestoreError(error)
+      terminal = true
+      suspended = false
+      generation += 1
+      stopListening()
+      destroyActiveRuntime()
+    })
   }
 
   lifecycleTarget.addEventListener('pagehide', handlePageHide)

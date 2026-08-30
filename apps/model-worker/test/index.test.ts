@@ -21,9 +21,10 @@ vi.mock(import('../src/model-access'), async (importOriginal) => {
   }
 })
 
-import { MODEL_DOWNLOAD_RECEIPT_HEADER, MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
+import { MODEL_DOWNLOAD_RECEIPT_HEADER, MODEL_INTEGRITY, MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 
 import { addCorsHeaders, modelObjectResponse, textResponse } from '../src/model-response'
+import { MODEL_WORKER_DEPENDENCY_TIMEOUT_MS } from '../src/request-timeout'
 import {
   assetRequest,
   createEnv,
@@ -99,7 +100,9 @@ describe('model worker', () => {
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.decoyBody)
     expect(response.headers.get('content-type')).toBe('application/octet-stream')
-    expect(response.headers.get('content-disposition')).toBe('inline; filename="yolo26n-640.onnx"')
+    expect(response.headers.get('content-disposition')).toBe(
+      `inline; filename="${fixture.publicModelPath.slice(fixture.publicModelPath.lastIndexOf('/') + 1)}"`,
+    )
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('etag')).toBe(fixture.decoyEtag)
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
@@ -156,7 +159,9 @@ describe('model worker', () => {
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.realBody)
     expect(response.headers.get('content-type')).toBe('application/octet-stream')
-    expect(response.headers.get('content-disposition')).toBe('inline; filename="yolo26n-640.onnx"')
+    expect(response.headers.get('content-disposition')).toBe(
+      `inline; filename="${fixture.publicModelPath.slice(fixture.publicModelPath.lastIndexOf('/') + 1)}"`,
+    )
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('etag')).toBe(fixture.realEtag)
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
@@ -272,7 +277,7 @@ describe('model worker', () => {
     expect(await readResponseBody(response)).toBe('')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(response.headers.get('etag')).toBe(fixture.realEtag)
-    expect(response.headers.get('content-length')).toBe(String(fixture.realBody.length))
+    expect(response.headers.get('content-length')).toBe(String(MODEL_INTEGRITY.byteLength))
     const bucket = env.MODEL_BUCKET as MockR2Bucket
     expect(bucket.requestedKeys).toEqual([])
     expect(bucket.headRequestedKeys).toEqual([fixture.realModelObjectKey])
@@ -486,6 +491,24 @@ describe('model worker', () => {
 
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.realBody)
+  })
+
+  it('derives the legacy model download filename from a custom public path', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+    })
+    env.PUBLIC_MODEL_PATH = '/models/custom-legacy-name.onnx'
+
+    const response = await fetchWorker(
+      new Request('https://models.example/models/custom-legacy-name.onnx', {
+        headers: { authorization: `Bearer ${fixture.validKey}` },
+      }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-disposition')).toBe('inline; filename="custom-legacy-name.onnx"')
   })
 
   it('sets ETag from R2 httpEtag for GET and HEAD model responses', async () => {
@@ -779,7 +802,17 @@ describe('model worker', () => {
       }),
       env,
     )
-    await expect(disabledConfirmation.json()).resolves.toEqual({ confirmed: true, alreadyConfirmed: false })
+    expect(disabledConfirmation.status).toBe(409)
+    expect(await disabledConfirmation.text()).toBe('Model download quota is disabled')
+    const malformedConfirmation = await fetchWorker(
+      quotaRequest(fixture, 'POST', undefined, {
+        authorization: `Bearer ${fixture.validKey}`,
+        [MODEL_DOWNLOAD_RECEIPT_HEADER]: 'invalid',
+      }),
+      env,
+    )
+    expect(malformedConfirmation.status).toBe(400)
+    expect(await malformedConfirmation.text()).toBe('Invalid model download receipt')
     for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT + 1; index += 1) {
       const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
       expect(response.status).toBe(200)
@@ -822,6 +855,48 @@ describe('model worker', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe('*')
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(await response.text()).toBe('Internal Server Error')
+  })
+
+  it('fails closed before reserving quota when real model metadata drifts', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+      objects: new Map<string, StoredObject>([
+        [
+          fixture.realModelObjectKey,
+          {
+            body: fixture.realBody,
+            cancelError: new Error('cancel failed'),
+            size: MODEL_INTEGRITY.byteLength - 1,
+          },
+        ],
+        [fixture.decoyModelObjectKey, { body: fixture.decoyBody }],
+      ]),
+    })
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+
+    expect(response.status).toBe(500)
+    expect(await response.text()).toBe('Internal Server Error')
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toEqual([])
+  })
+
+  it('fails closed on real model HEAD metadata drift without expecting a response body', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+      objects: new Map<string, StoredObject>([
+        [fixture.realModelObjectKey, { body: fixture.realBody, size: MODEL_INTEGRITY.byteLength - 1 }],
+        [fixture.decoyModelObjectKey, { body: fixture.decoyBody }],
+      ]),
+    })
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'HEAD'), env)
+
+    expect(response.status).toBe(500)
+    expect(await response.text()).toBe('Internal Server Error')
+    expect((env.MODEL_BUCKET as MockR2Bucket).headRequestedKeys).toEqual([fixture.realModelObjectKey])
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toEqual([])
   })
 
   it('returns a generic 500 when real access has no canonical token', async () => {
@@ -928,6 +1003,19 @@ describe('model worker', () => {
     expect(await response.text()).toBe('Internal Server Error')
   })
 
+  it('returns a generic 500 when runtime WASM metadata drifts', async () => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      assetRequest(fixture.publicRuntimeWasmPath, 'GET'),
+      createEnv(fixture, {
+        objects: new Map([[fixture.runtimeWasmObjectKey, { body: fixture.runtimeBody, size: 1 }]]),
+      }),
+    )
+
+    expect(response.status).toBe(500)
+    expect(await response.text()).toBe('Internal Server Error')
+  })
+
   it('rejects a bodyless R2 metadata object for a GET response', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture)
@@ -998,6 +1086,47 @@ describe('model worker', () => {
     for (const response of [keyFailure, getFailure, headFailure]) {
       expect(response.status).toBe(500)
       expect(await response.text()).toBe('Internal Server Error')
+    }
+  })
+
+  it('bounds hanging KV and R2 dependencies and fails closed', async () => {
+    vi.useFakeTimers()
+    try {
+      const fixture = createModelFixture()
+      const keyEnv = createEnv(fixture)
+      keyEnv.MODEL_KEYS = { get: () => new Promise<never>(() => undefined) }
+      const getEnv = createEnv(fixture)
+      const getBucket = getEnv.MODEL_BUCKET
+      getEnv.MODEL_BUCKET = {
+        get: () => new Promise<never>(() => undefined),
+        head: (key) => getBucket.head(key),
+      }
+      const headEnv = createEnv(fixture)
+      const headBucket = headEnv.MODEL_BUCKET
+      headEnv.MODEL_BUCKET = {
+        get: (key) => headBucket.get(key),
+        head: () => new Promise<never>(() => undefined),
+      }
+      const responsePromises = [
+        fetchWorker(authorizedModelRequest(fixture, 'GET'), keyEnv),
+        fetchWorker(modelRequest(fixture, 'GET'), getEnv),
+        fetchWorker(assetRequest(fixture.publicRuntimeWasmPath, 'HEAD'), headEnv),
+      ]
+      const settled = Promise.all(responsePromises).then(() => 'settled' as const)
+      const sentinel = new Promise<'hung'>((resolve) => {
+        setTimeout(() => resolve('hung'), MODEL_WORKER_DEPENDENCY_TIMEOUT_MS + 1)
+      })
+
+      await vi.advanceTimersByTimeAsync(MODEL_WORKER_DEPENDENCY_TIMEOUT_MS + 1)
+
+      expect(await Promise.race([settled, sentinel])).toBe('settled')
+      const responses = await Promise.all(responsePromises)
+      for (const response of responses) {
+        expect(response.status).toBe(500)
+        expect(await response.text()).toBe('Internal Server Error')
+      }
+    } finally {
+      vi.useRealTimers()
     }
   })
 
@@ -1093,7 +1222,7 @@ describe('model worker', () => {
     const headResponse = await fetchWorker(authorizedModelRequest(fixture, 'HEAD'), env)
 
     expect(headResponse.status).toBe(200)
-    expect(headResponse.headers.get('content-length')).toBe(String(fixture.realBody.length))
+    expect(headResponse.headers.get('content-length')).toBe(String(MODEL_INTEGRITY.byteLength))
     expect(headResponse.headers.get('retry-after')).toBeNull()
     expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toHaveLength(
       MODEL_MONTHLY_DOWNLOAD_LIMIT * 2 + 1,
@@ -1114,7 +1243,7 @@ describe('model worker', () => {
 
     expect(valid.status).toBe(200)
     expect(invalid.status).toBe(200)
-    expect(valid.headers.get('content-length')).toBe(String(fixture.realBody.length))
+    expect(valid.headers.get('content-length')).toBe(String(MODEL_INTEGRITY.byteLength))
     expect(invalid.headers.get('content-length')).toBe(String(fixture.decoyBody.length))
     expect(valid.headers.get('content-length')).not.toBe(invalid.headers.get('content-length'))
     expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toEqual([])

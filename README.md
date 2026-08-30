@@ -146,15 +146,15 @@ Cloudflare Model Worker
 
 以下运行时 profile 只适用于用户脚本，并由构建命令决定，不由运行时配置自动选择。扩展版始终使用随包分发的精简 glue 和 WASM，没有外部运行时 profile。
 
-| 项目         | 默认外部完整版                      | 显式内置精简版                          |
-| ------------ | ----------------------------------- | --------------------------------------- |
-| profile 名称 | `external`                          | `bundled`                               |
-| 构建命令     | `build`                             | `build:bundled-runtime`                 |
-| JS 运行时    | 下载并校验 jsDelivr `ort.min.js`    | 构建时内置精简 glue                     |
-| WASM         | 从 jsDelivr `dist/` 加载完整版 WASM | 从 `models.ngnl.host` 下载内容寻址 WASM |
-| 内容校验     | JS 校验长度/SHA；WASM 依赖固定 CDN  | WASM 最大长度、精确长度和 SHA-256       |
-| 自动回退     | 无                                  | 无                                      |
-| 包体预算     | `256 KiB`                           | `1 MiB`                                 |
+| 项目         | 默认外部完整版                       | 显式内置精简版                          |
+| ------------ | ------------------------------------ | --------------------------------------- |
+| profile 名称 | `external`                           | `bundled`                               |
+| 构建命令     | `build`                              | `build:bundled-runtime`                 |
+| JS 运行时    | 下载并校验 jsDelivr `ort.min.js`     | 构建时内置精简 glue                     |
+| WASM         | 下载并校验 jsDelivr 完整版 WASM      | 从 `models.ngnl.host` 下载内容寻址 WASM |
+| 内容校验     | JS/WASM 最大长度、精确长度和 SHA-256 | WASM 最大长度、精确长度和 SHA-256       |
+| 自动回退     | 无                                   | 无                                      |
+| 包体预算     | `256 KiB`                            | `1 MiB`                                 |
 
 根 `bundle:check` 对不带 `--minify` 的默认 profile 产物执行 `256 KiB` 门禁；显式压缩的发布构建不能替代这项未压缩门禁。
 
@@ -165,23 +165,27 @@ Cloudflare Model Worker
 ```text
 https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js
 https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/
+https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm
 ```
 
 默认 JS 运行时还固定以下原子契约：
 
-| 字段                                | 值                                                                 |
-| ----------------------------------- | ------------------------------------------------------------------ |
-| `externalFullRuntime.byteLength`    | `360,434`                                                          |
-| `externalFullRuntime.sha256`        | `de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5` |
-| `externalFullRuntime.maxByteLength` | `400,000`                                                          |
+| 字段                                    | 值                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| `externalFullRuntime.byteLength`        | `360,434`                                                          |
+| `externalFullRuntime.sha256`            | `de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5` |
+| `externalFullRuntime.maxByteLength`     | `400,000`                                                          |
+| `externalFullRuntime.wasmByteLength`    | `26,827,543`                                                       |
+| `externalFullRuntime.wasmSha256`        | `78feeeb3d08f6bcee94d938ed322f69073bb8076b5f9d34697a574ffba8deb48` |
+| `externalFullRuntime.wasmMaxByteLength` | `30,000,000`                                                       |
 
-ONNX 推理 Worker 以 `redirect: error` 下载 `ort.min.js`，限制声明/实际大小，并对解压后的实际字节执行精确长度与 SHA-256 校验；只有校验成功后才创建临时 Blob URL 并调用 `importScripts()`。启动期间最多暂存两个请求，失败后立即拒绝已排队及后续请求。运行时随后设置：
+ONNX 推理 Worker 以 `redirect: error` 并行下载 `ort.min.js` 和完整版 WASM，分别限制声明/实际大小，并对解压后的实际字节执行精确长度与 SHA-256 校验；只有两项都校验成功后才创建临时 Blob URL、调用 `importScripts()`，并通过 `wasmBinary` 注入已验证的 WASM 字节。启动期间最多暂存两个请求，失败后立即拒绝已排队及后续请求。运行时随后设置：
 
 - `numThreads = 1`
 - `proxy = false`
 - WASM Execution Provider
 
-该模式不会下载项目生成的精简 WASM，也不会在 CDN 或完整性校验失败时切换到内置精简版。远程 JS 已由固定字节身份保护；完整版 WASM 仍由 ORT 按固定版本路径加载，因此仍属于外部 CDN 信任边界。
+该模式不会下载项目生成的精简 WASM，也不会在 CDN 或完整性校验失败时切换到内置精简版。远程 JS 和完整版 WASM 都由固定字节身份保护，ORT 不再自行按目录路径下载未验证的 WASM。
 
 ### 显式内置精简版
 
@@ -246,6 +250,8 @@ apps/userscript/src/inference/onnx-runtime-assets.ts
 | Node.js  | `>= 24.15.0`                 |
 | pnpm     | `11.21.0`                    |
 | Corepack | 推荐启用，用于固定 pnpm 版本 |
+
+仓库根目录的 `.node-version` 将本地工具链和 GitHub Actions 精确固定为 Node.js `24.15.0`；`package.json#engines` 保留 `>= 24.15.0` 的最低兼容要求。
 
 安装依赖：
 
@@ -449,7 +455,7 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 pnpm build:onnx-runtime
 ```
 
-脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`，并把内容寻址 WASM 复制到 `${ORT_RUNTIME_OUTPUT_DIR:-other}`：
+脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`，并把内容寻址 WASM 复制到 `${ORT_RUNTIME_OUTPUT_DIR:-other}`。`ORT_BUILD_ROOT` 会先解析现存祖先目录和符号链接，规范化后的最终目录名必须匹配 `hv-pony-ort-*`，且不得指向文件系统根目录或用户主目录；清理旧构建前会先执行这项门禁：
 
 ```text
 other/ort-wasm-simd-<sha256>.wasm
@@ -548,11 +554,13 @@ GET, HEAD, OPTIONS
 - 不支持的方法返回 `405`，并设置 `Allow: GET, HEAD, OPTIONS`。
 - `HEAD` 返回与 `GET` 一致的响应头，但不返回响应体。
 - 模型响应使用 `application/octet-stream` 和 `Cache-Control: no-store`。
+- 模型响应的 `Content-Disposition` 文件名取对应公开路径的最后一段；路径以 `/` 结尾时回退到共享清单中的标准文件名。
 - WASM 响应使用 `application/wasm` 和 `Cache-Control: public, max-age=31536000, immutable`。
 - 文本错误响应使用 `no-store` 和 `X-Content-Type-Options: nosniff`。
+- 真实 ONNX、真实 ORT 和公开 Runtime 在返回响应或预留额度前，必须匹配共享清单中的精确 R2 对象长度；若 R2 对象带 SHA-256 元数据，该值也必须匹配。元数据读取异常或任一值漂移时返回通用 `500`。
 - `GET /quota` 只读并返回 `enabled`、`limit`、`used`、`remaining` 和 `retryAfterSeconds`，不会消耗次数。
 - 真实模型 `GET` 返回临时 `X-HV-Model-Download-Receipt`，但此时不递增次数；客户端读取并校验完整模型、完成 IndexedDB 事务后，才使用同一 Key 和回执调用 `POST /quota`。
-- 同一 Key 的 ONNX 与 ORT 缓存确认共用每个 UTC 自然月 5 次额度；重复确认同一回执是幂等的，未完成或已失效的回执不计数。`HEAD`、`OPTIONS`、诱饵模型和 Runtime 不计数。`MODEL_DOWNLOAD_QUOTA_ENABLED=false` 时不执行额度限制，也不递增计数。
+- 同一 Key 的 ONNX 与 ORT 缓存确认共用每个 UTC 自然月 5 次额度；重复确认同一回执是幂等的，未完成或已失效的回执不计数。`HEAD`、`OPTIONS`、诱饵模型和 Runtime 不计数。`MODEL_DOWNLOAD_QUOTA_ENABLED=false` 时不执行额度限制，也不递增计数；此时格式正确的 `POST /quota` 返回 `409`，不会伪造一次成功确认，缺失或畸形回执仍返回 `400`。
 
 ### 响应矩阵
 
@@ -560,7 +568,7 @@ GET, HEAD, OPTIONS
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `GET /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中  | `200` 真实模型，模型响应使用 `Cache-Control: no-store` 并返回临时回执；`GET /yolo26n-640.ort` 使用相同契约                                                                           |
 | `GET /quota` 携带有效 Bearer token                                                   | `200` JSON 额度状态；只报告已确认的缓存下载，不消耗下载次数                                                                                                                          |
-| `POST /quota` 携带有效 Bearer token 和 `X-HV-Model-Download-Receipt`                 | 有效待确认回执返回 `200` 并将该 Key 的已用次数递增一次；重复提交已确认回执仍返回 `200` 且不重复计数，失效或未知回执返回 `409`                                                        |
+| `POST /quota` 携带有效 Bearer token 和 `X-HV-Model-Download-Receipt`                 | 有效待确认回执返回 `200` 并将该 Key 的已用次数递增一次；重复提交已确认回执仍返回 `200` 且不重复计数，失效、未知回执或额度限制已关闭时返回 `409`；缺失或畸形回执返回 `400`            |
 | `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中 | `200`，只读取 R2 元数据且不返回响应体；`HEAD /yolo26n-640.ort` 使用相同契约                                                                                                          |
 | `OPTIONS /yolo26n-640.onnx`                                                          | `204` preflight，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Headers: Authorization`；`OPTIONS /yolo26n-640.ort` 使用相同策略，预检缓存上限为 86400 秒 |
 | `OPTIONS /quota`                                                                     | `204` preflight，`Access-Control-Allow-Methods: GET, POST, OPTIONS`，`Access-Control-Allow-Headers: Authorization, X-HV-Model-Download-Receipt`，预检缓存上限为 86400 秒             |
@@ -569,8 +577,9 @@ GET, HEAD, OPTIONS
 | 同一 Key 当月已确认 5 次后再次请求真实模型                                           | `429 Too Many Requests`，包含到下个 UTC 月的 `Retry-After`，并通过 `Access-Control-Expose-Headers` 暴露该响应头                                                                      |
 | 同一 Key 已占满 5 个待确认/已确认槽位，但仍有未失效回执                              | `503 Service Unavailable`，`Retry-After` 指向最早待确认回执的失效时间；避免并发请求越过硬上限                                                                                        |
 | 选中的 R2 object 缺失                                                                | `500 Internal Server Error`                                                                                                                                                          |
+| 真实模型或 Runtime 的 R2 长度漂移、已记录的 SHA-256 漂移                             | `500 Internal Server Error`；不返回对象内容，真实模型不会预留额度                                                                                                                    |
 
-选中的 R2 object 缺失时不会回退到其他对象。
+选中的 R2 object 缺失或完整性元数据不符合共享清单时不会回退到其他对象；真实模型在此阶段不会预留额度。
 
 ### 鉴权
 
@@ -636,6 +645,8 @@ pnpm --filter @hv-pony-solver/model-worker exec wrangler r2 object put \
   --file "other/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm"
 ```
 
+Worker 总是检查 R2 对象的精确长度。Cloudflare R2 只有在上传时记录了 SHA-256 才会通过对象元数据暴露该值；为兼容既有对象，缺少该元数据不会单独拒绝响应，但只要存在就必须匹配共享清单。客户端仍会对实际下载字节执行精确长度和 SHA-256 校验，因此上传新对象时应保留 SHA-256 元数据，并在发布前用 canonical 文件复核实际内容。
+
 ## 部署 Model Worker
 
 本地部署流程：
@@ -681,7 +692,7 @@ pnpm --filter @hv-pony-solver/model-worker check:deployment
 
 旧版 ONNX 模型清单由 `MODEL_VERSION`、`MODEL_INTEGRITY.byteLength` 和 `MODEL_INTEGRITY.sha256` 组成。`MODEL_FILE` 指定本地校验文件，`verify-model-integrity` 执行字节长度和 SHA-256 校验。新版 ORT 使用独立的共享资产清单，不覆盖旧版契约。
 
-ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFullRuntime` 对应默认外置完整版，`bundledMinimalRuntime` 对应显式内置精简版。默认外置 JS 使用 `externalFullRuntime.byteLength`、`externalFullRuntime.sha256` 和 `externalFullRuntime.maxByteLength`；构建 glue 使用 `bundleAsset.byteLength`、`bundleAsset.sha256` 和 `bundleAsset.maxByteLength`；首方 WASM 使用 `wasmAsset.url`、`wasmAsset.byteLength`、`wasmAsset.sha256` 和 `wasmAsset.maxByteLength`。相关入口为 `build:onnx-runtime` 与 `verify:onnx-runtime`。
+ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFullRuntime` 对应默认外置完整版，`bundledMinimalRuntime` 对应显式内置精简版。默认外置 JS 使用 `externalFullRuntime.byteLength`、`externalFullRuntime.sha256` 和 `externalFullRuntime.maxByteLength`；默认外置 WASM 使用 `externalFullRuntime.wasmByteLength`、`externalFullRuntime.wasmSha256` 和 `externalFullRuntime.wasmMaxByteLength`；构建 glue 使用 `bundleAsset.byteLength`、`bundleAsset.sha256` 和 `bundleAsset.maxByteLength`；首方 WASM 使用 `wasmAsset.url`、`wasmAsset.byteLength`、`wasmAsset.sha256` 和 `wasmAsset.maxByteLength`。相关入口为 `build:onnx-runtime` 与 `verify:onnx-runtime`。
 
 `architecture:check` 保护关键依赖边界：`inferenceTimeoutConfig` 继续集中管理异步超时，`StatusPanel` 继续负责 UI 状态输出，`Model Worker Core` 继续与 Userscript 浏览器代码隔离。
 
@@ -720,8 +731,8 @@ pnpm verify:onnx-runtime
 
 `.github/workflows/verify-monorepo.yml` 在 Pull Request、`main` 推送和手动触发时执行：
 
-- 使用 runner 提供的 Node.js 运行时和冻结依赖安装。
-- 检查外部 GitHub Action 是否固定到完整 commit SHA。
+- 使用 `.node-version` 固定的 Node.js `24.15.0` 和冻结依赖安装。
+- 检查外部 GitHub Action 是否固定到完整 commit SHA，要求 Docker Action 使用完整 `sha256` digest，并强制每个 `actions/checkout` 设置 `persist-credentials: false`。
 - 依赖审计、ESLint 和 TypeScript 类型检查。
 - JavaScript/TypeScript CodeQL 扫描，并在 Pull Request 中执行依赖审查。
 - 文档漂移、架构边界和浏览器危险调用检查。
@@ -739,9 +750,10 @@ pnpm verify:onnx-runtime
 
 `.github/workflows/deploy-cloudflare-model-worker.yml` 仅支持手动触发：
 
-- 默认只渲染配置、执行检查并运行 Wrangler dry-run。
+- Cloudflare secrets 完整时，默认只渲染配置、执行检查并运行 Wrangler dry-run，不执行部署。
+- Cloudflare secrets 不完整且 `publish_model_worker=false` 时，工作流仍执行 typecheck 与测试，但会安全跳过配置渲染、Wrangler dry-run 和部署；若已经请求发布则 fail closed。
 - 手动输入 `enable_model_download_quota` 控制是否启用每 Key 月度下载限制，默认开启；关闭后模型请求不受 5 次限制，额度查询会提示限制未开启。
-- 只有 `publish_model_worker=true` 且所需 secrets 完整时才实际部署。
+- 整个 job 绑定 `production-model-worker` GitHub Environment；只有从 `refs/heads/main` 手动运行、`publish_model_worker=true`、环境审批通过且所需 secrets 完整时才实际部署。
 - 工作流不自动运行线上公开契约探测；部署完成只证明 Wrangler 发布命令成功。等待边缘传播后，由操作者按 [`docs/model-worker-ops.md`](docs/model-worker-ops.md) 手动执行 `check:deployment`。
 
 dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare 已更新，也不证明 R2、KV 或线上路由正确。
@@ -751,12 +763,12 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - 不要把模型 token 写入 URL、日志、README、构建产物或公开配置。
 - 查询字符串密钥不会授权真实模型。
 - `@connect` 和 CORS 只允许网络访问，不代替 token 鉴权。
-- 默认外部 profile 对 jsDelivr `ort.min.js` 拒绝重定向并校验最大长度、精确长度和 SHA-256；完整版 WASM 仍信任固定版本的 jsDelivr 路径。
+- 默认外部 profile 对 jsDelivr `ort.min.js` 和完整版 WASM 都拒绝重定向，只接受可流式读取的响应正文，并校验最大长度、精确长度和 SHA-256；只有两项都通过后才执行 JS 并注入 WASM 字节。
 - 内置 profile 对首方精简 glue 和 WASM 执行固定资产身份与内容完整性校验。
 - 扩展产物不加载远程 JS/WASM；ORT glue、module Worker 和内容寻址 WASM 均随包分发。远程 `.ort` 下载和包内 `.ort` 都按固定长度与 SHA-256 校验；包内模型不加密，也不具备机密性。
 - 扩展内容脚本不接收模型 Key 或模型字节。远程版本只有设置页可发起 Key 验证和模型下载请求；内置版本不构建 Key 存储、验证或远程下载能力。
-- 验证码图片为兼容扩展 JSON 消息边界继续使用有上限的 Base64；模型从 Host 以可转移的二进制 `ArrayBuffer` 交给推理 Worker，初始化后由 Worker 转回同一所有权供缓存，避免在 JS 堆中显式复制整份模型；模型不使用 Base64 或分片。
-- 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致。
+- 验证码图片为兼容扩展 JSON 消息边界继续使用有上限的 Base64；模型从 Host 以可转移的二进制 `ArrayBuffer` 交给推理 Worker，初始化后由 Worker 转回同一所有权供缓存。单消费者路径不复制整份模型，并发消费者各自取得独立缓冲区，避免一个 Worker 的 transfer detach 另一个缓存调用的字节；模型不使用 Base64 或分片。
+- 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致；Worker 在响应前强制检查长度，并在 R2 提供 SHA-256 元数据时强制比对，客户端继续校验实际响应字节。
 - 原始 Key、规范化 Key、配额对象标识和配额状态均不得写入日志或响应。
 - `decoy` 模式的未鉴权 `200` 不表示真实模型泄漏。
 - `HEAD` 请求不计配额，且 decoy 响应头的 `Content-Length` 与 `ETag` 来自诱饵对象，与真实对象不同；叠加公开的真实模型 SHA-256，构成可区分有效与无效 Key 的探测面。这是当前接受的权衡，缓解方向记录在 [`docs/model-worker-ops.md`](docs/model-worker-ops.md) 的「待办运维项」。
@@ -781,7 +793,7 @@ corepack pnpm install
 cdn.jsdelivr.net
 ```
 
-默认 profile 没有内置回退。若错误提示运行时大小或 SHA-256 校验失败，应先确认固定 URL 未重定向，且实际解压字节仍匹配 `externalFullRuntime.byteLength` 与 `externalFullRuntime.sha256`；不要放宽上限或跳过校验。需要绕过完整版 CDN JS 时，应改用显式内置构建；内置构建仍需要访问 `models.ngnl.host` 下载精简 WASM 和 `.ort` 模型。
+默认 profile 没有内置回退。若错误提示运行时大小或 SHA-256 校验失败，应先确认两个固定 URL 都未重定向，JS 实际解压字节匹配 `externalFullRuntime.byteLength` 与 `externalFullRuntime.sha256`，WASM 实际字节匹配 `externalFullRuntime.wasmByteLength` 与 `externalFullRuntime.wasmSha256`；不要放宽对应 `maxByteLength` 或 `wasmMaxByteLength` 上限，也不要跳过校验。需要绕过完整版 CDN 时，应改用显式内置构建；内置构建仍需要访问 `models.ngnl.host` 下载精简 WASM 和 `.ort` 模型。
 
 ### 精简 WASM 初始化失败
 
@@ -827,6 +839,7 @@ pnpm --filter @hv-pony-solver/extension build:packaged
 这表示识别已到达答题阶段，但保存的表单控件快照不满足安全点击条件。依次检查：
 
 - 当前表单和提交按钮仍连接在页面中，且 `submit.form` 指向该表单；
+- 表单的解析后提交地址仍与识别开始时一致，并且是同源地址；
 - 页面存在同一表单下的 6 个答案 checkbox；
 - 每个 checkbox 仍连接、`checkbox.form` 指向同一表单且没有 `disabled`；
 - 没有同时启用用户脚本版和扩展版；

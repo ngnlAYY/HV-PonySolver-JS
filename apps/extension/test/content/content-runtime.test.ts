@@ -30,6 +30,23 @@ function runtimeApp(): ContentRuntimeApp {
 }
 
 describe('startContentRuntime', () => {
+  it('destroys candidate storage when application construction throws', async () => {
+    const lifecycleTarget = new EventTarget()
+    const storage: ContentRuntimeStorage = { destroy: vi.fn() }
+    const constructionError = new Error('application construction failed')
+
+    await expect(
+      startContentRuntime(
+        async () => storage,
+        () => {
+          throw constructionError
+        },
+        lifecycleTarget,
+      ),
+    ).rejects.toBe(constructionError)
+    expect(storage.destroy).toHaveBeenCalledTimes(1)
+  })
+
   it('does not initialize after an ordinary pagehide during asynchronous storage creation', async () => {
     const lifecycleTarget = new EventTarget()
     const pendingStorage = deferred<ContentRuntimeStorage>()
@@ -96,6 +113,44 @@ describe('startContentRuntime', () => {
     lifecycleTarget.dispatchEvent(pageTransition('pagehide', false))
     lifecycleTarget.dispatchEvent(pageTransition('pagehide', false))
     expect(secondApp.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('makes a failed BFCache restore terminal after cleaning the failed candidate', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const lifecycleTarget = new EventTarget()
+    const firstStorage: ContentRuntimeStorage = { destroy: vi.fn() }
+    const failedStorage: ContentRuntimeStorage = { destroy: vi.fn() }
+    const unexpectedStorage: ContentRuntimeStorage = { destroy: vi.fn() }
+    const firstApp = runtimeApp()
+    const failedApp = runtimeApp()
+    const unexpectedApp = runtimeApp()
+    vi.mocked(failedApp.init).mockImplementation(() => {
+      throw new Error('restore failed')
+    })
+    const createStorage = vi
+      .fn<() => Promise<ContentRuntimeStorage>>()
+      .mockResolvedValueOnce(firstStorage)
+      .mockResolvedValueOnce(failedStorage)
+      .mockResolvedValueOnce(unexpectedStorage)
+    const createApp = vi
+      .fn<(storage: ContentRuntimeStorage) => ContentRuntimeApp>()
+      .mockReturnValueOnce(firstApp)
+      .mockReturnValueOnce(failedApp)
+      .mockReturnValueOnce(unexpectedApp)
+
+    await expect(startContentRuntime(createStorage, createApp, lifecycleTarget)).resolves.toBe(firstApp)
+    lifecycleTarget.dispatchEvent(pageTransition('pagehide', true))
+    lifecycleTarget.dispatchEvent(pageTransition('pageshow', true))
+    await vi.waitFor(() => expect(failedApp.destroy).toHaveBeenCalledTimes(1))
+
+    lifecycleTarget.dispatchEvent(pageTransition('pagehide', true))
+    lifecycleTarget.dispatchEvent(pageTransition('pageshow', true))
+    await Promise.resolve()
+
+    expect(createStorage).toHaveBeenCalledTimes(2)
+    expect(unexpectedApp.init).not.toHaveBeenCalled()
+    expect(firstApp.destroy).toHaveBeenCalledTimes(1)
+    expect(failedStorage.destroy).not.toHaveBeenCalled()
   })
 
   it('invalidates an in-flight initialization and restores from BFCache without stale ownership', async () => {

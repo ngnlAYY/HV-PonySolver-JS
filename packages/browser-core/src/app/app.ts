@@ -157,7 +157,12 @@ export class App {
     })
     const target = document.body || document.documentElement
     if (target) {
-      this.observer.observe(target, { attributes: true, attributeFilter: ['src'], childList: true, subtree: true })
+      this.observer.observe(target, {
+        attributes: true,
+        attributeFilter: ['action', 'disabled', 'src', 'srcset'],
+        childList: true,
+        subtree: true,
+      })
     }
   }
 

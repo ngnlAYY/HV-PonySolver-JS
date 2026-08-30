@@ -24,12 +24,20 @@ export const gmSettingsStorage: SettingsStorage = {
  * the page-readable localStorage fallback when GM storage is unavailable.
  */
 export const sensitiveGmSettingsStorage: SettingsStorage = {
-  get: gmSettingsStorage.get,
-  getSync: gmSettingsStorage.getSync,
+  async get(key: string): Promise<string | null> {
+    const value = await getGmValue(key, '', { sensitive: true })
+    return value || null
+  },
+  getSync(key: string): string | null {
+    const value = getGmValueSync(key, '', { sensitive: true })
+    return value || null
+  },
   async set(key: string, value: string): Promise<void> {
     await setGmValue(key, value, { sensitive: true })
   },
-  remove: gmSettingsStorage.remove,
+  async remove(key: string): Promise<void> {
+    await deleteGmValue(key, { sensitive: true })
+  },
 }
 
 export const userscriptHistoryStorage = safeStorage

@@ -122,6 +122,49 @@ describe('ModelDownloadQuota', () => {
     ).resolves.toEqual({ allowed: false, reason: 'quota-exhausted', retryAfterSeconds: 1_857_600 })
   })
 
+  it('serializes concurrent reservations and duplicate confirmations in the real Durable Object', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'))
+    const quota = createQuotaStub()
+    const reservationResults = (await Promise.all(
+      Array.from({ length: MODEL_MONTHLY_DOWNLOAD_LIMIT * 2 }, async () =>
+        (await quota.fetch(new Request('https://quota.internal/reserve', { method: 'POST' }))).json(),
+      ),
+    )) as Array<
+      | { allowed: true; receiptId: string; retryAfterSeconds: number }
+      | { allowed: false; reason: string; retryAfterSeconds: number }
+    >
+    const receiptIds = reservationResults.flatMap((result) => (result.allowed ? [result.receiptId] : []))
+    const deniedReservations = reservationResults.filter((result) => !result.allowed)
+
+    expect(receiptIds).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT)
+    expect(new Set(receiptIds).size).toBe(MODEL_MONTHLY_DOWNLOAD_LIMIT)
+    expect(deniedReservations).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT)
+    expect(deniedReservations).toEqual(
+      expect.arrayContaining(
+        Array.from({ length: MODEL_MONTHLY_DOWNLOAD_LIMIT }, () =>
+          expect.objectContaining({ allowed: false, reason: 'reservations-full' }),
+        ),
+      ),
+    )
+
+    const confirmationResults = (await Promise.all(
+      receiptIds.flatMap((receiptId) =>
+        [confirm(quota, receiptId), confirm(quota, receiptId)].map(async (responsePromise) =>
+          (await responsePromise).json(),
+        ),
+      ),
+    )) as Array<{ confirmed: boolean; alreadyConfirmed: boolean; used: number }>
+
+    expect(confirmationResults).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT * 2)
+    expect(confirmationResults.every((result) => result.confirmed)).toBe(true)
+    expect(confirmationResults.filter((result) => !result.alreadyConfirmed)).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT)
+    expect(confirmationResults.filter((result) => result.alreadyConfirmed)).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT)
+    await expect(
+      (await quota.fetch(new Request('https://quota.internal/status', { method: 'POST' }))).json(),
+    ).resolves.toMatchObject({ used: MODEL_MONTHLY_DOWNLOAD_LIMIT, remaining: 0 })
+  })
+
   it('releases unconfirmed reservations after their TTL and starts fresh on month rollover', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-31T23:40:00.000Z'))

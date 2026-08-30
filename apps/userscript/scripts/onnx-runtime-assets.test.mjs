@@ -3,8 +3,14 @@ import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+
+import {
+  ORT_RUNTIME_WASM_FILENAME,
+  ORT_RUNTIME_WASM_INTEGRITY,
+} from '@hv-pony-solver/shared/ort-runtime'
 
 import {
   assetIntegrityMatches,
@@ -17,6 +23,7 @@ import {
 const bundleBytes = Buffer.from([1, 2, 3])
 const wasmBytes = Buffer.from([4, 5])
 const wasmSha = sha256(wasmBytes)
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 
 test('parses the custom bundle and content-addressed first-party WASM contract', () => {
   const manifest = parseOnnxRuntimeAssetsManifest(manifestSource())
@@ -26,6 +33,13 @@ test('parses the custom bundle and content-addressed first-party WASM contract',
     'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
   )
   assert.equal(manifest.externalFullRuntime.wasmBaseUrl, 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/')
+  assert.equal(
+    manifest.externalFullRuntime.wasmUrl,
+    'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm',
+  )
+  assert.equal(manifest.externalFullRuntime.wasmByteLength, 26_827_543)
+  assert.equal(manifest.externalFullRuntime.wasmSha256, 'd'.repeat(64))
+  assert.equal(manifest.externalFullRuntime.wasmMaxByteLength, 30_000_000)
   assert.equal(manifest.externalFullRuntime.byteLength, 360_434)
   assert.equal(manifest.externalFullRuntime.sha256, 'c'.repeat(64))
   assert.equal(manifest.externalFullRuntime.maxByteLength, 400_000)
@@ -89,6 +103,19 @@ test('reads and verifies the tracked custom bundle', async () => {
   }
 })
 
+test('keeps the tracked userscript WASM manifest aligned with the shared runtime contract', async () => {
+  const manifest = await readOnnxRuntimeAssetsManifest(repositoryRoot)
+  const publicPath = `/runtime/${ORT_RUNTIME_WASM_FILENAME}`
+  const objectKey = `runtime/${ORT_RUNTIME_WASM_FILENAME}`
+
+  assert.equal(manifest.wasmAsset.filename, ORT_RUNTIME_WASM_FILENAME)
+  assert.equal(manifest.wasmAsset.publicPath, publicPath)
+  assert.equal(manifest.wasmAsset.objectKey, objectKey)
+  assert.equal(manifest.wasmAsset.byteLength, ORT_RUNTIME_WASM_INTEGRITY.byteLength)
+  assert.equal(manifest.wasmAsset.sha256, ORT_RUNTIME_WASM_INTEGRITY.sha256)
+  assert.equal(manifest.wasmAsset.url, `https://models.ngnl.host${publicPath}`)
+})
+
 function manifestSource() {
   return `export const ONNX_RUNTIME_ASSETS = {
   packageName: 'onnxruntime-web',
@@ -99,6 +126,10 @@ function manifestSource() {
   externalFullRuntime: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
     wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/',
+    wasmUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm',
+    wasmByteLength: 26_827_543,
+    wasmSha256: '${'d'.repeat(64)}',
+    wasmMaxByteLength: 30_000_000,
     byteLength: 360_434,
     sha256: '${'c'.repeat(64)}',
     maxByteLength: 400_000,

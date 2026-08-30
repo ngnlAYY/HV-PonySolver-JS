@@ -20,6 +20,14 @@ function getWorld(): World {
   return location.pathname.includes('/isekai/') ? 'isekai' : 'main'
 }
 
+function initialPanelStatus(): PanelStatus {
+  return {
+    model: '未开始',
+    session: '未开始',
+    inference: '空闲',
+  }
+}
+
 export class StatusPanel implements StatusPanelContract {
   private el: HTMLDivElement | null = null
   private cspVisibilityObserver: MutationObserver | null = null
@@ -34,11 +42,7 @@ export class StatusPanel implements StatusPanelContract {
   private lifecycleGeneration = 0
   private historyMutationGeneration = 0
   private recordsVersion = 0
-  private status: PanelStatus = {
-    model: '未开始',
-    session: '未开始',
-    inference: '空闲',
-  }
+  private status: PanelStatus = initialPanelStatus()
 
   constructor(
     private readonly history: HistoryStore,
@@ -55,6 +59,7 @@ export class StatusPanel implements StatusPanelContract {
     // Async settings reads may outlive this very panel element; each callback
     // must drop its stale write when destroy/create replaced the generation.
     const lifecycleGeneration = this.lifecycleGeneration
+    this.status = initialPanelStatus()
     this.persistenceError = null
     this.records = this.history.get(this.world)
     this.recordsVersion += 1
@@ -164,18 +169,24 @@ export class StatusPanel implements StatusPanelContract {
 
     void mutation.persisted.then(
       (records) => {
-        if (!this.el || lifecycleGeneration !== this.lifecycleGeneration) {
+        if (
+          !this.el ||
+          lifecycleGeneration !== this.lifecycleGeneration ||
+          mutationGeneration !== this.historyMutationGeneration
+        ) {
           return
         }
         this.records = records
         this.recordsVersion += 1
-        if (mutationGeneration === this.historyMutationGeneration) {
-          this.persistenceError = null
-        }
+        this.persistenceError = null
         this.scheduleRender()
       },
       (error: unknown) => {
-        if (!this.el || lifecycleGeneration !== this.lifecycleGeneration) {
+        if (
+          !this.el ||
+          lifecycleGeneration !== this.lifecycleGeneration ||
+          mutationGeneration !== this.historyMutationGeneration
+        ) {
           return
         }
         this.records = this.history.get(this.world)

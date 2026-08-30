@@ -428,12 +428,13 @@ describe('downloadModel', () => {
 
   it('uses one cutoff across saved key retrieval and response body reading', async () => {
     vi.useFakeTimers()
-    const arrayBuffer = vi.fn(() => new Promise<ArrayBuffer>(() => {}))
+    const read = vi.fn(() => new Promise<ReadableStreamReadResult<Uint8Array>>(() => {}))
     const response = {
       ok: true,
       headers: new Headers(),
-      body: null,
-      arrayBuffer,
+      body: {
+        getReader: () => ({ read, cancel: vi.fn(async () => undefined), releaseLock: vi.fn() }),
+      },
     } as unknown as Response
     const fetchMock = vi.fn(async () => response)
     const promise = downloadCoreModel(
@@ -451,7 +452,7 @@ describe('downloadModel', () => {
 
     await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelDownloadTimeoutMs - 1_000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(arrayBuffer).toHaveBeenCalledTimes(1)
+    expect(read).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(1_000)
 
     await rejection
@@ -871,7 +872,7 @@ describe('downloadModel', () => {
     ).rejects.toThrow('下载模型大小校验失败')
   })
 
-  it('accepts fallback arrayBuffer responses at the max size when streams are unavailable', async () => {
+  it('rejects bodyless model responses without using the unbounded arrayBuffer fallback', async () => {
     const arrayBuffer = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
     const response = {
       ok: true,
@@ -884,76 +885,10 @@ describe('downloadModel', () => {
       vi.fn(async () => response),
     )
 
-    const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
-
-    expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3])
-    expect(arrayBuffer).toHaveBeenCalledTimes(1)
-  })
-
-  it('rejects fallback arrayBuffer short reads when content-length is declared', async () => {
-    const arrayBuffer = vi.fn(async () => new Uint8Array([1, 2]).buffer)
-    const response = {
-      ok: true,
-      headers: new Headers({ 'content-length': '3' }),
-      body: null,
-      arrayBuffer,
-    } as unknown as Response
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
-      '下载模型大小校验失败: 2 != 3',
+      '下载模型响应正文不可用',
     )
-    expect(arrayBuffer).toHaveBeenCalledTimes(1)
-  })
-
-  it('rejects oversized fallback arrayBuffer responses when streams are unavailable', async () => {
-    const arrayBuffer = vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer)
-    const response = {
-      ok: true,
-      headers: new Headers(),
-      body: null,
-      arrayBuffer,
-    } as unknown as Response
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
-    await expect(
-      downloadModel(undefined, {
-        integrity: TEST_INTEGRITY,
-        verifyIntegrity: false,
-      }),
-    ).rejects.toThrow('下载模型大小校验失败: 4 > 3')
-    expect(arrayBuffer).toHaveBeenCalledTimes(1)
-  })
-
-  it('rejects fallback arrayBuffer responses larger than the verified expected size', async () => {
-    const arrayBuffer = vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer)
-    const response = {
-      ok: true,
-      headers: new Headers(),
-      body: null,
-      arrayBuffer,
-    } as unknown as Response
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
-    await expect(
-      downloadModel(undefined, {
-        integrity: {
-          ...TEST_INTEGRITY,
-          byteLength: 3,
-        },
-        forceVerifyIntegrity: true,
-      }),
-    ).rejects.toThrow('下载模型大小校验失败: 4 != 3')
-    expect(arrayBuffer).toHaveBeenCalledTimes(1)
+    expect(arrayBuffer).not.toHaveBeenCalled()
   })
 
   it('rejects downloads exceeding integrity max size even when verifyIntegrity is false', async () => {
@@ -1030,9 +965,7 @@ describe('queryModelDownloadQuota', () => {
       if (this !== globalThis) {
         throw new TypeError('Illegal invocation')
       }
-      return Promise.resolve(
-        Response.json({ enabled: true, limit: 5, used: 2, remaining: 3, retryAfterSeconds: 3600 }),
-      )
+      return Promise.resolve(Response.json({ enabled: true, limit: 5, used: 2, remaining: 3, retryAfterSeconds: 3600 }))
     })
     vi.stubGlobal('fetch', fetchMock)
 

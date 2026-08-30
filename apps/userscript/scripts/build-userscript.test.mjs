@@ -24,6 +24,10 @@ const runtimeManifest = {
   externalFullRuntime: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
     wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/',
+    wasmUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm',
+    wasmByteLength: 26_827_543,
+    wasmSha256: 'c'.repeat(64),
+    wasmMaxByteLength: 30_000_000,
     byteLength: 360_434,
     sha256: 'b'.repeat(64),
     maxByteLength: 400_000,
@@ -86,6 +90,10 @@ test('build options select external full and bundled minimal runtime providers',
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.byteLength),
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.sha256),
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.maxByteLength),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmUrl),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.wasmByteLength),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmSha256),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_MAX_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.wasmMaxByteLength),
   })
 
   const bundledWorker = createWorkerBuildOptions({
@@ -139,7 +147,8 @@ test('default build downloads the pinned full runtime and excludes minimal runti
   assert.match(result.output, /cdn\.jsdelivr\.net\/npm\/onnxruntime-web@1\.27\.0\/dist\/ort\.min\.js/)
   assert.match(result.output, /cdn\.jsdelivr\.net\/npm\/onnxruntime-web@1\.27\.0\/dist\//)
   assert.match(result.output, /models\.ngnl\.host\/yolo26n-640\.ort/)
-  assert.doesNotMatch(result.output, /wasmBinary/)
+  assert.match(result.output, /wasmBinary/)
+  assert.match(result.output, /ort-wasm-simd-threaded\.jsep\.wasm/)
   assert.doesNotMatch(result.output, /models\.ngnl\.host\/runtime\/ort-wasm-simd-/)
   const metafile = JSON.parse(result.metafile)
   const workerOutput = Object.values(metafile.worker.outputs)[0]

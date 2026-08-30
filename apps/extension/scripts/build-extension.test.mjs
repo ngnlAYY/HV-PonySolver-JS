@@ -33,6 +33,15 @@ const remoteCsp =
   "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self' https://models.ngnl.host"
 const packagedCsp = "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'"
 
+test('derives the packaged runtime WASM identity from the shared contract', async () => {
+  const source = await readFile(path.join(scriptDirectory, 'build-extension.mjs'), 'utf8')
+
+  assert.match(source, /ORT_RUNTIME_WASM_FILENAME/u)
+  assert.match(source, /ORT_RUNTIME_WASM_INTEGRITY/u)
+  assert.doesNotMatch(source, /const runtimeWasmFilename = ['"]/u)
+  assert.doesNotMatch(source, /const runtimeWasmSha256 = ['"]/u)
+})
+
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
@@ -190,10 +199,19 @@ test('coverage gate includes every security-critical Node script without exclusi
     'scripts/build-extension.mjs',
     'scripts/download-canonical-model.mjs',
     'scripts/install-geckodriver.mjs',
+    'scripts/packaged-smoke-artifact.mjs',
     'scripts/release-gate.mjs',
   ]) {
     assert.match(coverageCommand, new RegExp(`--test-coverage-include=${script.replaceAll('.', '\\.')}(?:\\s|$)`, 'u'))
   }
+  assert.match(
+    coverageCommand,
+    /--test-coverage-include=scripts\/packaged-smoke-artifact\.mjs\s+--test-coverage-lines=75\s+--test-coverage-branches=60\s+--test-coverage-functions=90\s+scripts\/packaged-smoke-artifact\.test\.mjs/u,
+  )
+  assert.match(
+    coverageCommand,
+    /--test-coverage-include=scripts\/release-gate\.mjs\s+--test-coverage-lines=85\s+--test-coverage-branches=75\s+--test-coverage-functions=90\s+scripts\/\*\.test\.mjs/u,
+  )
   assert.doesNotMatch(coverageCommand, /--test-coverage-exclude/u)
 })
 

@@ -31,10 +31,13 @@ concurrency:
 
 jobs:
   deploy:
+    environment: production-model-worker
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -44,6 +47,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
+          node-version-file: '.node-version'
           cache: pnpm
 
       - name: Install dependencies
@@ -60,7 +64,7 @@ jobs:
           MODEL_KEYS_KV_NAMESPACE_ID: ${{ secrets.MODEL_KEYS_KV_NAMESPACE_ID }}
           MODEL_BUCKET_NAME: ${{ secrets.MODEL_BUCKET_NAME }}
         run: |
-          if [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$MODEL_KEYS_KV_NAMESPACE_ID" ] && [ -n "$MODEL_BUCKET_NAME" ]; then
+          if [ -n "${CLOUDFLARE_ACCOUNT_ID//[[:space:]]/}" ] && [ -n "${CLOUDFLARE_API_TOKEN//[[:space:]]/}" ] && [ -n "${MODEL_KEYS_KV_NAMESPACE_ID//[[:space:]]/}" ] && [ -n "${MODEL_BUCKET_NAME//[[:space:]]/}" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -71,6 +75,12 @@ jobs:
         if: ${{ inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready != 'true' }}
         run: |
           echo "Publishing Model Worker requires complete Cloudflare deployment secrets." >&2
+          exit 1
+
+      - name: Require main branch for deployment
+        if: ${{ inputs.publish_model_worker && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "Publishing Model Worker is restricted to refs/heads/main." >&2
           exit 1
 
       - name: Render Wrangler config
@@ -103,7 +113,7 @@ jobs:
           pnpm --filter @hv-pony-solver/model-worker exec wrangler deploy --dry-run
 
       - name: Deploy Worker
-        if: ${{ inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready == 'true' }}
+        if: ${{ inputs.publish_model_worker && github.ref == 'refs/heads/main' && steps.cloudflare_secrets.outputs.ready == 'true' }}
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

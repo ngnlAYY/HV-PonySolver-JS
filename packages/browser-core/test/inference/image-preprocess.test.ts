@@ -38,6 +38,48 @@ function createJpegBytes(options: Readonly<{ width: number; height: number; zero
   return new Uint8Array(values)
 }
 
+function createGifHeader(width: number, height: number, version: '87a' | '89a' = '89a'): Uint8Array {
+  const bytes = new Uint8Array(10)
+  bytes.set(version === '89a' ? [0x47, 0x49, 0x46, 0x38, 0x39, 0x61] : [0x47, 0x49, 0x46, 0x38, 0x37, 0x61])
+  const view = new DataView(bytes.buffer)
+  view.setUint16(6, width, true)
+  view.setUint16(8, height, true)
+  return bytes
+}
+
+function createWebpHeader(codec: 'VP8X' | 'VP8L' | 'VP8', width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(codec === 'VP8L' ? 25 : 30)
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0)
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8)
+  if (codec === 'VP8X') {
+    bytes.set([0x56, 0x50, 0x38, 0x58], 12)
+    const encodedWidth = width - 1
+    const encodedHeight = height - 1
+    bytes.set([encodedWidth & 0xff, (encodedWidth >>> 8) & 0xff, (encodedWidth >>> 16) & 0xff], 24)
+    bytes.set([encodedHeight & 0xff, (encodedHeight >>> 8) & 0xff, (encodedHeight >>> 16) & 0xff], 27)
+  } else if (codec === 'VP8L') {
+    bytes.set([0x56, 0x50, 0x38, 0x4c], 12)
+    bytes[20] = 0x2f
+    const bits = ((width - 1) | ((height - 1) << 14)) >>> 0
+    new DataView(bytes.buffer).setUint32(21, bits, true)
+  } else {
+    bytes.set([0x56, 0x50, 0x38, 0x20], 12)
+    bytes.set([0x9d, 0x01, 0x2a], 23)
+    const view = new DataView(bytes.buffer)
+    view.setUint16(26, width, true)
+    view.setUint16(28, height, true)
+  }
+  return bytes
+}
+
+const additionalEncodedDimensionCases = [
+  ['GIF87a', (width: number, height: number) => createGifHeader(width, height, '87a')],
+  ['GIF89a', (width: number, height: number) => createGifHeader(width, height, '89a')],
+  ['WebP VP8X', (width: number, height: number) => createWebpHeader('VP8X', width, height)],
+  ['WebP VP8L', (width: number, height: number) => createWebpHeader('VP8L', width, height)],
+  ['WebP VP8', (width: number, height: number) => createWebpHeader('VP8', width, height)],
+] as const
+
 describe('image preprocessing helpers', () => {
   it('calculates centered letterbox layout for wide images', () => {
     expect(calculateLetterboxLayout(200, 100, 640)).toEqual({
@@ -145,6 +187,45 @@ describe('image preprocessing helpers', () => {
       width: 320,
       height: 160,
     })
+  })
+
+  for (const [format, createBytes] of additionalEncodedDimensionCases) {
+    it(`reads ${format} dimensions and accepts the exact pixel boundary`, async () => {
+      const regular = createBytes(320, 160)
+      const boundary = createBytes(4_000, 4_000)
+
+      expect(inspectEncodedImageDimensions(regular)).toEqual({ width: 320, height: 160 })
+      await expect(validateInferenceImageBeforeDecode(new Blob([boundary]))).resolves.toEqual({
+        width: 4_000,
+        height: 4_000,
+      })
+    })
+
+    it(`rejects ${format} dimensions above the side and pixel limits`, async () => {
+      await expect(
+        validateInferenceImageBeforeDecode(new Blob([createBytes(imagePreprocessConfig.maxSourceSide + 1, 1)])),
+      ).rejects.toThrow('验证码图片边长超过限制')
+      await expect(validateInferenceImageBeforeDecode(new Blob([createBytes(4_001, 4_000)]))).rejects.toThrow(
+        '验证码图片像素总数超过限制',
+      )
+    })
+  }
+
+  it('rejects truncated or invalid GIF and WebP dimension headers', () => {
+    expect(() => inspectEncodedImageDimensions(createGifHeader(1, 1).slice(0, 9))).toThrow('验证码图片 GIF 头无效')
+    expect(() => inspectEncodedImageDimensions(createWebpHeader('VP8X', 1, 1).slice(0, 29))).toThrow(
+      '验证码图片 WebP VP8X 头无效',
+    )
+    const invalidVp8l = createWebpHeader('VP8L', 1, 1)
+    invalidVp8l[20] = 0
+    expect(() => inspectEncodedImageDimensions(invalidVp8l)).toThrow('验证码图片 WebP VP8L 头无效')
+    const invalidVp8 = createWebpHeader('VP8', 1, 1)
+    invalidVp8[23] = 0
+    expect(() => inspectEncodedImageDimensions(invalidVp8)).toThrow('验证码图片 WebP VP8 头无效')
+    const unknownWebp = new Uint8Array(21)
+    unknownWebp.set([0x52, 0x49, 0x46, 0x46], 0)
+    unknownWebp.set([0x57, 0x45, 0x42, 0x50], 8)
+    expect(() => inspectEncodedImageDimensions(unknownWebp)).toThrow('验证码图片 WebP 编码无效')
   })
 
   it('rejects a truncated small JPEG header before decode', async () => {

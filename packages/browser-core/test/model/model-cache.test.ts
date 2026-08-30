@@ -15,6 +15,10 @@ vi.mock('../../src/model/model-integrity', async (importOriginal) => {
 
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import { createCachedModelRow, ModelCache, readCachedModelBuffer } from '../../src/model/model-cache'
+import {
+  getModelDownloadConfirmation,
+  registerModelDownloadConfirmation,
+} from '../../src/model/model-download-confirmation-store'
 import { confirmCachedModelDownload, downloadModel } from '../../src/model/model-downloader'
 import { verifyModelIntegrity } from '../../src/model/model-integrity'
 import { modelConfig } from '../../src/model/model-config'
@@ -74,13 +78,15 @@ function stubIndexedDb(
   request: TestOpenRequest
   database: TestDatabase
   transactions: TestTransaction[]
+  getStoredRow(): Record<string, unknown> | undefined
 }> {
   const { cachedRow, readError, openError, deferOpenSuccess = false, deferTransactionCompletion = false } = options
+  let storedRow = cachedRow
   const transactions: TestTransaction[] = []
   const readRequest: TestRequest = {
     onerror: null,
     onsuccess: null,
-    result: cachedRow,
+    result: storedRow,
     error: readError ?? null,
   }
   const objectStore: TestObjectStore = {
@@ -90,11 +96,18 @@ function stubIndexedDb(
           readRequest.onerror?.(new Event('error'))
           return
         }
+        readRequest.result = storedRow
         readRequest.onsuccess?.(new Event('success'))
       })
       return readRequest as unknown as IDBRequest
     }),
-    put: vi.fn(),
+    put: vi.fn((row: Record<string, unknown>) => {
+      storedRow = {
+        ...row,
+        ...(row.buffer instanceof ArrayBuffer ? { buffer: row.buffer.slice(0) } : {}),
+      }
+      return {} as IDBRequest
+    }),
   }
   const database: TestDatabase = {
     close: vi.fn(),
@@ -144,7 +157,7 @@ function stubIndexedDb(
   }
 
   vi.stubGlobal('indexedDB', indexedDb)
-  return { request, database, transactions }
+  return { request, database, transactions, getStoredRow: () => storedRow }
 }
 
 afterEach(() => {
@@ -165,6 +178,7 @@ describe('readCachedModelBuffer', () => {
           byteLength: TEST_INTEGRITY.byteLength,
           sha256: TEST_INTEGRITY.sha256,
           buffer,
+          confirmationPending: false,
         },
         { integrity: TEST_INTEGRITY },
       ),
@@ -201,7 +215,7 @@ describe('readCachedModelBuffer', () => {
     ).resolves.toBeNull()
   })
 
-  it('returns cached buffers without integrity checks when explicitly disabled', async () => {
+  it('rejects mismatched cache metadata even when integrity hashing is explicitly disabled', async () => {
     const buffer = bufferFromBytes([9, 9, 9])
 
     await expect(
@@ -215,7 +229,58 @@ describe('readCachedModelBuffer', () => {
         },
         { integrity: TEST_INTEGRITY, verifyIntegrity: false },
       ),
+    ).resolves.toBeNull()
+  })
+
+  it('returns matching cached metadata without hashing when integrity verification is disabled', async () => {
+    const buffer = bufferFromBytes([9, 9, 9])
+    vi.mocked(verifyModelIntegrity).mockClear()
+
+    await expect(
+      readCachedModelBuffer(
+        {
+          key: modelConfig.cacheKey,
+          version: modelConfig.version,
+          byteLength: TEST_INTEGRITY.byteLength,
+          sha256: TEST_INTEGRITY.sha256,
+          buffer,
+          confirmationPending: false,
+        },
+        { integrity: TEST_INTEGRITY, verifyIntegrity: false },
+      ),
     ).resolves.toBe(buffer)
+    expect(verifyModelIntegrity).not.toHaveBeenCalled()
+  })
+
+  it('invalidates legacy rows that cannot prove quota confirmation state', async () => {
+    await expect(
+      readCachedModelBuffer(
+        {
+          key: modelConfig.cacheKey,
+          version: modelConfig.version,
+          byteLength: TEST_INTEGRITY.byteLength,
+          sha256: TEST_INTEGRITY.sha256,
+          buffer: bufferFromBytes([9, 9, 9]),
+        },
+        { integrity: TEST_INTEGRITY, verifyIntegrity: false },
+      ),
+    ).resolves.toBeNull()
+  })
+
+  it('rejects newly written cache rows whose download quota confirmation is still pending', async () => {
+    await expect(
+      readCachedModelBuffer(
+        {
+          key: modelConfig.cacheKey,
+          version: modelConfig.version,
+          byteLength: TEST_INTEGRITY.byteLength,
+          sha256: TEST_INTEGRITY.sha256,
+          buffer: bufferFromBytes([9, 9, 9]),
+          confirmationPending: true,
+        },
+        { integrity: TEST_INTEGRITY, verifyIntegrity: false },
+      ),
+    ).resolves.toBeNull()
   })
 })
 
@@ -230,6 +295,7 @@ describe('ModelCache', () => {
         byteLength: modelConfig.integrity.byteLength,
         sha256: modelConfig.integrity.sha256,
         buffer,
+        confirmationPending: false,
       },
     })
     const panel = createStatusPanel()
@@ -404,15 +470,27 @@ describe('ModelCache', () => {
     expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
   })
 
-  it('shares one in-flight download across concurrent callers', async () => {
-    const downloadModelImpl = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
+  it('shares one in-flight request while giving concurrent callers independently transferable buffers', async () => {
+    const confirmation = {
+      accessKey: 'candidate-key',
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+      receiptId: 'a'.repeat(32),
+    }
+    const downloadModelImpl = vi.fn(async () => {
+      const buffer = new Uint8Array([1, 2, 3]).buffer
+      registerModelDownloadConfirmation(buffer, confirmation)
+      return buffer
+    })
     const panel = createStatusPanel()
     const cache = new ModelCache(panel, downloadModelImpl)
 
     const [first, second] = await Promise.all([cache.download(undefined, false), cache.download(undefined, false)])
 
-    expect(first.byteLength).toBe(3)
-    expect(second).toBe(first)
+    expect([...new Uint8Array(first)]).toEqual([1, 2, 3])
+    expect([...new Uint8Array(second)]).toEqual([1, 2, 3])
+    expect(second).not.toBe(first)
+    expect(getModelDownloadConfirmation(first)).toBe(confirmation)
+    expect(getModelDownloadConfirmation(second)).toBe(confirmation)
     expect(downloadModelImpl).toHaveBeenCalledTimes(1)
   })
 
@@ -505,6 +583,23 @@ describe('ModelCache', () => {
     expect(downloadModelImpl).toHaveBeenCalledTimes(2)
   })
 
+  it('shares one download for access key overrides that normalize to the same value', async () => {
+    const downloadModelImpl = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
+    const cache = new ModelCache(createStatusPanel(), downloadModelImpl)
+
+    const [first, second] = await Promise.all([
+      cache.download(undefined, false, ' candidate-token '),
+      cache.download(undefined, false, 'candidate-token'),
+    ])
+
+    expect(second).not.toBe(first)
+    expect(downloadModelImpl).toHaveBeenCalledTimes(1)
+    expect(downloadModelImpl).toHaveBeenCalledWith(expect.any(AbortSignal), {
+      accessKeyOverride: 'candidate-token',
+      verifyIntegrity: false,
+    })
+  })
+
   it('reports elapsed time when download completes', async () => {
     const panel = createStatusPanel()
     const cache = new ModelCache(panel)
@@ -516,7 +611,7 @@ describe('ModelCache', () => {
     expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^下载完成 \d+ms$/) })
   })
 
-  it('forwards access key overrides to model downloads', async () => {
+  it('normalizes access key overrides before forwarding them to model downloads', async () => {
     const panel = createStatusPanel()
     const cache = new ModelCache(panel)
     const signal = new AbortController().signal
@@ -526,7 +621,7 @@ describe('ModelCache', () => {
 
     expect(downloadModel).toHaveBeenCalledTimes(1)
     expect(downloadModel).toHaveBeenCalledWith(expect.any(AbortSignal), {
-      accessKeyOverride: ' candidate-token ',
+      accessKeyOverride: 'candidate-token',
       verifyIntegrity: false,
     })
     expect(vi.mocked(downloadModel).mock.calls[0]?.[0]).not.toBe(signal)
@@ -549,6 +644,45 @@ describe('ModelCache', () => {
 
     expect(confirmDownload).toHaveBeenCalledWith(buffer, undefined)
     expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^已缓存 \d+ms$/) })
+  })
+
+  it('keeps a cache row unusable across instances when quota confirmation fails', async () => {
+    const indexedDb = stubIndexedDb()
+    const buffer = bufferFromBytes([9, 9, 9])
+    registerModelDownloadConfirmation(buffer, {
+      accessKey: 'candidate-key',
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+      receiptId: 'b'.repeat(32),
+    })
+    vi.mocked(confirmCachedModelDownload).mockRejectedValueOnce(new Error('confirmation unavailable'))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const firstCache = new ModelCache(createStatusPanel())
+
+    await expect(firstCache.putCached(buffer, false)).resolves.toBeUndefined()
+    expect(indexedDb.getStoredRow()).toMatchObject({ confirmationPending: true })
+    firstCache.close()
+
+    const restartedCache = new ModelCache(createStatusPanel())
+    await expect(restartedCache.getCached()).resolves.toBeNull()
+  })
+
+  it('marks a confirmed cache row usable before reporting cache success', async () => {
+    const indexedDb = stubIndexedDb()
+    const buffer = bufferFromBytes([9, 9, 9])
+    registerModelDownloadConfirmation(buffer, {
+      accessKey: 'candidate-key',
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+      receiptId: 'c'.repeat(32),
+    })
+    const firstCache = new ModelCache(createStatusPanel())
+
+    await firstCache.putCached(buffer, false)
+
+    expect(indexedDb.getStoredRow()).toMatchObject({ confirmationPending: false })
+    firstCache.close()
+    vi.mocked(verifyModelIntegrity).mockResolvedValueOnce(undefined)
+    const restartedCache = new ModelCache(createStatusPanel())
+    await expect(restartedCache.getCached()).resolves.toBeInstanceOf(ArrayBuffer)
   })
 
   it('rejects bad model buffers when cache write verification is enabled by default', async () => {

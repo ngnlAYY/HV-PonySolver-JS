@@ -10,10 +10,21 @@ export type SetGmValueOptions = Readonly<{
   sensitive?: boolean
 }>
 
+export type GetGmValueOptions = Readonly<{
+  /** Refuse the page-readable localStorage fallback for credentials. */
+  sensitive?: boolean
+}>
+
+export type DeleteGmValueOptions = Readonly<{
+  /** Refuse the page-readable localStorage fallback for credentials. */
+  sensitive?: boolean
+}>
+
 type ModernGmApi = {
   getValue?: (key: string, defaultValue: string) => MaybePromise<unknown>
   setValue?: (key: string, value: string) => MaybePromise<void>
   deleteValue?: (key: string) => MaybePromise<void>
+  registerMenuCommand?: (caption: string, command: () => void | Promise<void>) => unknown
 }
 
 type UserscriptGlobal = typeof globalThis & {
@@ -60,7 +71,7 @@ export const safeStorage = {
   },
 }
 
-export async function getGmValue(key: string, defaultValue = ''): Promise<string> {
+export async function getGmValue(key: string, defaultValue = '', options: GetGmValueOptions = {}): Promise<string> {
   const userscriptGlobal = getUserscriptGlobal()
   const modernGm = userscriptGlobal.GM
   if (typeof modernGm?.getValue === 'function') {
@@ -70,10 +81,10 @@ export async function getGmValue(key: string, defaultValue = ''): Promise<string
   if (typeof userscriptGlobal.GM_getValue === 'function') {
     return String(await userscriptGlobal.GM_getValue(key, defaultValue)).trim()
   }
-  return getGmValueSync(key, defaultValue)
+  return getGmValueSync(key, defaultValue, options)
 }
 
-export function getGmValueSync(key: string, defaultValue = ''): string {
+export function getGmValueSync(key: string, defaultValue = '', options: GetGmValueOptions = {}): string {
   const userscriptGlobal = getUserscriptGlobal()
   if (typeof userscriptGlobal.GM_getValue === 'function') {
     const value = userscriptGlobal.GM_getValue(key, defaultValue)
@@ -81,7 +92,7 @@ export function getGmValueSync(key: string, defaultValue = ''): string {
       return value.trim()
     }
   }
-  return (safeStorage.getItem(key) ?? defaultValue).trim()
+  return (options.sensitive ? defaultValue : (safeStorage.getItem(key) ?? defaultValue)).trim()
 }
 
 export async function setGmValue(key: string, value: string, options: SetGmValueOptions = {}): Promise<void> {
@@ -101,7 +112,7 @@ export async function setGmValue(key: string, value: string, options: SetGmValue
   safeStorage.setItem(key, value)
 }
 
-export async function deleteGmValue(key: string): Promise<void> {
+export async function deleteGmValue(key: string, options: DeleteGmValueOptions = {}): Promise<void> {
   const userscriptGlobal = getUserscriptGlobal()
   const modernGm = userscriptGlobal.GM
   if (typeof modernGm?.deleteValue === 'function') {
@@ -112,11 +123,28 @@ export async function deleteGmValue(key: string): Promise<void> {
     await userscriptGlobal.GM_deleteValue(key)
     return
   }
+  const hasGmStorage =
+    typeof modernGm?.getValue === 'function' ||
+    typeof modernGm?.setValue === 'function' ||
+    typeof userscriptGlobal.GM_getValue === 'function' ||
+    typeof userscriptGlobal.GM_setValue === 'function'
+  if (options.sensitive && hasGmStorage) {
+    throw new Error(
+      '当前脚本管理器不支持 GM 存储，无法安全删除模型下载 Key；请改用支持 GM_deleteValue 的用户脚本管理器',
+    )
+  }
+  // With no GM storage implementation at all, deleting the page-readable
+  // fallback remains necessary to clean up keys saved by older releases.
   safeStorage.removeItem(key)
 }
 
 export function registerGmMenu(caption: string, command: () => void | Promise<void>): boolean {
   const userscriptGlobal = getUserscriptGlobal()
+  const modernGm = userscriptGlobal.GM
+  if (typeof modernGm?.registerMenuCommand === 'function') {
+    modernGm.registerMenuCommand(caption, command)
+    return true
+  }
   if (typeof userscriptGlobal.GM_registerMenuCommand !== 'function') {
     return false
   }

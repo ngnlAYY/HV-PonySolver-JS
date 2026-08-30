@@ -27,6 +27,9 @@ const renderedResources = [
 ]
 const invalidKeyModes = new Set(['decoy', 'error'])
 const quotaEnabledValues = new Set(['true', 'false'])
+const durableObjectBindingName = 'MODEL_DOWNLOAD_QUOTAS'
+const durableObjectClassName = 'ModelDownloadQuota'
+const durableObjectMigrationTag = 'v1'
 
 function isProductionMode(renderMode) {
   return productionModes.has(renderMode)
@@ -96,6 +99,23 @@ function readTomlStringAssignment(content, assignment, sourceName) {
   return values[0]
 }
 
+function readTomlSingleStringArrayAssignment(content, assignment, sourceName) {
+  const escapedAssignment = escapeRegExp(assignment)
+  const assignmentPattern = new RegExp(`^\\s*${escapedAssignment}\\s*=`)
+  const lines = content.split('\n').filter((line) => assignmentPattern.test(line))
+  if (lines.length === 0) {
+    throw new Error(`${sourceName} must contain ${assignment}`)
+  }
+  if (lines.length > 1) {
+    throw new Error(`${sourceName} must contain exactly one ${assignment}`)
+  }
+  const match = lines[0].match(new RegExp(`^\\s*${escapedAssignment}\\s*=\\s*\\[\\s*"([^"]+)"\\s*\\]\\s*$`))
+  if (!match?.[1]) {
+    throw new Error(`${sourceName} ${assignment} must be a single quoted TOML string array`)
+  }
+  return match[1]
+}
+
 function readTomlArrayTableBlocks(content, tableName) {
   const escapedTableName = escapeRegExp(tableName)
   const tableHeaderPattern = new RegExp(`^\\s*\\[\\[\\s*${escapedTableName}\\s*\\]\\]\\s*$`)
@@ -136,6 +156,30 @@ function validateRenderedResource(content, tableName, binding, assignment, sourc
   throw new Error(`${sourceName} ${tableName} must contain binding = "${binding}" with ${assignment}`)
 }
 
+function validateRenderedDurableObjectBinding(content, sourceName) {
+  const blocks = readTomlArrayTableBlocks(content, 'durable_objects.bindings')
+  for (const block of blocks) {
+    const names = readTomlStringAssignmentValues(block, 'name', sourceName)
+    if (!names.includes(durableObjectBindingName)) continue
+    if (readTomlStringAssignment(block, 'class_name', sourceName) === durableObjectClassName) return
+  }
+  throw new Error(
+    `${sourceName} durable_objects.bindings must contain name = "${durableObjectBindingName}" with class_name = "${durableObjectClassName}"`,
+  )
+}
+
+function validateRenderedDurableObjectMigration(content, sourceName) {
+  const blocks = readTomlArrayTableBlocks(content, 'migrations')
+  for (const block of blocks) {
+    const tags = readTomlStringAssignmentValues(block, 'tag', sourceName)
+    if (!tags.includes(durableObjectMigrationTag)) continue
+    if (readTomlSingleStringArrayAssignment(block, 'new_sqlite_classes', sourceName) === durableObjectClassName) return
+  }
+  throw new Error(
+    `${sourceName} migrations must contain tag = "${durableObjectMigrationTag}" with new_sqlite_classes = ["${durableObjectClassName}"]`,
+  )
+}
+
 function validateRenderedInvalidKeyMode(content, sourceName) {
   const values = readTomlStringAssignmentValues(content, 'INVALID_KEY_MODE', sourceName)
   if (values.length === 0) {
@@ -172,6 +216,8 @@ function validateRenderedWranglerConfig(content, sourceName = 'wrangler.toml', {
   for (const [tableName, binding, assignment] of renderedResources) {
     validateRenderedResource(content, tableName, binding, assignment, sourceName)
   }
+  validateRenderedDurableObjectBinding(content, sourceName)
+  validateRenderedDurableObjectMigration(content, sourceName)
 }
 
 export {

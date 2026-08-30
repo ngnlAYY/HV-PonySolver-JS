@@ -26,9 +26,69 @@ function jsonBytes(value) {
   return Buffer.from(`${JSON.stringify(value, null, 2)}\n`)
 }
 
+function replaceArchiveEntryName(archiveBytes, sourceName, targetName) {
+  const source = Buffer.from(sourceName)
+  const target = Buffer.from(targetName)
+  assert.equal(source.byteLength, target.byteLength, 'ZIP entry names must have equal byte lengths')
+  const patched = Buffer.from(archiveBytes)
+
+  let localOffset = 0
+  let localReplacements = 0
+  while (patched.readUInt32LE(localOffset) === 0x04034b50) {
+    const flags = patched.readUInt16LE(localOffset + 6)
+    assert.equal(flags & 0x08, 0, 'fixture ZIP must record compressed sizes in local headers')
+    const compressedByteLength = patched.readUInt32LE(localOffset + 18)
+    const nameByteLength = patched.readUInt16LE(localOffset + 26)
+    const extraByteLength = patched.readUInt16LE(localOffset + 28)
+    const nameOffset = localOffset + 30
+    if (patched.subarray(nameOffset, nameOffset + nameByteLength).equals(source)) {
+      target.copy(patched, nameOffset)
+      localReplacements += 1
+    }
+    localOffset = nameOffset + nameByteLength + extraByteLength + compressedByteLength
+  }
+
+  const endOfCentralDirectory = patched.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
+  assert.notEqual(endOfCentralDirectory, -1, 'fixture ZIP must contain an end-of-central-directory record')
+  const centralEntryCount = patched.readUInt16LE(endOfCentralDirectory + 10)
+  let centralOffset = patched.readUInt32LE(endOfCentralDirectory + 16)
+  let centralReplacements = 0
+  for (let entryIndex = 0; entryIndex < centralEntryCount; entryIndex += 1) {
+    assert.equal(patched.readUInt32LE(centralOffset), 0x02014b50, 'fixture ZIP central entry is invalid')
+    const nameByteLength = patched.readUInt16LE(centralOffset + 28)
+    const extraByteLength = patched.readUInt16LE(centralOffset + 30)
+    const commentByteLength = patched.readUInt16LE(centralOffset + 32)
+    const nameOffset = centralOffset + 46
+    if (patched.subarray(nameOffset, nameOffset + nameByteLength).equals(source)) {
+      target.copy(patched, nameOffset)
+      centralReplacements += 1
+    }
+    centralOffset = nameOffset + nameByteLength + extraByteLength + commentByteLength
+  }
+
+  assert.equal(localReplacements, 1, 'fixture ZIP must contain one matching local entry')
+  assert.equal(centralReplacements, 1, 'fixture ZIP must contain one matching central entry')
+  return patched
+}
+
+async function assertInvalidArchiveCause(packagedArtifact, causePattern) {
+  await assert.rejects(verifyPackagedArchive(packagedArtifact), (error) => {
+    assert.ok(error instanceof Error)
+    assert.match(error.message, /archive is not a valid ZIP/u)
+    assert.ok(error.cause instanceof Error)
+    assert.match(error.cause.message, causePattern)
+    return true
+  })
+}
+
 async function createFixtureArtifact(
   outputRoot,
-  { includeOracle = true, modelBytes = Buffer.from([1, 2, 3, 4]) } = {},
+  {
+    includeOracle = true,
+    modelBytes = Buffer.from([1, 2, 3, 4]),
+    archiveEntries = {},
+    transformArchiveBytes = (bytes) => bytes,
+  } = {},
 ) {
   const target = 'chromium'
   const model = {
@@ -67,10 +127,15 @@ async function createFixtureArtifact(
   }
   const archiveName = 'hv-pony-solver-chromium-packaged-fixture-0.1.1.zip'
   const archiveBytes = Buffer.from(
-    zipSync({
-      ...sourceFiles,
-      'build-manifest.json': jsonBytes(buildManifest),
-    }),
+    transformArchiveBytes(
+      Buffer.from(
+        zipSync({
+          ...sourceFiles,
+          'build-manifest.json': jsonBytes(buildManifest),
+          ...archiveEntries,
+        }),
+      ),
+    ),
   )
   const archive = {
     archiveName,
@@ -140,6 +205,40 @@ test('archive verification rejects ZIP-byte tampering', async (context) => {
   const packagedArtifact = await discoverPackagedArtifact(outputRoot, 'chromium')
   await writeFile(path.join(outputRoot, archiveName), 'tampered ZIP bytes')
   await assert.rejects(verifyPackagedArchive(packagedArtifact), /archive bytes do not match artifact metadata/u)
+})
+
+test('archive verification rejects unsafe entry paths before extraction', async (context) => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-packaged-unsafe-path-'))
+  context.after(() => rm(outputRoot, { recursive: true, force: true }))
+  await createFixtureArtifact(outputRoot, {
+    archiveEntries: { '../escape.js': Buffer.from('escape') },
+  })
+  const packagedArtifact = await discoverPackagedArtifact(outputRoot, 'chromium')
+
+  await assertInvalidArchiveCause(packagedArtifact, /unsafe path/u)
+})
+
+test('archive verification rejects undeclared entries before extraction', async (context) => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-packaged-unexpected-entry-'))
+  context.after(() => rm(outputRoot, { recursive: true, force: true }))
+  await createFixtureArtifact(outputRoot, {
+    archiveEntries: { 'unexpected.js': Buffer.from('unexpected') },
+  })
+  const packagedArtifact = await discoverPackagedArtifact(outputRoot, 'chromium')
+
+  await assertInvalidArchiveCause(packagedArtifact, /unexpected entry/u)
+})
+
+test('archive verification rejects duplicate entries before extraction', async (context) => {
+  const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-packaged-duplicate-entry-'))
+  context.after(() => rm(outputRoot, { recursive: true, force: true }))
+  await createFixtureArtifact(outputRoot, {
+    archiveEntries: { 'aaaaaaaaaa.js': Buffer.from('duplicate') },
+    transformArchiveBytes: (bytes) => replaceArchiveEntryName(bytes, 'aaaaaaaaaa.js', 'background.js'),
+  })
+  const packagedArtifact = await discoverPackagedArtifact(outputRoot, 'chromium')
+
+  await assertInvalidArchiveCause(packagedArtifact, /duplicate entry/u)
 })
 
 test('artifact discovery rejects oversized uncompressed ZIP entries before extraction', async (context) => {

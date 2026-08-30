@@ -1,6 +1,12 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 
-import { MODEL_DOWNLOAD_RECEIPT_HEADER, MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
+import {
+  MODEL_DOWNLOAD_RECEIPT_HEADER,
+  MODEL_INTEGRITY,
+  MODEL_MONTHLY_DOWNLOAD_LIMIT,
+  ORT_MODEL_INTEGRITY,
+  ORT_RUNTIME_WASM_INTEGRITY,
+} from '@hv-pony-solver/shared'
 
 import worker, {
   type Env,
@@ -16,8 +22,11 @@ import {
 
 export type StoredObject = Readonly<{
   body: string
+  cancelError?: Error
   etag?: string
   httpEtag?: string | null
+  sha256?: string
+  size?: number
 }>
 
 export type ModelFixture = Readonly<{
@@ -190,7 +199,7 @@ export class MockR2Object implements R2Object {
   readonly version = 'mock-version'
   readonly size: number
   readonly httpEtag: string
-  readonly checksums: R2Checksums = { toJSON: () => ({}) }
+  readonly checksums: R2Checksums
   readonly uploaded = new Date('2026-05-18T00:00:00.000Z')
   readonly storageClass = 'Standard'
 
@@ -198,8 +207,9 @@ export class MockR2Object implements R2Object {
     readonly key: string,
     protected readonly object: StoredObject,
   ) {
-    this.size = object.body.length
+    this.size = object.size ?? object.body.length
     this.httpEtag = object.httpEtag === null ? '' : (object.httpEtag ?? object.etag ?? '"mock-etag"')
+    this.checksums = { toJSON: () => (object.sha256 === undefined ? {} : { sha256: object.sha256 }) }
   }
 
   get etag(): string {
@@ -215,7 +225,13 @@ export class MockR2ObjectBody extends MockR2Object implements R2ObjectBody {
 
   constructor(key: string, object: StoredObject) {
     super(key, object)
-    this.body = new Response(object.body).body ?? new ReadableStream()
+    this.body = object.cancelError
+      ? new ReadableStream({
+          cancel: () => {
+            throw object.cancelError
+          },
+        })
+      : (new Response(object.body).body ?? new ReadableStream())
   }
 
   async arrayBuffer(): Promise<ArrayBuffer> {
@@ -277,7 +293,7 @@ export function createModelFixture(): ModelFixture {
 }
 
 export function createEnv(fixture: ModelFixture, options: EnvOptions = {}): Env {
-  const objects =
+  const sourceObjects =
     options.objects ??
     new Map<string, StoredObject>([
       [fixture.realModelObjectKey, { body: fixture.realBody, etag: fixture.realEtag }],
@@ -285,6 +301,18 @@ export function createEnv(fixture: ModelFixture, options: EnvOptions = {}): Env 
       [fixture.decoyModelObjectKey, { body: fixture.decoyBody, etag: fixture.decoyEtag }],
       [fixture.runtimeWasmObjectKey, { body: fixture.runtimeBody, etag: fixture.runtimeEtag }],
     ])
+  const canonicalMetadata = new Map<string, Readonly<{ size: number; sha256: string }>>([
+    [fixture.realModelObjectKey, { size: MODEL_INTEGRITY.byteLength, sha256: MODEL_INTEGRITY.sha256 }],
+    [fixture.realOrtModelObjectKey, { size: ORT_MODEL_INTEGRITY.byteLength, sha256: ORT_MODEL_INTEGRITY.sha256 }],
+    [
+      fixture.runtimeWasmObjectKey,
+      { size: ORT_RUNTIME_WASM_INTEGRITY.byteLength, sha256: ORT_RUNTIME_WASM_INTEGRITY.sha256 },
+    ],
+  ])
+  const objects = new Map<string, StoredObject>()
+  for (const [key, object] of sourceObjects) {
+    objects.set(key, { ...canonicalMetadata.get(key), ...object })
+  }
   const env: Env = {
     MODEL_KEYS: new MockKvNamespace(options.keyValues, options.keyError),
     MODEL_BUCKET: new MockR2Bucket(objects, options.bucketGetError, options.bucketHeadError),

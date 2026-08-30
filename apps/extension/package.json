@@ -22,7 +22,7 @@
     "test:e2e:packaged:firefox": "node scripts/firefox-packaged-model-smoke.mjs",
     "test:e2e:packaged": "pnpm run test:e2e:packaged:chromium && pnpm run test:e2e:packaged:firefox",
     "test": "vitest run && node --test scripts/*.test.mjs",
-    "test:coverage": "vitest run --coverage && node --test --experimental-test-coverage --test-coverage-include=scripts/browser-support.mjs --test-coverage-include=scripts/build-extension.mjs --test-coverage-include=scripts/download-canonical-model.mjs --test-coverage-include=scripts/install-geckodriver.mjs --test-coverage-include=scripts/release-gate.mjs scripts/*.test.mjs",
+    "test:coverage": "vitest run --coverage && node --test --experimental-test-coverage --test-coverage-include=scripts/packaged-smoke-artifact.mjs --test-coverage-lines=75 --test-coverage-branches=60 --test-coverage-functions=90 scripts/packaged-smoke-artifact.test.mjs && node --test --experimental-test-coverage --test-coverage-include=scripts/browser-support.mjs --test-coverage-include=scripts/build-extension.mjs --test-coverage-include=scripts/download-canonical-model.mjs --test-coverage-include=scripts/install-geckodriver.mjs --test-coverage-include=scripts/release-gate.mjs --test-coverage-lines=85 --test-coverage-branches=75 --test-coverage-functions=90 scripts/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

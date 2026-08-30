@@ -67,7 +67,7 @@ describe('findCaptchaTarget', () => {
     expect(isSameCaptchaTarget(first, null)).toBe(false)
   })
 
-  it('tracks control identity and disabled answers while allowing the submit button to toggle', () => {
+  it('tracks control identity and disabled state for answers and the submit button', () => {
     const master = appendCandidate({ imageSrc: '/captcha.png', formAction: '/submit' })
     const form = master.querySelector<HTMLFormElement>('form')!
     const answers = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]'))
@@ -84,7 +84,7 @@ describe('findCaptchaTarget', () => {
 
     const beforeSubmitDisable = findCaptchaTarget()
     submit.disabled = true
-    expect(isSameCaptchaTarget(beforeSubmitDisable, findCaptchaTarget())).toBe(true)
+    expect(isSameCaptchaTarget(beforeSubmitDisable, findCaptchaTarget())).toBe(false)
 
     const beforeAnswerDisable = findCaptchaTarget()
     answers[1]!.disabled = true

@@ -5,6 +5,20 @@ function checkRootCheckCommand(rootPackageJson, readme) {
   }
 
   const errors = []
+  const readmeLines = readme.split(/\r?\n/)
+  const nodeVersion = typeof rootPackageJson.engines?.node === 'string' ? rootPackageJson.engines.node.match(/\d+\.\d+\.\d+/u)?.[0] : undefined
+  const pnpmVersion =
+    typeof rootPackageJson.packageManager === 'string'
+      ? /^pnpm@(?<version>\d+\.\d+\.\d+)$/u.exec(rootPackageJson.packageManager)?.groups?.version
+      : undefined
+  const nodeRequirementRow = readmeLines.find((line) => /^\|\s*Node\.js\s*\|/u.test(line)) ?? ''
+  const pnpmRequirementRow = readmeLines.find((line) => /^\|\s*pnpm\s*\|/u.test(line)) ?? ''
+  if (nodeVersion && !nodeRequirementRow.includes(nodeVersion)) {
+    errors.push(`README.md Node requirement must mention ${nodeVersion} from package.json engines.node`)
+  }
+  if (pnpmVersion && !pnpmRequirementRow.includes(pnpmVersion)) {
+    errors.push(`README.md pnpm requirement must mention ${pnpmVersion} from package.json packageManager`)
+  }
   for (const commandName of ['check:quick', 'test:coverage', 'build']) {
     if (checkCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check', commandName)) {
       errors.push(`README.md pnpm check description must mention ${commandName} because package.json scripts.check runs it`)

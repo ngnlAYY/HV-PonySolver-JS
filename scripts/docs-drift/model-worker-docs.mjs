@@ -77,6 +77,148 @@ function checkModelWorkerDocs(readme, facts) {
   return errors
 }
 
+function checkModelWorkerOpsDocs(opsDoc, readme, deploymentWorkflowSource) {
+  const errors = []
+  const workflowPath = '.github/workflows/deploy-cloudflare-model-worker.yml'
+  const renderStep = findUniqueWorkflowStep(deploymentWorkflowSource, 'Render Wrangler config', workflowPath, errors)
+  const dryRunStep = findUniqueWorkflowStep(deploymentWorkflowSource, 'Wrangler dry-run', workflowPath, errors)
+  const deployStep = findUniqueWorkflowStep(deploymentWorkflowSource, 'Deploy Worker', workflowPath, errors)
+  const requireSecretsStep = findUniqueWorkflowStep(
+    deploymentWorkflowSource,
+    'Require Cloudflare secrets for deployment',
+    workflowPath,
+    errors,
+  )
+  const deployJob = findUniqueWorkflowJob(deploymentWorkflowSource, 'deploy', workflowPath, errors)
+  const readyCondition = "steps.cloudflare_secrets.outputs.ready == 'true'"
+
+  if (!deploymentWorkflowSource.includes('skipping Wrangler dry-run and deploy')) {
+    errors.push(`${workflowPath} must explicitly report when missing secrets skip Wrangler dry-run and deploy`)
+  }
+  for (const variable of [
+    'CLOUDFLARE_ACCOUNT_ID',
+    'CLOUDFLARE_API_TOKEN',
+    'MODEL_KEYS_KV_NAMESPACE_ID',
+    'MODEL_BUCKET_NAME',
+  ]) {
+    const normalizedValue = '${' + variable + '//[[:space:]]/}'
+    if (!deploymentWorkflowSource.includes(normalizedValue)) {
+      errors.push(`${workflowPath} must treat whitespace-only values as incomplete secrets (${variable})`)
+    }
+  }
+  if (!renderStep.includes(readyCondition) || !dryRunStep.includes(readyCondition)) {
+    errors.push(`${workflowPath} must gate deploy config rendering and Wrangler dry-run on complete secrets`)
+  }
+  if (!deployStep.includes('inputs.publish_model_worker') || !deployStep.includes(readyCondition)) {
+    errors.push(`${workflowPath} must gate deployment on publish intent and complete secrets`)
+  }
+  if (!deployStep.includes("github.ref == 'refs/heads/main'")) {
+    errors.push(`${workflowPath} deployment must require github.ref == 'refs/heads/main'`)
+  }
+  if (!/^\s{4}environment:\s*production-model-worker\s*$/m.test(deployJob)) {
+    errors.push(`${workflowPath} deploy job must use the production-model-worker environment`)
+  }
+  if (
+    !requireSecretsStep.includes('inputs.publish_model_worker') ||
+    !requireSecretsStep.includes("steps.cloudflare_secrets.outputs.ready != 'true'")
+  ) {
+    errors.push(`${workflowPath} must fail closed when deployment is requested without complete secrets`)
+  }
+
+  if (!opsDoc.includes(workflowPath)) {
+    errors.push(`docs/model-worker-ops.md must name ${workflowPath}`)
+  }
+  checkSecretGateDocs(errors, opsDoc, 'docs/model-worker-ops.md', true)
+  checkSecretGateDocs(errors, readme, 'README.md', false)
+  return errors
+}
+
+function checkSecretGateDocs(errors, document, label, requirePublishDetails) {
+  const lines = document.split(/\r?\n/)
+  const secretlessSkipLine = lines.find(
+    (line) =>
+      /Cloudflare secrets 不完整/.test(line) &&
+      /publish_model_worker=false/.test(line) &&
+      /跳过/.test(line) &&
+      /dry-run/.test(line) &&
+      /(?:部署|deploy)/i.test(line),
+  )
+  if (!secretlessSkipLine) {
+    errors.push(`${label} missing-secrets contract must state that secrets skip Wrangler dry-run and deploy`)
+  } else if (!/typecheck/.test(secretlessSkipLine) || !/测试/.test(secretlessSkipLine)) {
+    errors.push(`${label} missing-secrets contract must state that typecheck and tests still run`)
+  }
+  if (
+    requirePublishDetails &&
+    !lines.some(
+      (line) => /publish_model_worker=true/.test(line) && /secrets 不完整/.test(line) && /fail closed/i.test(line),
+    )
+  ) {
+    errors.push(`${label} must state that publishing without complete secrets fails closed`)
+  }
+}
+
+function findUniqueWorkflowStep(source, name, workflowPath, errors) {
+  const steps = findWorkflowSteps(source, name)
+  if (steps.length !== 1) {
+    errors.push(`${workflowPath} must define exactly one workflow step named ${name}`)
+    return ''
+  }
+  return steps[0]
+}
+
+function findWorkflowSteps(source, name) {
+  const lines = source.split(/\r?\n/)
+  const steps = []
+  for (let start = 0; start < lines.length; start += 1) {
+    if (lines[start].trim() !== `- name: ${name}`) {
+      continue
+    }
+    const indentation = lines[start].match(/^\s*/)?.[0] ?? ''
+    let end = lines.length
+    for (let index = start + 1; index < lines.length; index += 1) {
+      const currentIndent = lines[index].match(/^\s*/)?.[0].length ?? 0
+      if (lines[index].trim().length > 0 && currentIndent < indentation.length) {
+        end = index
+        break
+      }
+      const sameLevelSource = lines[index].slice(indentation.length)
+      if (lines[index].startsWith(indentation) && /^-\s+/.test(sameLevelSource)) {
+        end = index
+        break
+      }
+    }
+    steps.push(lines.slice(start, end).join('\n'))
+  }
+  return steps
+}
+
+function findUniqueWorkflowJob(source, name, workflowPath, errors) {
+  const lines = source.split(/\r?\n/)
+  const jobHeader = `  ${name}:`
+  const jobs = []
+  for (let start = 0; start < lines.length; start += 1) {
+    if (lines[start] !== jobHeader) continue
+    let end = lines.length
+    for (let index = start + 1; index < lines.length; index += 1) {
+      if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(lines[index])) {
+        end = index
+        break
+      }
+      if (lines[index].trim().length > 0 && !lines[index].startsWith('  ')) {
+        end = index
+        break
+      }
+    }
+    jobs.push(lines.slice(start, end).join('\n'))
+  }
+  if (jobs.length !== 1) {
+    errors.push(`${workflowPath} must define exactly one workflow job named ${name}`)
+    return ''
+  }
+  return jobs[0]
+}
+
 function checkPreflightDocs(errors, line, routeName, allowMethods, allowHeaders) {
   if (allowMethods && !lineMentionsHeaderValue(line, 'Access-Control-Allow-Methods', allowMethods)) {
     errors.push(
@@ -165,4 +307,4 @@ function isSelectedObjectMissingDocsLine(line) {
   return /^\|\s*选中的 R2 object 缺失\s*\|/.test(line)
 }
 
-export { checkModelWorkerDocs, readModelWorkerHttpFacts }
+export { checkModelWorkerDocs, checkModelWorkerOpsDocs, readModelWorkerHttpFacts }

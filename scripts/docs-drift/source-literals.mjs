@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module'
+
 import {
   findMatchingBrace,
   findMatchingParen,
@@ -8,6 +10,9 @@ import {
   skipIgnoredSyntaxAndRegexLiteral,
   skipWhitespaceAndComments,
 } from './source-syntax.mjs'
+
+const loadModule = createRequire(import.meta.url)
+let typeScriptParser
 
 function readConstStringLiteral(source, constantName) {
   const valueStart = readTopLevelConstValueStart(source, constantName)
@@ -61,15 +66,17 @@ function readConstLiteralBoundary(source, startIndex) {
 }
 
 function isStatementStart(source, index) {
-  return identifierAt(source, index, 'export')
-    || identifierAt(source, index, 'import')
-    || identifierAt(source, index, 'const')
-    || identifierAt(source, index, 'let')
-    || identifierAt(source, index, 'var')
-    || identifierAt(source, index, 'function')
-    || identifierAt(source, index, 'type')
-    || identifierAt(source, index, 'interface')
-    || source[index] === '}'
+  return (
+    identifierAt(source, index, 'export') ||
+    identifierAt(source, index, 'import') ||
+    identifierAt(source, index, 'const') ||
+    identifierAt(source, index, 'let') ||
+    identifierAt(source, index, 'var') ||
+    identifierAt(source, index, 'function') ||
+    identifierAt(source, index, 'type') ||
+    identifierAt(source, index, 'interface') ||
+    source[index] === '}'
+  )
 }
 
 function skipTypeScriptConstSuffix(source, startIndex) {
@@ -94,7 +101,13 @@ function skipSingleTypeScriptConstSuffix(source, startIndex) {
   }
   if (identifierAt(source, index, 'satisfies')) {
     index = skipWhitespaceAndComments(source, index + 'satisfies'.length)
-    while (index < source.length && source[index] !== ';' && source[index] !== ',' && source[index] !== '\n' && source[index] !== '\r') {
+    while (
+      index < source.length &&
+      source[index] !== ';' &&
+      source[index] !== ',' &&
+      source[index] !== '\n' &&
+      source[index] !== '\r'
+    ) {
       const skipped = skipIgnoredSyntaxAndRegexLiteral(source, index)
       if (skipped !== index) {
         index = skipped
@@ -169,9 +182,11 @@ function extractStringCallArgumentsFromCode(source, callee) {
       index = skipped - 1
       continue
     }
-    if (!source.startsWith(callee, index)
-      || isIdentifierPart(source[index - 1])
-      || isIdentifierPart(source[index + callee.length])) {
+    if (
+      !source.startsWith(callee, index) ||
+      isIdentifierPart(source[index - 1]) ||
+      isIdentifierPart(source[index + callee.length])
+    ) {
       continue
     }
 
@@ -205,30 +220,45 @@ function readIdentifierToken(source, startIndex) {
 }
 
 function readFunctionBodySource(source, functionName) {
+  let braceDepth = 0
   for (let index = 0; index < source.length; index += 1) {
     const skipped = skipIgnoredSyntaxAndRegexLiteral(source, index)
     if (skipped !== index) {
       index = skipped - 1
       continue
     }
-    if (!identifierAt(source, index, 'function')) {
+    if (source[index] === '{') {
+      braceDepth += 1
+      continue
+    }
+    if (source[index] === '}') {
+      braceDepth = Math.max(0, braceDepth - 1)
+      continue
+    }
+    if (braceDepth !== 0 || !identifierAt(source, index, 'function')) {
       continue
     }
     const nameStart = skipWhitespaceAndComments(source, index + 'function'.length)
     if (!identifierAt(source, nameStart, functionName)) {
       continue
     }
-    const paramsStart = skipWhitespaceAndComments(source, nameStart + functionName.length)
-    if (source[paramsStart] !== '(') {
+    const signatureStart = skipWhitespaceAndComments(source, nameStart + functionName.length)
+    if (source[signatureStart] === '<') {
+      return readFunctionBodyFromTypeScriptAst(source, functionName)
+    }
+    if (source[signatureStart] !== '(') {
       continue
     }
-    const paramsEnd = findMatchingParen(source, paramsStart)
+    const paramsEnd = findMatchingParen(source, signatureStart)
     if (paramsEnd === -1) {
       return ''
     }
     const bodyStart = skipFunctionReturnType(source, paramsEnd + 1)
     if (source[bodyStart] !== '{') {
       return ''
+    }
+    if (hasAmbiguousReturnTypeBrace(source, paramsEnd + 1, bodyStart)) {
+      return readFunctionBodyFromTypeScriptAst(source, functionName)
     }
     const bodyEnd = findMatchingBrace(source, bodyStart)
     return bodyEnd === -1 ? '' : source.slice(bodyStart + 1, bodyEnd)
@@ -256,6 +286,84 @@ function skipFunctionReturnType(source, startIndex) {
   return index
 }
 
+function hasAmbiguousReturnTypeBrace(source, startIndex, bodyStart) {
+  let index = skipWhitespaceAndComments(source, startIndex)
+  if (source[index] !== ':') {
+    return false
+  }
+  index = skipWhitespaceAndComments(source, index + 1)
+  if (index === bodyStart) {
+    return true
+  }
+
+  let angleDepth = 0
+  let bracketDepth = 0
+  let parenthesisDepth = 0
+  let lastToken = ''
+  while (index < bodyStart) {
+    const skipped = skipIgnoredSyntaxAndRegexLiteral(source, index)
+    if (skipped !== index) {
+      index = skipped
+      continue
+    }
+    const token = readIdentifierToken(source, index)
+    if (token) {
+      if (token === 'function') {
+        return true
+      }
+      lastToken = token
+      index += token.length
+      continue
+    }
+    const char = source[index]
+    if (/\s/.test(char)) {
+      index += 1
+      continue
+    }
+    if (char === '(') parenthesisDepth += 1
+    else if (char === ')') parenthesisDepth = Math.max(0, parenthesisDepth - 1)
+    else if (char === '[') bracketDepth += 1
+    else if (char === ']') bracketDepth = Math.max(0, bracketDepth - 1)
+    else if (char === '<') angleDepth += 1
+    else if (char === '>' && source[index - 1] !== '=') angleDepth = Math.max(0, angleDepth - 1)
+    lastToken = char === '>' && source[index - 1] === '=' ? '=>' : char
+    index += 1
+  }
+
+  return (
+    angleDepth > 0 ||
+    bracketDepth > 0 ||
+    parenthesisDepth > 0 ||
+    ['|', '&', '?', ':', '=', '=>', 'extends', 'keyof', 'readonly', 'infer'].includes(lastToken)
+  )
+}
+
+function readFunctionBodyFromTypeScriptAst(source, functionName) {
+  typeScriptParser ??= loadModule('typescript')
+  const sourceFile = typeScriptParser.createSourceFile(
+    'docs-drift-source.ts',
+    source,
+    typeScriptParser.ScriptTarget.Latest,
+    true,
+    typeScriptParser.ScriptKind.TS,
+  )
+  for (const statement of sourceFile.statements) {
+    if (
+      !typeScriptParser.isFunctionDeclaration(statement) ||
+      statement.name?.text !== functionName ||
+      !statement.body
+    ) {
+      continue
+    }
+    const bodyStart = statement.body.getStart(sourceFile)
+    const bodyEnd = statement.body.getEnd()
+    if (source[bodyStart] === '{' && source[bodyEnd - 1] === '}') {
+      return source.slice(bodyStart + 1, bodyEnd - 1)
+    }
+  }
+  return ''
+}
+
 function readConstRegexLiteral(source, constantName) {
   const valueStart = readTopLevelConstValueStart(source, constantName)
   if (valueStart === -1 || source[valueStart] !== '/') {
@@ -267,7 +375,7 @@ function readConstRegexLiteral(source, constantName) {
 
 function parseStringLiteral(source, valueStart) {
   const quote = source[valueStart]
-  if (quote !== '\'' && quote !== '"') {
+  if (quote !== "'" && quote !== '"') {
     return null
   }
 
@@ -292,4 +400,11 @@ function parseStringLiteral(source, valueStart) {
   return null
 }
 
-export { extractStringCallArgumentsFromCode, parseStringLiteral, readConstRegexLiteral, readConstStringLiteral, readFunctionBodySource, readIdentifierToken }
+export {
+  extractStringCallArgumentsFromCode,
+  parseStringLiteral,
+  readConstRegexLiteral,
+  readConstStringLiteral,
+  readFunctionBodySource,
+  readIdentifierToken,
+}

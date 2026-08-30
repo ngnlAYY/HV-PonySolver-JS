@@ -1,6 +1,8 @@
 import { readWorkerConfig } from './env'
+import { hasExpectedR2ObjectIntegrity, type AssetIntegrity } from './asset-integrity'
 import { logWorkerError, logWorkerWarning, workerErrorName, type WorkerLogRoute } from './logger'
 import { selectModelAccess } from './model-access'
+import { withModelWorkerDependencyTimeout } from './request-timeout'
 import {
   confirmModelDownloadQuota,
   readModelDownloadQuota,
@@ -20,18 +22,25 @@ import {
 } from './model-response'
 import type { Env, WorkerConfig } from './worker-types'
 
-import { MODEL_DOWNLOAD_RECEIPT_HEADER, normalizeModelDownloadReceiptId } from '@hv-pony-solver/shared'
+import {
+  MODEL_FILENAME,
+  MODEL_DOWNLOAD_RECEIPT_HEADER,
+  MODEL_INTEGRITY,
+  ORT_MODEL_INTEGRITY,
+  ORT_MODEL_FILENAME,
+  ORT_RUNTIME_WASM_INTEGRITY,
+  normalizeModelDownloadReceiptId,
+} from '@hv-pony-solver/shared'
 
 const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'
 const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'
 const MODEL_ALLOWED_HEADERS = 'Authorization'
 const QUOTA_ALLOWED_HEADERS = `Authorization, ${MODEL_DOWNLOAD_RECEIPT_HEADER}`
-const LEGACY_MODEL_FILENAME = 'yolo26n-640.onnx'
-const ORT_MODEL_FILENAME = 'yolo26n-640.ort'
 const QUOTA_FAILURE_RETRY_AFTER_SECONDS = 5
 
 type ModelRoute = Readonly<{
   filename: string
+  integrity: AssetIntegrity
   logRoute: WorkerLogRoute
   realObjectKey: string
 }>
@@ -53,7 +62,10 @@ async function readObjectForRequest(
   env: Env,
   objectKey: string,
 ): Promise<R2Object | R2ObjectBody | null> {
-  return request.method === 'HEAD' ? env.MODEL_BUCKET.head(objectKey) : env.MODEL_BUCKET.get(objectKey)
+  return withModelWorkerDependencyTimeout(
+    request.method === 'HEAD' ? env.MODEL_BUCKET.head(objectKey) : env.MODEL_BUCKET.get(objectKey),
+    'R2',
+  )
 }
 
 async function cancelResponseBody(response: Response): Promise<void> {
@@ -61,6 +73,15 @@ async function cancelResponseBody(response: Response): Promise<void> {
     await response.body?.cancel()
   } catch {
     // Cancellation is best-effort cleanup and must not replace the primary response error.
+  }
+}
+
+async function cancelObjectBody(object: R2Object | R2ObjectBody): Promise<void> {
+  if (!('body' in object)) return
+  try {
+    await object.body.cancel()
+  } catch {
+    // Integrity failure remains authoritative if stream cleanup also fails.
   }
 }
 
@@ -72,6 +93,10 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
   const objectKey = access.decision === 'real' ? route.realObjectKey : config.decoyModelObjectKey
   const object = await readObjectForRequest(request, env, objectKey)
   if (!object) {
+    return internalErrorResponse(request)
+  }
+  if (access.decision === 'real' && !hasExpectedR2ObjectIntegrity(object, route.integrity)) {
+    await cancelObjectBody(object)
     return internalErrorResponse(request)
   }
   const response = modelObjectResponse(request, object, route.filename)
@@ -109,6 +134,10 @@ async function serveRuntime(request: Request, env: Env, config: WorkerConfig): P
   if (!object) {
     return internalErrorResponse(request)
   }
+  if (!hasExpectedR2ObjectIntegrity(object, ORT_RUNTIME_WASM_INTEGRITY)) {
+    await cancelObjectBody(object)
+    return internalErrorResponse(request)
+  }
   return runtimeObjectResponse(request, object)
 }
 
@@ -117,9 +146,16 @@ async function serveQuota(request: Request, env: Env, config: WorkerConfig): Pro
   if (access.decision !== 'real' || !access.canonicalToken) {
     return textResponse(request, 'Forbidden', 403)
   }
+  let receiptId: string | null = null
+  if (request.method === 'POST') {
+    receiptId = normalizeModelDownloadReceiptId(request.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER))
+    if (receiptId === null) {
+      return textResponse(request, 'Invalid model download receipt', 400)
+    }
+  }
   if (!config.downloadQuotaEnabled) {
     if (request.method === 'POST') {
-      return modelQuotaStatusResponse(request, { confirmed: true, alreadyConfirmed: false })
+      return textResponse(request, 'Model download quota is disabled', 409)
     }
     const status: PublicQuotaStatus = {
       enabled: false,
@@ -131,11 +167,7 @@ async function serveQuota(request: Request, env: Env, config: WorkerConfig): Pro
     return modelQuotaStatusResponse(request, status)
   }
   try {
-    if (request.method === 'POST') {
-      const receiptId = normalizeModelDownloadReceiptId(request.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER))
-      if (receiptId === null) {
-        return textResponse(request, 'Invalid model download receipt', 400)
-      }
+    if (receiptId !== null) {
       const confirmation = await confirmModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, access.canonicalToken, receiptId)
       if (!confirmation.confirmed) {
         return textResponse(request, 'Model download receipt expired', 409)
@@ -198,10 +230,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     const route: ModelRoute = isOrtModel
       ? {
           filename: filenameForPath(config.publicOrtModelPath, ORT_MODEL_FILENAME),
+          integrity: ORT_MODEL_INTEGRITY,
           logRoute: 'ort-model',
           realObjectKey: config.realOrtModelObjectKey,
         }
-      : { filename: LEGACY_MODEL_FILENAME, logRoute: 'legacy-model', realObjectKey: config.realModelObjectKey }
+      : {
+          filename: filenameForPath(config.publicModelPath, MODEL_FILENAME),
+          integrity: MODEL_INTEGRITY,
+          logRoute: 'legacy-model',
+          realObjectKey: config.realModelObjectKey,
+        }
     return await serveModel(request, env, config, route)
   } catch (error) {
     logWorkerError({ route: logRoute, errorKind: 'unhandled-exception', errorName: workerErrorName(error) })

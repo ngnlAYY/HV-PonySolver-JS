@@ -34,6 +34,8 @@ async function createFixture() {
     'apps/extension/scripts/build-extension.mjs',
     'apps/extension/scripts/browser-support.mjs',
     'docs/browser-extension.md',
+    'docs/model-worker-ops.md',
+    '.github/workflows/deploy-cloudflare-model-worker.yml',
     'packages/browser-core/src/inference/inference-config.ts',
     'apps/userscript/src/inference/onnx-runtime-assets.ts',
     'apps/model-worker/src/request-router.ts',
@@ -65,6 +67,135 @@ test('current repository README is in sync with source facts', async () => {
   assert.equal(result.exitCode, 0, result.stderr)
   assert.match(result.stdout, /Docs drift check passed/)
 })
+
+test('fails clearly when Model Worker ops docs omit the secretless dry-run skip contract', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const opsDocPath = join(fixtureRoot, 'docs/model-worker-ops.md')
+    const opsDoc = await readFile(opsDocPath, 'utf8')
+    assert.ok(opsDoc.includes('Cloudflare secrets 不完整且 `publish_model_worker=false` 时会安全跳过'))
+    await writeFile(
+      opsDocPath,
+      opsDoc.replace(
+        'Cloudflare secrets 不完整且 `publish_model_worker=false` 时会安全跳过',
+        'Cloudflare secrets 不完整且 `publish_model_worker=false` 时仍会执行',
+      ),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /docs\/model-worker-ops\.md.*secrets.*dry-run/s)
+  })
+})
+
+test('fails clearly when the Model Worker secret gate accepts whitespace-only values', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const workflowPath = join(fixtureRoot, '.github/workflows/deploy-cloudflare-model-worker.yml')
+    let workflow = await readFile(workflowPath, 'utf8')
+    for (const variable of [
+      'CLOUDFLARE_ACCOUNT_ID',
+      'CLOUDFLARE_API_TOKEN',
+      'MODEL_KEYS_KV_NAMESPACE_ID',
+      'MODEL_BUCKET_NAME',
+    ]) {
+      workflow = workflow.replaceAll(`"\${${variable}//[[:space:]]/}"`, `"$${variable}"`)
+    }
+    await writeFile(workflowPath, workflow)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /whitespace-only.*secrets/s)
+  })
+})
+
+test('fails clearly when a duplicate workflow step masks an ungated deployment step', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const workflowPath = join(fixtureRoot, '.github/workflows/deploy-cloudflare-model-worker.yml')
+    const workflow = await readFile(workflowPath, 'utf8')
+    const canonicalStep = `      - name: Render Wrangler config
+        if: \${{ steps.cloudflare_secrets.outputs.ready == 'true' }}`
+    const ungatedStep = `      - name: Render Wrangler config
+        if: \${{ always() }}`
+    assert.ok(workflow.includes(canonicalStep))
+    const driftedWorkflow = workflow.replace(canonicalStep, ungatedStep).replace(
+      ungatedStep,
+      `${canonicalStep}
+        run: echo "decoy"
+
+${ungatedStep}`,
+    )
+    await writeFile(workflowPath, driftedWorkflow)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /exactly one.*Render Wrangler config/s)
+  })
+})
+
+test('fails clearly when Model Worker deployment is not bound to the production environment', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const workflowPath = join(fixtureRoot, '.github/workflows/deploy-cloudflare-model-worker.yml')
+    const workflow = (await readFile(workflowPath, 'utf8')).replace(
+      'environment: production-model-worker',
+      'environment: staging-model-worker',
+    )
+    await writeFile(workflowPath, workflow)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /production-model-worker environment/s)
+  })
+})
+
+test('fails clearly when Model Worker deployment is not restricted to main', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const workflowPath = join(fixtureRoot, '.github/workflows/deploy-cloudflare-model-worker.yml')
+    const workflow = await readFile(workflowPath, 'utf8')
+    await writeFile(
+      workflowPath,
+      workflow.replace("github.ref == 'refs/heads/main'", "github.ref != 'refs/heads/main'"),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /deployment.*refs\/heads\/main/s)
+  })
+})
+
+test('does not let a later workflow job mask a missing deployment branch gate', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const workflowPath = join(fixtureRoot, '.github/workflows/deploy-cloudflare-model-worker.yml')
+    const workflow = await readFile(workflowPath, 'utf8')
+    const driftedWorkflow = workflow.replace(
+      "inputs.publish_model_worker && github.ref == 'refs/heads/main' && steps.cloudflare_secrets.outputs.ready == 'true'",
+      "inputs.publish_model_worker && steps.cloudflare_secrets.outputs.ready == 'true'",
+    )
+    assert.notEqual(driftedWorkflow, workflow, 'fixture should contain the deployment main-branch gate')
+    await writeFile(
+      workflowPath,
+      `${driftedWorkflow}\n  decoy:\n    if: \${{ github.ref == 'refs/heads/main' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /deployment.*refs\/heads\/main/s)
+  })
+})
+
+for (const [documentedVersion, replacement, errorPattern] of [
+  ['24.15.0', '24.14.0', /README\.md.*Node.*24\.15\.0/s],
+  ['11.21.0', '11.20.0', /README\.md.*pnpm.*11\.21\.0/s],
+]) {
+  test(`fails clearly when README drifts from runtime requirement ${documentedVersion}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const readmePath = join(fixtureRoot, 'README.md')
+      await writeFile(readmePath, (await readFile(readmePath, 'utf8')).replaceAll(documentedVersion, replacement))
+
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      assert.match(result.stderr, errorPattern)
+    })
+  })
+}
 
 for (const [browser, minimum, errorLabel] of [
   ['Firefox Desktop', '140', 'Firefox Desktop minimum version 140\\.0'],
@@ -700,6 +831,43 @@ ${responseSource
     "headers.set('access-control-allow-headers', 'X-Model-Token')",
   )
   .replace("'access-control-allow-methods': policy.allowMethods", "'access-control-allow-methods': 'GET, HEAD'")}`,
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*policy\.allowHeaders/s)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-response\.ts.*policy\.allowMethods/s)
+  })
+})
+
+test('fails clearly when Model Worker response drift is masked by an earlier nested same-name function', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const responseSource = await readFile(responsePath, 'utf8')
+    const nestedDecoy = `function decoyFunctionScope() {
+  function preflightResponse(request: Request, policy: { allowHeaders: string; allowMethods: string }) {
+    const headers = new Headers({
+      'access-control-allow-methods': policy.allowMethods,
+      'cache-control': CACHE_CONTROL,
+    })
+    headers.set('access-control-allow-headers', policy.allowHeaders)
+    return headers
+  }
+}
+
+`
+    await writeFile(
+      responsePath,
+      nestedDecoy +
+        responseSource
+          .replace(
+            "headers.set('access-control-allow-headers', policy.allowHeaders)",
+            "headers.set('access-control-allow-headers', 'X-Model-Token')",
+          )
+          .replace(
+            "'access-control-allow-methods': policy.allowMethods",
+            "'access-control-allow-methods': 'GET, HEAD'",
+          ),
     )
 
     const result = await runCheck(fixtureRoot)

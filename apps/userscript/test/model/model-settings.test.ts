@@ -19,6 +19,13 @@ describe('model settings', () => {
     await expect(getModelAccessKey()).resolves.toBe('')
   })
 
+  it('never reads a sensitive key from page-readable localStorage', async () => {
+    localStorage.setItem(STORAGE_KEY, VALID_TOKEN_LOWER)
+    const { getModelAccessKey } = await import('../../src/model/model-settings')
+
+    await expect(getModelAccessKey()).resolves.toBe('')
+  })
+
   it('refuses to save keys through the page-readable localStorage fallback when GM storage is unavailable', async () => {
     const { setModelAccessKey } = await import('../../src/model/model-settings')
 

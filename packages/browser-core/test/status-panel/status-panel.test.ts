@@ -121,6 +121,60 @@ describe('StatusPanel history persistence', () => {
     expect(document.body.textContent).not.toContain('历史记录保存失败')
   })
 
+  it('ignores an older persistence completion after a newer history mutation settles', async () => {
+    const firstPersistence = deferred<HistoryRecord[]>()
+    const secondPersistence = deferred<HistoryRecord[]>()
+    let addCount = 0
+    const store = {
+      get: vi.fn(() => []),
+      add: vi.fn((_world: World, record: HistoryRecord) => ({
+        records: [record],
+        persisted: addCount++ === 0 ? firstPersistence.promise : secondPersistence.promise,
+      })),
+    } as unknown as HistoryStore
+    const panel = new StatusPanel(store, settingsStorage())
+
+    panel.create()
+    panel.addSuccess(['TS'], {}, 12)
+    panel.addSuccess(['RA'], {}, 20)
+    secondPersistence.resolve([{ type: 'success', answers: 'RA', elapsed: 20, timestamp: 2, time: '00:00:02' }])
+    await vi.waitFor(() => expect(document.body.textContent).toContain('[RA]'))
+
+    firstPersistence.resolve([{ type: 'success', answers: 'TS', elapsed: 12, timestamp: 1, time: '00:00:01' }])
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(document.body.textContent).toContain('[RA]')
+    expect(document.body.textContent).not.toContain('[TS]')
+  })
+
+  it('ignores an older persistence failure after a newer history mutation settles', async () => {
+    const firstPersistence = deferred<HistoryRecord[]>()
+    const secondPersistence = deferred<HistoryRecord[]>()
+    let addCount = 0
+    const store = {
+      get: vi.fn(() => []),
+      add: vi.fn((_world: World, record: HistoryRecord) => ({
+        records: [record],
+        persisted: addCount++ === 0 ? firstPersistence.promise : secondPersistence.promise,
+      })),
+    } as unknown as HistoryStore
+    const panel = new StatusPanel(store, settingsStorage())
+
+    panel.create()
+    panel.addSuccess(['TS'], {}, 12)
+    panel.addSuccess(['RA'], {}, 20)
+    secondPersistence.resolve([{ type: 'success', answers: 'RA', elapsed: 20, timestamp: 2, time: '00:00:02' }])
+    await vi.waitFor(() => expect(document.body.textContent).toContain('[RA]'))
+
+    firstPersistence.reject(new Error('stale failure'))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(document.body.textContent).toContain('[RA]')
+    expect(document.body.textContent).not.toContain('历史记录保存失败')
+  })
+
   it('drops stale async settings writes after a fast destroy and re-create', async () => {
     const { storage, resolveGet } = deferredSettingsStorage()
     const panel = new StatusPanel(historyStore(Promise.resolve([])), storage)
@@ -140,6 +194,23 @@ describe('StatusPanel history persistence', () => {
     resolveGet('hvPonySolverPanelPosition', '300,200')
     await vi.waitFor(() => expect(document.querySelector<HTMLElement>('.ponyLog')?.style.top).toBe('300px'))
     expect(document.querySelector<HTMLElement>('.ponyLog')?.style.left).toBe('200px')
+  })
+
+  it('starts a fresh status snapshot after destroy and re-create', async () => {
+    const panel = new StatusPanel(historyStore(Promise.resolve([])), settingsStorage(false, false))
+
+    panel.create()
+    panel.setStatus({ model: '旧模型状态', session: '旧会话状态', inference: '旧推理状态' })
+    await vi.waitFor(() => expect(document.body.textContent).toContain('旧模型状态'))
+    panel.destroy()
+    panel.create()
+
+    expect(document.body.textContent).not.toContain('旧模型状态')
+    expect(document.body.textContent).not.toContain('旧会话状态')
+    expect(document.body.textContent).not.toContain('旧推理状态')
+    expect(document.body.textContent).toContain('模型状态：未开始')
+    expect(document.body.textContent).toContain('会话状态：未开始')
+    expect(document.body.textContent).toContain('推理状态：空闲')
   })
 
   it('shows only while a div#csp exists when the default visibility limit is enabled', async () => {

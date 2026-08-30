@@ -10,8 +10,9 @@
 
 - `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js`
 - `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/`
+- `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm`
 
-外置 `ort.min.js` 的解压后身份固定为 `360,434` 字节、SHA-256 `de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5`，最大允许 `400,000` 字节。Worker 使用 `redirect: error` 下载，先约束声明/实际大小，再验证精确长度和哈希，成功后才通过临时 Blob URL 执行；失败不会执行响应内容，也不会回退。启动期间的请求队列上限为两个。完整版 WASM 仍由 ORT 从上述固定 `dist/` 路径加载，没有独立内容哈希。
+外置 `ort.min.js` 的解压后身份固定为 `360,434` 字节、SHA-256 `de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5`，最大允许 `400,000` 字节；完整版 WASM 固定为 `26,827,543` 字节、SHA-256 `78feeeb3d08f6bcee94d938ed322f69073bb8076b5f9d34697a574ffba8deb48`，最大允许 `30,000,000` 字节。Worker 使用 `redirect: error` 并行下载两项资产，只接受可流式读取的响应正文，分别约束声明/实际大小，再验证精确长度和哈希；`body === null` 时失败关闭，不使用会先分配完整响应的 `arrayBuffer()` fallback。两项都成功后才通过临时 Blob URL 执行 JS，并把已验证的 WASM 赋给 `ort.env.wasm.wasmBinary`；失败不会执行响应内容，也不会回退。启动期间的请求队列上限为两个。
 
 显式 `build:bundled-runtime` profile 内置项目构建的精简 JS glue。其 Worker 只从 `models.ngnl.host` 下载内容寻址的精简 WASM，校验字节长度和 SHA-256 后赋给 `ort.env.wasm.wasmBinary`。两个 profile 使用同一份远程 ORT 模型和 WASM Execution Provider；运行时与模型格式都没有自动回退。
 
@@ -36,7 +37,7 @@
 | `/yolo26n-640.ort`                                                                             | `real/yolo26n-640.ort`                                                                        | 9,914,448 | `4e771776d9356679539ffed53ee40ea012394f9b586aa92a76267e8fee38094c` |
 | `/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 1,267,937 | `25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa` |
 
-ORT 路由与 legacy ONNX 路由使用相同的 Bearer/KV 鉴权、诱饵策略和下载确认计次协议。WASM 路由公开、只匹配精确路径，并返回一年 immutable 缓存。
+ORT 路由与 legacy ONNX 路由使用相同的 Bearer/KV 鉴权、诱饵策略和下载确认计次协议。WASM 路由公开、只匹配精确路径，并返回一年 immutable 缓存。Worker 在返回真实 ONNX、真实 ORT 或公开 WASM 前强制比对共享清单中的 R2 对象长度；R2 若提供 SHA-256 元数据也必须匹配。缺少 SHA-256 元数据为兼容既有对象可以通过，但客户端仍会校验实际响应字节。
 
 ## 复现与安装
 
@@ -48,7 +49,7 @@ pnpm build:onnx-runtime
 
 脚本执行以下输出：
 
-- 完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`；
+- 完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`；构建根目录本身不得是符号链接，其现存祖先会先解析为规范路径，规范化后的末级目录名必须匹配 `hv-pony-ort-*`，且不能是文件系统根目录或用户主目录；
 - 内容寻址 WASM 复制到 `${ORT_RUNTIME_OUTPUT_DIR:-other}`；
 - 终端打印可直接使用的 `runtime/<filename>` R2 对象键和全部产物哈希。
 

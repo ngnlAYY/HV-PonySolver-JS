@@ -4,10 +4,13 @@ import { loadVerifiedRuntimeAsset } from './verified-runtime-asset-loader'
 import { startOnnxWorker } from './onnx-worker-entry'
 
 declare const __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_URL__: string
-declare const __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BASE_URL__: string
 declare const __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__: number
 declare const __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__: string
 declare const __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__: number
+declare const __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_URL__: string
+declare const __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BYTE_LENGTH__: number
+declare const __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_SHA256__: string
+declare const __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_MAX_BYTE_LENGTH__: number
 
 const MAX_STARTUP_REQUESTS = 2
 
@@ -37,6 +40,9 @@ function rejectStartupRequest(event: MessageEvent<unknown>, message: string): vo
 
 const startupRequests: MessageEvent<unknown>[] = []
 externalWorkerScope.onmessage = (event): void => {
+  if (requestIdOf(event.data) === null) {
+    return
+  }
   if (startupRequests.length >= MAX_STARTUP_REQUESTS) {
     rejectStartupRequest(event, 'ONNX Runtime 启动队列繁忙')
     return
@@ -44,13 +50,32 @@ externalWorkerScope.onmessage = (event): void => {
   startupRequests.push(event)
 }
 
-void loadVerifiedRuntimeAsset('ONNX Runtime 脚本', {
-  url: __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_URL__,
-  byteLength: __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__,
-  sha256: __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__,
-  maxByteLength: __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__,
-})
-  .then((scriptBuffer) => {
+const runtimeDownloadController = new AbortController()
+void Promise.all([
+  loadVerifiedRuntimeAsset(
+    'ONNX Runtime 脚本',
+    {
+      url: __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_URL__,
+      byteLength: __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__,
+      sha256: __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__,
+      maxByteLength: __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__,
+    },
+    undefined,
+    runtimeDownloadController.signal,
+  ),
+  loadVerifiedRuntimeAsset(
+    'ONNX Runtime WASM',
+    {
+      url: __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_URL__,
+      byteLength: __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BYTE_LENGTH__,
+      sha256: __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_SHA256__,
+      maxByteLength: __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_MAX_BYTE_LENGTH__,
+    },
+    undefined,
+    runtimeDownloadController.signal,
+  ),
+])
+  .then(([scriptBuffer, wasmBuffer]) => {
     const scriptUrl = URL.createObjectURL(new Blob([scriptBuffer], { type: 'text/javascript' }))
     try {
       externalWorkerScope.importScripts(scriptUrl)
@@ -64,7 +89,7 @@ void loadVerifiedRuntimeAsset('ONNX Runtime 脚本', {
     startOnnxWorker(ort, (runtime) => {
       runtime.env.wasm.numThreads = 1
       runtime.env.wasm.proxy = false
-      runtime.env.wasm.wasmPaths = __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BASE_URL__
+      runtime.env.wasm.wasmBinary = wasmBuffer
     })
     const readyHandler = externalWorkerScope.onmessage
     for (const event of startupRequests.splice(0)) {
@@ -72,6 +97,7 @@ void loadVerifiedRuntimeAsset('ONNX Runtime 脚本', {
     }
   })
   .catch((error: unknown) => {
+    runtimeDownloadController.abort(error)
     const message = error instanceof Error ? error.message : String(error)
     const reject = (event: MessageEvent<unknown>): void => rejectStartupRequest(event, message)
     externalWorkerScope.onmessage = reject

@@ -99,7 +99,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 - 额度限制默认开启，按每个 Key、每个 UTC 自然月最多 5 次已确认下载计算。ONNX 与 ORT 共用同一 Key 的额度。
 - `GET /quota` 只查询，不计次；真实模型 `GET` 只预留临时回执，不立即计次；客户端成功缓存后使用 `POST /quota` 确认，确认成功才计次。
 - 同一回执重复确认必须幂等；未知、失效或未完成的回执不得计次。并发预留必须受硬上限约束，不能通过并发请求突破月度额度。
-- 关闭额度限制时，模型下载不做次数限制，查询接口必须明确返回“未启用/无限制”，不能伪造剩余次数。
+- 关闭额度限制时，模型下载不做次数限制，查询接口必须明确返回“未启用/无限制”，不能伪造剩余次数；格式正确的确认请求返回 `409`，缺失或畸形回执返回 `400`，不得伪造确认成功。
 - 模型、额度和公开运行时路由使用各自的 CORS 方法、请求头及公开/私有策略。修改路由时不得重新合并成过宽的全局 CORS 常量。
 - `HEAD`、`OPTIONS`、诱饵模型和运行时资产不计额度。模型响应保持 `no-store`；内容寻址运行时可使用长期 immutable 缓存。
 - R2 对象缺失或完整性契约异常时应失败关闭，不得静默回退到其他对象。
@@ -169,7 +169,7 @@ corepack pnpm --filter @hv-pony-solver/model-worker render-config
 ## GitHub Actions 与部署
 
 - 仓库只维护两个工作流：`.github/workflows/verify-monorepo.yml` 的 `Repository CI`，以及 `.github/workflows/deploy-cloudflare-model-worker.yml` 的手动部署流程。
-- 外部 Action 必须固定到完整 40 位 commit SHA，并通过 `scripts/assert-pinned-actions.mjs` 校验。
+- GitHub Action 必须固定到完整 40 位 commit SHA，Docker Action 必须固定到完整 `sha256` digest，并通过 `scripts/assert-pinned-actions.mjs` 校验。
 - 修改 CI 时要核对本地命令与 job 实际命令，尤其不能遗漏根级 Node 测试。
 - CodeQL 属于仓库安全门禁。修复告警后要等待目标分支的新分析完成，并同时检查最新分析结果和告警实例状态。
 - Model Worker 部署默认不应发生。只有手动输入明确允许发布且 Cloudflare secrets 完整时才可执行真实部署。

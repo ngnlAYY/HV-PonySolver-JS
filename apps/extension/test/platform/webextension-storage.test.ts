@@ -47,4 +47,32 @@ describe('webextension storage adapter', () => {
 
     await expect(storageSet({ answer: 42 })).rejects.toThrow('storage failed')
   })
+
+  it('rejects Chromium callback reads when runtime.lastError is set', async () => {
+    const api = rawExtensionApi() as RawExtensionApi & {
+      runtime: RawExtensionApi['runtime'] & { lastError?: { message?: string } }
+    }
+    vi.mocked(api.storage.local.get).mockImplementation((_keys, callback) => {
+      api.runtime.lastError = { message: 'storage read failed' }
+      callback?.({})
+      delete api.runtime.lastError
+    })
+    vi.stubGlobal('chrome', api)
+
+    await expect(storageGetAll()).rejects.toThrow('storage read failed')
+  })
+
+  it('rejects Chromium callback removals when runtime.lastError is set', async () => {
+    const api = rawExtensionApi() as RawExtensionApi & {
+      runtime: RawExtensionApi['runtime'] & { lastError?: { message?: string } }
+    }
+    vi.mocked(api.storage.local.remove).mockImplementation((_keys, callback) => {
+      api.runtime.lastError = { message: 'storage remove failed' }
+      callback?.()
+      delete api.runtime.lastError
+    })
+    vi.stubGlobal('chrome', api)
+
+    await expect(storageRemove('answer')).rejects.toThrow('storage remove failed')
+  })
 })

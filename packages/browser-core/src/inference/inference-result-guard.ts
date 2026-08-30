@@ -39,6 +39,15 @@ export function isYoloParseResult(value: unknown): value is YoloParseResult {
   ) {
     return false
   }
+  const ponySet = new Set(value.ponies)
+  const expectedSuccess = value.ponies.length >= 1 && value.ponies.length <= yoloOutputConfig.maxKinds
+  if (ponySet.size !== value.ponies.length || value.success !== expectedSuccess) {
+    return false
+  }
+  const confidenceKeys = Object.keys(value.confidences)
+  if (confidenceKeys.length !== ponySet.size || !confidenceKeys.every((key) => isAnswerCode(key) && ponySet.has(key))) {
+    return false
+  }
   for (const [key, confidence] of Object.entries(value.confidences)) {
     if (
       !isAnswerCode(key) ||

@@ -4,6 +4,7 @@ import {
   type ModelAccessDecision,
 } from '@hv-pony-solver/shared'
 import type { InvalidKeyMode, ModelKeyStore } from './worker-types'
+import { withModelWorkerDependencyTimeout } from './request-timeout'
 
 const BEARER_AUTHORIZATION_PATTERN = /^Bearer\s+([^\s]+)$/i
 
@@ -26,6 +27,15 @@ function getRequestAccessToken(request: Request): string | null {
   return match?.[1] ?? null
 }
 
+async function hasAuthorizedLookupKey(keyStore: ModelKeyStore, lookupKeys: readonly string[]): Promise<boolean> {
+  for (const lookupKey of lookupKeys) {
+    if ((await keyStore.get(lookupKey)) !== null) {
+      return true
+    }
+  }
+  return false
+}
+
 export async function selectModelAccess(
   request: Request,
   keyStore: ModelKeyStore,
@@ -41,11 +51,8 @@ export async function selectModelAccess(
     return { decision: invalidAccessDecision(invalidKeyMode), canonicalToken }
   }
 
-  for (const lookupKey of lookupKeys) {
-    const authorizationMarker = await keyStore.get(lookupKey)
-    if (authorizationMarker !== null) {
-      return { decision: 'real', canonicalToken }
-    }
+  if (await withModelWorkerDependencyTimeout(hasAuthorizedLookupKey(keyStore, lookupKeys), 'KV')) {
+    return { decision: 'real', canonicalToken }
   }
 
   return { decision: invalidAccessDecision(invalidKeyMode), canonicalToken }

@@ -5,6 +5,12 @@ type TestGlobal = typeof globalThis & {
   GM_setValue?: (key: string, value: string) => void | Promise<void>
   GM_deleteValue?: (key: string) => void | Promise<void>
   GM_registerMenuCommand?: (caption: string, command: () => void | Promise<void>) => void
+  GM?: {
+    getValue?: (key: string, defaultValue: string) => string | Promise<string>
+    setValue?: (key: string, value: string) => void | Promise<void>
+    deleteValue?: (key: string) => void | Promise<void>
+    registerMenuCommand?: (caption: string, command: () => void | Promise<void>) => void
+  }
 }
 
 const testGlobal = globalThis as TestGlobal
@@ -17,6 +23,7 @@ describe('gm-bridge', () => {
     delete testGlobal.GM_setValue
     delete testGlobal.GM_deleteValue
     delete testGlobal.GM_registerMenuCommand
+    delete testGlobal.GM
   })
 
   afterEach(() => {
@@ -64,6 +71,16 @@ describe('gm-bridge', () => {
     expect(registerGmMenu('caption', vi.fn())).toBe(false)
   })
 
+  it('registers menus through the modern GM API', async () => {
+    const registerMenuCommand = vi.fn()
+    testGlobal.GM = { registerMenuCommand }
+    const command = vi.fn()
+    const { registerGmMenu } = await import('../../src/userscript/gm-bridge')
+
+    expect(registerGmMenu('caption', command)).toBe(true)
+    expect(registerMenuCommand).toHaveBeenCalledWith('caption', command)
+  })
+
   it('falls back to localStorage for non-sensitive values when GM storage is unavailable', async () => {
     const { setGmValue } = await import('../../src/userscript/gm-bridge')
 
@@ -89,5 +106,16 @@ describe('gm-bridge', () => {
       '当前脚本管理器不支持 GM 存储，无法安全保存模型下载 Key；请改用支持 GM_setValue 的用户脚本管理器',
     )
     expect(localStorage.getItem('key')).toBeNull()
+  })
+
+  it('refuses the localStorage fallback when sensitive deletion lacks a GM API', async () => {
+    testGlobal.GM = { getValue: vi.fn(async () => 'secret'), setValue: vi.fn(async () => undefined) }
+    localStorage.setItem('key', 'page-visible-copy')
+    const { deleteGmValue } = await import('../../src/userscript/gm-bridge')
+
+    await expect(deleteGmValue('key', { sensitive: true })).rejects.toThrow(
+      '当前脚本管理器不支持 GM 存储，无法安全删除模型下载 Key',
+    )
+    expect(localStorage.getItem('key')).toBe('page-visible-copy')
   })
 })

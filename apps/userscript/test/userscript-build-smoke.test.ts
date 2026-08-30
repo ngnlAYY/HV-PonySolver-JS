@@ -19,7 +19,10 @@ describe('userscript build output', () => {
     expect(output).not.toContain('__HV_PONY_SOLVER_VERSION__')
     expect(output).toContain('DOMContentLoaded')
     expect(output).toContain('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js')
-    expect(output).not.toContain('wasmBinary')
+    expect(output).toContain(
+      'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm',
+    )
+    expect(output).toContain('wasmBinary')
     expect(output).not.toContain('models.ngnl.host/runtime/ort-wasm-simd-')
     expect(output).not.toContain('__HV_PONY_SOLVER_WORKER_RUNTIME_SOURCE_PLACEHOLDER__')
   })

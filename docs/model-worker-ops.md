@@ -1,6 +1,6 @@
 # Model Worker 运维手册
 
-最后复核：2026-08-25。
+最后复核：2026-08-30。
 
 ## 无效 Key 模式
 
@@ -13,7 +13,9 @@
 
 ## 部署与分层验收
 
-Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。GitHub 手动部署 workflow 的 `enable_model_download_quota` 默认开启；关闭时真实模型 GET 不执行月度额度限制、不创建回执也不保存确认次数，客户端查询显示“无次数限制（模型下载次数限制未开启）”。
+Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。GitHub 手动部署 workflow 的 `enable_model_download_quota` 默认开启；关闭时真实模型 GET 不执行月度额度限制、不创建回执也不保存确认次数，客户端查询显示“无次数限制（模型下载次数限制未开启）”，意外发送且回执格式正确的 `POST /quota` 返回 `409` 而不是伪造确认成功，缺失或畸形回执仍返回 `400`。
+
+配置渲染器会拒绝缺失或漂移的 `MODEL_DOWNLOAD_QUOTAS` Durable Object 绑定、`ModelDownloadQuota` 类名、`v1` migration tag 或 `new_sqlite_classes` 声明，防止回滚/部署配置静默丢失持久状态契约。
 
 回执确认协议使用独立的 v2 状态键。首次部署该协议时，旧版在响应体到达客户端前产生、无法验证的计数不会迁入 v2；之后只保留客户端完成缓存后确认的使用次数。
 
@@ -21,11 +23,12 @@ Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。�
 
 `.github/workflows/deploy-cloudflare-model-worker.yml` 是手动 workflow：
 
-- `publish_model_worker=false` 时可以完成配置渲染、测试和 Wrangler dry-run，但 `Deploy Worker` 会跳过；workflow 总体绿色不代表线上已发布。
-- 只有 `publish_model_worker=true` 且 Cloudflare secrets gate 通过时，才会执行 `Deploy Worker`。
+- Cloudflare secrets 完整时会渲染部署配置、执行 typecheck、测试和 Wrangler dry-run；`publish_model_worker=false` 时只跳过 `Deploy Worker`，workflow 总体绿色不代表线上已发布。
+- Cloudflare secrets 不完整且 `publish_model_worker=false` 时会安全跳过配置渲染、Wrangler dry-run 和部署，但仍执行 typecheck 与测试。
+- 整个 job 绑定受保护的 `production-model-worker` GitHub Environment；`publish_model_worker=true` 时还必须从 `refs/heads/main` 运行。非 `main` ref 或 Cloudflare secrets 不完整都会 fail closed；只有 ref、环境审批和 secrets gate 全部通过时才会执行 `Deploy Worker`。
 - 部署证据至少包括 workflow run URL、head SHA、`Deploy Worker` step 的 `success` 状态，以及日志中可获得的 Cloudflare deployment 标识或时间。不得把 secret 值复制到记录中。
 
-触发生产发布前，确认目标 ref、`publish_model_worker`、`invalid_key_mode` 和 `enable_model_download_quota`。三个输入分别控制是否真实部署、无效 Key 返回诱饵还是 `403`、是否执行每 Key 月度 5 次限制；后两项不能从线上状态自动推断。发布时使用仓库中受审查的 ref，不从未验证分支临时部署。
+触发生产发布前，确认目标 ref 是 `refs/heads/main`，并核对 `publish_model_worker`、`invalid_key_mode` 和 `enable_model_download_quota`。三个输入分别控制是否真实部署、无效 Key 返回诱饵还是 `403`、是否执行每 Key 月度 5 次限制；后两项不能从线上状态自动推断。`production-model-worker` Environment 应在 GitHub 设置中配置 required reviewers、只允许 `main` 部署并保存生产 secrets；不得从未验证分支临时部署。
 
 ### 2. 发布后公开契约检查
 
@@ -57,7 +60,9 @@ MODEL_WORKER_PROBE_ID=<probe-id> \
 pnpm --filter @hv-pony-solver/model-worker check:deployment
 ```
 
-无 Key `HEAD 200` 在 `decoy` 模式只证明 decoy 路径正常，不证明真实模型授权或 artifact 正确。ORT 和 WASM 探测会发现新路由未部署或公开 WASM 对象缺失，但仍不证明真实 ORT 模型内容正确。
+无 Key `HEAD 200` 在 `decoy` 模式只证明 decoy 路径正常，不证明真实模型授权或 artifact 正确。ORT 和 WASM 探测会发现新路由未部署、公开 WASM 对象缺失或对象长度漂移，但不读取并重新哈希真实 ORT 模型内容。
+
+Worker 在响应真实 ONNX、真实 ORT 和公开 WASM 前，强制要求 R2 对象长度与共享清单完全一致；若 R2 对象记录了 SHA-256 元数据，该值也必须匹配。R2 对既有上传可能不暴露 SHA-256，因此缺少该元数据本身暂不拒绝响应；浏览器客户端仍会对实际下载字节执行精确长度和 SHA-256 校验。新上传应尽量保留 SHA-256 元数据，以便 Worker 在发送 body 或预留额度前额外失败关闭。
 
 ### 3. 客户端 Key、额度与下载验收
 
@@ -65,7 +70,7 @@ pnpm --filter @hv-pony-solver/model-worker check:deployment
 
 浏览器请求必须继续使用标准 `fetch` 和 `Authorization: Bearer <key>`。不要改用 `GM_xmlhttpRequest` / `GM.xmlHttpRequest` 绕过 CORS，也不要关闭 byteLength 或 SHA-256 完整性校验。
 
-Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。客户端的次数查询使用已保存 Key 调用只读 `GET /quota`，返回本月上限、已确认使用和剩余次数；关闭限制时返回 `enabled=false`，客户端不得显示虚构的 `0/5`。真实模型 GET 仅预留一个十分钟有效的回执；客户端完整读取、校验并完成 IndexedDB 缓存后，才调用 `POST /quota` 确认并计数。确认接口按回执幂等，缓存未完成或回执失效均不计数；收到 `429` 才表示该 Key 当月已经确认使用 5 次。已确认与待确认槽位合计占满但仍有回执未失效时返回 `503`，它不是月额度已经确认用完。
+Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。客户端的次数查询使用已保存 Key 调用只读 `GET /quota`，返回本月上限、已确认使用和剩余次数；关闭限制时返回 `enabled=false`，客户端不得显示虚构的 `0/5`，且格式正确的确认请求以 `409` 明确拒绝（缺失或畸形回执为 `400`）。真实模型 GET 仅预留一个十分钟有效的回执；客户端完整读取、校验并完成 IndexedDB 缓存后，才调用 `POST /quota` 确认并计数。确认接口按回执幂等，缓存未完成或回执失效均不计数；收到 `429` 才表示该 Key 当月已经确认使用 5 次。已确认与待确认槽位合计占满但仍有回执未失效时返回 `503`，它不是月额度已经确认用完。
 
 扩展远程模型版提供“验证并保存”“查询下载次数”“下载模型”和“清除 Key”。有效模型缓存命中不会再次下载或计次。设置页保留 Worker 返回的 HTTP/协议错误和浏览器 Port 错误；只有额度查询会在瞬时 Port 断开后重连一次，第二次失败原样呈现。看到“连接已断开”说明扩展内部传输没有收到 Host 响应，不能据此判定 KV、R2 或 Durable Object 已失败。
 
@@ -75,12 +80,13 @@ Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。客户�
 
 1. `OPTIONS 405`、`Allow: GET, HEAD` 或旧 public cache header：先检查部署 ref、Cloudflare route 和边缘传播；此时 Key 尚未到达 KV，不应先排查 Key 内容。
 2. `OPTIONS` 正确但无效/有效 Key收到 `403`：核对 deployed `INVALID_KEY_MODE`、Worker 的 KV binding target 与相应 entry；不得输出 entry 的 key/value。
-3. HTTP `200` 后出现 byteLength 或 SHA-256 错误：核对 real/decoy R2 object 选择，并在受控环境中用 `packages/shared/src/model.ts` 的 canonical manifest 校验真实 artifact。
-4. 有效 Key 收到 `429`：确认 `Retry-After`、UTC 月边界和 Durable Object 绑定；不要把它改成 decoy 或放宽为 KV 非原子计数。
-5. 有效 Key 收到 `503`：先区分额度存储不可用与待确认槽位占满；后者等待响应给出的 `Retry-After`，不要手工增加已用次数。
-6. 仍为 `Failed to fetch`：收集浏览器 Network 面板中不含 secret 的 CORS、DNS、TLS、status 与 CF-Ray 信息。
-7. 下载和完整性校验通过但缓存失败：单独排查 IndexedDB；后端不应收到成功确认，不改变授权链路或完整性要求。
-8. 扩展只显示额度/下载连接断开：检查扩展后台是否重启、Port 错误内容和浏览器控制台；额度查询已自动重连一次，不要把重复点击当作后端重试证据。
+3. Worker 返回通用 `500`：先核对目标 R2 object 是否存在、对象长度是否匹配共享清单，以及已记录的 SHA-256 元数据是否漂移；真实模型在此阶段不会预留额度。
+4. HTTP `200` 后出现 byteLength 或 SHA-256 错误：对象可能没有可供 Worker 预检的 SHA-256 元数据；核对 real/decoy R2 object 选择，并在受控环境中用 `packages/shared/src/model.ts` 的 canonical manifest 校验真实 artifact。
+5. 有效 Key 收到 `429`：确认 `Retry-After`、UTC 月边界和 Durable Object 绑定；不要把它改成 decoy 或放宽为 KV 非原子计数。
+6. 有效 Key 收到 `503`：先区分额度存储不可用与待确认槽位占满；后者等待响应给出的 `Retry-After`，不要手工增加已用次数。
+7. 仍为 `Failed to fetch`：收集浏览器 Network 面板中不含 secret 的 CORS、DNS、TLS、status 与 CF-Ray 信息。
+8. 下载和完整性校验通过但缓存失败：单独排查 IndexedDB；后端不应收到成功确认，不改变授权链路或完整性要求。
+9. 扩展只显示额度/下载连接断开：检查扩展后台是否重启、Port 错误内容和浏览器控制台；额度查询已自动重连一次，不要把重复点击当作后端重试证据。
 
 ## 发布后失败与回滚
 

@@ -208,6 +208,78 @@ describe('App', () => {
     expect(harness.trigger.mock.calls[1]?.[0]?.captchaKey).toContain('/captcha-b.png')
   })
 
+  it('rescans a handled target when responsive image selection changes through srcset', async () => {
+    const captcha = appendCaptcha('/captcha-a.png')
+    const image = captcha.querySelector('img')!
+    let currentSrc = 'http://localhost:3000/captcha-a.png'
+    Object.defineProperty(image, 'currentSrc', {
+      configurable: true,
+      get: () => currentSrc,
+    })
+    const harness = createHarness()
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    currentSrc = 'http://localhost:3000/captcha-b.png'
+    image.srcset = '/captcha-b.png 1x'
+    await settleDom()
+
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+    expect(harness.trigger.mock.calls[1]?.[0]?.captchaKey).toContain('/captcha-b.png')
+  })
+
+  it('rescans a handled target when an answer control becomes disabled', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    captcha.querySelector<HTMLInputElement>('input[name="riddleanswer[]"]')!.disabled = true
+    await settleDom()
+
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries the same failed captcha when its submit button becomes enabled', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const submit = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!
+    submit.disabled = true
+    const harness = createHarness()
+    harness.trigger.mockImplementation(async (target?: CaptchaTarget) => ({
+      handled: false,
+      captchaKey: target?.captchaKey ?? null,
+    }))
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    submit.disabled = false
+    await settleDom()
+
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+  })
+
+  it('starts solving when a form action recovers from cross-origin to same-origin', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const form = captcha.querySelector<HTMLFormElement>('form')!
+    form.action = 'https://example.invalid/submit'
+    const harness = createHarness()
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).not.toHaveBeenCalled()
+
+    form.action = '/submit'
+    await settleDom()
+
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+  })
+
   it('abandons a target replaced while prepare is pending and solves the replacement', async () => {
     let resolvePrepare: (() => void) | undefined
     const harness = createHarness()

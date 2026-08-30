@@ -1,4 +1,5 @@
 import { downloadModel as downloadCoreModel, type ModelIntegrityOptions } from '@hv-pony-solver/browser-core'
+import { resolveFetchImplementation } from '@hv-pony-solver/browser-core/platform/fetch'
 
 import { getModelAccessKey } from './model-settings'
 
@@ -15,7 +16,10 @@ function combineAbortSignals(first: AbortSignal, second: AbortSignal): CombinedA
   }
 
   const controller = new AbortController()
-  const abortFrom = (source: AbortSignal): (() => void) => () => controller.abort(source.reason)
+  const abortFrom =
+    (source: AbortSignal): (() => void) =>
+    () =>
+      controller.abort(source.reason)
   const abortFirst = abortFrom(first)
   const abortSecond = abortFrom(second)
   first.addEventListener('abort', abortFirst, { once: true })
@@ -47,10 +51,11 @@ async function fetchWithBodyLifetimeAborts(
   input: RequestInfo | URL,
   init: RequestInit,
   combined: CombinedAbortSignal,
+  fetchImpl: typeof fetch,
 ): Promise<Response> {
   let response: Response
   try {
-    response = await fetch(input, { ...init, signal: combined.signal })
+    response = await fetchImpl(input, { ...init, signal: combined.signal })
   } catch (error) {
     combined.dispose()
     throw error
@@ -93,19 +98,20 @@ export function downloadModel(signal?: AbortSignal, options: ModelIntegrityOptio
     return Promise.reject(new Error('模型下载已取消'))
   }
 
+  const fetchImpl = resolveFetchImplementation()
   return downloadCoreModel(undefined, options, {
     fetchImpl: (input, init) => {
       const deadlineSignal = init?.signal
       if (!signal || !deadlineSignal) {
-        return fetch(input, { ...init, signal: signal ?? deadlineSignal } as RequestInit)
+        return fetchImpl(input, { ...init, signal: signal ?? deadlineSignal } as RequestInit)
       }
       if (typeof AbortSignal.any === 'function') {
         // Composite signals keep forwarding caller aborts to the body for its
         // whole lifetime; their dispose step is a no-op.
-        return fetch(input, { ...init, signal: combineAbortSignals(signal, deadlineSignal).signal })
+        return fetchImpl(input, { ...init, signal: combineAbortSignals(signal, deadlineSignal).signal })
       }
       const combined = combineAbortSignals(signal, deadlineSignal)
-      return fetchWithBodyLifetimeAborts(input, { ...init, signal: combined.signal }, combined)
+      return fetchWithBodyLifetimeAborts(input, { ...init, signal: combined.signal }, combined, fetchImpl)
     },
     getAccessKey: () => getModelAccessKey().catch(() => ''),
   })

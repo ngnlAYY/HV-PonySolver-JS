@@ -1,5 +1,6 @@
 import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 import { warn } from '@hv-pony-solver/browser-core/utils/logger'
+import { raceAbort } from '@hv-pony-solver/browser-core/utils/abort-race'
 
 import {
   addRuntimeMessageListener,
@@ -37,12 +38,16 @@ function nextOffscreenRequestId(): string {
   return `sw-${serviceWorkerEpoch}-${offscreenRequestSequence.toString(36)}`.slice(0, 80)
 }
 
-async function claimOffscreenHost(): Promise<OffscreenClaimResponse> {
-  const response = await sendRuntimeMessage({
-    type: OFFSCREEN_MESSAGE_TYPE,
-    operation: 'claim',
-    epoch: serviceWorkerEpoch,
-  })
+async function claimOffscreenHost(signal?: AbortSignal): Promise<OffscreenClaimResponse> {
+  const response = await raceAbort(
+    sendRuntimeMessage({
+      type: OFFSCREEN_MESSAGE_TYPE,
+      operation: 'claim',
+      epoch: serviceWorkerEpoch,
+    }),
+    signal,
+    () => new Error('推理请求已取消'),
+  )
   if (!isOffscreenClaimResponse(response) || response.epoch !== serviceWorkerEpoch) {
     throw new Error('Offscreen 推理 Host 接管失败')
   }
@@ -136,7 +141,7 @@ export async function invokeOffscreenHost(request: HostRequest, signal: AbortSig
     if (signal.aborted) {
       throw new Error('推理请求已取消')
     }
-    await claimOffscreenHost()
+    await claimOffscreenHost(signal)
     if (signal.aborted) {
       throw new Error('推理请求已取消')
     }

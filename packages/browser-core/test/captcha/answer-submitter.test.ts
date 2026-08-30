@@ -342,6 +342,68 @@ describe('AnswerSubmitter', () => {
       expect(onSubmitted).not.toHaveBeenCalled()
     })
 
+    it('keeps a user selection manual when it is checked while timing settings are pending', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) checkbox.checked = false
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      let resolveFirstSubmitDelay!: (range: readonly [number, number]) => void
+      let firstDelay = true
+      const submitter = new AnswerSubmitter(
+        () => {
+          if (!firstDelay) return Promise.resolve([0, 0])
+          firstDelay = false
+          return new Promise((resolve) => {
+            resolveFirstSubmitDelay = resolve
+          })
+        },
+        async () => [0, 0],
+      )
+
+      const firstSubmit = submitter.submit(form, ['TS'], vi.fn(), vi.fn(), { confidences: { TS: 0.01 } })
+      await flushMicrotasks()
+      checkboxes[ANSWER_CODES.indexOf('TS')]!.click()
+      resolveFirstSubmitDelay([0, 0])
+      await vi.runAllTimersAsync()
+      await firstSubmit
+
+      const secondSubmit = submitter.submit(form, ['TS', 'RA', 'FS', 'RD', 'PP'], vi.fn(), vi.fn(), {
+        confidences: { TS: 0.01, RA: 0.02, FS: 0.9, RD: 0.8, PP: 0.7 },
+      })
+      await flushMicrotasks()
+      await vi.runAllTimersAsync()
+      await secondSubmit
+
+      expect(checkboxes[ANSWER_CODES.indexOf('TS')]).toHaveProperty('checked', true)
+    })
+
+    it('does not submit when the form action changes while timing settings are pending', async () => {
+      const form = createForm(true)
+      form.action = '/submit'
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const onSubmitted = vi.fn()
+      let resolveSubmitDelay!: (range: readonly [number, number]) => void
+      const submitter = new AnswerSubmitter(
+        () =>
+          new Promise((resolve) => {
+            resolveSubmitDelay = resolve
+          }),
+        async () => [0, 0],
+      )
+
+      const submitPromise = submitter.submit(form, ['TS'], vi.fn(), onSubmitted)
+      await flushMicrotasks()
+      form.action = '/other-submit'
+      resolveSubmitDelay([0, 0])
+      await vi.runAllTimersAsync()
+      await submitPromise
+
+      expect(button.click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
+    })
+
     it('does not submit when the captured form is disconnected during the delay', async () => {
       const form = createForm(true)
       const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!

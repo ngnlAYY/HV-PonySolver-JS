@@ -1,4 +1,5 @@
 import {
+  DEFAULT_PUBLIC_MODEL_PATH,
   ORT_MODEL_OBJECT_KEY,
   ORT_MODEL_PUBLIC_PATH,
   ORT_RUNTIME_WASM_OBJECT_KEY,
@@ -7,7 +8,6 @@ import {
 
 import type { Env, InvalidKeyMode, WorkerConfig } from './worker-types'
 
-const LEGACY_MODEL_PUBLIC_PATH = '/yolo26n-640.onnx'
 // eslint-disable-next-line no-control-regex -- These code points are the validation target.
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 // Paths flow verbatim into the Content-Disposition quoted-string emitted by model-response.ts,
@@ -96,7 +96,7 @@ function readDownloadQuotaEnabled(value: string | undefined): boolean {
 
 function parseWorkerConfig(env: Env): WorkerConfig {
   const config = {
-    publicModelPath: readPath(env.PUBLIC_MODEL_PATH, LEGACY_MODEL_PUBLIC_PATH, 'PUBLIC_MODEL_PATH'),
+    publicModelPath: readPath(env.PUBLIC_MODEL_PATH, DEFAULT_PUBLIC_MODEL_PATH, 'PUBLIC_MODEL_PATH'),
     publicQuotaPath: readPath(env.PUBLIC_QUOTA_PATH, '/quota', 'PUBLIC_QUOTA_PATH'),
     publicOrtModelPath: readPath(env.PUBLIC_ORT_MODEL_PATH, ORT_MODEL_PUBLIC_PATH, 'PUBLIC_ORT_MODEL_PATH'),
     publicRuntimeWasmPath: readPath(

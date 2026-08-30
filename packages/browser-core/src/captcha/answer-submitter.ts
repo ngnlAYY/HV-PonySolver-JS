@@ -1,6 +1,7 @@
 import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
 import { randDelay, shuffle, sleep } from '../utils/delay'
 import { captchaSelectors } from './captcha-selectors'
+import { isSameOriginForm } from './captcha-target'
 import type { DelayRange } from './timing-settings'
 
 export type SubmitErrorHandler = (message: string) => void
@@ -172,7 +173,8 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       checkboxes: initialControls.checkboxes,
       button: initialControls.button,
     }
-    if (!controlsAreUsable(form, expectedControls)) {
+    const expectedFormAction = form.action
+    if (!isSameOriginForm(form) || !controlsAreUsable(form, expectedControls)) {
       onError('答案控件不可用')
       return
     }
@@ -192,12 +194,25 @@ export class AnswerSubmitter implements AnswerSubmissionService {
         checkboxes: current.checkboxes,
         button: current.button,
       }
-      return hasSameControls(expectedControls, controls) && controlsAreUsable(form, controls) ? controls : null
+      return hasSameControls(expectedControls, controls) &&
+        form.action === expectedFormAction &&
+        isSameOriginForm(form) &&
+        controlsAreUsable(form, controls)
+        ? controls
+        : null
     }
 
     const indices = ponies.map((pony) => ANSWER_CODES.indexOf(pony)).filter((index) => index >= 0)
     if (!indices.length) {
       onError('无有效答案')
+      return
+    }
+
+    const [submitDelay, multiClickDelay] = await Promise.all([
+      this.getSubmitDelayRange(),
+      this.getMultiClickDelayRange(),
+    ])
+    if (!currentControls()) {
       return
     }
 
@@ -256,14 +271,6 @@ export class AnswerSubmitter implements AnswerSubmissionService {
           this.automaticConfidences.delete(checkbox)
         }
       }
-    }
-
-    const [submitDelay, multiClickDelay] = await Promise.all([
-      this.getSubmitDelayRange(),
-      this.getMultiClickDelayRange(),
-    ])
-    if (!currentControls()) {
-      return
     }
 
     const order = shuffle(automaticIndices)

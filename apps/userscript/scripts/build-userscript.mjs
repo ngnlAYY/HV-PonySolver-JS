@@ -130,6 +130,12 @@ export function createWorkerBuildOptions({
       __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.byteLength),
       __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.sha256),
       __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.maxByteLength),
+      __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmUrl),
+      __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.wasmByteLength),
+      __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmSha256),
+      __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_MAX_BYTE_LENGTH__: String(
+        runtimeManifest.externalFullRuntime.wasmMaxByteLength,
+      ),
     },
   }
 }

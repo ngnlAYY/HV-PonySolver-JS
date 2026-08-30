@@ -6,7 +6,11 @@ import { parseRepoRootArgs } from './lib/cli.mjs'
 import { isDirectRun } from './lib/direct-run.mjs'
 import { checkArchitectureGuardrails, checkUserscriptConfigDocs } from './docs-drift/architecture-docs.mjs'
 import { checkModelManifestDocs } from './docs-drift/model-manifest-docs.mjs'
-import { checkModelWorkerDocs, readModelWorkerHttpFacts } from './docs-drift/model-worker-docs.mjs'
+import {
+  checkModelWorkerDocs,
+  checkModelWorkerOpsDocs,
+  readModelWorkerHttpFacts,
+} from './docs-drift/model-worker-docs.mjs'
 import { checkOnnxRuntimeAssetsDocs } from './docs-drift/onnx-runtime-docs.mjs'
 import { checkRootCheckCommand } from './docs-drift/readme-commands.mjs'
 import { checkExtensionDocs } from './docs-drift/extension-docs.mjs'
@@ -40,6 +44,8 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     extensionPackageJson,
     readme,
     extensionDoc,
+    modelWorkerOpsDoc,
+    modelWorkerDeploymentWorkflow,
     browserSupportModule,
     inferenceConfigSource,
     onnxRuntimeAssetsSource,
@@ -53,6 +59,8 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     readJson(repoRoot, 'apps/extension/package.json'),
     readText(repoRoot, 'README.md'),
     readText(repoRoot, 'docs/browser-extension.md'),
+    readText(repoRoot, 'docs/model-worker-ops.md'),
+    readText(repoRoot, '.github/workflows/deploy-cloudflare-model-worker.yml'),
     importBrowserSupport(repoRoot),
     readText(repoRoot, 'packages/browser-core/src/inference/inference-config.ts'),
     readText(repoRoot, 'apps/userscript/src/inference/onnx-runtime-assets.ts'),
@@ -75,6 +83,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     ...checkModelManifestDocs(modelSource, readme),
     ...checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJson, readme),
     ...checkModelWorkerDocs(readme, modelWorkerHttpFacts),
+    ...checkModelWorkerOpsDocs(modelWorkerOpsDoc, readme, modelWorkerDeploymentWorkflow),
     ...checkArchitectureGuardrails(readme),
     ...checkExtensionDocs(extensionPackageJson, browserSupportModule.browserSupport, readme, extensionDoc),
   ]

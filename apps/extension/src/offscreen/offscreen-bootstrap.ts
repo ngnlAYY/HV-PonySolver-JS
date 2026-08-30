@@ -163,9 +163,16 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
       'pagehide',
       () => {
         clearIdleTimer()
-        for (const entry of activeRequests.values()) {
+        idleGeneration = null
+        resetIdleRetries()
+        lifecycleGeneration += 1
+        for (const [key, entry] of activeRequests) {
+          rememberCancellation(key)
           entry.controller.abort()
         }
+        // A Host is no longer allowed to consume queue capacity after document
+        // teardown, even when a faulty implementation ignores its abort signal.
+        activeRequests.clear()
         host.destroy()
         hostDestroyed = true
       },
@@ -177,9 +184,10 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
   const claimEpoch = (epoch: string): OffscreenClaimResponse => {
     if (currentEpoch !== epoch) {
       currentEpoch = epoch
-      for (const entry of activeRequests.values()) {
+      for (const [key, entry] of activeRequests) {
         if (entry.epoch !== epoch) {
           entry.controller.abort(new Error('Offscreen 推理请求所属服务工作线程已失效'))
+          activeRequests.delete(key)
         }
       }
       if (activeRequests.size === 0 && idleGeneration === null) {
@@ -291,21 +299,34 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
       kind,
     }
     activeRequests.set(key, entry)
+    const sendHostResponse = (response: HostResponse): void => {
+      try {
+        sendResponse(response)
+      } catch {
+        // The runtime channel may close while Host work is settling.
+      }
+    }
     void Promise.resolve()
       .then(() => host.handle(message.request, entry.controller.signal))
-      .then((response: HostResponse) => {
-        sendResponse(
-          entry.controller.signal.aborted ? errorResponse(entry.hostRequestId, 'Offscreen 推理请求已取消') : response,
-        )
-      })
-      .catch((error: unknown) => {
-        const messageText = error instanceof Error ? error.message : String(error)
-        sendResponse(errorResponse(entry.hostRequestId, messageText))
-      })
+      .then(
+        (response: HostResponse) => {
+          sendHostResponse(
+            entry.controller.signal.aborted ? errorResponse(entry.hostRequestId, 'Offscreen 推理请求已取消') : response,
+          )
+        },
+        (error: unknown) => {
+          const messageText = error instanceof Error ? error.message : String(error)
+          sendHostResponse(
+            errorResponse(
+              entry.hostRequestId,
+              entry.controller.signal.aborted ? 'Offscreen 推理请求已取消' : messageText,
+            ),
+          )
+        },
+      )
       .finally(() => {
-        if (activeRequests.get(key) === entry) {
-          activeRequests.delete(key)
-        }
+        if (activeRequests.get(key) !== entry) return
+        activeRequests.delete(key)
         if (activeRequests.size === 0) {
           scheduleIdleNotification()
         }

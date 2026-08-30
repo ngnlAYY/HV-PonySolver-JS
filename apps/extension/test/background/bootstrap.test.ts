@@ -55,13 +55,9 @@ const offscreenSender = {
 
 function claim(listener: RuntimeMessageListener, epoch: string): unknown {
   const sendResponse = vi.fn()
-  expect(
-    listener(
-      { type: OFFSCREEN_MESSAGE_TYPE, operation: 'claim', epoch },
-      serviceWorkerSender,
-      sendResponse,
-    ),
-  ).toBe(false)
+  expect(listener({ type: OFFSCREEN_MESSAGE_TYPE, operation: 'claim', epoch }, serviceWorkerSender, sendResponse)).toBe(
+    false,
+  )
   return sendResponse.mock.calls[0]?.[0]
 }
 
@@ -162,7 +158,9 @@ describe('target-specific extension bootstraps', () => {
     )
     await vi.waitFor(() =>
       expect(
-        mocks.sendRuntimeMessage.mock.calls.some(([message]) => (message as { operation?: string }).operation === 'request'),
+        mocks.sendRuntimeMessage.mock.calls.some(
+          ([message]) => (message as { operation?: string }).operation === 'request',
+        ),
       ).toBe(true),
     )
     const requestMessage = mocks.sendRuntimeMessage.mock.calls
@@ -186,6 +184,40 @@ describe('target-specific extension bootstraps', () => {
       requestId: 'prepare-cancel',
       ok: true,
     })
+  })
+
+  it('releases admission when cancellation interrupts a hanging Offscreen claim', async () => {
+    mocks.sendRuntimeMessage.mockImplementation(
+      (message: Record<string, unknown>) =>
+        message.operation === 'claim' ? new Promise<never>(() => undefined) : Promise.resolve(undefined),
+    )
+    registerChromiumBackground()
+    const invokeHost = mocks.registerBroker.mock.calls[0]![0] as HostInvoker
+    const controller = new AbortController()
+    const invocation = invokeHost(
+      { protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'prepare-claim-cancel' },
+      controller.signal,
+    )
+    await vi.waitFor(() =>
+      expect(
+        mocks.sendRuntimeMessage.mock.calls.some(
+          ([message]) => (message as { operation?: string }).operation === 'claim',
+        ),
+      ).toBe(true),
+    )
+
+    controller.abort()
+
+    const abortDeadline = new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error('Offscreen claim did not abort')), 50)
+    })
+    await expect(Promise.race([invocation, abortDeadline])).rejects.toThrow('推理请求已取消')
+    expect(mocks.offscreenReleases[0]).toHaveBeenCalledTimes(1)
+    expect(
+      mocks.sendRuntimeMessage.mock.calls.some(
+        ([message]) => (message as { operation?: string }).operation === 'request',
+      ),
+    ).toBe(false)
   })
 
   it('claims a surviving Offscreen document without creating one and restores its status snapshot', async () => {
@@ -227,6 +259,20 @@ describe('target-specific extension bootstraps', () => {
       signal,
     )
     expect(mocks.registerBroker).toHaveBeenCalledWith(expect.any(Function), { allowOptions: false })
+  })
+
+  it('buffers Firefox Host status emitted synchronously during construction', () => {
+    const broadcastContentStatus = vi.fn()
+    mocks.registerBroker.mockReturnValue({ dispose: vi.fn(), broadcastContentStatus })
+    const host = { handle: vi.fn(), destroy: vi.fn() }
+
+    expect(() =>
+      registerFirefoxBackground((emitStatus) => {
+        emitStatus({ session: '同步初始化中' })
+        return host as never
+      }),
+    ).not.toThrow()
+    expect(broadcastContentStatus).toHaveBeenCalledWith({ session: '同步初始化中' })
   })
 
   it('keeps newest-Key-intent arbitration in the shared Firefox Host', async () => {
@@ -398,6 +444,50 @@ describe('target-specific extension bootstraps', () => {
     )
   })
 
+  it('releases old-epoch capacity immediately when a new Offscreen owner claims it', async () => {
+    const host = {
+      handle: vi.fn(() => new Promise<HostResponse>(() => undefined)),
+      destroy: vi.fn(),
+    }
+    registerOffscreenHost(() => host as never)
+    const listener = mocks.addRuntimeMessageListener.mock.calls[0]![0] as RuntimeMessageListener
+    claim(listener, 'epoch-capacity-old')
+    for (let index = 0; index < MAX_OFFSCREEN_PREPARE_REQUESTS; index += 1) {
+      expect(
+        listener(
+          {
+            type: OFFSCREEN_MESSAGE_TYPE,
+            operation: 'request',
+            epoch: 'epoch-capacity-old',
+            requestId: `old-offscreen-${index}`,
+            request: { protocol: PROTOCOL_VERSION, type: 'prepare', requestId: `old-prepare-${index}` },
+          },
+          serviceWorkerSender,
+          vi.fn(),
+        ),
+      ).toBe(true)
+    }
+    await vi.waitFor(() => expect(host.handle).toHaveBeenCalledTimes(MAX_OFFSCREEN_PREPARE_REQUESTS))
+
+    claim(listener, 'epoch-capacity-new')
+    const newResponse = vi.fn()
+    expect(
+      listener(
+        {
+          type: OFFSCREEN_MESSAGE_TYPE,
+          operation: 'request',
+          epoch: 'epoch-capacity-new',
+          requestId: 'new-offscreen',
+          request: { protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'new-prepare' },
+        },
+        serviceWorkerSender,
+        newResponse,
+      ),
+    ).toBe(true)
+    await vi.waitFor(() => expect(host.handle).toHaveBeenCalledTimes(MAX_OFFSCREEN_PREPARE_REQUESTS + 1))
+    expect(newResponse).not.toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringContaining('繁忙') }))
+  })
+
   it('starts warm-idle only after Host activity settles and confirms the generation', async () => {
     vi.useFakeTimers()
     const host = {
@@ -528,7 +618,9 @@ describe('target-specific extension bootstraps', () => {
     registerChromiumBackground()
     await vi.waitFor(() =>
       expect(
-        mocks.sendRuntimeMessage.mock.calls.some(([message]) => (message as { operation?: string }).operation === 'claim'),
+        mocks.sendRuntimeMessage.mock.calls.some(
+          ([message]) => (message as { operation?: string }).operation === 'claim',
+        ),
       ).toBe(true),
     )
     const claimMessage = mocks.sendRuntimeMessage.mock.calls

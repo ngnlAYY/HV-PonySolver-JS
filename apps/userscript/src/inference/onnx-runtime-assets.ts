@@ -7,6 +7,10 @@ export const ONNX_RUNTIME_ASSETS = {
   externalFullRuntime: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
     wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/',
+    wasmUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm',
+    wasmByteLength: 26_827_543,
+    wasmSha256: '78feeeb3d08f6bcee94d938ed322f69073bb8076b5f9d34697a574ffba8deb48',
+    wasmMaxByteLength: 30_000_000,
     byteLength: 360_434,
     sha256: 'de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5',
     maxByteLength: 400_000,

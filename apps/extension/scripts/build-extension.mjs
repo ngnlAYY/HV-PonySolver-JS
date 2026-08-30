@@ -9,6 +9,7 @@ import { zipSync } from 'fflate'
 import { JSDOM } from 'jsdom'
 
 import { ORT_MODEL_FILENAME, ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared/ort-model'
+import { ORT_RUNTIME_WASM_FILENAME, ORT_RUNTIME_WASM_INTEGRITY } from '@hv-pony-solver/shared/ort-runtime'
 
 import { browserSupport } from './browser-support.mjs'
 
@@ -17,8 +18,8 @@ const extensionRoot = path.resolve(scriptDirectory, '..')
 const repositoryRoot = path.resolve(extensionRoot, '../..')
 const packageJson = JSON.parse(await readFile(path.join(extensionRoot, 'package.json'), 'utf8'))
 const version = packageJson.version
-const runtimeWasmFilename = 'ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm'
-const runtimeWasmSha256 = '25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa'
+const runtimeWasmFilename = ORT_RUNTIME_WASM_FILENAME
+const runtimeWasmSha256 = ORT_RUNTIME_WASM_INTEGRITY.sha256
 const runtimeWasmSource = path.join(repositoryRoot, 'other', runtimeWasmFilename)
 const runtimeGlueSource = path.join(
   repositoryRoot,

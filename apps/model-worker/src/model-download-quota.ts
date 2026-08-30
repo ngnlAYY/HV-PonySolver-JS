@@ -7,6 +7,7 @@ import {
 } from '@hv-pony-solver/shared'
 
 import type { ModelDownloadQuotaNamespace, ModelDownloadQuotaStub } from './worker-types'
+import { MODEL_WORKER_DEPENDENCY_TIMEOUT_MS } from './request-timeout'
 
 // v1 charged a request before its response body reached the client. A fresh key
 // intentionally drops those unverifiable counters when the receipt protocol is
@@ -18,7 +19,6 @@ const STATUS_PATH = '/status'
 const INTERNAL_RESERVE_URL = `https://model-download-quota.internal${RESERVE_PATH}`
 const INTERNAL_CONFIRM_URL = `https://model-download-quota.internal${CONFIRM_PATH}`
 const INTERNAL_STATUS_URL = `https://model-download-quota.internal${STATUS_PATH}`
-const QUOTA_REQUEST_TIMEOUT_MS = 5_000
 export const MODEL_DOWNLOAD_RESERVATION_TTL_MS = 10 * 60 * 1_000
 
 const UTC_MONTH_KEY_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/
@@ -311,7 +311,7 @@ async function requestQuotaService<T>(
 ): Promise<T> {
   const stub = await quotaStub(namespace, canonicalToken)
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), QUOTA_REQUEST_TIMEOUT_MS)
+  const timeoutId = setTimeout(() => controller.abort(), MODEL_WORKER_DEPENDENCY_TIMEOUT_MS)
   try {
     const response = await stub.fetch(
       new Request(url, {

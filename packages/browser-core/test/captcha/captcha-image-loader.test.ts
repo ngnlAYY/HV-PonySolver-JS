@@ -74,7 +74,10 @@ describe('CachedImageLoader', () => {
   })
 
   it('falls back after a cache fetch throws and logs a warning', async () => {
-    const fetchStub = vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce(makeOkResponse())
+    const fetchStub = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(makeOkResponse())
     globalThis.fetch = fetchStub
 
     const result = await new CachedImageLoader().get(FAKE_URL)
@@ -112,10 +115,12 @@ describe('CachedImageLoader', () => {
     'image/gif ; foo=bar; quoted="value with spaces"',
     'IMAGE/WEBP;version=1',
   ])('accepts supported Content-Type %j with optional parameters', async (type) => {
-    globalThis.fetch = vi.fn().mockResolvedValueOnce(makeOkResponse(FAKE_BYTES, {
-      'content-type': type,
-      'content-length': String(FAKE_BYTES.byteLength),
-    }))
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      makeOkResponse(FAKE_BYTES, {
+        'content-type': type,
+        'content-length': String(FAKE_BYTES.byteLength),
+      }),
+    )
 
     const result = await new CachedImageLoader().get(FAKE_URL)
 
@@ -149,10 +154,11 @@ describe('CachedImageLoader', () => {
     'rejects invalid Content-Length %j before reading the body',
     async (length) => {
       const body = { cancel: vi.fn(async () => undefined), getReader: vi.fn() }
-      const response = () => makeStreamResponse(body as unknown as ReadableStream<Uint8Array>, {
-        'content-type': 'image/png',
-        'content-length': length,
-      })
+      const response = () =>
+        makeStreamResponse(body as unknown as ReadableStream<Uint8Array>, {
+          'content-type': 'image/png',
+          'content-length': length,
+        })
       globalThis.fetch = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response())
 
       await expect(new CachedImageLoader().get(FAKE_URL)).rejects.toThrow('验证码图片 Content-Length 无效')
@@ -163,10 +169,11 @@ describe('CachedImageLoader', () => {
 
   it('rejects a declared body over the encoded byte limit before acquiring a reader', async () => {
     const body = { cancel: vi.fn(async () => undefined), getReader: vi.fn() }
-    const response = () => makeStreamResponse(body as unknown as ReadableStream<Uint8Array>, {
-      'content-type': 'image/png',
-      'content-length': String(imagePreprocessConfig.maxEncodedBytes + 1),
-    })
+    const response = () =>
+      makeStreamResponse(body as unknown as ReadableStream<Uint8Array>, {
+        'content-type': 'image/png',
+        'content-length': String(imagePreprocessConfig.maxEncodedBytes + 1),
+      })
     globalThis.fetch = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response())
 
     await expect(new CachedImageLoader().get(FAKE_URL)).rejects.toThrow(
@@ -197,26 +204,49 @@ describe('CachedImageLoader', () => {
     expect(events).toEqual(['cancel', 'release', 'cancel', 'release'])
   })
 
+  it('accepts a bounded streamed image when Content-Length is omitted', async () => {
+    const firstChunk = FAKE_BYTES.slice(0, 4)
+    const secondChunk = FAKE_BYTES.slice(4)
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false as const, value: firstChunk })
+        .mockResolvedValueOnce({ done: false as const, value: secondChunk })
+        .mockResolvedValueOnce({ done: true as const, value: undefined }),
+      cancel: vi.fn(async () => undefined),
+      releaseLock: vi.fn(),
+    }
+    const body = { getReader: vi.fn(() => reader) }
+    globalThis.fetch = vi.fn(async () => makeStreamResponse(body as unknown as ReadableStream<Uint8Array>))
+
+    const result = await new CachedImageLoader().get(FAKE_URL)
+
+    expect(result.type).toBe('image/png')
+    expect(Array.from(new Uint8Array(await result.arrayBuffer()))).toEqual(Array.from(FAKE_BYTES))
+    expect(reader.cancel).not.toHaveBeenCalled()
+    expect(reader.releaseLock).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     { name: 'shorter', declared: FAKE_BYTES.byteLength + 1 },
     { name: 'longer', declared: FAKE_BYTES.byteLength - 1 },
   ])('rejects an actual body $name than Content-Length', async ({ declared }) => {
-    const response = () => makeOkResponse(FAKE_BYTES, {
-      'content-type': 'image/gif',
-      'content-length': String(declared),
-    })
+    const response = () =>
+      makeOkResponse(FAKE_BYTES, {
+        'content-type': 'image/gif',
+        'content-length': String(declared),
+      })
     globalThis.fetch = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response())
 
-    await expect(new CachedImageLoader().get(FAKE_URL)).rejects.toThrow(
-      '验证码图片 Content-Length 与正文不匹配',
-    )
+    await expect(new CachedImageLoader().get(FAKE_URL)).rejects.toThrow('验证码图片 Content-Length 与正文不匹配')
   })
 
   it('rejects an empty body even when its declared length is zero', async () => {
-    const response = () => makeOkResponse(new Uint8Array(), {
-      'content-type': 'image/webp',
-      'content-length': '0',
-    })
+    const response = () =>
+      makeOkResponse(new Uint8Array(), {
+        'content-type': 'image/webp',
+        'content-length': '0',
+      })
     globalThis.fetch = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response())
 
     await expect(new CachedImageLoader().get(FAKE_URL)).rejects.toThrow('验证码图片数据为空')
