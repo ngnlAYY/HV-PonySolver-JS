@@ -8,7 +8,8 @@ function extractObject(source, property, sourcePath) {
   const marker = property === 'ONNX_RUNTIME_ASSETS' ? 'ONNX_RUNTIME_ASSETS =' : `${property}:`
   const propertyIndex = source.indexOf(marker)
   const start = source.indexOf('{', propertyIndex)
-  if (propertyIndex < 0 || start < 0) throw new Error(`Unable to read ONNX_RUNTIME_ASSETS.${property} from ${sourcePath}`)
+  if (propertyIndex < 0 || start < 0)
+    throw new Error(`Unable to read ONNX_RUNTIME_ASSETS.${property} from ${sourcePath}`)
   let depth = 0
   let quote = ''
   let escaped = false
@@ -61,7 +62,7 @@ function assertSha256(value, context) {
 
 export function parseOnnxRuntimeAssetsManifest(source, { sourcePath = manifestRelativePath } = {}) {
   const root = extractObject(source, 'ONNX_RUNTIME_ASSETS', sourcePath)
-  const externalFullRuntimeBlock = extractObject(root, 'externalFullRuntime', sourcePath)
+  const externalFullRuntime = readAsset(root, 'externalFullRuntime', sourcePath, ['scriptUrl', 'wasmBaseUrl'])
   const bundleAsset = readAsset(root, 'bundleAsset', sourcePath, ['path', 'filename'])
   const wasmAsset = readAsset(root, 'wasmAsset', sourcePath, ['filename', 'publicPath', 'url', 'objectKey'])
   const manifest = {
@@ -70,20 +71,23 @@ export function parseOnnxRuntimeAssetsManifest(source, { sourcePath = manifestRe
     sourceCommit: readString(root, 'sourceCommit', 'ONNX_RUNTIME_ASSETS'),
     emsdkVersion: readString(root, 'emsdkVersion', 'ONNX_RUNTIME_ASSETS'),
     operatorConfigSha256: readString(root, 'operatorConfigSha256', 'ONNX_RUNTIME_ASSETS'),
-    externalFullRuntime: {
-      scriptUrl: readString(externalFullRuntimeBlock, 'scriptUrl', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
-      wasmBaseUrl: readString(externalFullRuntimeBlock, 'wasmBaseUrl', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
-    },
+    externalFullRuntime,
     bundleAsset,
     wasmAsset,
   }
+  assertSha256(externalFullRuntime.sha256, 'ONNX_RUNTIME_ASSETS.externalFullRuntime')
   assertSha256(bundleAsset.sha256, 'ONNX_RUNTIME_ASSETS.bundleAsset')
   assertSha256(wasmAsset.sha256, 'ONNX_RUNTIME_ASSETS.wasmAsset')
+  if (externalFullRuntime.byteLength > externalFullRuntime.maxByteLength) {
+    throw new Error('ONNX Runtime external full runtime exceeds maxByteLength')
+  }
   if (bundleAsset.byteLength > bundleAsset.maxByteLength) throw new Error('ONNX Runtime bundle exceeds maxByteLength')
   if (wasmAsset.byteLength > wasmAsset.maxByteLength) throw new Error('ONNX Runtime WASM exceeds maxByteLength')
-  if (!wasmAsset.filename.includes(wasmAsset.sha256)) throw new Error('ONNX Runtime WASM filename is not content-addressed')
+  if (!wasmAsset.filename.includes(wasmAsset.sha256))
+    throw new Error('ONNX Runtime WASM filename is not content-addressed')
   if (wasmAsset.publicPath !== `/${wasmAsset.objectKey}`) throw new Error('ONNX Runtime WASM path/object key mismatch')
-  if (wasmAsset.url !== `https://models.ngnl.host${wasmAsset.publicPath}`) throw new Error('ONNX Runtime WASM URL drift')
+  if (wasmAsset.url !== `https://models.ngnl.host${wasmAsset.publicPath}`)
+    throw new Error('ONNX Runtime WASM URL drift')
   const expectedExternalBaseUrl = `https://cdn.jsdelivr.net/npm/${manifest.packageName}@${manifest.packageVersion}/dist/`
   if (manifest.externalFullRuntime.scriptUrl !== `${expectedExternalBaseUrl}ort.min.js`) {
     throw new Error('External ONNX Runtime script URL drift')

@@ -20,8 +20,9 @@ class SuccessfulInitWorker {
     SuccessfulInitWorker.messages.push(message)
     SuccessfulInitWorker.transfers.push(transfer)
     queueMicrotask(() => {
+      const modelBuffer = message.modelBuffer
       this.onmessage?.({
-        data: { type: 'response', requestId: message.requestId },
+        data: { type: 'response', requestId: message.requestId, modelBuffer },
       } as MessageEvent)
     })
   }
@@ -72,9 +73,7 @@ describe('PackagedModelRepository', () => {
     expect(download).not.toHaveBeenCalled()
     expect(putCached).not.toHaveBeenCalled()
     expect(workerFactory).toHaveBeenCalledTimes(1)
-    expect(SuccessfulInitWorker.messages).toEqual([
-      expect.objectContaining({ type: 'init', modelBuffer: model }),
-    ])
+    expect(SuccessfulInitWorker.messages).toEqual([expect.objectContaining({ type: 'init', modelBuffer: model })])
     expect(SuccessfulInitWorker.transfers).toEqual([[model]])
 
     client.destroy()
@@ -87,7 +86,8 @@ describe('PackagedModelRepository', () => {
     SuccessfulInitWorker.terminateCount = 0
     const firstModel = Uint8Array.from([1, 2, 3]).buffer
     const secondModel = Uint8Array.from([4, 5, 6]).buffer
-    const loadModel = vi.fn()
+    const loadModel = vi
+      .fn()
       .mockRejectedValueOnce(new Error('扩展内置模型 完整性校验失败'))
       .mockResolvedValueOnce(firstModel)
       .mockResolvedValueOnce(secondModel)
@@ -111,9 +111,12 @@ describe('PackagedModelRepository', () => {
 
   it('does not create a Worker when destroyed during asset loading', async () => {
     let resolveModel: ((buffer: ArrayBuffer) => void) | undefined
-    const loadModel = vi.fn(async () => new Promise<ArrayBuffer>((resolve) => {
-      resolveModel = resolve
-    }))
+    const loadModel = vi.fn(
+      async () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          resolveModel = resolve
+        }),
+    )
     const repository = new PackagedModelRepository(loadModel)
     const workerFactory = vi.fn(() => new SuccessfulInitWorker() as unknown as Worker)
     const client = new OnnxWorkerClient(repository, silentStatusSink, workerFactory)

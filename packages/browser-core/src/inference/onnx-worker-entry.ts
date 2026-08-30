@@ -10,15 +10,16 @@ import { imagePreprocessConfig } from './inference-config'
 import type { WorkerMessage, WorkerRequest } from './inference-types'
 import { parseYoloOutputTensor } from './yolo-output-parser'
 import { formatErrorMessage } from '../utils/errors'
+import { isRecordObject } from '../utils/guards'
 
 const INPUT_SIZE = imagePreprocessConfig.imageSize
 const INPUT_NAME = 'images'
 const OUTPUT_NAME = 'output0'
 
 type WorkerScope = Readonly<{
-  postMessage(message: WorkerMessage): void
+  postMessage(message: WorkerMessage, transfer?: Transferable[]): void
 }> & {
-  onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null
+  onmessage: ((event: MessageEvent<unknown>) => void) | null
 }
 
 type OnnxRuntime = typeof Ort
@@ -34,6 +35,29 @@ class FatalInferenceError extends Error {
   }
 }
 
+function isSafeRequestId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value)
+  return keys.length === expected.length && keys.every((key) => expected.includes(key))
+}
+
+function isWorkerRequest(value: unknown): value is WorkerRequest {
+  if (!isRecordObject(value) || !isSafeRequestId(value.requestId)) {
+    return false
+  }
+  if (value.type === 'init') {
+    return hasExactKeys(value, ['type', 'requestId', 'modelBuffer']) && value.modelBuffer instanceof ArrayBuffer
+  }
+  return (
+    value.type === 'detect' &&
+    hasExactKeys(value, ['type', 'requestId', 'imageBlob']) &&
+    value.imageBlob instanceof Blob
+  )
+}
+
 export function startOnnxWorker(
   runtime: OnnxRuntime,
   initializeRuntime: RuntimeInitializer,
@@ -42,6 +66,7 @@ export function startOnnxWorker(
   const workerScope = globalThis as unknown as WorkerScope
   let session: Ort.InferenceSession | undefined
   let runtimeInitialization: Promise<void> | undefined
+  let requestTail: Promise<void> = Promise.resolve()
   // Detect requests are processed serially, so the canvas, its context, and
   // the CHW output buffer are allocated once per worker and reused per frame.
   // The RGBA readback itself is the one allocation getImageData cannot avoid.
@@ -139,26 +164,38 @@ export function startOnnxWorker(
     }
   }
 
+  async function processRequest(request: WorkerRequest): Promise<void> {
+    try {
+      if (request.type === 'init') {
+        await initializeSession(request.modelBuffer)
+        workerScope.postMessage({ type: 'response', requestId: request.requestId, modelBuffer: request.modelBuffer }, [
+          request.modelBuffer,
+        ])
+        return
+      }
+      await hooks.beforeDetect?.()
+      const result = await detect(request.imageBlob)
+      workerScope.postMessage({ type: 'response', requestId: request.requestId, result })
+    } catch (error) {
+      workerScope.postMessage({
+        type: 'error',
+        requestId: request.requestId,
+        message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof FatalInferenceError ? { fatal: true } : {}),
+      })
+    }
+  }
+
   workerScope.onmessage = (event): void => {
     const request = event.data
-    void (async () => {
-      try {
-        if (request.type === 'init') {
-          await initializeSession(request.modelBuffer)
-          workerScope.postMessage({ type: 'response', requestId: request.requestId })
-          return
-        }
-        await hooks.beforeDetect?.()
-        const result = await detect(request.imageBlob)
-        workerScope.postMessage({ type: 'response', requestId: request.requestId, result })
-      } catch (error) {
-        workerScope.postMessage({
-          type: 'error',
-          requestId: request.requestId,
-          message: error instanceof Error ? error.message : String(error),
-          ...(error instanceof FatalInferenceError ? { fatal: true } : {}),
-        })
+    if (!isWorkerRequest(request)) {
+      const requestId = isRecordObject(request) && isSafeRequestId(request.requestId) ? request.requestId : null
+      if (requestId !== null) {
+        workerScope.postMessage({ type: 'error', requestId, message: 'ONNX Worker 请求格式无效' })
       }
-    })()
+      return
+    }
+    const run = (): Promise<void> => processRequest(request)
+    requestTail = requestTail.then(run, run)
   }
 }

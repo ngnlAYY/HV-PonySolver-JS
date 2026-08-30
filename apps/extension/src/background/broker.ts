@@ -137,6 +137,8 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
   let globalDownloadModelRequests = 0
   let globalQueryModelQuotaRequests = 0
   let latestHostStatus: HostStatusUpdate = {}
+  let pendingCredentialsRevision: string | null = null
+  let credentialsRevisionWriteRunning = false
   const contentPorts = new Map<ExtensionPort, (message: unknown) => boolean>()
 
   const broadcast = (message: unknown): void => {
@@ -145,13 +147,42 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
     }
   }
 
+  const drainCredentialsRevisionWrites = async (): Promise<void> => {
+    if (credentialsRevisionWriteRunning) {
+      return
+    }
+    credentialsRevisionWriteRunning = true
+    try {
+      while (pendingCredentialsRevision !== null) {
+        const revision = pendingCredentialsRevision
+        pendingCredentialsRevision = null
+        try {
+          await storageSet({ [MODEL_CREDENTIALS_REVISION_KEY]: revision })
+        } catch (error) {
+          warn('凭证版本持久化失败:', formatErrorMessage(error))
+        }
+      }
+    } finally {
+      credentialsRevisionWriteRunning = false
+      if (pendingCredentialsRevision !== null) {
+        void drainCredentialsRevisionWrites()
+      }
+    }
+  }
+
+  const persistCredentialsRevision = (revision: string): void => {
+    // One in-flight write plus the newest pending revision is sufficient. This
+    // preserves ordering without growing an unbounded promise chain if storage
+    // stalls while the user verifies or clears a Key repeatedly.
+    pendingCredentialsRevision = revision
+    void drainCredentialsRevisionWrites()
+  }
+
   const broadcastCredentialsChanged = (): void => {
     broadcast(modelCredentialsChangedMessage())
     // The broadcast only reaches Ports of this service-worker generation; the
     // persisted revision lets a later content-script generation recover too.
-    void storageSet({ [MODEL_CREDENTIALS_REVISION_KEY]: nextModelCredentialsRevision() }).catch((error: unknown) => {
-      warn('凭证版本持久化失败:', formatErrorMessage(error))
-    })
+    persistCredentialsRevision(nextModelCredentialsRevision())
   }
 
   const dispose = addRuntimeConnectListener((port) => {

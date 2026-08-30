@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
+
 import { inferenceRecoveryConfig, inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import { OnnxWorkerClient as CoreOnnxWorkerClient, type ModelRepository } from '../../src/inference/onnx-worker-client'
 import type { ModelCache } from '../../src/model/model-cache'
 import { downloadModel } from '../../src/model/model-downloader'
+import { getModelDownloadConfirmation } from '../../src/model/model-download-confirmation-store'
 import type { InferenceStatusSink } from '../../src/status-panel/status-panel-types'
 import { createMockPanel } from '../helpers/mock-panel'
 import { FailingWorker, SuccessfulWorker, TimeoutThenSuccessfulWorker } from '../../../../test/support/mock-worker'
@@ -68,7 +71,7 @@ describe('OnnxWorkerClient', () => {
     expect(modelCache.download).not.toHaveBeenCalled()
     expect(modelBuffer.byteLength).toBe(0)
     expect(cachedBytes).toEqual([1, 2, 3, 4])
-    expect(modelCache.putCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true, true, expect.any(AbortSignal))
+    expect(modelCache.putCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true, false, expect.any(AbortSignal))
     expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init' })
   })
 
@@ -106,7 +109,7 @@ describe('OnnxWorkerClient', () => {
     expect(panel.setSessionReady).toHaveBeenCalledTimes(1)
   })
 
-  it('hashes a downloaded model only once before direct verified-buffer preparation', async () => {
+  it('preserves quota confirmation and requests revalidation after the Worker ownership round-trip', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const digestBytes = Uint8Array.from(
       '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81'
@@ -124,26 +127,36 @@ describe('OnnxWorkerClient', () => {
         },
       },
       {
-        fetchImpl: vi.fn(async () => new Response(new Uint8Array([1, 2, 3]))),
-        getAccessKey: async () => '',
+        fetchImpl: vi.fn(
+          async () =>
+            new Response(new Uint8Array([1, 2, 3]), {
+              headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: 'a'.repeat(32) },
+            }),
+        ),
+        getAccessKey: async () => 'b'.repeat(64),
       },
     )
+    let returnedConfirmation: ReturnType<typeof getModelDownloadConfirmation> = undefined
     const modelCache = {
       getCached: vi.fn(),
       download: vi.fn(),
-      putCached: vi.fn(async () => undefined),
+      putCached: vi.fn(async (buffer: ArrayBuffer) => {
+        returnedConfirmation = getModelDownloadConfirmation(buffer)
+      }),
     } as unknown as ModelCache
     const client = new OnnxWorkerClient(modelCache, createMockPanel())
 
     await client.prepareFromVerifiedModel(modelBuffer)
 
     expect(digest).toHaveBeenCalledTimes(1)
-    expect(modelCache.putCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true, true, expect.any(AbortSignal))
+    expect(returnedConfirmation).toMatchObject({ receiptId: 'a'.repeat(32), accessKey: 'b'.repeat(64) })
+    expect(modelCache.putCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true, false, expect.any(AbortSignal))
   })
 
   it('sends a fixed init message shape when worker init succeeds', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+    const sliceSpy = vi.spyOn(ArrayBuffer.prototype, 'slice')
     const putCached = vi.fn(async (buffer: ArrayBuffer) => {
       expect(buffer.byteLength).toBe(4)
       expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3, 4])
@@ -158,8 +171,9 @@ describe('OnnxWorkerClient', () => {
     await client.prepare()
 
     expect(modelCache.download).toHaveBeenCalledTimes(1)
+    expect(sliceSpy).not.toHaveBeenCalled()
     expect(putCached).toHaveBeenCalledTimes(1)
-    expect(putCached).toHaveBeenCalledWith(modelBuffer, true, true, expect.any(AbortSignal))
+    expect(putCached).toHaveBeenCalledWith(expect.any(ArrayBuffer), true, false, expect.any(AbortSignal))
     expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init', modelBuffer })
     expect(SuccessfulWorker.messages[0]).not.toHaveProperty('wasmPath')
     expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')

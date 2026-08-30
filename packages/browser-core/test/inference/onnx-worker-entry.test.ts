@@ -59,6 +59,73 @@ afterEach(() => {
 })
 
 describe('startOnnxWorker', () => {
+  it('returns the initialized model buffer to the caller without copying it', async () => {
+    const { runtime } = createRuntime(() => ({ run: vi.fn(), release: vi.fn(async () => undefined) }))
+    const postMessage = vi.fn()
+    vi.stubGlobal('postMessage', postMessage)
+    startOnnxWorker(runtime, vi.fn())
+    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
+
+    sendWorkerRequest({ type: 'init', requestId: 1, modelBuffer })
+
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    expect(postMessage).toHaveBeenCalledWith({ type: 'response', requestId: 1, modelBuffer }, [modelBuffer])
+  })
+
+  it('serializes overlapping detects before reusing the shared input buffer', async () => {
+    installImageRuntime()
+    const runResolvers: Array<(outputs: object) => void> = []
+    const run = vi.fn(
+      () =>
+        new Promise<object>((resolve) => {
+          runResolvers.push(resolve)
+        }),
+    )
+    const { runtime } = createRuntime(() => ({ run, release: vi.fn(async () => undefined) }))
+    const postMessage = vi.fn()
+    vi.stubGlobal('postMessage', postMessage)
+    startOnnxWorker(runtime, vi.fn())
+
+    sendWorkerRequest({ type: 'init', requestId: 1, modelBuffer: new ArrayBuffer(4) })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    sendWorkerRequest({ type: 'detect', requestId: 2, imageBlob: new Blob([new Uint8Array([0x00])]) })
+    sendWorkerRequest({ type: 'detect', requestId: 3, imageBlob: new Blob([new Uint8Array([0x00])]) })
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(run).toHaveBeenCalledTimes(1)
+    runResolvers[0]?.({
+      output0: { data: new Float32Array([0, 0, 0, 0, 0.95, 0]), dims: [1, 6] },
+    })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    runResolvers[1]?.({
+      output0: { data: new Float32Array([0, 0, 0, 0, 0.95, 0]), dims: [1, 6] },
+    })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(3))
+  })
+
+  it('rejects malformed requests before touching inference state', async () => {
+    installImageRuntime()
+    const run = vi.fn()
+    const { runtime, create } = createRuntime(() => ({ run, release: vi.fn(async () => undefined) }))
+    const postMessage = vi.fn()
+    vi.stubGlobal('postMessage', postMessage)
+    startOnnxWorker(runtime, vi.fn())
+
+    sendWorkerRequest({ type: 'detect', requestId: 7 })
+
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'error',
+      requestId: 7,
+      message: 'ONNX Worker 请求格式无效',
+    })
+    expect(create).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
+    expect(globalThis.createImageBitmap).not.toHaveBeenCalled()
+  })
+
   it('marks session.run failures fatal and releases the unusable session', async () => {
     installImageRuntime()
     const release = vi.fn(async () => undefined)

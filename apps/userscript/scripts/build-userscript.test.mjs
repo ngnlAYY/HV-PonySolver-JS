@@ -24,6 +24,9 @@ const runtimeManifest = {
   externalFullRuntime: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
     wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/',
+    byteLength: 360_434,
+    sha256: 'b'.repeat(64),
+    maxByteLength: 400_000,
   },
   wasmAsset: {
     url: 'https://models.example/runtime/ort-wasm-hash.wasm',
@@ -80,6 +83,9 @@ test('build options select external full and bundled minimal runtime providers',
   assert.deepEqual(externalWorker.define, {
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.scriptUrl),
     __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BASE_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmBaseUrl),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.byteLength),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.sha256),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.maxByteLength),
   })
 
   const bundledWorker = createWorkerBuildOptions({
@@ -137,11 +143,10 @@ test('default build downloads the pinned full runtime and excludes minimal runti
   assert.doesNotMatch(result.output, /models\.ngnl\.host\/runtime\/ort-wasm-simd-/)
   const metafile = JSON.parse(result.metafile)
   const workerOutput = Object.values(metafile.worker.outputs)[0]
-  // Baseline 2026-08: the external-profile worker glue measures ~20.6KB after
-  // the browser-core inference/model hardening landed (the clean main baseline
-  // was already ~21.1KB), so the historical 20000B cap fails on main too.
-  // Raised to 25000B for roughly 20% headroom over the measured size.
-  assert.ok(workerOutput.bytes < 25_000, `external worker bundle ${workerOutput.bytes} bytes exceeds 25000`)
+  // Baseline 2026-08: the verified external-runtime loader and bounded startup
+  // queue measure ~26.4KB unminified. Keep roughly 20% headroom without making
+  // the default userscript absorb the 360KB third-party runtime itself.
+  assert.ok(workerOutput.bytes < 32_000, `external worker bundle ${workerOutput.bytes} bytes exceeds 32000`)
 })
 
 test('bundled build embeds the custom glue and uses the verified first-party minimal WASM', async () => {

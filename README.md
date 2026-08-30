@@ -150,9 +150,9 @@ Cloudflare Model Worker
 | ------------ | ----------------------------------- | --------------------------------------- |
 | profile 名称 | `external`                          | `bundled`                               |
 | 构建命令     | `build`                             | `build:bundled-runtime`                 |
-| JS 运行时    | 从 jsDelivr 加载 `ort.min.js`       | 构建时内置精简 glue                     |
+| JS 运行时    | 下载并校验 jsDelivr `ort.min.js`    | 构建时内置精简 glue                     |
 | WASM         | 从 jsDelivr `dist/` 加载完整版 WASM | 从 `models.ngnl.host` 下载内容寻址 WASM |
-| WASM 校验    | 依赖固定版本 CDN                    | 最大长度、精确长度和 SHA-256            |
+| 内容校验     | JS 校验长度/SHA；WASM 依赖固定 CDN  | WASM 最大长度、精确长度和 SHA-256       |
 | 自动回退     | 无                                  | 无                                      |
 | 包体预算     | `256 KiB`                           | `1 MiB`                                 |
 
@@ -167,13 +167,21 @@ https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js
 https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/
 ```
 
-ONNX 推理 Worker 使用 `importScripts()` 加载 `ort.min.js`，并设置：
+默认 JS 运行时还固定以下原子契约：
+
+| 字段                                | 值                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| `externalFullRuntime.byteLength`    | `360,434`                                                          |
+| `externalFullRuntime.sha256`        | `de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5` |
+| `externalFullRuntime.maxByteLength` | `400,000`                                                          |
+
+ONNX 推理 Worker 以 `redirect: error` 下载 `ort.min.js`，限制声明/实际大小，并对解压后的实际字节执行精确长度与 SHA-256 校验；只有校验成功后才创建临时 Blob URL 并调用 `importScripts()`。启动期间最多暂存两个请求，失败后立即拒绝已排队及后续请求。运行时随后设置：
 
 - `numThreads = 1`
 - `proxy = false`
 - WASM Execution Provider
 
-该模式不会下载项目生成的精简 WASM，也不会在 CDN 失败时切换到内置精简版。固定版本 URL 降低了版本漂移，但远程 JS 和完整版 WASM 仍属于外部 CDN 信任边界。
+该模式不会下载项目生成的精简 WASM，也不会在 CDN 或完整性校验失败时切换到内置精简版。远程 JS 已由固定字节身份保护；完整版 WASM 仍由 ORT 按固定版本路径加载，因此仍属于外部 CDN 信任边界。
 
 ### 显式内置精简版
 
@@ -349,7 +357,8 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 | `pnpm bundle:check:default`                                 | 检查当前产物的默认 profile 预算                                                                                                              |
 | `pnpm bundle:check:bundled`                                 | 检查当前产物的内置 profile 预算                                                                                                              |
 | `pnpm benchmark:inference`                                  | 执行推理预处理和解析基准，不作为 CI 性能门槛                                                                                                 |
-| `pnpm benchmark:extension`                                  | 执行默认代表性浏览器 transport microbenchmark；不宣称扩展 remote/packaged、cold/warm 或推理性能                                              |
+| `pnpm benchmark:extension`                                  | 执行有界 Chromium CI transport smoke（4 个场景、1,600 次操作、约 201 MiB 负载）；不作为性能比较证据                                          |
+| `pnpm benchmark:extension:full`                             | 显式执行代表性双浏览器矩阵（16 个场景、343,200 次操作、约 335 GiB 负载）；仅用于有意的本地基线/候选比较                                      |
 | `pnpm benchmark:extension:quick`                            | 执行降低采样的 Chromium transport smoke；不能作为性能比较证据                                                                                |
 | `pnpm benchmark:extension:exhaustive`                       | 显式执行完整 transport 尺寸矩阵；成本显著高于默认代表性矩阵                                                                                  |
 | `pnpm test:e2e`                                             | 执行用户脚本 Playwright Chromium 测试                                                                                                        |
@@ -383,6 +392,8 @@ pnpm --filter @hv-pony-solver/userscript verify:onnx-runtime
 
 ```bash
 pnpm --filter @hv-pony-solver/extension benchmark
+pnpm --filter @hv-pony-solver/extension benchmark:ci
+pnpm --filter @hv-pony-solver/extension benchmark:full
 pnpm --filter @hv-pony-solver/extension benchmark:quick
 pnpm --filter @hv-pony-solver/extension benchmark:exhaustive
 pnpm --filter @hv-pony-solver/extension benchmark:compare -- BASELINE_JSON CANDIDATE_JSON [OUTPUT_JSON]
@@ -670,7 +681,7 @@ pnpm --filter @hv-pony-solver/model-worker check:deployment
 
 旧版 ONNX 模型清单由 `MODEL_VERSION`、`MODEL_INTEGRITY.byteLength` 和 `MODEL_INTEGRITY.sha256` 组成。`MODEL_FILE` 指定本地校验文件，`verify-model-integrity` 执行字节长度和 SHA-256 校验。新版 ORT 使用独立的共享资产清单，不覆盖旧版契约。
 
-ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFullRuntime` 对应默认外置完整版，`bundledMinimalRuntime` 对应显式内置精简版。构建 glue 使用 `bundleAsset.byteLength`、`bundleAsset.sha256` 和 `bundleAsset.maxByteLength`；首方 WASM 使用 `wasmAsset.url`、`wasmAsset.byteLength`、`wasmAsset.sha256` 和 `wasmAsset.maxByteLength`。相关入口为 `build:onnx-runtime` 与 `verify:onnx-runtime`。
+ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFullRuntime` 对应默认外置完整版，`bundledMinimalRuntime` 对应显式内置精简版。默认外置 JS 使用 `externalFullRuntime.byteLength`、`externalFullRuntime.sha256` 和 `externalFullRuntime.maxByteLength`；构建 glue 使用 `bundleAsset.byteLength`、`bundleAsset.sha256` 和 `bundleAsset.maxByteLength`；首方 WASM 使用 `wasmAsset.url`、`wasmAsset.byteLength`、`wasmAsset.sha256` 和 `wasmAsset.maxByteLength`。相关入口为 `build:onnx-runtime` 与 `verify:onnx-runtime`。
 
 `architecture:check` 保护关键依赖边界：`inferenceTimeoutConfig` 继续集中管理异步超时，`StatusPanel` 继续负责 UI 状态输出，`Model Worker Core` 继续与 Userscript 浏览器代码隔离。
 
@@ -718,7 +729,7 @@ pnpm verify:onnx-runtime
 - 默认外部 profile 构建及 `256 KiB` 预算。
 - 显式内置 profile 构建及 `1 MiB` 预算。
 - Pull Request 和 `main` push 执行用户脚本 Playwright Chromium E2E；手动运行由 `run_userscript_e2e` 控制。
-- 执行扩展内容脚本、远程模型 Chromium/Firefox 加载、内置模型双浏览器推理及 Chromium 116/Firefox 140 精确最低版本门禁。
+- 扩展 job 只构建一次远程产物并复用于有界 transport 基准与 Chromium/Firefox 加载检查；另执行内容脚本、内置模型双浏览器推理及 Chromium 116/Firefox 140 精确最低版本门禁。
 - 受仓库变量和受保护环境控制的真实远程模型与 canonical 内置模型门禁；缺少生产配置时明确跳过，不能冒充已验证。
 - 手动选择 `publish_userscript_artifact`、`publish_extension_artifact` 或 `publish_extension_release` 时执行对应发布门禁；三个选项默认都关闭。
 
@@ -740,11 +751,11 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - 不要把模型 token 写入 URL、日志、README、构建产物或公开配置。
 - 查询字符串密钥不会授权真实模型。
 - `@connect` 和 CORS 只允许网络访问，不代替 token 鉴权。
-- 默认外部 profile 信任固定版本的 jsDelivr 运行时资源。
-- 内置 profile 只对首方精简 WASM 执行内容完整性校验。
+- 默认外部 profile 对 jsDelivr `ort.min.js` 拒绝重定向并校验最大长度、精确长度和 SHA-256；完整版 WASM 仍信任固定版本的 jsDelivr 路径。
+- 内置 profile 对首方精简 glue 和 WASM 执行固定资产身份与内容完整性校验。
 - 扩展产物不加载远程 JS/WASM；ORT glue、module Worker 和内容寻址 WASM 均随包分发。远程 `.ort` 下载和包内 `.ort` 都按固定长度与 SHA-256 校验；包内模型不加密，也不具备机密性。
 - 扩展内容脚本不接收模型 Key 或模型字节。远程版本只有设置页可发起 Key 验证和模型下载请求；内置版本不构建 Key 存储、验证或远程下载能力。
-- 验证码图片为兼容扩展 JSON 消息边界继续使用有上限的 Base64；模型从 Host 以一次可转移的二进制 `ArrayBuffer` 交给推理 Worker，不使用 Base64 或分片。
+- 验证码图片为兼容扩展 JSON 消息边界继续使用有上限的 Base64；模型从 Host 以可转移的二进制 `ArrayBuffer` 交给推理 Worker，初始化后由 Worker 转回同一所有权供缓存，避免在 JS 堆中显式复制整份模型；模型不使用 Base64 或分片。
 - 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致。
 - 原始 Key、规范化 Key、配额对象标识和配额状态均不得写入日志或响应。
 - `decoy` 模式的未鉴权 `200` 不表示真实模型泄漏。
@@ -770,7 +781,7 @@ corepack pnpm install
 cdn.jsdelivr.net
 ```
 
-默认 profile 没有内置回退。需要绕过完整版 CDN JS 时，应改用显式内置构建；内置构建仍需要访问 `models.ngnl.host` 下载精简 WASM 和 `.ort` 模型。
+默认 profile 没有内置回退。若错误提示运行时大小或 SHA-256 校验失败，应先确认固定 URL 未重定向，且实际解压字节仍匹配 `externalFullRuntime.byteLength` 与 `externalFullRuntime.sha256`；不要放宽上限或跳过校验。需要绕过完整版 CDN JS 时，应改用显式内置构建；内置构建仍需要访问 `models.ngnl.host` 下载精简 WASM 和 `.ort` 模型。
 
 ### 精简 WASM 初始化失败
 

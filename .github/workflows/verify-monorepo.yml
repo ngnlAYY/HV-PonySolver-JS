@@ -305,11 +305,8 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-extension-browsers-${{ steps.playwright-version.outputs.version }}
 
-      - name: Install Playwright Chromium
-        run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps chromium
-
-      - name: Install Playwright Firefox
-        run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps firefox
+      - name: Install Playwright Chromium and Firefox
+        run: pnpm --filter @hv-pony-solver/extension exec playwright install --with-deps chromium firefox
 
       - name: Install pinned geckodriver
         id: geckodriver
@@ -318,13 +315,19 @@ jobs:
       - name: Extension content E2E smoke
         run: pnpm test:e2e:extension:content
 
+      - name: Build remote extension once for desktop smokes
+        run: pnpm --filter @hv-pony-solver/extension build
+
+      - name: Bounded extension transport benchmark smoke
+        run: pnpm --filter @hv-pony-solver/extension benchmark:ci
+
       - name: Chromium production remote extension load-only smoke
-        run: pnpm test:e2e:extension:chromium:load-only
+        run: pnpm --filter @hv-pony-solver/extension test:e2e:chromium:load-only
 
       - name: Firefox production remote extension load-only smoke
         env:
           GECKODRIVER_PATH: ${{ steps.geckodriver.outputs.path }}
-        run: pnpm test:e2e:extension:firefox:load-only
+        run: pnpm --filter @hv-pony-solver/extension test:e2e:firefox:load-only
 
   extension-remote-authenticated-e2e:
     needs: guardrails

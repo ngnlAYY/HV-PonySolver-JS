@@ -43,11 +43,19 @@ export type WorkerInitRequest = WorkerInitRequestPayload & Readonly<{ requestId:
 export type WorkerDetectRequest = WorkerDetectRequestPayload & Readonly<{ requestId: number }>
 export type WorkerRequest = WorkerInitRequest | WorkerDetectRequest
 
-export type WorkerResponse = Readonly<{
+export type WorkerInitResponse = Readonly<{
   type: 'response'
   requestId: number
-  result?: YoloParseResult
+  modelBuffer: ArrayBuffer
 }>
+
+export type WorkerDetectResponse = Readonly<{
+  type: 'response'
+  requestId: number
+  result: YoloParseResult
+}>
+
+export type WorkerResponse = WorkerInitResponse | WorkerDetectResponse
 
 export type WorkerErrorResponse = Readonly<{
   type: 'error'

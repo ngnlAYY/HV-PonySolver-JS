@@ -7,6 +7,9 @@ export const ONNX_RUNTIME_ASSETS = {
   externalFullRuntime: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
     wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/',
+    byteLength: 360_434,
+    sha256: 'de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5',
+    maxByteLength: 400_000,
   },
   bundleAsset: {
     path: 'apps/userscript/vendor/onnxruntime/ort.wasm.bundle.min.mjs',

@@ -28,10 +28,11 @@ describe('WorkerRequestBridge', () => {
     const worker = new ManualWorker()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, () => undefined)
     const promise = bridge.post({ type: 'init', modelBuffer: new ArrayBuffer(1) }, [])
+    const returnedModelBuffer = new ArrayBuffer(1)
 
-    worker.onmessage?.({ data: { type: 'response', requestId: 1 } } as MessageEvent)
+    worker.onmessage?.({ data: { type: 'response', requestId: 1, modelBuffer: returnedModelBuffer } } as MessageEvent)
 
-    await expect(promise).resolves.toEqual({ type: 'response', requestId: 1 })
+    await expect(promise).resolves.toEqual({ type: 'response', requestId: 1, modelBuffer: returnedModelBuffer })
   })
 
   it('calls onFailure when postMessage throws synchronously', async () => {
@@ -87,6 +88,20 @@ describe('WorkerRequestBridge', () => {
     const promise = bridge.post({ type: 'detect', imageBlob: new Blob() }, [])
 
     worker.onmessage?.({ data: { type: 'unexpected', requestId: 1 } } as MessageEvent)
+
+    await expect(promise).rejects.toMatchObject({ message: 'ONNX Worker 返回无效消息', fatal: true })
+    expect(onFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a structurally invalid detect result as fatal', async () => {
+    const worker = new ManualWorker()
+    const onFailure = vi.fn()
+    const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
+    const promise = bridge.post({ type: 'detect', imageBlob: new Blob() }, [])
+
+    worker.onmessage?.({
+      data: { type: 'response', requestId: 1, result: { ...detectResult, ponies: ['UNKNOWN'] } },
+    } as MessageEvent)
 
     await expect(promise).rejects.toMatchObject({ message: 'ONNX Worker 返回无效消息', fatal: true })
     expect(onFailure).toHaveBeenCalledTimes(1)

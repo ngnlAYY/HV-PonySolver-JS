@@ -822,6 +822,82 @@ describe('broker queue and privilege boundaries', () => {
     await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(2))
   })
 
+  it('serializes durable credential revisions so an older write cannot finish last', async () => {
+    vi.mocked(storageSet).mockReset()
+    let resolveFirstWrite: (() => void) | undefined
+    const firstWrite = new Promise<void>((resolve) => {
+      resolveFirstWrite = resolve
+    })
+    vi.mocked(storageSet)
+      .mockImplementationOnce(() => firstWrite)
+      .mockResolvedValueOnce(undefined)
+    const invokeHost = vi.fn(async (request: { requestId: string }): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    }))
+    registerBroker(invokeHost)
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(options)
+
+    options.emitMessage(verifyKeyRequest(10))
+    await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(1))
+    options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-11' })
+    await vi.waitFor(() =>
+      expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'clear-11', ok: true })),
+    )
+
+    expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(1)
+    resolveFirstWrite?.()
+    await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(2))
+
+    const firstRevision = vi.mocked(storageSet).mock.calls[0]![0].hvPonySolverModelCredentialsRevision
+    const secondRevision = vi.mocked(storageSet).mock.calls[1]![0].hvPonySolverModelCredentialsRevision
+    expect(secondRevision).not.toBe(firstRevision)
+  })
+
+  it('coalesces queued credential revisions while one durable write is stalled', async () => {
+    vi.mocked(storageSet).mockReset()
+    let resolveFirstWrite: (() => void) | undefined
+    vi.mocked(storageSet)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveFirstWrite = resolve
+          }),
+      )
+      .mockResolvedValue(undefined)
+    const invokeHost = vi.fn(async (request: { requestId: string }): Promise<HostResponse> => ({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: request.requestId,
+      ok: true,
+    }))
+    registerBroker(invokeHost)
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options.html',
+    })
+    platformMocks.connectListener?.(options)
+
+    options.emitMessage(verifyKeyRequest(20))
+    await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(1))
+    options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-21' })
+    options.emitMessage(verifyKeyRequest(22))
+    await vi.waitFor(() =>
+      expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'verify-22', ok: true })),
+    )
+
+    resolveFirstWrite?.()
+    await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(2))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(2)
+  })
+
   it('derives the broker detect deadline from the shared detect deadline config', async () => {
     const { DETECT_DEADLINE_CONFIG } = await import('../../src/protocol/deadlines')
     expect(BROKER_DETECT_TIMEOUT_MS).toBe(DETECT_DEADLINE_CONFIG.brokerTimeoutMs)

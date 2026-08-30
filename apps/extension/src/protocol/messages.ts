@@ -1,5 +1,5 @@
-import type { Detection, YoloParseResult } from '@hv-pony-solver/browser-core/inference/inference-types'
-import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
+import { isYoloParseResult } from '@hv-pony-solver/browser-core/inference/inference-result-guard'
+import type { YoloParseResult } from '@hv-pony-solver/browser-core/inference/inference-types'
 import { MODEL_ACCESS_TOKEN_PATTERN } from '@hv-pony-solver/shared/token'
 
 export const PROTOCOL_VERSION = 'hv-pony-solver/2' as const
@@ -196,39 +196,6 @@ export function isModelAccessKey(value: unknown): value is string {
   return typeof value === 'string' && MODEL_ACCESS_TOKEN_PATTERN.test(value.trim())
 }
 
-function isDetection(value: unknown): value is Detection {
-  return (
-    isRecord(value) &&
-    Number.isInteger(value.class_id) &&
-    typeof value.confidence === 'number' &&
-    Number.isFinite(value.confidence)
-  )
-}
-
-function isAnswerCode(value: unknown): value is AnswerCode {
-  return typeof value === 'string' && ANSWER_CODES.includes(value as AnswerCode)
-}
-
-function isYoloResult(value: unknown): value is YoloParseResult {
-  if (!isRecord(value) || typeof value.success !== 'boolean' || !Array.isArray(value.ponies)) {
-    return false
-  }
-  if (!value.ponies.every(isAnswerCode) || !isRecord(value.confidences)) {
-    return false
-  }
-  for (const [key, confidence] of Object.entries(value.confidences)) {
-    if (!isAnswerCode(key) || typeof confidence !== 'number' || !Number.isFinite(confidence)) {
-      return false
-    }
-  }
-  return (
-    Array.isArray(value.detections) &&
-    value.detections.every(isDetection) &&
-    Array.isArray(value.candidates) &&
-    value.candidates.every(isDetection)
-  )
-}
-
 export function isHostRequest(value: unknown): value is HostRequest {
   if (!isRecord(value) || value.protocol !== PROTOCOL_VERSION || !isRequestId(value.requestId)) {
     return false
@@ -284,7 +251,7 @@ export function isHostResponse(value: unknown): value is HostResponse {
     if (!hasAllowedKeys(value, ['protocol', 'type', 'requestId', 'ok'], ['result', 'notice'])) {
       return false
     }
-    if (value.result !== undefined && !isYoloResult(value.result)) {
+    if (value.result !== undefined && !isYoloParseResult(value.result)) {
       return false
     }
     return (

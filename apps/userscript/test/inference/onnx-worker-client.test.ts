@@ -58,7 +58,7 @@ describe('OnnxWorkerClient', () => {
 
     expect(modelCache.download).toHaveBeenCalledTimes(1)
     expect(putCached).toHaveBeenCalledTimes(1)
-    expect(putCached).toHaveBeenCalledWith(modelBuffer, true, true, expect.any(AbortSignal))
+    expect(putCached).toHaveBeenCalledWith(modelBuffer, true, false, expect.any(AbortSignal))
     expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init', modelBuffer })
     expect(SuccessfulWorker.messages[0]).not.toHaveProperty('wasmPath')
     expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')

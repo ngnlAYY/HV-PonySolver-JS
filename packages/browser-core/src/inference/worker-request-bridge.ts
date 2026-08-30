@@ -1,13 +1,62 @@
 import { inferenceTimeoutConfig } from './inference-config'
-import type { WorkerMessage, WorkerRequestPayload, WorkerResponse } from './inference-types'
+import { isYoloParseResult } from './inference-result-guard'
+import type {
+  WorkerDetectRequestPayload,
+  WorkerDetectResponse,
+  WorkerInitRequestPayload,
+  WorkerInitResponse,
+  WorkerRequestPayload,
+  WorkerResponse,
+} from './inference-types'
 import { formatErrorMessage } from '../utils/errors'
 import { isRecordObject } from '../utils/guards'
 
 type PendingRequest = Readonly<{
-  resolve: (message: WorkerMessage) => void
+  requestType: WorkerRequestPayload['type']
+  resolve: (message: WorkerResponse) => void
   reject: (error: unknown) => void
   timeoutId: ReturnType<typeof setTimeout>
 }>
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value)
+  return keys.length === expected.length && keys.every((key) => expected.includes(key))
+}
+
+function hasAllowedKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+): boolean {
+  const allowed = new Set([...required, ...optional])
+  return required.every((key) => key in value) && Object.keys(value).every((key) => allowed.has(key))
+}
+
+function isWorkerErrorResponse(message: Record<string, unknown>, requestId: number): boolean {
+  return (
+    message.type === 'error' &&
+    message.requestId === requestId &&
+    hasAllowedKeys(message, ['type', 'requestId', 'message'], ['fatal']) &&
+    typeof message.message === 'string' &&
+    message.message.length > 0 &&
+    message.message.length <= 1_000 &&
+    (message.fatal === undefined || typeof message.fatal === 'boolean')
+  )
+}
+
+function isWorkerResponse(
+  message: Record<string, unknown>,
+  requestId: number,
+  requestType: WorkerRequestPayload['type'],
+): message is WorkerResponse {
+  if (message.type !== 'response' || message.requestId !== requestId) {
+    return false
+  }
+  if (requestType === 'init') {
+    return hasExactKeys(message, ['type', 'requestId', 'modelBuffer']) && message.modelBuffer instanceof ArrayBuffer
+  }
+  return hasExactKeys(message, ['type', 'requestId', 'result']) && isYoloParseResult(message.result)
+}
 
 export class WorkerResponseError extends Error {
   readonly fatal: boolean
@@ -41,10 +90,12 @@ export class WorkerRequestBridge {
     this.worker.onmessage = (event: MessageEvent<unknown>) => this.handleMessage(event)
   }
 
+  post(message: WorkerInitRequestPayload, transfer?: Transferable[]): Promise<WorkerInitResponse>
+  post(message: WorkerDetectRequestPayload, transfer?: Transferable[]): Promise<WorkerDetectResponse>
   post(message: WorkerRequestPayload, transfer: Transferable[] = []): Promise<WorkerResponse> {
     const requestId = this.nextRequestId
     this.nextRequestId += 1
-    return new Promise<WorkerMessage>((resolve, reject) => {
+    return new Promise<WorkerResponse>((resolve, reject) => {
       const timeoutMs =
         message.type === 'init'
           ? inferenceTimeoutConfig.workerInitTimeoutMs
@@ -55,7 +106,7 @@ export class WorkerRequestBridge {
         reject(error)
         this.onFailure(error)
       }, timeoutMs)
-      this.requests.set(requestId, { resolve, reject, timeoutId })
+      this.requests.set(requestId, { requestType: message.type, resolve, reject, timeoutId })
       try {
         this.worker.postMessage({ ...message, requestId }, transfer)
       } catch (error) {
@@ -65,11 +116,6 @@ export class WorkerRequestBridge {
         this.onFailure(contextualError)
         reject(contextualError)
       }
-    }).then((response) => {
-      if (response.type === 'error') {
-        throw new WorkerResponseError(response.message || 'ONNX Worker 错误', response.fatal === true)
-      }
-      return response
     })
   }
 
@@ -88,24 +134,21 @@ export class WorkerRequestBridge {
     }
     this.requests.delete(requestId)
     clearTimeout(pending.timeoutId)
-    if (message.type === 'error') {
-      const error = new WorkerResponseError(
-        typeof message.message === 'string' && message.message ? message.message : 'ONNX Worker 错误',
-        message.fatal === true,
-      )
+    if (isWorkerErrorResponse(message, requestId)) {
+      const error = new WorkerResponseError(message.message as string, message.fatal === true)
       pending.reject(error)
       if (error.fatal) {
         this.onFailure(error)
       }
       return
     }
-    if (message.type !== 'response') {
+    if (!isWorkerResponse(message, requestId, pending.requestType)) {
       const error = new WorkerResponseError('ONNX Worker 返回无效消息', true)
       pending.reject(error)
       this.onFailure(error)
       return
     }
-    pending.resolve(message as WorkerMessage)
+    pending.resolve(message)
   }
 
   rejectPending(error: unknown): void {

@@ -19,6 +19,7 @@
     "bundle:check": "corepack pnpm --filter @hv-pony-solver/userscript build && corepack pnpm bundle:check:default",
     "benchmark:inference": "corepack pnpm --filter @hv-pony-solver/userscript benchmark:inference",
     "benchmark:extension": "corepack pnpm --filter @hv-pony-solver/extension benchmark",
+    "benchmark:extension:full": "corepack pnpm --filter @hv-pony-solver/extension benchmark:full",
     "benchmark:extension:quick": "corepack pnpm --filter @hv-pony-solver/extension benchmark:quick",
     "benchmark:extension:exhaustive": "corepack pnpm --filter @hv-pony-solver/extension benchmark:exhaustive",
     "release:notes": "node scripts/model-release-notes.mjs",

@@ -1,4 +1,11 @@
-import { HISTORY_ENTRY_PREFIX, HISTORY_KEY, HISTORY_MAX } from './answer-history-config'
+import {
+  HISTORY_ENTRY_MAX_LENGTH,
+  HISTORY_ENTRY_PREFIX,
+  HISTORY_KEY,
+  HISTORY_MAX,
+  HISTORY_ROOT_MAX_LENGTH,
+  HISTORY_TEXT_MAX_LENGTH,
+} from './answer-history-config'
 import type { HistoryRecord, HistoryRecordType, World } from './answer-history-types'
 import type { EnumerableTextStorage, TextStorage } from '../platform/storage'
 import { formatErrorMessage } from '../utils/errors'
@@ -21,28 +28,36 @@ function isHistoryRecordType(value: unknown): value is HistoryRecordType {
   return value === 'success' || value === 'manual' || value === 'random' || value === 'error'
 }
 
+function isBoundedHistoryText(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= HISTORY_TEXT_MAX_LENGTH
+}
+
 function isHistoryRecord(value: unknown): value is HistoryRecord {
-  if (!isRecordObject(value) || !isHistoryRecordType(value.type) || typeof value.elapsed !== 'number') {
+  if (!isRecordObject(value) || !isHistoryRecordType(value.type) || !Number.isFinite(value.elapsed)) {
     return false
   }
   const hasValidOptionalFields =
-    (value.timestamp === undefined || typeof value.timestamp === 'number') &&
-    (value.time === undefined || typeof value.time === 'string')
+    (value.timestamp === undefined || Number.isFinite(value.timestamp)) &&
+    (value.time === undefined || isBoundedHistoryText(value.time))
   if (!hasValidOptionalFields) {
     return false
   }
   if (value.type === 'success' || value.type === 'manual') {
-    return typeof value.answers === 'string'
+    return isBoundedHistoryText(value.answers)
   }
   if (value.type === 'random') {
-    return typeof value.answers === 'string' && typeof value.message === 'string'
+    return isBoundedHistoryText(value.answers) && isBoundedHistoryText(value.message)
   }
-  return typeof value.message === 'string'
+  return isBoundedHistoryText(value.message)
 }
 
 function parseHistoryRoot(storage: TextStorage): Record<string, unknown> | null {
   try {
-    const parsed: unknown = JSON.parse(storage.getItem(HISTORY_KEY) || '{}')
+    const raw = storage.getItem(HISTORY_KEY) || '{}'
+    if (raw.length > HISTORY_ROOT_MAX_LENGTH) {
+      return null
+    }
+    const parsed: unknown = JSON.parse(raw)
     return isRecordObject(parsed) ? parsed : null
   } catch {
     return null
@@ -51,7 +66,7 @@ function parseHistoryRoot(storage: TextStorage): Record<string, unknown> | null 
 
 function getWorldRecords(root: Record<string, unknown>, world: World): HistoryRecord[] {
   const records = root[world]
-  return Array.isArray(records) ? records.filter(isHistoryRecord) : []
+  return Array.isArray(records) ? records.filter(isHistoryRecord).slice(0, HISTORY_MAX) : []
 }
 
 function isEnumerableTextStorage(storage: TextStorage): storage is EnumerableTextStorage {
@@ -79,10 +94,27 @@ function createHistoryEntryId(): string {
 
 function completeRecord(record: HistoryRecord): HistoryRecord {
   const now = Date.now()
-  return {
-    timestamp: now,
-    time: new Date(now).toLocaleTimeString('zh-CN', { hour12: false }),
-    ...record,
+  const base = {
+    timestamp: typeof record.timestamp === 'number' && Number.isFinite(record.timestamp) ? record.timestamp : now,
+    time: (record.time ?? new Date(now).toLocaleTimeString('zh-CN', { hour12: false })).slice(
+      0,
+      HISTORY_TEXT_MAX_LENGTH,
+    ),
+    elapsed: record.elapsed,
+  }
+  switch (record.type) {
+    case 'success':
+    case 'manual':
+      return { ...base, type: record.type, answers: record.answers.slice(0, HISTORY_TEXT_MAX_LENGTH) }
+    case 'random':
+      return {
+        ...base,
+        type: record.type,
+        answers: record.answers.slice(0, HISTORY_TEXT_MAX_LENGTH),
+        message: record.message.slice(0, HISTORY_TEXT_MAX_LENGTH),
+      }
+    case 'error':
+      return { ...base, type: record.type, message: record.message.slice(0, HISTORY_TEXT_MAX_LENGTH) }
   }
 }
 
@@ -176,15 +208,26 @@ export class HistoryStore {
     }
   }
 
-  private getKeyedRecords(storage: EnumerableTextStorage, world: World): KeyedHistoryRecord[] {
+  private getKeyedRecords(
+    storage: EnumerableTextStorage,
+    world: World,
+    invalidKeys: string[] = [],
+  ): KeyedHistoryRecord[] {
     const records: KeyedHistoryRecord[] = []
     for (const [key, value] of storage.getItemsByPrefix(`${HISTORY_ENTRY_PREFIX}${world}:`)) {
       try {
+        if (value.length > HISTORY_ENTRY_MAX_LENGTH) {
+          invalidKeys.push(key)
+          continue
+        }
         const parsed: unknown = JSON.parse(value)
         if (isHistoryRecord(parsed)) {
           records.push({ key, record: parsed })
+        } else {
+          invalidKeys.push(key)
         }
       } catch (error) {
+        invalidKeys.push(key)
         warn('读取单条记录失败:', formatErrorMessage(error))
       }
     }
@@ -201,7 +244,7 @@ export class HistoryStore {
       return
     }
     try {
-      if (isRecordObject(JSON.parse(raw) as unknown)) {
+      if (raw.length <= HISTORY_ROOT_MAX_LENGTH && isRecordObject(JSON.parse(raw) as unknown)) {
         return
       }
     } catch {
@@ -215,8 +258,11 @@ export class HistoryStore {
   }
 
   private async trimKeyedHistory(storage: EnumerableTextStorage, world: World): Promise<void> {
-    const staleRecords = this.getKeyedRecords(storage, world).slice(HISTORY_MAX)
-    for (const { key } of staleRecords) {
+    const invalidKeys: string[] = []
+    const staleKeys = this.getKeyedRecords(storage, world, invalidKeys)
+      .slice(HISTORY_MAX)
+      .map(({ key }) => key)
+    for (const key of new Set([...invalidKeys, ...staleKeys])) {
       try {
         await storage.removeItem(key)
       } catch (error) {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
@@ -16,6 +17,7 @@ import {
   buildExtensions,
   buildPackagedFixtureExtensions,
   createManifest,
+  createTargetInventory,
   parseBuildArguments,
   verifyPackagedModelFile,
 } from './build-extension.mjs'
@@ -110,6 +112,39 @@ test('parses only one exact model-delivery selector in either CLI form', () => {
   assert.throws(() => parseBuildArguments(['--unknown']), /Unknown extension build argument/u)
   assert.throws(() => parseBuildArguments(['packaged']), /Unknown extension build argument/u)
   assert.throws(() => parseBuildArguments(['--model-mode=remote', '--model-mode', 'packaged']), /only once/u)
+})
+
+test('creates one sorted target inventory while excluding its self-referential build manifest', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-inventory-'))
+  try {
+    await mkdir(path.join(temporaryRoot, 'nested'))
+    await writeFile(path.join(temporaryRoot, 'z.txt'), 'last')
+    await writeFile(path.join(temporaryRoot, 'nested', 'a.txt'), 'first')
+    await writeFile(path.join(temporaryRoot, 'build-manifest.json'), '{}')
+    const reads = []
+
+    const inventory = await createTargetInventory(temporaryRoot, {
+      readFileImpl: async (filePath) => {
+        reads.push(filePath)
+        return readFile(filePath)
+      },
+    })
+
+    assert.deepEqual(
+      inventory.map(({ relativePath }) => relativePath),
+      ['nested/a.txt', 'z.txt'],
+    )
+    assert.equal(new Set(reads).size, 2)
+    assert.deepEqual(
+      inventory.map(({ byteLength, sha256: digest }) => ({ byteLength, sha256: digest })),
+      [
+        { byteLength: 5, sha256: sha256(Buffer.from('first')) },
+        { byteLength: 4, sha256: sha256(Buffer.from('last')) },
+      ],
+    )
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
 })
 
 test('guards recursive build cleanup with canonical allowed roots', async () => {

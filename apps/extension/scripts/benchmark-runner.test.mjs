@@ -8,7 +8,7 @@ import { TextEncoder } from 'node:util'
 
 import { zipSync } from 'fflate'
 
-import { findArtifactIdentity, parseArguments } from './benchmark-runner.mjs'
+import { estimateBenchmarkBudget, findArtifactIdentity, parseArguments } from './benchmark-runner.mjs'
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -67,6 +67,28 @@ test('uses transport-only representative defaults and an explicit exhaustive sel
   const exhaustive = parseArguments(['--exhaustive', '--dry-run'])
   assert.deepEqual(exhaustive.imageBytes, [1_024, 262_144, 2_097_152])
   assert.equal(exhaustive.matrixProfile, 'exhaustive')
+})
+
+test('provides a bounded CI transport profile and exposes the full-run work budget', () => {
+  const ci = parseArguments(['--ci'])
+  assert.deepEqual(ci.browsers, ['chromium'])
+  assert.deepEqual(ci.imageBytes, [1_024, 262_144])
+  assert.deepEqual(ci.iterations, [100])
+  assert.deepEqual(ci.patterns, ['sequential', 'burst'])
+  assert.equal(ci.invocations, 1)
+  assert.equal(ci.warmups, 1)
+  assert.equal(ci.samples, 3)
+  assert.equal(ci.allowReducedSampling, true)
+
+  const ciBudget = estimateBenchmarkBudget(ci)
+  assert.equal(ciBudget.scenarioCount, 4)
+  assert.equal(ciBudget.totalOperations, 1_600)
+  assert.ok(ciBudget.totalPayloadBytes <= 256 * 1024 * 1024)
+
+  const fullBudget = estimateBenchmarkBudget(parseArguments([]))
+  assert.equal(fullBudget.scenarioCount, 16)
+  assert.equal(fullBudget.totalOperations, 343_200)
+  assert.ok(fullBudget.totalPayloadBytes > 300 * 1024 * 1024 * 1024)
 })
 
 test('discovers and verifies artifact archive, model, WASM, and dynamic version provenance', async () => {

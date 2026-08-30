@@ -133,12 +133,45 @@ export function parseArguments(argumentsList) {
           allowReducedSampling: true,
         })
         break
+      case '--ci':
+        Object.assign(options, {
+          browsers: ['chromium'],
+          imageBytes: [1_024, 262_144],
+          iterations: [100],
+          patterns: ['sequential', 'burst'],
+          matrixProfile: 'custom',
+          invocations: 1,
+          warmups: 1,
+          samples: 3,
+          allowReducedSampling: true,
+        })
+        break
       default:
         throw new Error(`Unknown benchmark argument: ${argument}`)
     }
   }
   validateBenchmarkConfig(options, { allowReducedSampling: options.allowReducedSampling })
   return options
+}
+
+export function estimateBenchmarkBudget(options) {
+  const scenarios = buildScenarioMatrix(options)
+  const executionsPerScenario = options.invocations * (options.warmups + options.samples)
+  let totalOperations = 0
+  let totalPayloadBytes = 0
+  for (const scenario of scenarios) {
+    totalOperations += scenario.iterations * executionsPerScenario
+    totalPayloadBytes += scenario.imageBytes * scenario.iterations * executionsPerScenario
+  }
+  if (!Number.isSafeInteger(totalOperations) || !Number.isSafeInteger(totalPayloadBytes)) {
+    throw new Error('Benchmark work budget exceeds the safe integer range')
+  }
+  return {
+    scenarioCount: scenarios.length,
+    sampleExecutions: scenarios.length * executionsPerScenario,
+    totalOperations,
+    totalPayloadBytes,
+  }
 }
 
 function sha256(bytes) {
@@ -532,12 +565,16 @@ function resultConfig(options) {
 export async function main(argumentsList = process.argv.slice(2)) {
   const options = parseArguments(argumentsList)
   const matrix = buildScenarioMatrix(options)
+  const budget = estimateBenchmarkBudget(options)
   if (options.dryRun) {
     process.stdout.write(
-      `${JSON.stringify({ schemaVersion: benchmarkSchemaVersion, config: resultConfig(options), scenarios: matrix }, null, 2)}\n`,
+      `${JSON.stringify({ schemaVersion: benchmarkSchemaVersion, config: resultConfig(options), budget, scenarios: matrix }, null, 2)}\n`,
     )
     return
   }
+  process.stderr.write(
+    `Benchmark work budget: ${budget.scenarioCount} scenarios, ${budget.totalOperations} operations, ${budget.totalPayloadBytes} payload bytes\n`,
+  )
   const cpuList = os.cpus()
   const artifactByBrowser = new Map()
   for (const browser of options.browsers) {

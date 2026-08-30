@@ -48,7 +48,8 @@ export function parseRuntimeProfile(args) {
 }
 
 export function validateUserscriptMetadata(metadata) {
-  if (!metadata.startsWith('// ==UserScript==')) throw new Error('Userscript metadata must start with // ==UserScript==')
+  if (!metadata.startsWith('// ==UserScript=='))
+    throw new Error('Userscript metadata must start with // ==UserScript==')
   if (!metadata.endsWith('// ==/UserScript==')) throw new Error('Userscript metadata must end with // ==/UserScript==')
 }
 
@@ -126,6 +127,9 @@ export function createWorkerBuildOptions({
     define: {
       __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.scriptUrl),
       __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BASE_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmBaseUrl),
+      __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.byteLength),
+      __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.sha256),
+      __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.maxByteLength),
     },
   }
 }
@@ -157,7 +161,9 @@ async function main() {
   const args = process.argv.slice(2)
   const shouldMinify = parseMinifyFlag(args)
   const runtimeProfile = parseRuntimeProfile(args)
-  const outputPath = resolve(process.env.HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH || resolve(appDir, 'dist/hv-pony-solver.user.js'))
+  const outputPath = resolve(
+    process.env.HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH || resolve(appDir, 'dist/hv-pony-solver.user.js'),
+  )
   const metafilePath = process.env.HV_PONY_SOLVER_METAFILE_PATH
   const artifactManifestPath = process.env.HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH
   const artifactSha256Path = process.env.HV_PONY_SOLVER_ARTIFACT_SHA256_PATH

@@ -21,6 +21,11 @@ export type WorkerFactory = () => Worker
 type PreparationSource =
   Readonly<{ type: 'repository' }> | Readonly<{ type: 'verified-buffer'; modelBuffer: ArrayBuffer }>
 
+type LoadedModelBuffer = Readonly<{
+  modelBuffer: ArrayBuffer
+  cacheAfterInit: boolean
+}>
+
 type PreparationOperation = {
   readonly controller: AbortController
   /** The first caller decides whether the whole preparation stays off-panel. */
@@ -278,7 +283,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
 
     try {
       this.checkPreparation(controller)
-      const { modelBuffer, cacheBuffer } = await this.loadModelBuffer(controller, source)
+      const { modelBuffer, cacheAfterInit } = await this.loadModelBuffer(controller, source)
       this.checkPreparation(controller)
       const worker = this.spawnWorker()
       const bridge = this.requestBridge
@@ -288,10 +293,10 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       createdWorker = worker
       createdBridge = bridge
       this.ready = false
-      await this.initWorkerSession(worker, bridge, controller, modelBuffer)
+      const returnedModelBuffer = await this.initWorkerSession(worker, bridge, controller, modelBuffer)
       this.checkPreparation(controller, worker, bridge)
-      if (cacheBuffer) {
-        await this.cacheVerifiedBufferBestEffort(cacheBuffer, controller.signal)
+      if (cacheAfterInit) {
+        await this.cacheVerifiedBufferBestEffort(returnedModelBuffer, controller.signal)
       }
       this.checkPreparation(controller, worker, bridge)
       this.ready = true
@@ -331,16 +336,11 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     }
   }
 
-  private async loadModelBuffer(
-    controller: AbortController,
-    source: PreparationSource,
-  ): Promise<{ modelBuffer: ArrayBuffer; cacheBuffer: ArrayBuffer | null }> {
+  private async loadModelBuffer(controller: AbortController, source: PreparationSource): Promise<LoadedModelBuffer> {
     if (source.type === 'verified-buffer') {
-      const cacheBuffer = source.modelBuffer.slice(0)
-      copyModelDownloadConfirmation(source.modelBuffer, cacheBuffer)
       return {
         modelBuffer: source.modelBuffer,
-        cacheBuffer,
+        cacheAfterInit: true,
       }
     }
 
@@ -355,13 +355,9 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       (await raceAbort(this.modelCache.download(controller.signal), controller.signal, () =>
         signalError(controller.signal, '操作已取消'),
       ))
-    const cacheBuffer = cachedModel ? null : modelBuffer.slice(0)
-    if (cacheBuffer) {
-      copyModelDownloadConfirmation(modelBuffer, cacheBuffer)
-    }
     return {
       modelBuffer,
-      cacheBuffer,
+      cacheAfterInit: cachedModel === null,
     }
   }
 
@@ -381,9 +377,9 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     bridge: WorkerRequestBridge,
     controller: AbortController,
     modelBuffer: ArrayBuffer,
-  ): Promise<void> {
+  ): Promise<ArrayBuffer> {
     this.checkPreparation(controller, worker, bridge)
-    await raceAbort(
+    const response = await raceAbort(
       bridge.post(
         {
           type: 'init',
@@ -394,6 +390,8 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       controller.signal,
       () => signalError(controller.signal, '操作已取消'),
     )
+    copyModelDownloadConfirmation(modelBuffer, response.modelBuffer)
+    return response.modelBuffer
   }
 
   private async cacheVerifiedBufferBestEffort(buffer: ArrayBuffer, parentSignal?: AbortSignal): Promise<void> {
@@ -412,7 +410,10 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     }
 
     try {
-      await raceAbort(this.modelCache.putCached(buffer, true, true, controller.signal), controller.signal, () =>
+      // The Worker owned this mutable buffer while creating the session. Rehash
+      // the returned bytes before persistence instead of trusting their earlier
+      // download-time verification.
+      await raceAbort(this.modelCache.putCached(buffer, true, false, controller.signal), controller.signal, () =>
         signalError(controller.signal, '操作已取消'),
       )
     } catch {

@@ -389,12 +389,34 @@ async function walkFiles(root, current = root) {
   return files
 }
 
-async function writeBuildManifest(targetDirectory, target, metadata) {
-  const files = await walkFiles(targetDirectory)
+export async function createTargetInventory(targetDirectory, options = {}) {
+  const readFileImpl = options.readFileImpl ?? readFile
+  const files = (await walkFiles(targetDirectory)).filter(({ relativePath }) => relativePath !== 'build-manifest.json')
+  return Promise.all(
+    files.map(async (file) => {
+      const bytes = await readFileImpl(file.absolutePath)
+      return {
+        ...file,
+        bytes,
+        byteLength: bytes.byteLength,
+        sha256: sha256(bytes),
+      }
+    }),
+  )
+}
+
+function requireInventoryFile(inventory, relativePath) {
+  const file = inventory.find((candidate) => candidate.relativePath === relativePath)
+  if (!file) {
+    throw new Error(`Extension package is missing ${relativePath}`)
+  }
+  return file
+}
+
+async function writeBuildManifest(targetDirectory, target, metadata, inventory) {
   const fileRecords = {}
-  for (const file of files) {
-    const bytes = await readFile(file.absolutePath)
-    fileRecords[file.relativePath] = { byteLength: bytes.byteLength, sha256: sha256(bytes) }
+  for (const file of inventory) {
+    fileRecords[file.relativePath] = { byteLength: file.byteLength, sha256: file.sha256 }
   }
   await writeFile(
     path.join(targetDirectory, 'build-manifest.json'),
@@ -465,12 +487,12 @@ function auditHtmlSource(source, relativePath) {
   }
 }
 
-export async function auditBuiltExtension(targetDirectory, target, options = {}) {
+async function auditTargetInventory(target, options, files) {
   if (!extensionTargets.has(target)) {
     throw new Error(`Unsupported extension target: ${target}`)
   }
   const modelDelivery = normalizeModelDelivery(options.modelDelivery)
-  const manifest = JSON.parse(await readFile(path.join(targetDirectory, 'manifest.json'), 'utf8'))
+  const manifest = JSON.parse(requireInventoryFile(files, 'manifest.json').bytes.toString('utf8'))
   const expectedBackground =
     target === 'chromium' ? manifest.background?.service_worker : manifest.background?.scripts?.[0]
   if (expectedBackground !== 'background.js') {
@@ -498,7 +520,6 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
   if ('web_accessible_resources' in manifest) {
     throw new Error(`${target} package unexpectedly exposes a web-accessible resource`)
   }
-  const files = await walkFiles(targetDirectory)
   if (
     'icons' in manifest ||
     manifest.action?.default_icon !== undefined ||
@@ -538,15 +559,15 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
     if (ortFiles.length !== 1 || ortFiles[0]?.relativePath !== expectedModelPath) {
       throw new Error(`${target} packaged-model package must contain only ${expectedModelPath}`)
     }
-    verifyPackagedModelBytes(await readFile(ortFiles[0].absolutePath), expectedModel)
+    verifyPackagedModelBytes(ortFiles[0].bytes, expectedModel)
   }
   for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.html'))) {
-    const source = await readFile(file.absolutePath, 'utf8')
+    const source = file.bytes.toString('utf8')
     auditHtmlSource(source, file.relativePath)
   }
   const javascriptSources = []
   for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.js'))) {
-    const source = await readFile(file.absolutePath, 'utf8')
+    const source = file.bytes.toString('utf8')
     javascriptSources.push([file.relativePath, source])
     if (/\bimport\s*\(/u.test(source)) {
       throw new Error(`${file.relativePath} contains a dynamic import`)
@@ -579,6 +600,10 @@ export async function auditBuiltExtension(targetDirectory, target, options = {})
   }
 }
 
+export async function auditBuiltExtension(targetDirectory, target, options = {}) {
+  return auditTargetInventory(target, options, await createTargetInventory(targetDirectory))
+}
+
 function createBuildMetadata(modelDelivery, packagedModel, fixture) {
   return {
     modelDelivery,
@@ -593,15 +618,15 @@ function artifactBaseName(target, modelDelivery, fixture = false) {
   return `hv-pony-solver-${target}${modeSuffix}${fixtureSuffix}-${version}`
 }
 
-async function createArchive(targetDirectory, outputRoot, target, modelDelivery, fixture) {
-  const files = await walkFiles(targetDirectory)
+async function createArchive(targetDirectory, outputRoot, target, modelDelivery, fixture, inventory) {
   const entries = {}
-  for (const file of files) {
-    entries[file.relativePath] = [
-      new Uint8Array(await readFile(file.absolutePath)),
-      { mtime: deterministicZipTimestamp },
-    ]
+  for (const file of inventory) {
+    entries[file.relativePath] = [file.bytes, { mtime: deterministicZipTimestamp }]
   }
+  entries['build-manifest.json'] = [
+    await readFile(path.join(targetDirectory, 'build-manifest.json')),
+    { mtime: deterministicZipTimestamp },
+  ]
   const archiveName = `${artifactBaseName(target, modelDelivery, fixture)}.zip`
   const archiveBytes = zipSync(entries, { level: 9 })
   const archivePath = path.join(outputRoot, archiveName)
@@ -702,16 +727,21 @@ async function buildTarget(outputRoot, target, options = {}) {
     path.join(targetDirectory, 'manifest.json'),
     `${JSON.stringify(createManifest(target, { modelDelivery }), null, 2)}\n`,
   )
-  await auditBuiltExtension(targetDirectory, target, {
-    modelDelivery,
-    model: packagedModel?.identity,
-    metafiles: [extensionBuild.metafile, workerBuild.metafile],
-    fixture: options.fixture === true,
-  })
+  const inventory = await createTargetInventory(targetDirectory)
+  await auditTargetInventory(
+    target,
+    {
+      modelDelivery,
+      model: packagedModel?.identity,
+      metafiles: [extensionBuild.metafile, workerBuild.metafile],
+      fixture: options.fixture === true,
+    },
+    inventory,
+  )
   const metadata = createBuildMetadata(modelDelivery, packagedModel, options.fixture === true)
-  const files = await writeBuildManifest(targetDirectory, target, metadata)
+  const files = await writeBuildManifest(targetDirectory, target, metadata, inventory)
   const fixture = options.fixture === true
-  const archive = await createArchive(targetDirectory, outputRoot, target, modelDelivery, fixture)
+  const archive = await createArchive(targetDirectory, outputRoot, target, modelDelivery, fixture, inventory)
   await writeFile(
     path.join(outputRoot, `${artifactBaseName(target, modelDelivery, fixture)}.artifact.json`),
     `${JSON.stringify({ target, version, ...metadata, archive, files }, null, 2)}\n`,

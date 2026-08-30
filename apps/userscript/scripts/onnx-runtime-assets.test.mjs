@@ -21,8 +21,14 @@ const wasmSha = sha256(wasmBytes)
 test('parses the custom bundle and content-addressed first-party WASM contract', () => {
   const manifest = parseOnnxRuntimeAssetsManifest(manifestSource())
   assert.equal(manifest.packageVersion, '1.27.0')
-  assert.equal(manifest.externalFullRuntime.scriptUrl, 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js')
+  assert.equal(
+    manifest.externalFullRuntime.scriptUrl,
+    'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
+  )
   assert.equal(manifest.externalFullRuntime.wasmBaseUrl, 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/')
+  assert.equal(manifest.externalFullRuntime.byteLength, 360_434)
+  assert.equal(manifest.externalFullRuntime.sha256, 'c'.repeat(64))
+  assert.equal(manifest.externalFullRuntime.maxByteLength, 400_000)
   assert.equal(manifest.bundleAsset.sha256, sha256(bundleBytes))
   assert.equal(manifest.wasmAsset.filename, `ort-wasm-simd-${wasmSha}.wasm`)
   assert.equal(manifest.wasmAsset.url, `https://models.ngnl.host/runtime/ort-wasm-simd-${wasmSha}.wasm`)
@@ -30,14 +36,20 @@ test('parses the custom bundle and content-addressed first-party WASM contract',
 
 test('rejects non-content-addressed WASM filenames', () => {
   assert.throws(
-    () => parseOnnxRuntimeAssetsManifest(manifestSource().replaceAll(`ort-wasm-simd-${wasmSha}.wasm`, 'ort-wasm-simd.wasm')),
+    () =>
+      parseOnnxRuntimeAssetsManifest(
+        manifestSource().replaceAll(`ort-wasm-simd-${wasmSha}.wasm`, 'ort-wasm-simd.wasm'),
+      ),
     /not content-addressed/,
   )
 })
 
 test('rejects first-party URL drift', () => {
   assert.throws(
-    () => parseOnnxRuntimeAssetsManifest(manifestSource().replace('https://models.ngnl.host/runtime/', 'https://cdn.example/runtime/')),
+    () =>
+      parseOnnxRuntimeAssetsManifest(
+        manifestSource().replace('https://models.ngnl.host/runtime/', 'https://cdn.example/runtime/'),
+      ),
     /URL drift/,
   )
 })
@@ -46,6 +58,17 @@ test('rejects external full runtime URL drift', () => {
   assert.throws(
     () => parseOnnxRuntimeAssetsManifest(manifestSource().replace('cdn.jsdelivr.net', 'cdn.example')),
     /External ONNX Runtime script URL drift/,
+  )
+})
+
+test('rejects an invalid or over-budget external full runtime integrity contract', () => {
+  assert.throws(
+    () => parseOnnxRuntimeAssetsManifest(manifestSource().replace(`sha256: '${'c'.repeat(64)}'`, "sha256: 'bad'")),
+    /externalFullRuntime\.sha256/,
+  )
+  assert.throws(
+    () => parseOnnxRuntimeAssetsManifest(manifestSource().replace('maxByteLength: 400_000', 'maxByteLength: 300_000')),
+    /external full runtime exceeds maxByteLength/,
   )
 })
 
@@ -76,6 +99,9 @@ function manifestSource() {
   externalFullRuntime: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
     wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/',
+    byteLength: 360_434,
+    sha256: '${'c'.repeat(64)}',
+    maxByteLength: 400_000,
   },
   bundleAsset: {
     path: 'apps/userscript/vendor/onnxruntime/ort.wasm.bundle.min.mjs',

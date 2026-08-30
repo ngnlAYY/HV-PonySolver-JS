@@ -116,6 +116,47 @@ describe('HistoryStore', () => {
     expect(records[49]).toMatchObject({ answers: 'P1' })
   })
 
+  it('caps oversized legacy storage on read without requiring another write', () => {
+    const records = Array.from({ length: 51 }, (_, index) => ({
+      type: 'success',
+      answers: `P${index}`,
+      elapsed: index,
+    }))
+    localStorage.setItem(HISTORY_KEY, JSON.stringify({ main: records }))
+
+    expect(new HistoryStore(localStorage).get('main')).toEqual(records.slice(0, 50))
+  })
+
+  it('drops records whose persisted text fields exceed the defensive bound', () => {
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify({
+        main: [
+          validSuccessRecord,
+          { type: 'success', answers: 'x'.repeat(1_025), elapsed: 1 },
+          { type: 'error', message: 'x'.repeat(1_025), elapsed: 1 },
+        ],
+      }),
+    )
+
+    expect(new HistoryStore(localStorage).get('main')).toEqual([validSuccessRecord])
+  })
+
+  it('bounds text before exposing or persisting a new record', async () => {
+    const storage = new MemoryEnumerableStorage()
+    const store = new HistoryStore(storage, () => 'bounded-record')
+    const oversizedMessage = '错'.repeat(1_025)
+
+    const mutation = store.add('main', { type: 'error', message: oversizedMessage, elapsed: 1 })
+
+    expect(mutation.records[0]).toMatchObject({ message: oversizedMessage.slice(0, 1_024) })
+    await mutation.persisted
+    const persisted = JSON.parse(
+      storage.values.get(`${HISTORY_ENTRY_PREFIX}main:bounded-record`) ?? '',
+    ) as HistoryRecord
+    expect(persisted).toMatchObject({ message: oversizedMessage.slice(0, 1_024) })
+  })
+
   it('uses individual keys for enumerable storage and removes a corrupted legacy root', async () => {
     const storage = new MemoryEnumerableStorage()
     storage.values.set(HISTORY_KEY, '{bad json')
@@ -126,6 +167,7 @@ describe('HistoryStore', () => {
     await expect(mutation.persisted).resolves.toMatchObject([{ answers: 'TS' }])
 
     expect(storage.values.has(HISTORY_KEY)).toBe(false)
+    expect(storage.values.has(`${HISTORY_ENTRY_PREFIX}main:invalid`)).toBe(false)
     expect(storage.values.has(`${HISTORY_ENTRY_PREFIX}main:new-record`)).toBe(true)
     expect(store.get('main')).toMatchObject([{ answers: 'TS' }])
   })

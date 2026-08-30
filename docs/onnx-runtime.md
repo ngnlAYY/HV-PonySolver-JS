@@ -1,6 +1,6 @@
 # 精简 ONNX Runtime Web
 
-最后复核：2026-08-25。
+最后复核：2026-08-30。
 
 当前用户脚本只使用 ORT 格式模型；既有旧版用户脚本仍请求 legacy ONNX 路径。Model Worker 同时保留两个精确路由，不重定向，也不自动协商格式。浏览器扩展始终随包分发精简 glue 和 WASM，不使用本页所述的用户脚本运行时 profile 切换。
 
@@ -10,6 +10,8 @@
 
 - `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js`
 - `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/`
+
+外置 `ort.min.js` 的解压后身份固定为 `360,434` 字节、SHA-256 `de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5`，最大允许 `400,000` 字节。Worker 使用 `redirect: error` 下载，先约束声明/实际大小，再验证精确长度和哈希，成功后才通过临时 Blob URL 执行；失败不会执行响应内容，也不会回退。启动期间的请求队列上限为两个。完整版 WASM 仍由 ORT 从上述固定 `dist/` 路径加载，没有独立内容哈希。
 
 显式 `build:bundled-runtime` profile 内置项目构建的精简 JS glue。其 Worker 只从 `models.ngnl.host` 下载内容寻址的精简 WASM，校验字节长度和 SHA-256 后赋给 `ort.env.wasm.wasmBinary`。两个 profile 使用同一份远程 ORT 模型和 WASM Execution Provider；运行时与模型格式都没有自动回退。
 

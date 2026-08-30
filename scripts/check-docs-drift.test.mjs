@@ -238,6 +238,9 @@ test('fails clearly when README omits ONNX Runtime asset manifest field names', 
       readmePath,
       readme
         .replaceAll('ONNX_RUNTIME_ASSETS', 'ONNX Runtime assets')
+        .replaceAll('externalFullRuntime.byteLength', 'external full runtime byte length')
+        .replaceAll('externalFullRuntime.sha256', 'external full runtime sha256')
+        .replaceAll('externalFullRuntime.maxByteLength', 'external full runtime max byte length')
         .replaceAll('bundleAsset.byteLength', 'bundle asset byte length')
         .replaceAll('bundleAsset.sha256', 'bundle asset sha256')
         .replaceAll('bundleAsset.maxByteLength', 'bundle asset max byte length')
@@ -249,6 +252,9 @@ test('fails clearly when README omits ONNX Runtime asset manifest field names', 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /README.md.*ONNX_RUNTIME_ASSETS/s)
+    assert.match(result.stderr, /README.md.*externalFullRuntime\.byteLength/s)
+    assert.match(result.stderr, /README.md.*externalFullRuntime\.sha256/s)
+    assert.match(result.stderr, /README.md.*externalFullRuntime\.maxByteLength/s)
     assert.match(result.stderr, /README.md.*bundleAsset\.byteLength/s)
     assert.match(result.stderr, /README.md.*bundleAsset\.sha256/s)
     assert.match(result.stderr, /README.md.*bundleAsset\.maxByteLength/s)
