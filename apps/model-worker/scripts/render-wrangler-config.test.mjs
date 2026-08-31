@@ -14,6 +14,18 @@ const repoRoot = resolve(workerDir, '../..')
 const validKvNamespaceId = '0123456789abcdef0123456789abcdef'
 const validBucketName = 'bucket-prod'
 
+test('package coverage runs the Model Worker deployment-script tests under Node coverage', async () => {
+  const packageJson = JSON.parse(await readFile(join(workerDir, 'package.json'), 'utf8'))
+  const coverageCommand = packageJson.scripts?.['test:coverage'] ?? ''
+
+  assert.match(coverageCommand, /--experimental-test-coverage/u)
+  assert.match(coverageCommand, /scripts\/wrangler-config-renderer\.mjs/u)
+  assert.match(coverageCommand, /scripts\/wrangler-config-guard\.mjs/u)
+  assert.match(coverageCommand, /scripts\/check-deployment-contract\.mjs/u)
+  assert.match(coverageCommand, /scripts\/render-wrangler-config\.test\.mjs/u)
+  assert.match(coverageCommand, /scripts\/check-deployment-contract\.test\.mjs/u)
+})
+
 async function withTempWorker(callback) {
   // Mirror the repository layout (apps/model-worker plus the shared scripts/lib) so the
   // copied scripts keep resolving their cross-package imports.

@@ -367,7 +367,7 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 | `pnpm benchmark:extension:full`                             | 显式执行代表性双浏览器矩阵（16 个场景、343,200 次操作、约 335 GiB 负载）；仅用于有意的本地基线/候选比较                                      |
 | `pnpm benchmark:extension:quick`                            | 执行降低采样的 Chromium transport smoke；不能作为性能比较证据                                                                                |
 | `pnpm benchmark:extension:exhaustive`                       | 显式执行完整 transport 尺寸矩阵；成本显著高于默认代表性矩阵                                                                                  |
-| `pnpm test:e2e`                                             | 执行用户脚本 Playwright Chromium 测试                                                                                                        |
+| `pnpm test:e2e:userscript`                                  | 执行用户脚本 Playwright Chromium 测试                                                                                                        |
 | `pnpm test:e2e:extension:content`                           | 加载临时 Chromium 扩展并执行确定性内容脚本整链 fixture                                                                                       |
 | `pnpm test:e2e:extension:chromium:load-only`                | 加载生产远程 Chromium 产物，仅验证加载与普通设置，不声称已验证远程模型                                                                       |
 | `pnpm test:e2e:extension:chromium:authenticated`            | 从受保护环境读取 `KvKey`，验证真实模型后至少执行一次 `detect`；缺少 Key 时 fail closed                                                       |
@@ -455,7 +455,7 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 pnpm build:onnx-runtime
 ```
 
-脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`，并把内容寻址 WASM 复制到 `${ORT_RUNTIME_OUTPUT_DIR:-other}`。`ORT_BUILD_ROOT` 会先解析现存祖先目录和符号链接，规范化后的最终目录名必须匹配 `hv-pony-ort-*`，且不得指向文件系统根目录或用户主目录；清理旧构建前会先执行这项门禁：
+脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`，并把内容寻址 WASM 复制到 `${ORT_RUNTIME_OUTPUT_DIR:-other}`。`ORT_BUILD_ROOT` 会先解析现存祖先目录和符号链接，规范化后的最终目录名必须匹配 `hv-pony-ort-*`，且不得指向文件系统根目录或用户主目录；清理旧构建前会先执行这项门禁并复核目录身份。上游 checkout 必须在开始时完全干净；JS 依赖安装、临时 `build.ts` 补丁和 bundle 生成都发生在 `${ORT_BUILD_ROOT}/js-build` 的一次性副本中，退出或中断后由下一次运行安全重建，并再次验证上游 checkout。专用构建根可复用，但同一时刻只允许一个构建进程持有互斥锁；并发启动会立即失败，未知 untracked 或 tracked 改动仍会阻断：
 
 ```text
 other/ort-wasm-simd-<sha256>.wasm
@@ -740,20 +740,21 @@ pnpm verify:onnx-runtime
 - 默认外部 profile 构建及 `256 KiB` 预算。
 - 显式内置 profile 构建及 `1 MiB` 预算。
 - Pull Request 和 `main` push 执行用户脚本 Playwright Chromium E2E；手动运行由 `run_userscript_e2e` 控制。
-- 扩展 job 只构建一次远程产物并复用于有界 transport 基准与 Chromium/Firefox 加载检查；另执行内容脚本、内置模型双浏览器推理及 Chromium 116/Firefox 140 精确最低版本门禁。
+- 扩展 job 只构建一次远程产物并复用于有界 transport 基准与 Chromium/Firefox 加载检查；Release 直接下载并发布这份已测试产物，不再二次构建；另执行内容脚本、内置模型双浏览器推理及 Chromium 116/Firefox 140 精确最低版本门禁。
 - 受仓库变量和受保护环境控制的真实远程模型与 canonical 内置模型门禁；缺少生产配置时明确跳过，不能冒充已验证。
 - 手动选择 `publish_userscript_artifact`、`publish_extension_artifact` 或 `publish_extension_release` 时执行对应发布门禁；三个选项默认都关闭。
+- 同一 workflow/event/ref 的新自动 CI 会取消旧运行；手动制品/发布运行与 push 使用不同并发组，彼此串行且不会被 push 抢占；每个 job 都有独立超时，避免浏览器、网络或发布门禁永久占用 runner。
 
 普通 push 和 Pull Request 不创建 GitHub Release，也不发布生产扩展 artifact。
 
 ### Model Worker 部署工作流
 
-`.github/workflows/deploy-cloudflare-model-worker.yml` 仅支持手动触发：
+`.github/workflows/deploy-cloudflare-model-worker.yml` 仅支持从 `refs/heads/main` 手动触发生产 job；其他 ref 的 job 会在读取受保护 secrets 前跳过：
 
 - Cloudflare secrets 完整时，默认只渲染配置、执行检查并运行 Wrangler dry-run，不执行部署。
 - Cloudflare secrets 不完整且 `publish_model_worker=false` 时，工作流仍执行 typecheck 与测试，但会安全跳过配置渲染、Wrangler dry-run 和部署；若已经请求发布则 fail closed。
 - 手动输入 `enable_model_download_quota` 控制是否启用每 Key 月度下载限制，默认开启；关闭后模型请求不受 5 次限制，额度查询会提示限制未开启。
-- 整个 job 绑定 `production-model-worker` GitHub Environment；只有从 `refs/heads/main` 手动运行、`publish_model_worker=true`、环境审批通过且所需 secrets 完整时才实际部署。
+- 整个 job 绑定 `production-model-worker` GitHub Environment；在 `refs/heads/main` 上只有 `publish_model_worker=true`、环境审批通过且所需 secrets 完整时才实际部署。
 - 工作流不自动运行线上公开契约探测；部署完成只证明 Wrangler 发布命令成功。等待边缘传播后，由操作者按 [`docs/model-worker-ops.md`](docs/model-worker-ops.md) 手动执行 `check:deployment`。
 
 dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare 已更新，也不证明 R2、KV 或线上路由正确。

@@ -38,8 +38,13 @@ permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  group: repository-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   guardrails:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -59,7 +64,7 @@ jobs:
           fi
 
       - name: Validate canonical packaged-model configuration
-        if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.RUN_CANONICAL_PACKAGED_GATE == 'true' }}
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.RUN_CANONICAL_PACKAGED_GATE == 'true' }}
         env:
           PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
           PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
@@ -114,6 +119,7 @@ jobs:
         run: pnpm browser-sinks:check
 
   codeql:
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
@@ -141,6 +147,7 @@ jobs:
 
   dependency-review:
     if: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
@@ -158,6 +165,7 @@ jobs:
 
   test:
     needs: guardrails
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -190,6 +198,7 @@ jobs:
 
   coverage-build:
     needs: guardrails
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -242,6 +251,7 @@ jobs:
   userscript-e2e:
     needs: guardrails
     if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_userscript_e2e) }}
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -287,6 +297,7 @@ jobs:
 
   extension-e2e:
     needs: guardrails
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -348,9 +359,22 @@ jobs:
           GECKODRIVER_PATH: ${{ steps.geckodriver.outputs.path }}
         run: pnpm --filter @hv-pony-solver/extension test:e2e:firefox:load-only
 
+      - name: Transfer tested remote extension packages to Release job
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_extension_release }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hv-pony-solver-extension-remote-tested
+          path: |
+            apps/extension/dist/*.zip
+            apps/extension/dist/*.zip.sha256
+            apps/extension/dist/*.artifact.json
+          if-no-files-found: error
+          retention-days: 1
+
   extension-remote-authenticated-e2e:
     needs: guardrails
-    if: ${{ (github.event_name == 'push' && vars.RUN_PRODUCTION_MODEL_SMOKE == 'true') || (github.event_name == 'workflow_dispatch' && (inputs.publish_extension_artifact || inputs.publish_extension_release)) }}
+    if: ${{ github.ref == 'refs/heads/main' && ((github.event_name == 'push' && vars.RUN_PRODUCTION_MODEL_SMOKE == 'true') || (github.event_name == 'workflow_dispatch' && (inputs.publish_extension_artifact || inputs.publish_extension_release))) }}
+    timeout-minutes: 20
     outputs:
       enabled: ${{ steps.protected_remote_model.outputs.enabled }}
     runs-on: ubuntu-latest
@@ -402,6 +426,7 @@ jobs:
 
   extension-minimum-versions-e2e:
     needs: guardrails
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -468,6 +493,7 @@ jobs:
 
   extension-packaged-e2e:
     needs: guardrails
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -525,14 +551,11 @@ jobs:
 
   extension-canonical-packaged-e2e:
     needs: guardrails
-    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.RUN_CANONICAL_PACKAGED_GATE == 'true' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && vars.RUN_CANONICAL_PACKAGED_GATE == 'true' }}
+    timeout-minutes: 45
     outputs:
       enabled: ${{ steps.canonical_model_config.outputs.enabled }}
     runs-on: ubuntu-latest
-    env:
-      PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
-      PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
-      PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -541,6 +564,10 @@ jobs:
 
       - name: Check canonical packaged-model configuration
         id: canonical_model_config
+        env:
+          PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
+          PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
+          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
         run: |
           if [[ -z "${PACKAGED_MODEL_URL//[[:space:]]/}" ]]; then
             echo 'enabled=false' >> "$GITHUB_OUTPUT"
@@ -595,7 +622,19 @@ jobs:
 
       - name: Download and verify canonical model
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
+        env:
+          PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
+          PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
+          PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
         run: node apps/extension/scripts/download-canonical-model.mjs
+
+      - name: Run canonical-model-only package tests
+        if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
+        run: >-
+          node --test
+          --test-name-pattern='production packaged builds stay free|CLI preflight verifies only'
+          apps/extension/scripts/build-extension.test.mjs
+          apps/extension/scripts/release-gate.test.mjs
 
       - name: Build canonical packaged extensions
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
@@ -637,6 +676,7 @@ jobs:
   firefox-android-142-release-gate:
     needs: extension-canonical-packaged-e2e
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs['extension-canonical-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].outputs.enabled == 'true' }}
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -741,6 +781,7 @@ jobs:
       - coverage-build
       - userscript-e2e
     if: ${{ always() && github.event_name == 'workflow_dispatch' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && ((inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'success') || (!inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'skipped')) }}
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -795,7 +836,8 @@ jobs:
       - extension-minimum-versions-e2e
       - extension-remote-authenticated-e2e
       - firefox-android-142-release-gate
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_artifact && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].outputs.enabled == 'true' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' && needs['firefox-android-142-release-gate'].result == 'success' }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_extension_artifact && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].outputs.enabled == 'true' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' && needs['firefox-android-142-release-gate'].result == 'success' }}
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -850,6 +892,7 @@ jobs:
       - extension-minimum-versions-e2e
       - extension-remote-authenticated-e2e
     if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_release && github.ref == 'refs/heads/main' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' }}
+    timeout-minutes: 15
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -859,22 +902,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          run_install: false
-
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.node-version'
-          cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build remote-model desktop extension packages
-        run: pnpm --filter @hv-pony-solver/extension build
+      - name: Download tested remote-model desktop extension packages
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: hv-pony-solver-extension-remote-tested
+          path: apps/extension/dist
 
       - name: Validate Release assets and version
         id: release

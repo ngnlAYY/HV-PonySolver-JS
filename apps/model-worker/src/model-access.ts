@@ -29,7 +29,8 @@ function getRequestAccessToken(request: Request): string | null {
 
 async function hasAuthorizedLookupKey(keyStore: ModelKeyStore, lookupKeys: readonly string[]): Promise<boolean> {
   for (const lookupKey of lookupKeys) {
-    if ((await keyStore.get(lookupKey)) !== null) {
+    const marker = await keyStore.get(lookupKey)
+    if (marker !== null && marker.trim().length > 0) {
       return true
     }
   }

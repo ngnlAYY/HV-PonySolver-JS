@@ -25,7 +25,7 @@ Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。�
 
 - Cloudflare secrets 完整时会渲染部署配置、执行 typecheck、测试和 Wrangler dry-run；`publish_model_worker=false` 时只跳过 `Deploy Worker`，workflow 总体绿色不代表线上已发布。
 - Cloudflare secrets 不完整且 `publish_model_worker=false` 时会安全跳过配置渲染、Wrangler dry-run 和部署，但仍执行 typecheck 与测试。
-- 整个 job 绑定受保护的 `production-model-worker` GitHub Environment；`publish_model_worker=true` 时还必须从 `refs/heads/main` 运行。非 `main` ref 或 Cloudflare secrets 不完整都会 fail closed；只有 ref、环境审批和 secrets gate 全部通过时才会执行 `Deploy Worker`。
+- 整个 job 绑定受保护的 `production-model-worker` GitHub Environment，并在读取 secrets 前限定 `refs/heads/main`；非 `main` ref 的 job 会直接跳过。`publish_model_worker=true` 但 Cloudflare secrets 不完整时 fail closed；只有 ref、环境审批、发布意图和 secrets gate 全部通过时才会执行 `Deploy Worker`。
 - 部署证据至少包括 workflow run URL、head SHA、`Deploy Worker` step 的 `success` 状态，以及日志中可获得的 Cloudflare deployment 标识或时间。不得把 secret 值复制到记录中。
 
 触发生产发布前，确认目标 ref 是 `refs/heads/main`，并核对 `publish_model_worker`、`invalid_key_mode` 和 `enable_model_download_quota`。三个输入分别控制是否真实部署、无效 Key 返回诱饵还是 `403`、是否执行每 Key 月度 5 次限制；后两项不能从线上状态自动推断。`production-model-worker` Environment 应在 GitHub 设置中配置 required reviewers、只允许 `main` 部署并保存生产 secrets；不得从未验证分支临时部署。
@@ -56,7 +56,7 @@ MODEL_WORKER_ORT_URL=https://models.ngnl.host/yolo26n-640.ort \
 MODEL_WORKER_RUNTIME_WASM_URL=https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm \
 MODEL_WORKER_RUNTIME_WASM_BYTE_LENGTH=1267937 \
 MODEL_WORKER_INVALID_KEY_MODE=decoy \
-MODEL_WORKER_PROBE_ID=<probe-id> \
+MODEL_WORKER_PROBE_ID=manual-$(date +%s) \
 pnpm --filter @hv-pony-solver/model-worker check:deployment
 ```
 

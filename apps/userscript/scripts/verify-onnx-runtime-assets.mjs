@@ -17,15 +17,17 @@ async function verifyAsset(filePath, expected, label) {
   return `${label} byteLength=${actual.byteLength} sha256=${actual.sha256}`
 }
 
-export async function runCli(repoRoot, env = process.env) {
+export async function runCli(repoRoot, env = process.env, write = (chunk) => process.stdout.write(chunk)) {
   const manifest = await readOnnxRuntimeAssetsManifest(repoRoot)
   const verified = [
     await verifyAsset(resolveRuntimeBundlePath(manifest, repoRoot), manifest.bundleAsset, 'runtime bundle'),
   ]
   if (env.ORT_RUNTIME_WASM_FILE) {
     verified.push(await verifyAsset(resolve(env.ORT_RUNTIME_WASM_FILE), manifest.wasmAsset, 'runtime WASM'))
+  } else {
+    verified.push('runtime WASM skipped (ORT_RUNTIME_WASM_FILE is not set)')
   }
-  process.stdout.write(`ONNX Runtime assets verified: ${verified.join('; ')}\n`)
+  write(`ONNX Runtime assets verified: ${verified.join('; ')}\n`)
 }
 
 function resolveRepoRoot(args) {

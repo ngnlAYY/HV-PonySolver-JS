@@ -594,6 +594,18 @@ describe('model worker', () => {
     expect(response.headers.get('x-hv-model-access')).toBeNull()
   })
 
+  it.each(['', '   '])('treats a %j KV marker as unauthorized', async (marker) => {
+    const fixture = createModelFixture()
+    const response = await fetchWorker(
+      authorizedModelRequest(fixture, 'GET', fixture.validKey),
+      createEnv(fixture, { keyValues: new Map<string, string>([[fixture.validKey, marker]]) }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+    expect(response.headers.get('x-hv-model-access')).toBeNull()
+  })
+
   it('returns the decoy model when requested key is not authorized', async () => {
     const fixture = createModelFixture()
     const response = await fetchWorker(

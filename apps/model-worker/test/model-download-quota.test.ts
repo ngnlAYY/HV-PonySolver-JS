@@ -307,12 +307,33 @@ describe('ModelDownloadQuota', () => {
     } as unknown as ModelDownloadQuotaNamespace
 
     const pending = [
-      expect(reserveModelDownloadQuota(namespace, 'token')).rejects.toThrow('quota request timed out'),
-      expect(readModelDownloadQuota(namespace, 'token')).rejects.toThrow('quota request timed out'),
-      expect(confirmModelDownloadQuota(namespace, 'token', RECEIPT_ID)).rejects.toThrow('quota request timed out'),
+      expect(reserveModelDownloadQuota(namespace, 'token')).rejects.toThrow('quota request dependency timed out'),
+      expect(readModelDownloadQuota(namespace, 'token')).rejects.toThrow('quota request dependency timed out'),
+      expect(confirmModelDownloadQuota(namespace, 'token', RECEIPT_ID)).rejects.toThrow(
+        'quota request dependency timed out',
+      ),
     ]
     await vi.advanceTimersByTimeAsync(5_000)
     await Promise.all(pending)
+  })
+
+  it('rejects at the deadline even when an internal quota stub ignores abort', async () => {
+    vi.useFakeTimers()
+    const namespace = {
+      idFromName: (name: string) => ({ toString: () => name }) as DurableObjectId,
+      get: () => ({ fetch: () => new Promise<Response>(() => undefined) }),
+    } as unknown as ModelDownloadQuotaNamespace
+    const pending = reserveModelDownloadQuota(namespace, 'token').then(
+      () => ({ status: 'resolved' as const, error: null }),
+      (error: unknown) => ({ status: 'rejected' as const, error }),
+    )
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    const outcome = await Promise.race([pending, Promise.resolve({ status: 'pending' as const, error: null })])
+
+    expect(outcome.status).toBe('rejected')
+    expect(outcome.error).toBeInstanceOf(Error)
+    expect((outcome.error as Error).message).toContain('quota request dependency timed out')
   })
 
   it('calculates UTC month and retry boundaries deterministically', () => {

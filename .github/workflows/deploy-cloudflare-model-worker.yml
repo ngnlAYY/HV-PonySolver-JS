@@ -31,6 +31,8 @@ concurrency:
 
 jobs:
   deploy:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    timeout-minutes: 30
     environment: production-model-worker
     runs-on: ubuntu-latest
     steps:

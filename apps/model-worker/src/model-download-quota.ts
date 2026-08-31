@@ -7,7 +7,7 @@ import {
 } from '@hv-pony-solver/shared'
 
 import type { ModelDownloadQuotaNamespace, ModelDownloadQuotaStub } from './worker-types'
-import { MODEL_WORKER_DEPENDENCY_TIMEOUT_MS } from './request-timeout'
+import { withModelWorkerDependencyTimeout } from './request-timeout'
 
 // v1 charged a request before its response body reached the client. A fresh key
 // intentionally drops those unverifiable counters when the receipt protocol is
@@ -311,8 +311,7 @@ async function requestQuotaService<T>(
 ): Promise<T> {
   const stub = await quotaStub(namespace, canonicalToken)
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), MODEL_WORKER_DEPENDENCY_TIMEOUT_MS)
-  try {
+  const operation = (async () => {
     const response = await stub.fetch(
       new Request(url, {
         method: 'POST',
@@ -328,9 +327,8 @@ async function requestQuotaService<T>(
       throw new Error('Model download quota service returned an invalid response')
     }
     return result
-  } finally {
-    clearTimeout(timeoutId)
-  }
+  })()
+  return withModelWorkerDependencyTimeout(operation, 'quota request', () => controller.abort())
 }
 
 export async function reserveModelDownloadQuota(

@@ -49,7 +49,7 @@ pnpm build:onnx-runtime
 
 脚本执行以下输出：
 
-- 完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`；构建根目录本身不得是符号链接，其现存祖先会先解析为规范路径，规范化后的末级目录名必须匹配 `hv-pony-ort-*`，且不能是文件系统根目录或用户主目录；
+- 完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`；构建根目录本身不得是符号链接，其现存祖先会先解析为规范路径，规范化后的末级目录名必须匹配 `hv-pony-ort-*`，且不能是文件系统根目录或用户主目录；每次危险清理前还会复核构建根身份。上游 checkout 开始时必须完全干净，JS 依赖安装、临时 `build.ts` 补丁和 bundle 生成都发生在 `${ORT_BUILD_ROOT}/js-build` 的一次性副本中，退出或中断后由下一次运行重建，并再次验证上游 checkout。专用构建根可复用，但同一时刻只允许一个构建进程持有互斥锁；并发启动会立即失败，同时继续拒绝未知 untracked 或 tracked 改动；
 - 内容寻址 WASM 复制到 `${ORT_RUNTIME_OUTPUT_DIR:-other}`；
 - 终端打印可直接使用的 `runtime/<filename>` R2 对象键和全部产物哈希。
 

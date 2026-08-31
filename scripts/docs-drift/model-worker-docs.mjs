@@ -115,6 +115,9 @@ function checkModelWorkerOpsDocs(opsDoc, readme, deploymentWorkflowSource) {
   if (!deployStep.includes("github.ref == 'refs/heads/main'")) {
     errors.push(`${workflowPath} deployment must require github.ref == 'refs/heads/main'`)
   }
+  if (!/^ {4}if:\s*\$\{\{[^\n]*github\.ref\s*==\s*'refs\/heads\/main'[^\n]*\}\}\s*$/mu.test(deployJob)) {
+    errors.push(`${workflowPath} deployment job must require github.ref == 'refs/heads/main' before reading secrets`)
+  }
   if (!/^\s{4}environment:\s*production-model-worker\s*$/m.test(deployJob)) {
     errors.push(`${workflowPath} deploy job must use the production-model-worker environment`)
   }
@@ -128,9 +131,28 @@ function checkModelWorkerOpsDocs(opsDoc, readme, deploymentWorkflowSource) {
   if (!opsDoc.includes(workflowPath)) {
     errors.push(`docs/model-worker-ops.md must name ${workflowPath}`)
   }
+  if (/^MODEL_WORKER_PROBE_ID=<[^>\n]+>\s*\\?$/mu.test(opsDoc)) {
+    errors.push('docs/model-worker-ops.md MODEL_WORKER_PROBE_ID example must be directly executable')
+  }
   checkSecretGateDocs(errors, opsDoc, 'docs/model-worker-ops.md', true)
   checkSecretGateDocs(errors, readme, 'README.md', false)
   return errors
+}
+
+function checkModelCacheStrategyDocs(cacheDoc, facts) {
+  const requiredTerms = [
+    `Cache-Control: ${facts.cacheControl}`,
+    'Authorization: Bearer',
+    'IndexedDB',
+    'GET /quota',
+    'POST /quota',
+    'MODEL_DOWNLOAD_QUOTA_ENABLED=false',
+    '`429`',
+    '`503`',
+  ]
+  return requiredTerms.flatMap((term) =>
+    cacheDoc.includes(term) ? [] : [`docs/model-cache-strategy.md model cache contract must mention ${term}`],
+  )
 }
 
 function checkSecretGateDocs(errors, document, label, requirePublishDetails) {
@@ -307,4 +329,4 @@ function isSelectedObjectMissingDocsLine(line) {
   return /^\|\s*选中的 R2 object 缺失\s*\|/.test(line)
 }
 
-export { checkModelWorkerDocs, checkModelWorkerOpsDocs, readModelWorkerHttpFacts }
+export { checkModelCacheStrategyDocs, checkModelWorkerDocs, checkModelWorkerOpsDocs, readModelWorkerHttpFacts }

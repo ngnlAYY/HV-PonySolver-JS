@@ -1,4 +1,4 @@
-function checkRootCheckCommand(rootPackageJson, readme) {
+function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
   const checkCommand = rootPackageJson.scripts?.check
   if (typeof checkCommand !== 'string') {
     return ['package.json scripts.check is missing']
@@ -6,7 +6,10 @@ function checkRootCheckCommand(rootPackageJson, readme) {
 
   const errors = []
   const readmeLines = readme.split(/\r?\n/)
-  const nodeVersion = typeof rootPackageJson.engines?.node === 'string' ? rootPackageJson.engines.node.match(/\d+\.\d+\.\d+/u)?.[0] : undefined
+  const nodeVersion =
+    typeof rootPackageJson.engines?.node === 'string'
+      ? rootPackageJson.engines.node.match(/\d+\.\d+\.\d+/u)?.[0]
+      : undefined
   const pnpmVersion =
     typeof rootPackageJson.packageManager === 'string'
       ? /^pnpm@(?<version>\d+\.\d+\.\d+)$/u.exec(rootPackageJson.packageManager)?.groups?.version
@@ -19,9 +22,12 @@ function checkRootCheckCommand(rootPackageJson, readme) {
   if (pnpmVersion && !pnpmRequirementRow.includes(pnpmVersion)) {
     errors.push(`README.md pnpm requirement must mention ${pnpmVersion} from package.json packageManager`)
   }
+  errors.push(...checkDocumentedPnpmCommands(rootPackageJson, workspacePackageJsons, readmeLines))
   for (const commandName of ['check:quick', 'test:coverage', 'build']) {
     if (checkCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check', commandName)) {
-      errors.push(`README.md pnpm check description must mention ${commandName} because package.json scripts.check runs it`)
+      errors.push(
+        `README.md pnpm check description must mention ${commandName} because package.json scripts.check runs it`,
+      )
     }
   }
 
@@ -43,8 +49,41 @@ function checkRootCheckCommand(rootPackageJson, readme) {
     'extension:package-check',
     'bundle:check',
   ]) {
-    if (quickCheckCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check:quick', commandName)) {
-      errors.push(`README.md pnpm check:quick description must mention ${commandName} because package.json scripts.check:quick runs it`)
+    if (
+      quickCheckCommand.includes(commandName) &&
+      !commandDescriptionMentions(readme, 'pnpm check:quick', commandName)
+    ) {
+      errors.push(
+        `README.md pnpm check:quick description must mention ${commandName} because package.json scripts.check:quick runs it`,
+      )
+    }
+  }
+  return errors
+}
+
+function checkDocumentedPnpmCommands(rootPackageJson, workspacePackageJsons, readmeLines) {
+  const errors = []
+  for (const line of readmeLines) {
+    const command = /^\|\s*`pnpm\s+(?<arguments>[^`]+)`\s*\|/u.exec(line)?.groups?.arguments.trim()
+    if (!command) continue
+    const tokens = command.split(/\s+/u)
+    if (tokens[0] === '--filter') {
+      const packageName = tokens[1]
+      const commandName = tokens[2]
+      const packageJson = workspacePackageJsons.find((candidate) => candidate.name === packageName)
+      if (!packageJson) {
+        errors.push(`README.md documents unknown pnpm workspace filter ${packageName ?? '<missing>'}`)
+      } else if (!commandName || typeof packageJson.scripts?.[commandName] !== 'string') {
+        errors.push(
+          `README.md documents pnpm --filter ${packageName} ${commandName ?? '<missing>'}, but ${packageName} scripts.${commandName ?? '<missing>'} is missing`,
+        )
+      }
+      continue
+    }
+
+    const commandName = tokens[0]
+    if (typeof rootPackageJson.scripts?.[commandName] !== 'string') {
+      errors.push(`README.md documents pnpm ${commandName}, but package.json scripts.${commandName} is missing`)
     }
   }
   return errors

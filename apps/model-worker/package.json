@@ -9,7 +9,7 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && node --test scripts/render-wrangler-config.test.mjs scripts/check-deployment-contract.test.mjs",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage && node --test --experimental-test-coverage --test-coverage-include-all --test-coverage-lines=80 --test-coverage-branches=70 --test-coverage-functions=80 --test-coverage-include=scripts/wrangler-config-renderer.mjs --test-coverage-include=scripts/wrangler-config-guard.mjs --test-coverage-include=scripts/check-deployment-contract.mjs scripts/render-wrangler-config.test.mjs scripts/check-deployment-contract.test.mjs",
     "check:deployment": "node scripts/check-deployment-contract.mjs",
     "deploy": "HV_PONY_SOLVER_RENDER_ENV=deploy pnpm render-config && node scripts/validate-wrangler-config.mjs && wrangler deploy"
   },

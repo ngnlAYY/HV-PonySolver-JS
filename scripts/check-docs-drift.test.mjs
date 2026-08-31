@@ -31,10 +31,15 @@ async function createFixture() {
     'package.json',
     'apps/userscript/package.json',
     'apps/extension/package.json',
+    'apps/model-worker/package.json',
+    'packages/browser-core/package.json',
+    'packages/shared/package.json',
     'apps/extension/scripts/build-extension.mjs',
     'apps/extension/scripts/browser-support.mjs',
     'docs/browser-extension.md',
+    'docs/model-cache-strategy.md',
     'docs/model-worker-ops.md',
+    'docs/onnx-runtime.md',
     '.github/workflows/deploy-cloudflare-model-worker.yml',
     'packages/browser-core/src/inference/inference-config.ts',
     'apps/userscript/src/inference/onnx-runtime-assets.ts',
@@ -300,6 +305,73 @@ test('fails clearly when pnpm check references a missing check:quick script', as
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /package\.json scripts\.check:quick is missing/s)
+  })
+})
+
+test('fails clearly when README documents a root pnpm command that does not exist', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    assert.ok(readme.includes('`pnpm test:e2e:userscript`'))
+    await writeFile(readmePath, readme.replace('`pnpm test:e2e:userscript`', '`pnpm command-that-does-not-exist`'))
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README\.md.*command-that-does-not-exist.*package\.json/s)
+  })
+})
+
+test('fails clearly when README documents a filtered workspace command that does not exist', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const readmePath = join(fixtureRoot, 'README.md')
+    const readme = await readFile(readmePath, 'utf8')
+    const documentedCommand = 'pnpm --filter @hv-pony-solver/extension test:e2e:packaged'
+    assert.ok(readme.includes(documentedCommand))
+    await writeFile(readmePath, readme.replace(documentedCommand, `${documentedCommand}-missing`))
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /README\.md.*@hv-pony-solver\/extension.*test:e2e:packaged-missing/s)
+  })
+})
+
+for (const [relativePath, term, label] of [
+  ['docs/onnx-runtime.md', 'ONNX_RUNTIME_ASSETS', 'ONNX Runtime'],
+  ['docs/model-cache-strategy.md', 'POST /quota', 'model cache'],
+]) {
+  test(`fails clearly when the ${label} supplemental document drops ${term}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const documentPath = join(fixtureRoot, relativePath)
+      const document = await readFile(documentPath, 'utf8')
+      assert.ok(document.includes(term))
+      await writeFile(documentPath, document.replaceAll(term, 'omitted supplemental contract'))
+
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      assert.match(
+        result.stderr,
+        new RegExp(
+          `${relativePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+          's',
+        ),
+      )
+    })
+  })
+}
+
+test('fails clearly when the Model Worker probe example uses a shell placeholder', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const opsDocPath = join(fixtureRoot, 'docs/model-worker-ops.md')
+    const opsDoc = await readFile(opsDocPath, 'utf8')
+    const placeholder = 'MODEL_WORKER_PROBE_ID=<probe-id>'
+    await writeFile(
+      opsDocPath,
+      opsDoc.includes(placeholder) ? opsDoc : opsDoc.replace('MODEL_WORKER_PROBE_ID=manual-$(date +%s)', placeholder),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /docs\/model-worker-ops\.md.*MODEL_WORKER_PROBE_ID.*executable/s)
   })
 })
 

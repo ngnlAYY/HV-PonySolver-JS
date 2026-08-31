@@ -56,4 +56,29 @@ function checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJs
   return errors
 }
 
-export { checkOnnxRuntimeAssetsDocs }
+function checkOnnxRuntimeSupplementalDocs(onnxRuntimeAssetsSource, onnxRuntimeDoc) {
+  const expectedAssets = parseOnnxRuntimeAssetsManifest(onnxRuntimeAssetsSource)
+  const requiredTerms = [
+    'ONNX_RUNTIME_ASSETS',
+    expectedAssets.packageVersion,
+    expectedAssets.sourceCommit,
+    expectedAssets.emsdkVersion,
+    expectedAssets.externalFullRuntime.scriptUrl,
+    expectedAssets.externalFullRuntime.wasmUrl,
+    expectedAssets.externalFullRuntime.sha256,
+    expectedAssets.externalFullRuntime.wasmSha256,
+    expectedAssets.wasmAsset.publicPath,
+    expectedAssets.wasmAsset.objectKey,
+    expectedAssets.wasmAsset.sha256,
+    'redirect: error',
+    'wasmBinary',
+    'build:onnx-runtime',
+    'verify:onnx-runtime',
+  ]
+
+  return requiredTerms.flatMap((term) =>
+    onnxRuntimeDoc.includes(term) ? [] : [`docs/onnx-runtime.md ONNX Runtime contract must mention ${term}`],
+  )
+}
+
+export { checkOnnxRuntimeAssetsDocs, checkOnnxRuntimeSupplementalDocs }

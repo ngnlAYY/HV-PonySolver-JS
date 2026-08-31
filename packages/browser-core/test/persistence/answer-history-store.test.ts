@@ -176,6 +176,17 @@ describe('HistoryStore', () => {
     expect(store.get('main')).toMatchObject([{ answers: 'TS' }])
   })
 
+  it('falls back to legacy history when keyed enumeration fails', () => {
+    const storage = new MemoryEnumerableStorage()
+    storage.values.set(HISTORY_KEY, JSON.stringify({ main: [validSuccessRecord] }))
+    storage.getItemsByPrefix = () => {
+      throw new Error('storage mirror unavailable')
+    }
+
+    expect(new HistoryStore(storage).get('main')).toEqual([validSuccessRecord])
+    expect(vi.mocked(globalThis.console.warn).mock.calls.flat().join(' ')).toContain('读取单条记录列表失败')
+  })
+
   it('keeps a successful keyed write usable when corrupted-record cleanup fails', async () => {
     const storage = new MemoryEnumerableStorage()
     const invalidKey = `${HISTORY_ENTRY_PREFIX}main:invalid`

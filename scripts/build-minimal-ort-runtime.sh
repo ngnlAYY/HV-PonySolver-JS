@@ -11,8 +11,37 @@ ORT_SOURCE="$BUILD_ROOT/onnxruntime"
 MODEL_INPUT="$BUILD_ROOT/model-input"
 MODEL_OUTPUT="$BUILD_ROOT/model-output"
 BUILD_DIR="$BUILD_ROOT/build"
+JS_BUILD_ROOT="$BUILD_ROOT/js-build"
 RUNTIME_OUTPUT_DIR="${ORT_RUNTIME_OUTPUT_DIR:-$ROOT_DIR/other}"
+ORT_BUILD_SCRIPT="$JS_BUILD_ROOT/web/script/build.ts"
 INSTALL=0
+BUILD_ROOT_ID=
+
+assert_build_root_identity() {
+  local current_root current_id
+  current_root="$(node "$ROOT_DIR/scripts/resolve-ort-build-root.mjs" "$BUILD_ROOT")" || return 1
+  current_id="$(stat -Lc '%d:%i' -- "$BUILD_ROOT")" || return 1
+  if [[ "$current_root" != "$BUILD_ROOT" || "$current_id" != "$BUILD_ROOT_ID" ]]; then
+    printf 'Refusing to mutate replaced ORT build root: %s\n' "$BUILD_ROOT" >&2
+    return 1
+  fi
+}
+
+remove_build_paths() {
+  local target
+  assert_build_root_identity || return 1
+  for target in "$@"; do
+    if [[ "$target" != "$BUILD_ROOT/"* || -L "$target" ]]; then
+      printf 'Refusing to remove unsafe ORT build path: %s\n' "$target" >&2
+      return 1
+    fi
+  done
+  rm -rf -- "$@"
+}
+
+cleanup_js_build_root() {
+  remove_build_paths "$JS_BUILD_ROOT"
+}
 
 if [[ "${1:-}" == "--install" ]]; then
   INSTALL=1
@@ -21,7 +50,23 @@ elif [[ $# -gt 0 ]]; then
   exit 2
 fi
 
-mkdir -p "$BUILD_ROOT"
+if ! command -v flock >/dev/null 2>&1; then
+  printf 'The ORT build requires flock to guard its shared build root.\n' >&2
+  exit 1
+fi
+mkdir -p -- "$BUILD_ROOT"
+created_build_root="$(node "$ROOT_DIR/scripts/resolve-ort-build-root.mjs" "$BUILD_ROOT")"
+if [[ "$created_build_root" != "$BUILD_ROOT" ]]; then
+  printf 'Refusing replaced ORT build root: expected=%s actual=%s\n' "$BUILD_ROOT" "$created_build_root" >&2
+  exit 1
+fi
+BUILD_ROOT_ID="$(stat -Lc '%d:%i' -- "$BUILD_ROOT")"
+exec {ORT_BUILD_LOCK_FD}>"$BUILD_ROOT/.build.lock"
+if ! flock -n "$ORT_BUILD_LOCK_FD"; then
+  printf 'Another ORT build is already using %s\n' "$BUILD_ROOT" >&2
+  exit 1
+fi
+assert_build_root_identity
 if [[ ! -d "$ORT_SOURCE/.git" ]]; then
   git clone --depth 1 --branch "$ORT_TAG" --recurse-submodules --shallow-submodules \
     https://github.com/microsoft/onnxruntime.git "$ORT_SOURCE"
@@ -32,6 +77,10 @@ if [[ "$actual_commit" != "$ORT_COMMIT" ]]; then
   exit 1
 fi
 node "$ROOT_DIR/scripts/assert-clean-ort-source.mjs" "$ORT_SOURCE"
+cleanup_js_build_root
+mkdir -p "$JS_BUILD_ROOT"
+trap cleanup_js_build_root EXIT
+cp -a "$ORT_SOURCE/js/." "$JS_BUILD_ROOT/"
 
 python3 -m venv "$BUILD_ROOT/venv"
 # shellcheck disable=SC1091
@@ -41,7 +90,7 @@ python -m pip install --disable-pip-version-check --require-hashes -r "$PYTHON_R
 python --version
 python -m pip --version
 sha256sum "$PYTHON_REQUIREMENTS"
-rm -rf "$MODEL_INPUT" "$MODEL_OUTPUT"
+remove_build_paths "$MODEL_INPUT" "$MODEL_OUTPUT"
 mkdir -p "$MODEL_INPUT" "$MODEL_OUTPUT"
 cp "$ROOT_DIR/model/yolo26n-640.onnx" "$MODEL_INPUT/yolo26n-640.onnx"
 python -m onnxruntime.tools.convert_onnx_models_to_ort \
@@ -67,9 +116,9 @@ cd "$ORT_SOURCE"
   --skip_tests \
   --parallel "${ORT_BUILD_JOBS:-8}"
 
-mkdir -p "$ORT_SOURCE/js/web/dist"
-cp "$BUILD_DIR/MinSizeRel/ort-wasm-simd.mjs" "$ORT_SOURCE/js/web/dist/ort-wasm-simd-threaded.mjs"
-node - "$ORT_SOURCE/js/web/script/build.ts" <<'NODE'
+mkdir -p "$JS_BUILD_ROOT/web/dist"
+cp "$BUILD_DIR/MinSizeRel/ort-wasm-simd.mjs" "$JS_BUILD_ROOT/web/dist/ort-wasm-simd-threaded.mjs"
+node - "$ORT_BUILD_SCRIPT" <<'NODE'
 const fs = require('node:fs')
 const path = process.argv[2]
 let source = fs.readFileSync(path, 'utf8')
@@ -108,16 +157,16 @@ if (!source.includes('void addAllWebBuildTasks;')) {
 fs.writeFileSync(path, source)
 NODE
 
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$ORT_SOURCE/js" ci --ignore-scripts --no-audit --no-fund
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$ORT_SOURCE/js" run prepare
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$ORT_SOURCE/js/common" ci --ignore-scripts --no-audit --no-fund
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$ORT_SOURCE/js/common" run prepare
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$ORT_SOURCE/js/web" ci --ignore-scripts --no-audit --no-fund
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$ORT_SOURCE/js/web" run prepare
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$ORT_SOURCE/js/web" run build -- --bundle-mode=prod
+NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT" ci --ignore-scripts --no-audit --no-fund
+NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT" run prepare
+NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/common" ci --ignore-scripts --no-audit --no-fund
+NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/common" run prepare
+NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/web" ci --ignore-scripts --no-audit --no-fund
+NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/web" run prepare
+NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/web" run build -- --bundle-mode=prod
 
 ARTIFACT_DIR="$BUILD_ROOT/artifacts"
-rm -rf "$ARTIFACT_DIR"
+remove_build_paths "$ARTIFACT_DIR"
 mkdir -p "$ARTIFACT_DIR"
 cp "$MODEL_OUTPUT/yolo26n-640.ort" "$ARTIFACT_DIR/"
 cp "$MODEL_OUTPUT/required_operators_and_types.config" "$ARTIFACT_DIR/"
@@ -125,7 +174,7 @@ WASM_SOURCE="$BUILD_DIR/MinSizeRel/ort-wasm-simd.wasm"
 WASM_SHA256="$(sha256sum "$WASM_SOURCE" | awk '{print $1}')"
 WASM_FILENAME="ort-wasm-simd-${WASM_SHA256}.wasm"
 cp "$WASM_SOURCE" "$ARTIFACT_DIR/$WASM_FILENAME"
-cp "$ORT_SOURCE/js/web/dist/ort.wasm.bundle.min.mjs" "$ARTIFACT_DIR/"
+cp "$JS_BUILD_ROOT/web/dist/ort.wasm.bundle.min.mjs" "$ARTIFACT_DIR/"
 mkdir -p "$RUNTIME_OUTPUT_DIR"
 cp "$WASM_SOURCE" "$RUNTIME_OUTPUT_DIR/$WASM_FILENAME"
 
@@ -135,6 +184,10 @@ if [[ "$INSTALL" == 1 ]]; then
   install -Dm644 "$ARTIFACT_DIR/required_operators_and_types.config" \
     "$ROOT_DIR/config/onnxruntime/required_operators_and_types.config"
 fi
+
+cleanup_js_build_root
+trap - EXIT
+node "$ROOT_DIR/scripts/assert-clean-ort-source.mjs" "$ORT_SOURCE"
 
 printf 'Generated artifacts in %s\n' "$ARTIFACT_DIR"
 printf 'Copied minimal runtime to %s\n' "$RUNTIME_OUTPUT_DIR"

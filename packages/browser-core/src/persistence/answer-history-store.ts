@@ -214,22 +214,26 @@ export class HistoryStore {
     invalidKeys: string[] = [],
   ): KeyedHistoryRecord[] {
     const records: KeyedHistoryRecord[] = []
-    for (const [key, value] of storage.getItemsByPrefix(`${HISTORY_ENTRY_PREFIX}${world}:`)) {
-      try {
-        if (value.length > HISTORY_ENTRY_MAX_LENGTH) {
+    try {
+      for (const [key, value] of storage.getItemsByPrefix(`${HISTORY_ENTRY_PREFIX}${world}:`)) {
+        try {
+          if (value.length > HISTORY_ENTRY_MAX_LENGTH) {
+            invalidKeys.push(key)
+            continue
+          }
+          const parsed: unknown = JSON.parse(value)
+          if (isHistoryRecord(parsed)) {
+            records.push({ key, record: parsed })
+          } else {
+            invalidKeys.push(key)
+          }
+        } catch (error) {
           invalidKeys.push(key)
-          continue
+          warn('读取单条记录失败:', formatErrorMessage(error))
         }
-        const parsed: unknown = JSON.parse(value)
-        if (isHistoryRecord(parsed)) {
-          records.push({ key, record: parsed })
-        } else {
-          invalidKeys.push(key)
-        }
-      } catch (error) {
-        invalidKeys.push(key)
-        warn('读取单条记录失败:', formatErrorMessage(error))
       }
+    } catch (error) {
+      warn('读取单条记录列表失败:', formatErrorMessage(error))
     }
     return records.sort((left, right) => {
       const leftTimestamp = Number.isFinite(left.record.timestamp) ? (left.record.timestamp ?? 0) : 0
