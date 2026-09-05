@@ -56,6 +56,10 @@ HEAD 验证 Key（不计次）
 
 缓存事务先把远程模型记录标记为“待确认”；只有 `POST /quota` 成功后才写回可命中状态。确认失败不会阻止当前调用继续使用已经验证的内存字节，但该 IndexedDB 记录在后续实例或重启后必须视为未命中并重新下载，不能因内存回执丢失而永久绕过计次。升级前缺少确认状态字段的旧缓存也会一次性失效。失败日志不得包含 Key 或回执。
 
+数据库继续使用版本 1 的 `models` store。首次写入在同一事务内保存模型行与 `${cacheKey}:confirmation` 元数据行，以随机 `cacheWriteId`、版本、长度和 SHA-256 绑定；确认成功后只更新元数据，不再次写入模型二进制。更新前必须比较写入身份，较晚完成的旧确认不能覆盖新下载的状态。带 `cacheWriteId` 的模型行只有匹配的元数据明确完成确认时才能命中；旧格式中明确 `confirmationPending=false` 的记录仍可读取，缺失或待确认记录仍失效。
+
+`ModelCache` 保留原有调用接口，IndexedDB 生命周期、记录校验和共享下载分别由 `indexeddb-model-store`、`model-cache-record`、`shared-model-downloads` 管理。关闭缓存或收到 `versionchange` 时同时取消数据库操作和共享下载。
+
 并发消费者只共享同一次网络 GET；每个仍在等待的消费者获得独立、可转移的 `ArrayBuffer` 所有权，并复制同一幂等确认回执。这样一个推理 Worker 转移缓冲区时不会把另一个缓存调用的字节 detach。
 
 ## 未来可选方案

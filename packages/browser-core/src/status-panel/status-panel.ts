@@ -69,38 +69,40 @@ export class StatusPanel implements StatusPanelContract {
     this.el.className = 'ponyLog'
     const syncPosition = getPanelPositionSync(this.settingsStorage)
     this.el.style.cssText = `position:absolute;top:${syncPosition.top}px;left:${syncPosition.left}px;font-size:12px;text-align:left`
-    getPanelPosition(this.settingsStorage).then((position) => {
-      if (
-        lifecycleGeneration !== this.lifecycleGeneration ||
-        !this.el ||
-        (position.top === syncPosition.top && position.left === syncPosition.left)
-      ) {
-        return
-      }
-      this.el.style.top = `${position.top}px`
-      this.el.style.left = `${position.left}px`
-    })
-    isPanelCompactMode(this.settingsStorage).then((compactMode) => {
-      if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || compactMode === this.compactMode) {
-        return
-      }
-      this.compactMode = compactMode
-      this.scheduleRender()
-    })
-    isPanelCspVisibilityRequired(this.settingsStorage).then((required) => {
-      if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || required === this.cspVisibilityRequired) {
-        return
-      }
-      this.cspVisibilityRequired = required
-      this.configureCspVisibility()
-    })
-    getPanelHistoryLimit(this.settingsStorage).then((historyLimit) => {
-      if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || historyLimit === this.historyLimit) {
-        return
-      }
-      this.historyLimit = historyLimit
-      this.scheduleRender()
-    })
+    if (!this.settingsStorage.synchronousSnapshot) {
+      getPanelPosition(this.settingsStorage).then((position) => {
+        if (
+          lifecycleGeneration !== this.lifecycleGeneration ||
+          !this.el ||
+          (position.top === syncPosition.top && position.left === syncPosition.left)
+        ) {
+          return
+        }
+        this.el.style.top = `${position.top}px`
+        this.el.style.left = `${position.left}px`
+      })
+      isPanelCompactMode(this.settingsStorage).then((compactMode) => {
+        if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || compactMode === this.compactMode) {
+          return
+        }
+        this.compactMode = compactMode
+        this.scheduleRender()
+      })
+      isPanelCspVisibilityRequired(this.settingsStorage).then((required) => {
+        if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || required === this.cspVisibilityRequired) {
+          return
+        }
+        this.cspVisibilityRequired = required
+        this.configureCspVisibility()
+      })
+      getPanelHistoryLimit(this.settingsStorage).then((historyLimit) => {
+        if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || historyLimit === this.historyLimit) {
+          return
+        }
+        this.historyLimit = historyLimit
+        this.scheduleRender()
+      })
+    }
     document.body.appendChild(this.el)
     this.configureCspVisibility()
     this.render()
@@ -277,6 +279,9 @@ export class StatusPanel implements StatusPanelContract {
       return
     }
     this.lastRenderKey = renderKey
+    // 先保留外部变更，随后只丢弃这次同步渲染生成的观察记录。
+    const externalMutations = this.cspVisibilityObserver?.takeRecords() ?? []
+    const removedCsp = this.cspVisibilityObserver !== null && this.el.querySelector('div#csp') !== null
     renderStatusPanelInto(
       this.el,
       this.world,
@@ -286,5 +291,8 @@ export class StatusPanel implements StatusPanelContract {
       this.historyLimit,
       this.persistenceError,
     )
+    this.cspVisibilityObserver?.takeRecords()
+    if (removedCsp || externalMutations.some((mutation) => this.mutationMayChangeCspVisibility(mutation)))
+      this.syncCspVisibility()
   }
 }

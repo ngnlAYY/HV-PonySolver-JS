@@ -18,7 +18,7 @@ function reportRestoreError(error: unknown): void {
 }
 
 export async function startContentRuntime<TStorage extends ContentRuntimeStorage>(
-  createStorage: () => Promise<TStorage>,
+  createStorage: (signal: AbortSignal) => Promise<TStorage>,
   createApp: (storage: TStorage) => ContentRuntimeApp,
   lifecycleTarget: EventTarget = globalThis,
 ): Promise<ContentRuntimeApp | null> {
@@ -28,6 +28,7 @@ export async function startContentRuntime<TStorage extends ContentRuntimeStorage
   let generation = 0
   let storage: TStorage | null = null
   let app: ContentRuntimeApp | null = null
+  let initializingStorage: AbortController | null = null
 
   const stopListening = (): void => {
     if (!listening) {
@@ -39,6 +40,8 @@ export async function startContentRuntime<TStorage extends ContentRuntimeStorage
   }
 
   const destroyActiveRuntime = (): void => {
+    initializingStorage?.abort(new Error('扩展页面初始化已取消'))
+    initializingStorage = null
     const activeApp = app
     const activeStorage = storage
     app = null
@@ -52,6 +55,9 @@ export async function startContentRuntime<TStorage extends ContentRuntimeStorage
 
   const initialize = async (): Promise<ContentRuntimeApp | null> => {
     const attemptGeneration = ++generation
+    const storageController = new AbortController()
+    initializingStorage?.abort(new Error('扩展页面初始化已被替换'))
+    initializingStorage = storageController
     let candidateStorage: TStorage | null = null
     let candidateApp: ContentRuntimeApp | null = null
     let ownershipTransferred = false
@@ -74,7 +80,7 @@ export async function startContentRuntime<TStorage extends ContentRuntimeStorage
     }
 
     try {
-      candidateStorage = await createStorage()
+      candidateStorage = await createStorage(storageController.signal)
       if (!isCurrent()) {
         destroyCandidate()
         return null
@@ -106,6 +112,8 @@ export async function startContentRuntime<TStorage extends ContentRuntimeStorage
         return null
       }
       throw error
+    } finally {
+      if (initializingStorage === storageController) initializingStorage = null
     }
   }
 

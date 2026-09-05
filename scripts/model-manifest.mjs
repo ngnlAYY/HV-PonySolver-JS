@@ -1,5 +1,14 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import {
+  findMatchingBrace as sharedMatchingBrace,
+  identifierAt,
+  skipIgnoredComment,
+  skipIgnoredSyntax,
+  skipTemplateLiteral,
+  skipWhitespaceAndComments,
+} from './docs-drift/source-syntax.mjs'
+import { parseStringLiteral } from './docs-drift/source-literals.mjs'
 
 const defaultManifestRelativePath = 'packages/shared/src/model.ts'
 
@@ -22,19 +31,16 @@ function parseModelManifest(modelSource, options = {}) {
   if (versionStart === -2) {
     throw new Error(`Duplicate MODEL_VERSION in ${sourcePath}`)
   }
-  const version = versionStart === -1 ? null : parseAssignedString(modelSource, versionStart, 'MODEL_VERSION', sourcePath)
-  const byteLength = integritySource === null ? null : parseNumberProperty(
-    integritySource,
-    'byteLength',
-    'MODEL_INTEGRITY.byteLength',
-    sourcePath,
-  )
-  const sha256 = integritySource === null ? null : parseStringProperty(
-    integritySource,
-    'sha256',
-    'MODEL_INTEGRITY.sha256',
-    sourcePath,
-  )
+  const version =
+    versionStart === -1 ? null : parseAssignedString(modelSource, versionStart, 'MODEL_VERSION', sourcePath)
+  const byteLength =
+    integritySource === null
+      ? null
+      : parseNumberProperty(integritySource, 'byteLength', 'MODEL_INTEGRITY.byteLength', sourcePath)
+  const sha256 =
+    integritySource === null
+      ? null
+      : parseStringProperty(integritySource, 'sha256', 'MODEL_INTEGRITY.sha256', sourcePath)
 
   if (requireVersion && !version) {
     throw new Error(`Unable to read MODEL_VERSION from ${sourcePath}`)
@@ -109,23 +115,7 @@ function readDeclarationNameStart(source, index) {
 }
 
 function findMatchingBrace(source, objectStart) {
-  let depth = 0
-  for (let index = objectStart; index < source.length; index += 1) {
-    const skipped = skipIgnoredSyntax(source, index)
-    if (skipped !== index) {
-      index = skipped - 1
-      continue
-    }
-    if (source[index] === '{') {
-      depth += 1
-    } else if (source[index] === '}') {
-      depth -= 1
-      if (depth === 0) {
-        return index
-      }
-    }
-  }
-  return -1
+  return sharedMatchingBrace(source, objectStart, skipIgnoredSyntax)
 }
 
 function parseAssignedString(source, valueStart, displayName, sourcePath) {
@@ -183,7 +173,7 @@ function findDirectPropertyMatches(source, propertyName) {
     }
 
     const char = source[index]
-    if (char === '\'' || char === '"') {
+    if (char === "'" || char === '"') {
       const parsed = parseStringLiteral(source, index)
       if (!parsed) {
         return matches
@@ -198,7 +188,7 @@ function findDirectPropertyMatches(source, propertyName) {
       continue
     }
     if (char === '`') {
-      index = skipQuotedLiteral(source, index) - 1
+      index = skipTemplateLiteral(source, index) - 1
       continue
     }
     if (char === '{') {
@@ -221,33 +211,6 @@ function findDirectPropertyMatches(source, propertyName) {
     }
   }
   return matches
-}
-
-function parseStringLiteral(source, valueStart) {
-  const quote = source[valueStart]
-  if (quote !== '\'' && quote !== '"') {
-    return null
-  }
-
-  let value = ''
-  let isEscaped = false
-  for (let index = valueStart + 1; index < source.length; index += 1) {
-    const char = source[index]
-    if (isEscaped) {
-      value += char
-      isEscaped = false
-    } else if (char === '\\') {
-      value += char
-      isEscaped = true
-    } else if (char === quote) {
-      return { value, end: index + 1 }
-    } else if (char === '\n' || char === '\r') {
-      return null
-    } else {
-      value += char
-    }
-  }
-  return null
 }
 
 function readNumberTokenEnd(source, valueStart) {
@@ -296,132 +259,12 @@ function readAssignmentBoundary(source, valueEnd) {
 }
 
 function isAssignmentStatementStart(source, index) {
-  return identifierAt(source, index, 'export')
-    || identifierAt(source, index, 'const')
-    || identifierAt(source, index, 'let')
-    || identifierAt(source, index, 'var')
-}
-
-function skipIgnoredSyntax(source, index) {
-  const char = source[index]
-  const nextChar = source[index + 1]
-  if (char === '/' && nextChar === '/') {
-    return skipLineComment(source, index)
-  }
-  if (char === '/' && nextChar === '*') {
-    return skipBlockComment(source, index)
-  }
-  if (char === '\'' || char === '"' || char === '`') {
-    return skipQuotedLiteral(source, index)
-  }
-  return index
-}
-
-function skipWhitespaceAndComments(source, startIndex) {
-  let index = startIndex
-  while (index < source.length) {
-    if (/\s/.test(source[index])) {
-      index += 1
-      continue
-    }
-    const skipped = skipIgnoredComment(source, index)
-    if (skipped === index) {
-      return index
-    }
-    index = skipped
-  }
-  return index
-}
-
-function skipIgnoredComment(source, index) {
-  const char = source[index]
-  const nextChar = source[index + 1]
-  if (char === '/' && nextChar === '/') {
-    return skipLineComment(source, index)
-  }
-  if (char === '/' && nextChar === '*') {
-    return skipBlockComment(source, index)
-  }
-  return index
-}
-
-function skipLineComment(source, startIndex) {
-  const endIndex = source.indexOf('\n', startIndex + 2)
-  return endIndex === -1 ? source.length : endIndex + 1
-}
-
-function skipBlockComment(source, startIndex) {
-  const endIndex = source.indexOf('*/', startIndex + 2)
-  return endIndex === -1 ? source.length : endIndex + 2
-}
-
-function skipQuotedLiteral(source, startIndex) {
-  const quote = source[startIndex]
-  if (quote === '`') {
-    return skipTemplateLiteral(source, startIndex)
-  }
-  return skipUntilUnescaped(source, startIndex, quote)
-}
-
-function skipTemplateLiteral(source, startIndex) {
-  let isEscaped = false
-  for (let index = startIndex + 1; index < source.length; index += 1) {
-    const char = source[index]
-    if (isEscaped) {
-      isEscaped = false
-    } else if (char === '\\') {
-      isEscaped = true
-    } else if (char === '`') {
-      return index + 1
-    } else if (char === '$' && source[index + 1] === '{') {
-      index = skipTemplateExpression(source, index + 2) - 1
-    }
-  }
-  return source.length
-}
-
-function skipTemplateExpression(source, startIndex) {
-  let depth = 1
-  for (let index = startIndex; index < source.length; index += 1) {
-    const skipped = skipIgnoredSyntax(source, index)
-    if (skipped !== index) {
-      index = skipped - 1
-      continue
-    }
-    if (source[index] === '{') {
-      depth += 1
-    } else if (source[index] === '}') {
-      depth -= 1
-      if (depth === 0) {
-        return index + 1
-      }
-    }
-  }
-  return source.length
-}
-
-function skipUntilUnescaped(source, startIndex, endChar) {
-  let isEscaped = false
-  for (let index = startIndex + 1; index < source.length; index += 1) {
-    if (isEscaped) {
-      isEscaped = false
-    } else if (source[index] === '\\') {
-      isEscaped = true
-    } else if (source[index] === endChar) {
-      return index + 1
-    }
-  }
-  return source.length
-}
-
-function identifierAt(source, index, identifier) {
-  return source.startsWith(identifier, index)
-    && !isIdentifierPart(source[index - 1])
-    && !isIdentifierPart(source[index + identifier.length])
-}
-
-function isIdentifierPart(char) {
-  return /[A-Za-z0-9_$]/.test(char ?? '')
+  return (
+    identifierAt(source, index, 'export') ||
+    identifierAt(source, index, 'const') ||
+    identifierAt(source, index, 'let') ||
+    identifierAt(source, index, 'var')
+  )
 }
 
 async function readModelManifest(repoRoot, options = {}) {

@@ -236,6 +236,31 @@ describe('StatusPanel history persistence', () => {
     panel.destroy()
   })
 
+  it('does not reread an initialized synchronous snapshot asynchronously', () => {
+    const storage = { ...settingsStorage(), synchronousSnapshot: true }
+    const get = vi.spyOn(storage, 'get')
+    const panel = new StatusPanel(historyStore(Promise.resolve([])), storage)
+    panel.create()
+    expect(get).not.toHaveBeenCalled()
+    panel.destroy()
+  })
+
+  it('preserves external visibility changes while draining its own render mutations', async () => {
+    const panel = new StatusPanel(historyStore(Promise.resolve([])), settingsStorage())
+    panel.create()
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+    const csp = document.createElement('div')
+    csp.id = 'csp'
+    document.body.appendChild(csp)
+    panel.setStatus({ model: 'changed' })
+    await vi.waitFor(() => expect(element.hidden).toBe(false))
+    // 外部节点被放进面板后，下一次渲染移除它也必须更新可见性。
+    element.appendChild(csp)
+    panel.setStatus({ model: 'changed again' })
+    await vi.waitFor(() => expect(element.hidden).toBe(true))
+    panel.destroy()
+  })
+
   it('keeps the panel visible without div#csp when the visibility limit is disabled', () => {
     const panel = new StatusPanel(historyStore(Promise.resolve([])), settingsStorage(false, false))
     panel.create()

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.21.0",
+  "packageManager": "pnpm@12.3.0",
   "engines": {
     "node": ">=24.15.0"
   },
@@ -24,6 +24,7 @@
     "benchmark:extension": "corepack pnpm --filter @hv-pony-solver/extension benchmark",
     "benchmark:extension:full": "corepack pnpm --filter @hv-pony-solver/extension benchmark:full",
     "benchmark:extension:quick": "corepack pnpm --filter @hv-pony-solver/extension benchmark:quick",
+    "benchmark:extension:product": "corepack pnpm --filter @hv-pony-solver/extension benchmark:product",
     "benchmark:extension:exhaustive": "corepack pnpm --filter @hv-pony-solver/extension benchmark:exhaustive",
     "release:notes": "node scripts/model-release-notes.mjs",
     "format": "prettier --write .",

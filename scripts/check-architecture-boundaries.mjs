@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { parseRepoRootArgs } from './lib/cli.mjs'
 import { isDirectRun } from './lib/direct-run.mjs'
-import { collectSourceFiles } from './lib/source-files.mjs'
+import { createSourceFileCollector } from './lib/source-files.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '..')
@@ -122,6 +122,8 @@ if (isDirectRun(import.meta.url)) {
 async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot, { requireSourceDirs = false } = {}) {
   const violations = []
   const missingSourceDirs = []
+  const collectSourceFiles = createSourceFileCollector()
+  const importsByFile = new Map()
   for (const rule of BOUNDARY_RULES) {
     const absoluteDir = resolve(repoRoot, rule.fromDir)
     if (!existsSync(absoluteDir)) {
@@ -130,7 +132,8 @@ async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot, { require
     }
     const files = await collectSourceFiles(absoluteDir)
     for (const file of files) {
-      const imports = extractImportSpecifiers(await readFile(file, 'utf8'))
+      if (!importsByFile.has(file)) importsByFile.set(file, extractImportSpecifiers(await readFile(file, 'utf8')))
+      const imports = importsByFile.get(file)
       for (const importSpec of imports) {
         if (importSpec.typeOnly && !rule.includeTypeOnly) {
           continue

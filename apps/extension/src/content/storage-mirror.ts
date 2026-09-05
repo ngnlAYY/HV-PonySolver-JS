@@ -1,4 +1,10 @@
 import type { EnumerableTextStorage, SettingsStorage } from '@hv-pony-solver/browser-core/platform/storage'
+import { raceAbort } from '@hv-pony-solver/browser-core/utils/abort-race'
+import {
+  MAX_BUFFERED_STORAGE_KEYS,
+  MAX_STORAGE_PREFIX_INDICES,
+  STORAGE_INITIALIZATION_TIMEOUT_MS,
+} from './storage-config'
 
 import {
   addStorageChangeListener,
@@ -23,42 +29,66 @@ type MutationState = {
   tail: Promise<void>
 }
 
-export type CommittedChangeListener = (
-  key: string,
-  newValue: StoredValue,
-  oldValue: StoredValue,
-) => void
+export type CommittedChangeListener = (key: string, newValue: StoredValue, oldValue: StoredValue) => void
 
 export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextStorage {
+  readonly synchronousSnapshot = true
   private readonly values = new Map<string, string>()
+  private readonly prefixIndices = new Map<string, Map<string, string>>()
   private readonly mutationStates = new Map<string, MutationState>()
   private readonly committedChangeListeners = new Set<CommittedChangeListener>()
-  private readonly bufferedChanges: StorageChanges[] = []
+  private readonly bufferedChanges = new Map<string, StorageChanges[string]>()
   private removeChangeListener: (() => void) | null = null
   private initializing = true
   private destroyed = false
   private nextMutationId = 0
 
-  static async create(): Promise<ExtensionStorageMirror> {
-    const mirror = new ExtensionStorageMirror()
-    mirror.removeChangeListener = addStorageChangeListener((changes, areaName) => {
-      if (areaName !== 'local' || mirror.destroyed) {
-        return
-      }
-      if (mirror.initializing) {
-        mirror.bufferedChanges.push(changes)
-        return
-      }
-      mirror.applyChanges(changes)
-    })
+  private constructor(private readonly acceptsKey: (key: string) => boolean) {}
 
+  static async create(
+    options: Readonly<{ signal?: AbortSignal; acceptsKey?: (key: string) => boolean }> = {},
+  ): Promise<ExtensionStorageMirror> {
+    const mirror = new ExtensionStorageMirror(options.acceptsKey ?? (() => true))
+    const controller = new AbortController()
+    const onAbort = (): void => controller.abort(options.signal?.reason ?? new Error('扩展存储初始化已取消'))
+    options.signal?.addEventListener('abort', onAbort, { once: true })
+    if (options.signal?.aborted) onAbort()
+    const timeout = setTimeout(
+      () => controller.abort(new Error('扩展存储初始化超时')),
+      STORAGE_INITIALIZATION_TIMEOUT_MS,
+    )
     try {
-      const stored = await storageGetAll()
+      mirror.removeChangeListener = addStorageChangeListener((changes, areaName) => {
+        if (areaName !== 'local' || mirror.destroyed || controller.signal.aborted) {
+          return
+        }
+        if (mirror.initializing) {
+          for (const [key, change] of Object.entries(changes)) {
+            if (!mirror.acceptsKey(key)) continue
+            const previous = mirror.bufferedChanges.get(key)
+            if (!previous && mirror.bufferedChanges.size >= MAX_BUFFERED_STORAGE_KEYS) {
+              controller.abort(new Error('扩展存储初始化期间变更过多'))
+              return
+            }
+            mirror.bufferedChanges.set(key, {
+              oldValue: previous ? previous.oldValue : change.oldValue,
+              newValue: change.newValue,
+            })
+          }
+          return
+        }
+        mirror.applyChanges(changes)
+      })
+
+      const stored = await raceAbort(storageGetAll(), controller.signal)
       mirror.finishInitialization(stored)
       return mirror
     } catch (error) {
       mirror.destroy()
       throw error
+    } finally {
+      clearTimeout(timeout)
+      options.signal?.removeEventListener('abort', onAbort)
     }
   }
 
@@ -91,13 +121,18 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
   }
 
   getItemsByPrefix(prefix: string): ReadonlyArray<readonly [key: string, value: string]> {
-    return Array.from(this.values.entries()).filter(([key]) => key.startsWith(prefix))
+    let index = this.prefixIndices.get(prefix)
+    if (!index) {
+      index = new Map<string, string>()
+      for (const [key, value] of this.values) if (key.startsWith(prefix)) index.set(key, value)
+      if (this.prefixIndices.size < MAX_STORAGE_PREFIX_INDICES) this.prefixIndices.set(prefix, index)
+    }
+    return Array.from(index)
   }
 
   /**
-   * Observes externally committed storage changes (never this mirror's own
-   * writes), including the buffered replay of changes that arrived while the
-   * initial snapshot was still loading.
+   * 转发 storage.onChanged 的已提交变更，不为本地乐观写入制造通知。
+   * 浏览器也会为本上下文的已提交写入发送 onChanged。
    */
   addCommittedChangeListener(listener: CommittedChangeListener): () => void {
     this.committedChangeListeners.add(listener)
@@ -114,7 +149,8 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
     this.initializing = false
     this.removeChangeListener?.()
     this.removeChangeListener = null
-    this.bufferedChanges.length = 0
+    this.bufferedChanges.clear()
+    this.prefixIndices.clear()
     this.committedChangeListeners.clear()
     this.mutationStates.clear()
     this.values.clear()
@@ -125,14 +161,13 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
       return
     }
     for (const [key, value] of Object.entries(stored)) {
-      if (typeof value === 'string') {
+      if (this.acceptsKey(key) && typeof value === 'string') {
         this.setCommittedValue(key, value)
       }
     }
     this.initializing = false
-    for (const changes of this.bufferedChanges.splice(0)) {
-      this.applyChanges(changes)
-    }
+    this.applyChanges(Object.fromEntries(this.bufferedChanges))
+    this.bufferedChanges.clear()
   }
 
   private applyChanges(changes: StorageChanges): void {
@@ -140,6 +175,7 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
       return
     }
     for (const [key, change] of Object.entries(changes)) {
+      if (!this.acceptsKey(key)) continue
       const oldValue = typeof change.oldValue === 'string' ? change.oldValue : null
       const newValue = typeof change.newValue === 'string' ? change.newValue : null
       this.setCommittedValue(key, newValue)
@@ -161,8 +197,8 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
   }
 
   private mutate(key: string, value: StoredValue, persist: () => Promise<void>): Promise<void> {
-    if (this.destroyed) {
-      return Promise.reject(new Error('扩展存储镜像已销毁'))
+    if (this.destroyed || !this.acceptsKey(key)) {
+      return Promise.reject(new Error(this.destroyed ? '扩展存储镜像已销毁' : '不支持的扩展存储项'))
     }
 
     const state = this.getMutationState(key)
@@ -232,6 +268,11 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
       this.values.delete(key)
     } else {
       this.values.set(key, value)
+    }
+    for (const [prefix, index] of this.prefixIndices) {
+      if (!key.startsWith(prefix)) continue
+      if (value === null) index.delete(key)
+      else index.set(key, value)
     }
   }
 }

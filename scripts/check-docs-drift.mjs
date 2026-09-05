@@ -38,7 +38,9 @@ if (isDirectRun(import.meta.url)) {
   }
 }
 
-async function checkDocsDrift(repoRoot = defaultRepoRoot) {
+async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
+  const readSource = options.readText ?? ((relativePath) => readText(repoRoot, relativePath))
+  const readPackage = async (relativePath) => JSON.parse(await readSource(relativePath))
   const [
     rootPackageJson,
     userscriptPackageJson,
@@ -60,25 +62,25 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     modelWorkerResponseSource,
     modelSource,
   ] = await Promise.all([
-    readJson(repoRoot, 'package.json'),
-    readJson(repoRoot, 'apps/userscript/package.json'),
-    readJson(repoRoot, 'apps/extension/package.json'),
-    readJson(repoRoot, 'apps/model-worker/package.json'),
-    readJson(repoRoot, 'packages/browser-core/package.json'),
-    readJson(repoRoot, 'packages/shared/package.json'),
-    readText(repoRoot, 'README.md'),
-    readText(repoRoot, 'docs/browser-extension.md'),
-    readText(repoRoot, 'docs/model-cache-strategy.md'),
-    readText(repoRoot, 'docs/model-worker-ops.md'),
-    readText(repoRoot, 'docs/onnx-runtime.md'),
-    readText(repoRoot, '.github/workflows/deploy-cloudflare-model-worker.yml'),
+    readPackage('package.json'),
+    readPackage('apps/userscript/package.json'),
+    readPackage('apps/extension/package.json'),
+    readPackage('apps/model-worker/package.json'),
+    readPackage('packages/browser-core/package.json'),
+    readPackage('packages/shared/package.json'),
+    readSource('README.md'),
+    readSource('docs/browser-extension.md'),
+    readSource('docs/model-cache-strategy.md'),
+    readSource('docs/model-worker-ops.md'),
+    readSource('docs/onnx-runtime.md'),
+    readSource('.github/workflows/deploy-cloudflare-model-worker.yml'),
     importBrowserSupport(repoRoot),
-    readText(repoRoot, 'packages/browser-core/src/inference/inference-config.ts'),
-    readText(repoRoot, 'apps/userscript/src/inference/onnx-runtime-assets.ts'),
-    readText(repoRoot, 'apps/model-worker/src/request-router.ts'),
-    readText(repoRoot, 'apps/model-worker/src/model-access.ts'),
-    readText(repoRoot, 'apps/model-worker/src/model-response.ts'),
-    readText(repoRoot, 'packages/shared/src/model.ts'),
+    readSource('packages/browser-core/src/inference/inference-config.ts'),
+    readSource('apps/userscript/src/inference/onnx-runtime-assets.ts'),
+    readSource('apps/model-worker/src/request-router.ts'),
+    readSource('apps/model-worker/src/model-access.ts'),
+    readSource('apps/model-worker/src/model-response.ts'),
+    readSource('packages/shared/src/model.ts'),
   ])
   const modelWorkerHttpFacts = readModelWorkerHttpFacts(
     modelWorkerRequestRouterSource,
@@ -86,6 +88,8 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     modelWorkerResponseSource,
     modelSource,
   )
+
+  const runtimeAssets = parseOnnxRuntimeAssetsManifest(onnxRuntimeAssetsSource)
 
   return [
     ...checkRootCheckCommand(
@@ -96,18 +100,14 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot) {
     ...checkUserscriptConfigDocs(inferenceConfigSource, readme),
     ...modelWorkerHttpFacts.errors,
     ...checkModelManifestDocs(modelSource, readme),
-    ...checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJson, readme),
-    ...checkOnnxRuntimeSupplementalDocs(onnxRuntimeAssetsSource, onnxRuntimeDoc),
+    ...checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJson, readme, runtimeAssets),
+    ...checkOnnxRuntimeSupplementalDocs(onnxRuntimeAssetsSource, onnxRuntimeDoc, runtimeAssets),
     ...checkModelWorkerDocs(readme, modelWorkerHttpFacts),
     ...checkModelCacheStrategyDocs(modelCacheStrategyDoc, modelWorkerHttpFacts),
     ...checkModelWorkerOpsDocs(modelWorkerOpsDoc, readme, modelWorkerDeploymentWorkflow),
     ...checkArchitectureGuardrails(readme),
     ...checkExtensionDocs(extensionPackageJson, browserSupportModule.browserSupport, readme, extensionDoc),
   ]
-}
-
-async function readJson(repoRoot, relativePath) {
-  return JSON.parse(await readText(repoRoot, relativePath))
 }
 
 async function readText(repoRoot, relativePath) {

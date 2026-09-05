@@ -6,6 +6,22 @@ import { getChromiumOffscreenApi, runtimeGetUrl } from '../platform/webextension
 let creatingDocument: Promise<void> | null = null
 let closingDocument: Promise<void> | null = null
 let pendingAdmissions = 0
+let knownContextId: string | null = null
+
+function rememberContext(context: unknown): void {
+  knownContextId =
+    typeof context === 'object' &&
+    context !== null &&
+    'contextId' in context &&
+    typeof context.contextId === 'string' &&
+    context.contextId.length > 0
+      ? context.contextId
+      : null
+}
+
+export function offscreenDocumentIdentity(): string | null {
+  return knownContextId
+}
 
 function documentFilter(): Readonly<{ contextTypes: string[]; documentUrls: string[] }> {
   return {
@@ -22,6 +38,7 @@ export async function hasOffscreenDocument(): Promise<boolean> {
     await creatingDocument
   }
   const contexts = await getChromiumOffscreenApi().getContexts(documentFilter())
+  rememberContext(contexts[0])
   return contexts.length > 0
 }
 
@@ -35,6 +52,7 @@ export async function ensureOffscreenDocument(): Promise<void> {
   const operation = (async () => {
     const offscreen = getChromiumOffscreenApi()
     const contexts = await offscreen.getContexts(documentFilter())
+    rememberContext(contexts[0])
     if (contexts.length > 0) {
       return
     }
@@ -43,6 +61,7 @@ export async function ensureOffscreenDocument(): Promise<void> {
       reasons: ['WORKERS'],
       justification: 'Run the packaged ONNX inference worker outside the restartable service worker.',
     })
+    rememberContext((await offscreen.getContexts(documentFilter()))[0])
   })()
   creatingDocument = operation
   try {
@@ -91,6 +110,7 @@ export async function closeOffscreenDocumentIfIdle(confirmIdle: () => Promise<bo
         return
       }
       await offscreen.closeDocument()
+      knownContextId = null
     } catch (error) {
       // Offscreen repeats the authoritative idle notification (with backoff)
       // while it remains alive, so closing stays best-effort — but the failure

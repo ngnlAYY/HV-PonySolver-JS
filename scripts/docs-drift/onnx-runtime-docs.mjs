@@ -1,7 +1,11 @@
 import { parseOnnxRuntimeAssetsManifest } from '../../apps/userscript/scripts/onnx-runtime-assets.mjs'
 
-function checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJson, readme) {
-  const expectedAssets = parseOnnxRuntimeAssetsManifest(onnxRuntimeAssetsSource)
+function checkOnnxRuntimeAssetsDocs(
+  onnxRuntimeAssetsSource,
+  userscriptPackageJson,
+  readme,
+  expectedAssets = parseOnnxRuntimeAssetsManifest(onnxRuntimeAssetsSource),
+) {
   const expectedPackageVersion = userscriptPackageJson.devDependencies?.[expectedAssets.packageName]
   const errors = []
 
@@ -56,8 +60,11 @@ function checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJs
   return errors
 }
 
-function checkOnnxRuntimeSupplementalDocs(onnxRuntimeAssetsSource, onnxRuntimeDoc) {
-  const expectedAssets = parseOnnxRuntimeAssetsManifest(onnxRuntimeAssetsSource)
+function checkOnnxRuntimeSupplementalDocs(
+  onnxRuntimeAssetsSource,
+  onnxRuntimeDoc,
+  expectedAssets = parseOnnxRuntimeAssetsManifest(onnxRuntimeAssetsSource),
+) {
   const requiredTerms = [
     'ONNX_RUNTIME_ASSETS',
     expectedAssets.packageVersion,

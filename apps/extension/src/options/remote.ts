@@ -1,6 +1,7 @@
 import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 
 import { runtimeConnect } from '../platform/webextension'
+import { createRequestLifecycle } from '../protocol/request-lifecycle'
 import {
   OPTIONS_PORT_NAME,
   PROTOCOL_VERSION,
@@ -55,7 +56,6 @@ function requestHostAttempt(
   }
   return new Promise<HostResponse>((resolve, reject) => {
     const port = runtimeConnect(OPTIONS_PORT_NAME)
-    let settled = false
     let disconnected = false
     const disconnect = (): void => {
       if (disconnected) {
@@ -68,50 +68,36 @@ function requestHostAttempt(
         // The request is already settled locally.
       }
     }
-    const cleanup = (): void => {
-      clearTimeout(timeoutId)
-      signal?.removeEventListener('abort', onAbort)
-      port.onMessage.removeListener(onMessage)
-      port.onDisconnect.removeListener(onDisconnect)
-    }
-    const settle = (callback: () => void): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      cleanup()
-      disconnect()
-      callback()
-    }
-    const onAbort = (): void => settle(() => reject(new Error(`${operationName}已取消`)))
     const onMessage = (message: unknown): void => {
       if (!isHostResponse(message) || message.requestId !== request.requestId) {
         return
       }
-      settle(() => resolve(message))
+      lifecycle.resolve(message)
     }
     const onDisconnect = (): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      cleanup()
+      disconnected = true
       const disconnectMessage = port.error?.message?.trim()
-      reject(new HostConnectionDisconnectedError(disconnectMessage || `${operationName}连接已断开`))
+      lifecycle.reject(new HostConnectionDisconnectedError(disconnectMessage || `${operationName}连接已断开`))
     }
-    const timeoutId = setTimeout(() => {
-      settle(() => reject(new Error(`${operationName}超时`)))
-    }, timeoutMs)
-    signal?.addEventListener('abort', onAbort, { once: true })
+    const lifecycle = createRequestLifecycle(resolve, reject, {
+      signal,
+      timeoutMs,
+      timeoutError: () => new Error(`${operationName}超时`),
+      abortError: () => new Error(`${operationName}已取消`),
+      cleanup: () => {
+        port.onMessage.removeListener(onMessage)
+        port.onDisconnect.removeListener(onDisconnect)
+        disconnect()
+      },
+    })
     port.onMessage.addListener(onMessage)
     port.onDisconnect.addListener(onDisconnect)
+    lifecycle.start()
+    if (lifecycle.settled) return
     try {
       port.postMessage(request)
     } catch (error) {
-      settle(() => reject(error instanceof Error ? error : new Error(String(error))))
-    }
-    if (signal?.aborted) {
-      onAbort()
+      lifecycle.reject(error instanceof Error ? error : new Error(String(error)))
     }
   }).then((response) => {
     if (!response.ok) {

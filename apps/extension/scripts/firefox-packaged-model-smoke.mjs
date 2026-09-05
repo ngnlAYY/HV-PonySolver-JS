@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
-import { execFile, spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises'
 import http from 'node:http'
-import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import tls from 'node:tls'
@@ -12,12 +11,12 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
 import { firefox } from '@playwright/test'
+import { findExecutable, startWebDriver, createWebDriverClient } from './browser/webdriver.mjs'
 
 import {
   assertBrowserVersionForRun,
   browserSupport,
   firefoxArguments,
-  geckodriverArguments,
   parseGeckodriverVersion,
 } from './browser-support.mjs'
 import { validatePackagedInferenceObservation, writePackagedE2eEvidence } from './packaged-e2e-evidence.mjs'
@@ -39,24 +38,6 @@ const transparentPng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
   'base64',
 )
-
-async function findExecutable(name) {
-  if (name.includes(path.sep)) {
-    return name
-  }
-  for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
-    if (directory) {
-      const candidate = path.join(directory, name)
-      try {
-        await access(candidate, constants.X_OK)
-        return candidate
-      } catch {
-        // Keep looking through PATH.
-      }
-    }
-  }
-  return name
-}
 
 function captchaHtml() {
   const answers = '<input name="riddleanswer[]" type="checkbox">'.repeat(6)
@@ -151,83 +132,6 @@ async function startFixtureProxy(temporaryRoot) {
   })
   const port = await listen(server)
   return { port, stop: () => closeServer(server) }
-}
-
-async function reservePort() {
-  const server = net.createServer()
-  const port = await listen(server)
-  await closeServer(server)
-  return port
-}
-
-async function waitForWebDriver(port, driver, output) {
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline) {
-    if (driver.exitCode !== null) {
-      throw new Error(`geckodriver 提前退出: ${output.join('')}`)
-    }
-    try {
-      const response = await globalThis.fetch(`http://127.0.0.1:${port}/status`)
-      if (response.ok) {
-        return
-      }
-    } catch {
-      // Driver is still starting.
-    }
-    await new Promise((resolve) => globalThis.setTimeout(resolve, 50))
-  }
-  throw new Error(`等待 geckodriver 启动超时: ${output.join('')}`)
-}
-
-async function startWebDriver(executable) {
-  const port = await reservePort()
-  const output = []
-  const driver = spawn(executable, geckodriverArguments(port), { stdio: ['ignore', 'pipe', 'pipe'] })
-  driver.stdout.on('data', (chunk) => output.push(String(chunk)))
-  driver.stderr.on('data', (chunk) => output.push(String(chunk)))
-  const stop = async () => {
-    if (driver.exitCode !== null) {
-      return
-    }
-    await new Promise((resolve) => {
-      const killTimer = globalThis.setTimeout(() => {
-        if (driver.exitCode === null) {
-          driver.kill('SIGKILL')
-        }
-      }, 2_000)
-      driver.once('exit', () => {
-        globalThis.clearTimeout(killTimer)
-        resolve()
-      })
-      driver.kill('SIGTERM')
-    })
-  }
-  try {
-    await waitForWebDriver(port, driver, output)
-  } catch (error) {
-    await stop()
-    throw error
-  }
-  return {
-    port,
-    stop,
-  }
-}
-
-function createWebDriverClient(port) {
-  const endpoint = `http://127.0.0.1:${port}`
-  return async (method, pathname, body) => {
-    const response = await globalThis.fetch(`${endpoint}${pathname}`, {
-      method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-    const payload = await response.json()
-    if (!response.ok || payload.value?.error) {
-      throw new Error(payload.value?.message || `WebDriver HTTP ${response.status}`)
-    }
-    return payload.value
-  }
 }
 
 async function runInstalledArtifact(request, proxyPort, runIndex) {

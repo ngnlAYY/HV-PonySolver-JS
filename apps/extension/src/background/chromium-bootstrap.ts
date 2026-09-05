@@ -22,7 +22,13 @@ import {
   type OffscreenClaimResponse,
 } from '../protocol/messages'
 import { registerBroker, type BrokerHandle, type BrokerPolicy } from './broker'
-import { acquireOffscreenAdmission, closeOffscreenDocumentIfIdle, hasOffscreenDocument } from './chromium-offscreen'
+import {
+  acquireOffscreenAdmission,
+  closeOffscreenDocumentIfIdle,
+  hasOffscreenDocument,
+  offscreenDocumentIdentity,
+} from './chromium-offscreen'
+import { OFFSCREEN_CLAIM_TIMEOUT_MS } from '../protocol/deadlines'
 
 const serviceWorkerEpoch = (() => {
   try {
@@ -32,6 +38,7 @@ const serviceWorkerEpoch = (() => {
   }
 })()
 let offscreenRequestSequence = 0
+let claimedHost: Readonly<{ contextId: string; promise: Promise<OffscreenClaimResponse> }> | null = null
 
 function nextOffscreenRequestId(): string {
   offscreenRequestSequence += 1
@@ -39,19 +46,31 @@ function nextOffscreenRequestId(): string {
 }
 
 async function claimOffscreenHost(signal?: AbortSignal): Promise<OffscreenClaimResponse> {
-  const response = await raceAbort(
-    sendRuntimeMessage({
-      type: OFFSCREEN_MESSAGE_TYPE,
-      operation: 'claim',
-      epoch: serviceWorkerEpoch,
-    }),
-    signal,
-    () => new Error('推理请求已取消'),
-  )
-  if (!isOffscreenClaimResponse(response) || response.epoch !== serviceWorkerEpoch) {
-    throw new Error('Offscreen 推理 Host 接管失败')
+  const contextId = offscreenDocumentIdentity()
+  let promise = contextId !== null && claimedHost?.contextId === contextId ? claimedHost.promise : undefined
+  if (!promise) {
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const expired = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error('Offscreen 推理 Host 接管超时')), OFFSCREEN_CLAIM_TIMEOUT_MS)
+    })
+    promise = Promise.race([
+      sendRuntimeMessage({ type: OFFSCREEN_MESSAGE_TYPE, operation: 'claim', epoch: serviceWorkerEpoch }),
+      expired,
+    ])
+      .then((response) => {
+        if (!isOffscreenClaimResponse(response) || response.epoch !== serviceWorkerEpoch)
+          throw new Error('Offscreen 推理 Host 接管失败')
+        return response
+      })
+      .finally(() => clearTimeout(timeout))
+    const attempt = promise
+    // 首次创建后尚不知道 contextId 时不缓存；下一次 getContexts 会给出真实身份。
+    claimedHost = contextId === null ? null : { contextId, promise }
+    void promise.catch(() => {
+      if (claimedHost?.promise === attempt) claimedHost = null
+    })
   }
-  return response
+  return raceAbort(promise, signal, () => new Error('推理请求已取消'))
 }
 
 function acquireForRequest(signal: AbortSignal): Promise<() => void> {
@@ -162,6 +181,9 @@ export async function invokeOffscreenHost(request: HostRequest, signal: AbortSig
       throw new Error('推理请求已取消')
     }
     return response
+  } catch (error) {
+    if (!signal.aborted) claimedHost = null
+    throw error
   } finally {
     release()
   }

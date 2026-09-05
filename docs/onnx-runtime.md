@@ -16,6 +16,8 @@
 
 显式 `build:bundled-runtime` profile 内置项目构建的精简 JS glue。其 Worker 只从 `models.ngnl.host` 下载内容寻址的精简 WASM，校验字节长度和 SHA-256 后赋给 `ort.env.wasm.wasmBinary`。两个 profile 使用同一份远程 ORT 模型和 WASM Execution Provider；运行时与模型格式都没有自动回退。
 
+两种 profile 的资产加载器与模型、扩展包内资产共用 `browser-core/platform/byte-stream` 有界读取原语。已知可信长度的 Runtime 直接预分配目标缓冲区，逐块写入；不再同时保留全部网络分块和完整 WASM。取消、超限和长度不符时释放 reader，精确长度与 SHA-256 检查仍由各入口执行。
+
 ## 精简运行时构建身份
 
 运行时基于 ONNX Runtime `v1.27.0` 的提交 `8f0278c77bf44b0cc83c098c6c722b92a36ac4b5` 构建，并固定 Emscripten SDK `4.0.23`：

@@ -21,11 +21,18 @@ function stripDeadFalseBranches(source) {
       index = stripped - 1
       continue
     }
-    if (source.startsWith('if', index) && !isIdentifierPart(source[index - 1]) && !isIdentifierPart(source[index + 2])) {
+    if (
+      source.startsWith('if', index) &&
+      !isIdentifierPart(source[index - 1]) &&
+      !isIdentifierPart(source[index + 2])
+    ) {
       const conditionStart = skipWhitespaceAndComments(source, index + 2)
       if (source[conditionStart] === '(') {
         const conditionEnd = findMatchingParen(source, conditionStart)
-        if (conditionEnd !== -1 && stripIgnoredSyntax(source.slice(conditionStart + 1, conditionEnd)).trim() === 'false') {
+        if (
+          conditionEnd !== -1 &&
+          stripIgnoredSyntax(source.slice(conditionStart + 1, conditionEnd)).trim() === 'false'
+        ) {
           const bodyStart = skipWhitespaceAndComments(source, conditionEnd + 1)
           if (source[bodyStart] === '{') {
             const bodyEnd = findMatchingBrace(source, bodyStart)
@@ -47,14 +54,20 @@ function findMatchingParen(source, openParenIndex) {
   return findMatchingDelimitedToken(source, openParenIndex, '(', ')')
 }
 
-function findMatchingBrace(source, openBraceIndex) {
-  return findMatchingDelimitedToken(source, openBraceIndex, '{', '}')
+function findMatchingBrace(source, openBraceIndex, skipSyntax = skipIgnoredSyntaxAndRegexLiteral) {
+  return findMatchingDelimitedToken(source, openBraceIndex, '{', '}', skipSyntax)
 }
 
-function findMatchingDelimitedToken(source, openIndex, openToken, closeToken) {
+function findMatchingDelimitedToken(
+  source,
+  openIndex,
+  openToken,
+  closeToken,
+  skipSyntax = skipIgnoredSyntaxAndRegexLiteral,
+) {
   let depth = 0
   for (let index = openIndex; index < source.length; index += 1) {
-    const skipped = skipIgnoredSyntaxAndRegexLiteral(source, index)
+    const skipped = skipSyntax(source, index)
     if (skipped !== index) {
       index = skipped - 1
       continue
@@ -116,7 +129,7 @@ function skipIgnoredSyntax(source, index) {
   if (char === '/' && nextChar === '*') {
     return skipBlockComment(source, index)
   }
-  if (char === '\'' || char === '"') {
+  if (char === "'" || char === '"') {
     return skipStringLiteral(source, index)
   }
   if (char === '`') {
@@ -219,9 +232,11 @@ function skipTemplateExpression(source, startIndex) {
 }
 
 function identifierAt(source, index, identifier) {
-  return source.startsWith(identifier, index)
-    && !isIdentifierPart(source[index - 1])
-    && !isIdentifierPart(source[index + identifier.length])
+  return (
+    source.startsWith(identifier, index) &&
+    !isIdentifierPart(source[index - 1]) &&
+    !isIdentifierPart(source[index + identifier.length])
+  )
 }
 
 function isIdentifierPart(char) {

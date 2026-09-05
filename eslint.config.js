@@ -12,6 +12,7 @@ export default tseslint.config(
       'other/**',
       'apps/userscript/vendor/onnxruntime/**',
       '.claude/worktrees/**',
+      '.gitnexus/**',
       'apps/model-worker/wrangler.toml',
     ],
   },

@@ -18,20 +18,13 @@ import {
   type HostSuccessResponse,
 } from '../protocol/messages'
 import { DETECT_DEADLINE_CONFIG } from '../protocol/deadlines'
+import { createRequestLifecycle, type RequestLifecycle } from '../protocol/request-lifecycle'
 import { resetPrefetchMisses } from './prefetch'
-
-type PendingRequest = {
-  resolve(response: HostResponse): void
-  reject(error: Error): void
-  timeoutId: ReturnType<typeof setTimeout>
-  signal: AbortSignal | undefined
-  abort: (() => void) | undefined
-  posted: boolean
-}
 
 export class RemoteDetectorClient implements DetectorService {
   private port: ExtensionPort | null = null
-  private readonly pending = new Map<string, PendingRequest>()
+  private removePortListeners: (() => void) | null = null
+  private readonly pending = new Map<string, RequestLifecycle<HostResponse>>()
   private requestSequence = 0
   private destroyed = false
 
@@ -119,8 +112,14 @@ export class RemoteDetectorClient implements DetectorService {
       return this.port
     }
     const port = runtimeConnect(CONTENT_PORT_NAME)
-    port.onMessage.addListener((message) => this.handleMessage(port, message))
-    port.onDisconnect.addListener(() => this.handleDisconnect(port))
+    const onMessage = (message: unknown): void => this.handleMessage(port, message)
+    const onDisconnect = (): void => this.handleDisconnect(port)
+    port.onMessage.addListener(onMessage)
+    port.onDisconnect.addListener(onDisconnect)
+    this.removePortListeners = () => {
+      port.onMessage.removeListener(onMessage)
+      port.onDisconnect.removeListener(onDisconnect)
+    }
     this.port = port
     return port
   }
@@ -137,34 +136,25 @@ export class RemoteDetectorClient implements DetectorService {
         reject(error instanceof Error ? error : new Error(String(error)))
         return
       }
-      const timeoutId = setTimeout(() => {
-        if (this.pending.has(request.requestId)) {
-          this.abandonRequest(request.requestId, new Error('扩展推理请求超时'))
-        }
-      }, timeoutMs)
-      const abort = signal
-        ? (): void => {
-            if (this.pending.has(request.requestId)) {
-              this.abandonRequest(request.requestId, new Error('扩展推理请求已取消'))
-            }
-          }
-        : undefined
-      if (signal && abort) {
-        signal.addEventListener('abort', abort, { once: true })
-      }
-      this.pending.set(request.requestId, { resolve, reject, timeoutId, signal, abort, posted: false })
-      // AbortSignal does not replay an abort that races with listener installation.
-      // Recheck after publishing the pending entry so the abort handler can own cleanup.
-      if (signal?.aborted) {
-        abort?.()
-        return
-      }
+      let posted = false
+      const lifecycle = createRequestLifecycle(resolve, reject, {
+        signal,
+        timeoutMs,
+        timeoutError: () => new Error('扩展推理请求超时'),
+        abortError: () => new Error('扩展推理请求已取消'),
+        cleanup: () => {
+          this.pending.delete(request.requestId)
+        },
+        onAbandon: () => {
+          if (posted) this.sendCancel(request.requestId)
+        },
+      })
+      this.pending.set(request.requestId, lifecycle)
+      lifecycle.start()
+      if (lifecycle.settled) return
       try {
         port.postMessage(request)
-        const pending = this.pending.get(request.requestId)
-        if (pending) {
-          pending.posted = true
-        }
+        posted = true
       } catch (error) {
         this.disconnectPort(error instanceof Error ? error : new Error(String(error)))
       }
@@ -195,7 +185,7 @@ export class RemoteDetectorClient implements DetectorService {
     if (!isHostResponse(message)) {
       return
     }
-    const pending = this.takePending(message.requestId)
+    const pending = this.pending.get(message.requestId)
     if (!pending) {
       return
     }
@@ -207,47 +197,14 @@ export class RemoteDetectorClient implements DetectorService {
       return
     }
     this.port = null
+    this.removePortListeners?.()
+    this.removePortListeners = null
     this.statusSink.setStatus({ session: '连接断开' })
     this.rejectPending(new Error('扩展推理连接已断开'))
   }
 
   private rejectPending(error: Error): void {
-    for (const requestId of [...this.pending.keys()]) {
-      const pending = this.takePending(requestId)
-      if (!pending) {
-        continue
-      }
-      pending.reject(error)
-    }
-  }
-
-  private takePending(requestId: string): PendingRequest | undefined {
-    const pending = this.pending.get(requestId)
-    if (!pending) {
-      return undefined
-    }
-    this.pending.delete(requestId)
-    clearTimeout(pending.timeoutId)
-    if (pending.abort) {
-      pending.signal?.removeEventListener('abort', pending.abort)
-    }
-    return pending
-  }
-
-  /**
-   * Settles one request locally and asks the broker to abort its queued or
-   * running work. The Port survives so sibling requests keep their channel —
-   * a single slow answer no longer drags the whole connection down.
-   */
-  private abandonRequest(requestId: string, error: Error): void {
-    const pending = this.takePending(requestId)
-    if (!pending) {
-      return
-    }
-    if (pending.posted) {
-      this.sendCancel(requestId)
-    }
-    pending.reject(error)
+    for (const pending of [...this.pending.values()]) pending.reject(error)
   }
 
   private sendCancel(requestId: string): void {
@@ -266,6 +223,8 @@ export class RemoteDetectorClient implements DetectorService {
   private disconnectPort(error: Error): void {
     const port = this.port
     this.port = null
+    this.removePortListeners?.()
+    this.removePortListeners = null
     this.rejectPending(error)
     if (port) {
       try {

@@ -12,7 +12,7 @@
     "verify-onnx-runtime-assets": "node scripts/verify-onnx-runtime-assets.mjs",
     "test": "vitest run && node --test scripts/build-userscript.test.mjs scripts/verify-model-integrity.test.mjs scripts/onnx-runtime-assets.test.mjs scripts/verify-onnx-runtime-assets.test.mjs",
     "test:e2e": "playwright test test/e2e/userscript-smoke.spec.ts --project=chromium",
-    "test:coverage": "vitest run --coverage && node --test --experimental-test-coverage --test-coverage-include-all --test-coverage-lines=80 --test-coverage-branches=70 --test-coverage-functions=80 --test-coverage-include=scripts/build-userscript.mjs --test-coverage-include=scripts/verify-model-integrity.mjs --test-coverage-include=scripts/onnx-runtime-assets.mjs --test-coverage-include=scripts/verify-onnx-runtime-assets.mjs scripts/build-userscript.test.mjs scripts/verify-model-integrity.test.mjs scripts/onnx-runtime-assets.test.mjs scripts/verify-onnx-runtime-assets.test.mjs",
+    "test:coverage": "vitest run --coverage && node --test --experimental-test-coverage --test-coverage-lines=80 --test-coverage-branches=70 --test-coverage-functions=80 --test-coverage-include=scripts/build-userscript.mjs --test-coverage-include=scripts/verify-model-integrity.mjs --test-coverage-include=scripts/onnx-runtime-assets.mjs --test-coverage-include=scripts/verify-onnx-runtime-assets.mjs scripts/build-userscript.test.mjs scripts/verify-model-integrity.test.mjs scripts/onnx-runtime-assets.test.mjs scripts/verify-onnx-runtime-assets.test.mjs",
     "typecheck": "tsc --noEmit",
     "verify:onnx-runtime": "node scripts/verify-onnx-runtime-assets.mjs"
   },

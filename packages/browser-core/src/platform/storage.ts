@@ -6,6 +6,8 @@ export interface AsyncStringStorage {
 
 export interface SyncStringStorage {
   getSync(key: string): string | null
+  /** 已完成初始化且同步视图始终跟随已提交更改，无需再做异步首屏校正。 */
+  readonly synchronousSnapshot?: boolean
 }
 
 export type SettingsStorage = AsyncStringStorage & SyncStringStorage

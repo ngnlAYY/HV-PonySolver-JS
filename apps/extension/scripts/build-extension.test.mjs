@@ -34,7 +34,7 @@ const remoteCsp =
 const packagedCsp = "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'"
 
 test('derives the packaged runtime WASM identity from the shared contract', async () => {
-  const source = await readFile(path.join(scriptDirectory, 'build-extension.mjs'), 'utf8')
+  const source = await readFile(path.join(scriptDirectory, 'build/config.mjs'), 'utf8')
 
   assert.match(source, /ORT_RUNTIME_WASM_FILENAME/u)
   assert.match(source, /ORT_RUNTIME_WASM_INTEGRITY/u)

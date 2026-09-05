@@ -13,6 +13,8 @@ import {
 
 const loadModule = createRequire(import.meta.url)
 let typeScriptParser
+const parsedSources = new Map()
+const MAX_PARSED_SOURCES = 8
 
 function readConstStringLiteral(source, constantName) {
   const valueStart = readTopLevelConstValueStart(source, constantName)
@@ -340,13 +342,18 @@ function hasAmbiguousReturnTypeBrace(source, startIndex, bodyStart) {
 
 function readFunctionBodyFromTypeScriptAst(source, functionName) {
   typeScriptParser ??= loadModule('typescript')
-  const sourceFile = typeScriptParser.createSourceFile(
-    'docs-drift-source.ts',
-    source,
-    typeScriptParser.ScriptTarget.Latest,
-    true,
-    typeScriptParser.ScriptKind.TS,
-  )
+  let sourceFile = parsedSources.get(source)
+  if (!sourceFile) {
+    sourceFile = typeScriptParser.createSourceFile(
+      'docs-drift-source.ts',
+      source,
+      typeScriptParser.ScriptTarget.Latest,
+      true,
+      typeScriptParser.ScriptKind.TS,
+    )
+    if (parsedSources.size >= MAX_PARSED_SOURCES) parsedSources.delete(parsedSources.keys().next().value)
+    parsedSources.set(source, sourceFile)
+  }
   for (const statement of sourceFile.statements) {
     if (
       !typeScriptParser.isFunctionDeclaration(statement) ||

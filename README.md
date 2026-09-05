@@ -248,7 +248,7 @@ apps/userscript/src/inference/onnx-runtime-assets.ts
 | 工具     | 要求                         |
 | -------- | ---------------------------- |
 | Node.js  | `>= 24.15.0`                 |
-| pnpm     | `11.21.0`                    |
+| pnpm     | `12.3.0`                     |
 | Corepack | 推荐启用，用于固定 pnpm 版本 |
 
 仓库根目录的 `.node-version` 将本地工具链和 GitHub Actions 精确固定为 Node.js `24.15.0`；`package.json#engines` 保留 `>= 24.15.0` 的最低兼容要求。
@@ -366,6 +366,7 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 | `pnpm benchmark:extension`                                  | 执行有界 Chromium CI transport smoke（4 个场景、1,600 次操作、约 201 MiB 负载）；不作为性能比较证据                                          |
 | `pnpm benchmark:extension:full`                             | 显式执行代表性双浏览器矩阵（16 个场景、343,200 次操作、约 335 GiB 负载）；仅用于有意的本地基线/候选比较                                      |
 | `pnpm benchmark:extension:quick`                            | 执行降低采样的 Chromium transport smoke；不能作为性能比较证据                                                                                |
+| `pnpm benchmark:extension:product`                          | 使用本地固定模型测量实际 Chromium 消息与 ORT 推理链路，并在 localhost 回放模型下载、缓存和确认                                               |
 | `pnpm benchmark:extension:exhaustive`                       | 显式执行完整 transport 尺寸矩阵；成本显著高于默认代表性矩阵                                                                                  |
 | `pnpm test:e2e:userscript`                                  | 执行用户脚本 Playwright Chromium 测试                                                                                                        |
 | `pnpm test:e2e:extension:content`                           | 加载临时 Chromium 扩展并执行确定性内容脚本整链 fixture                                                                                       |
@@ -403,6 +404,7 @@ pnpm --filter @hv-pony-solver/extension benchmark:full
 pnpm --filter @hv-pony-solver/extension benchmark:quick
 pnpm --filter @hv-pony-solver/extension benchmark:exhaustive
 pnpm --filter @hv-pony-solver/extension benchmark:compare -- BASELINE_JSON CANDIDATE_JSON [OUTPUT_JSON]
+pnpm --filter @hv-pony-solver/extension benchmark:product
 pnpm --filter @hv-pony-solver/extension typecheck
 pnpm --filter @hv-pony-solver/extension test
 pnpm --filter @hv-pony-solver/extension test:coverage
@@ -429,6 +431,10 @@ CI 的独立最低版本任务下载并实际运行 Chromium 116 与 Firefox Des
 MODEL_FILE=/path/to/yolo26n-640.ort \
 pnpm --filter @hv-pony-solver/userscript verify-model-integrity
 ```
+
+`corepack pnpm benchmark:extension:product` 要求本地固定的 `model/yolo26n-640.ort` 和可运行的 Chromium。它默认连续识别 100 次，可传入 `--iterations 1000` 延长运行；另测冷/热 `prepare`、四标签页并发、20 次取消尝试后恢复（分别记录实际取消和抢先完成次数）、4000×4000 合成图片和缓存关闭后重新命中。报告写入 `apps/extension/dist/product-benchmark/product-benchmark.json`。识别使用正式内置模型 ZIP 和真实 content client → broker → Offscreen → Worker → ORT；缓存阶段使用生产下载器与 IndexedDB，仅通过 localhost 回放下载确认，不访问生产 Key 或模型服务。该基准与原有 transport 矩阵独立，不作为发布证据或 CI 性能门槛。
+
+合成纯白 PNG 只用于固定负载，不能证明识别准确率。报告给出 P50/P95、模型 GET/确认/二进制与元数据写入次数，以及连续识别前后的 CDP 堆快照；未测量的 WASM/网络缓冲峰值和 Port/监听器总数保留为 `null`，不把快照变化解释为泄漏证明。比较候选版本时应使用同一机器、浏览器、模型、迭代数与空闲系统状态。
 
 ### Model Worker 命令
 
@@ -784,7 +790,7 @@ corepack pnpm --version
 corepack pnpm install
 ```
 
-项目固定 pnpm `11.21.0`。不要让全局 pnpm 的其他主版本接管项目脚本。
+项目固定 pnpm `12.3.0`。不要让全局 pnpm 的其他主版本接管项目脚本。
 
 ### 默认构建无法加载 ONNX Runtime
 

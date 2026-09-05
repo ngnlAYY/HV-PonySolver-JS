@@ -1,5 +1,7 @@
 import { inferenceTimeoutConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
 
+export const OFFSCREEN_CLAIM_TIMEOUT_MS = 5_000
+
 /**
  * Detect deadlines for the three hops a captcha image travels, derived from the
  * single worker-side budget in browser-core:

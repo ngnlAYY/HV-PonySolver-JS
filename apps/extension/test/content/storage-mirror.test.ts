@@ -3,6 +3,11 @@ import { HISTORY_ENTRY_PREFIX, HISTORY_KEY } from '@hv-pony-solver/browser-core/
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ExtensionStorageMirror } from '../../src/content/storage-mirror'
+import {
+  isContentStorageKey,
+  MAX_BUFFERED_STORAGE_KEYS,
+  STORAGE_INITIALIZATION_TIMEOUT_MS,
+} from '../../src/content/storage-config'
 import type { RawExtensionApi, StorageChanges } from '../../src/platform/webextension-api'
 import { rawExtensionApi } from '../platform/webextension-api-fixture'
 
@@ -35,10 +40,104 @@ function mutationStateCount(mirror: ExtensionStorageMirror): number {
 }
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
 describe('ExtensionStorageMirror', () => {
+  it('handles browser change events for its own committed writes without duplicating optimistic notifications', async () => {
+    const api = rawExtensionApi()
+    vi.mocked(api.storage.local.get).mockResolvedValue({ setting: 'old' })
+    vi.mocked(api.storage.local.set).mockImplementation(async (items) => {
+      emitStorageChanges(api, { setting: { oldValue: 'old', newValue: items.setting } })
+    })
+    vi.stubGlobal('browser', api)
+    const mirror = await ExtensionStorageMirror.create()
+    const listener = vi.fn()
+    mirror.addCommittedChangeListener(listener)
+    const write = mirror.set('setting', 'new')
+    expect(listener).not.toHaveBeenCalled()
+    await write
+    expect(listener).toHaveBeenCalledExactlyOnceWith('setting', 'new', 'old')
+    expect(mirror.getSync('setting')).toBe('new')
+    expect(mutationStateCount(mirror)).toBe(0)
+    mirror.destroy()
+  })
+
+  it('coalesces thousands of same-key changes while retaining the final value', async () => {
+    const api = rawExtensionApi()
+    const snapshot = deferred<Record<string, unknown>>()
+    vi.mocked(api.storage.local.get).mockReturnValue(snapshot.promise)
+    vi.stubGlobal('browser', api)
+    const creation = ExtensionStorageMirror.create()
+    for (let i = 0; i < 3_000; i += 1)
+      emitStorageChanges(api, { setting: { oldValue: String(i), newValue: String(i + 1) } })
+    snapshot.resolve({ setting: '0' })
+    const mirror = await creation
+    expect(mirror.getSync('setting')).toBe('3000')
+    expect(mirror.synchronousSnapshot).toBe(true)
+    mirror.destroy()
+  })
+
+  it('bounds distinct buffered keys and removes the listener on failure', async () => {
+    const api = rawExtensionApi()
+    vi.mocked(api.storage.local.get).mockReturnValue(new Promise(() => undefined))
+    vi.stubGlobal('browser', api)
+    const creation = ExtensionStorageMirror.create()
+    for (let i = 0; i <= MAX_BUFFERED_STORAGE_KEYS; i += 1)
+      emitStorageChanges(api, { [`key-${i}`]: { newValue: 'value' } })
+    await expect(creation).rejects.toThrow('变更过多')
+    expect(api.storage.onChanged.removeListener).toHaveBeenCalledOnce()
+  })
+
+  it.each(['timeout', 'abort'] as const)('cleans up a hanging snapshot on %s', async (reason) => {
+    vi.useFakeTimers()
+    const api = rawExtensionApi()
+    vi.mocked(api.storage.local.get).mockReturnValue(new Promise(() => undefined))
+    vi.stubGlobal('browser', api)
+    const controller = new AbortController()
+    const creation = ExtensionStorageMirror.create({ signal: controller.signal })
+    const rejected = expect(creation).rejects.toThrow(reason === 'timeout' ? '初始化超时' : 'abandoned')
+    if (reason === 'timeout') await vi.advanceTimersByTimeAsync(STORAGE_INITIALIZATION_TIMEOUT_MS)
+    else controller.abort(new Error('abandoned'))
+    await rejected
+    expect(api.storage.onChanged.removeListener).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('keeps prefix indices current through writes, rollback and external deletion', async () => {
+    const api = rawExtensionApi()
+    vi.mocked(api.storage.local.get).mockResolvedValue({ 'history:a': 'old', unrelated: 'x' })
+    vi.stubGlobal('browser', api)
+    const mirror = await ExtensionStorageMirror.create()
+    expect(mirror.getItemsByPrefix('history:')).toEqual([['history:a', 'old']])
+    vi.mocked(api.storage.local.set).mockRejectedValueOnce(new Error('failed'))
+    const failed = mirror.set('history:a', 'new')
+    expect(mirror.getItemsByPrefix('history:')).toEqual([['history:a', 'new']])
+    await expect(failed).rejects.toThrow('failed')
+    expect(mirror.getItemsByPrefix('history:')).toEqual([['history:a', 'old']])
+    emitStorageChanges(api, { 'history:a': { oldValue: 'old' }, 'history:b': { newValue: 'b' } })
+    expect(mirror.getItemsByPrefix('history:')).toEqual([['history:b', 'b']])
+    mirror.destroy()
+  })
+
+  it('retains both worlds and settings but drops unrelated snapshot and event values', async () => {
+    const api = rawExtensionApi()
+    const key = `${HISTORY_ENTRY_PREFIX}isekai:record`
+    vi.mocked(api.storage.local.get).mockResolvedValue({
+      unrelated: 'large',
+      hvPonySolverAnswerMode: 'manual',
+      [key]: 'history',
+    })
+    vi.stubGlobal('browser', api)
+    const mirror = await ExtensionStorageMirror.create({ acceptsKey: isContentStorageKey })
+    emitStorageChanges(api, { unrelated: { newValue: 'more' } })
+    expect(mirror.getSync('unrelated')).toBeNull()
+    expect(mirror.getSync('hvPonySolverAnswerMode')).toBe('manual')
+    expect(mirror.getSync(key)).toBe('history')
+    mirror.destroy()
+  })
+
   it('subscribes before reading the snapshot and replays changes from that window', async () => {
     const api = rawExtensionApi()
     const snapshot = deferred<Record<string, unknown>>()
@@ -113,27 +212,30 @@ describe('ExtensionStorageMirror', () => {
     expect(events).toEqual([['setting', 'updated', 'initial']])
   })
 
-  it.each(['success', 'failure'] as const)('prunes mutation state after the final local mutation %s', async (outcome) => {
-    const api = rawExtensionApi()
-    const persistence = deferred<void>()
-    vi.mocked(api.storage.local.get).mockResolvedValue({ setting: 'old' })
-    vi.mocked(api.storage.local.set).mockReturnValue(persistence.promise)
-    vi.stubGlobal('browser', api)
-    const mirror = await ExtensionStorageMirror.create()
+  it.each(['success', 'failure'] as const)(
+    'prunes mutation state after the final local mutation %s',
+    async (outcome) => {
+      const api = rawExtensionApi()
+      const persistence = deferred<void>()
+      vi.mocked(api.storage.local.get).mockResolvedValue({ setting: 'old' })
+      vi.mocked(api.storage.local.set).mockReturnValue(persistence.promise)
+      vi.stubGlobal('browser', api)
+      const mirror = await ExtensionStorageMirror.create()
 
-    const write = mirror.set('setting', 'new')
-    expect(mutationStateCount(mirror)).toBe(1)
-    if (outcome === 'success') {
-      persistence.resolve(undefined)
-      await expect(write).resolves.toBeUndefined()
-      expect(mirror.getSync('setting')).toBe('new')
-    } else {
-      persistence.reject(new Error('write failed'))
-      await expect(write).rejects.toThrow('write failed')
-      expect(mirror.getSync('setting')).toBe('old')
-    }
-    expect(mutationStateCount(mirror)).toBe(0)
-  })
+      const write = mirror.set('setting', 'new')
+      expect(mutationStateCount(mirror)).toBe(1)
+      if (outcome === 'success') {
+        persistence.resolve(undefined)
+        await expect(write).resolves.toBeUndefined()
+        expect(mirror.getSync('setting')).toBe('new')
+      } else {
+        persistence.reject(new Error('write failed'))
+        await expect(write).rejects.toThrow('write failed')
+        expect(mirror.getSync('setting')).toBe('old')
+      }
+      expect(mutationStateCount(mirror)).toBe(0)
+    },
+  )
 
   it('keeps state and revision protection until the final queued mutation settles', async () => {
     const api = rawExtensionApi()

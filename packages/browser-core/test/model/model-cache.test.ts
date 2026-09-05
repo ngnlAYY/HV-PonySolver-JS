@@ -22,6 +22,7 @@ import {
 import { confirmCachedModelDownload, downloadModel } from '../../src/model/model-downloader'
 import { verifyModelIntegrity } from '../../src/model/model-integrity'
 import { modelConfig } from '../../src/model/model-config'
+import { MODEL_CONFIRMATION_KEY } from '../../src/model/model-cache-schema'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
 
 const TEST_SHA256 = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81'
@@ -79,33 +80,34 @@ function stubIndexedDb(
   database: TestDatabase
   transactions: TestTransaction[]
   getStoredRow(): Record<string, unknown> | undefined
+  getConfirmationRow(): Record<string, unknown> | undefined
+  writes: Record<string, unknown>[]
 }> {
   const { cachedRow, readError, openError, deferOpenSuccess = false, deferTransactionCompletion = false } = options
-  let storedRow = cachedRow
+  const rows = new Map<string, Record<string, unknown>>()
+  if (cachedRow) rows.set(modelConfig.cacheKey, cachedRow)
+  const writes: Record<string, unknown>[] = []
   const transactions: TestTransaction[] = []
-  const readRequest: TestRequest = {
-    onerror: null,
-    onsuccess: null,
-    result: storedRow,
-    error: readError ?? null,
-  }
   const objectStore: TestObjectStore = {
-    get: vi.fn(() => {
+    get: vi.fn((key: IDBValidKey) => {
+      const readRequest: TestRequest = { onerror: null, onsuccess: null, result: undefined, error: readError ?? null }
       queueMicrotask(() => {
         if (readError) {
           readRequest.onerror?.(new Event('error'))
           return
         }
-        readRequest.result = storedRow
+        readRequest.result = rows.get(String(key))
         readRequest.onsuccess?.(new Event('success'))
       })
       return readRequest as unknown as IDBRequest
     }),
     put: vi.fn((row: Record<string, unknown>) => {
-      storedRow = {
+      const storedRow = {
         ...row,
         ...(row.buffer instanceof ArrayBuffer ? { buffer: row.buffer.slice(0) } : {}),
       }
+      rows.set(String(row.key), storedRow)
+      writes.push(storedRow)
       return {} as IDBRequest
     }),
   }
@@ -157,7 +159,14 @@ function stubIndexedDb(
   }
 
   vi.stubGlobal('indexedDB', indexedDb)
-  return { request, database, transactions, getStoredRow: () => storedRow }
+  return {
+    request,
+    database,
+    transactions,
+    writes,
+    getStoredRow: () => rows.get(modelConfig.cacheKey),
+    getConfirmationRow: () => rows.get(MODEL_CONFIRMATION_KEY),
+  }
 }
 
 afterEach(() => {
@@ -167,6 +176,21 @@ afterEach(() => {
 })
 
 describe('readCachedModelBuffer', () => {
+  it.each(['missing', 'cacheWriteId', 'version', 'byteLength', 'sha256', 'confirmationPending'])(
+    'rejects mismatched separate confirmation metadata: %s',
+    async (field) => {
+      const row = {
+        ...(await createCachedModelRow(bufferFromBytes([1, 2, 3]), { integrity: TEST_INTEGRITY }, true)),
+        cacheWriteId: 'write-a',
+      }
+      const confirmation: Record<string, unknown> = { ...row, key: MODEL_CONFIRMATION_KEY, confirmationPending: false }
+      confirmation[field] = 'different'
+      await expect(
+        readCachedModelBuffer(row, { integrity: TEST_INTEGRITY }, field === 'missing' ? undefined : confirmation),
+      ).resolves.toBeNull()
+    },
+  )
+
   it('returns cached buffers that match the configured integrity by default', async () => {
     const buffer = bufferFromBytes([1, 2, 3])
 
@@ -678,11 +702,47 @@ describe('ModelCache', () => {
 
     await firstCache.putCached(buffer, false)
 
-    expect(indexedDb.getStoredRow()).toMatchObject({ confirmationPending: false })
+    expect(indexedDb.getStoredRow()).toMatchObject({ confirmationPending: true })
+    expect(indexedDb.getConfirmationRow()).toMatchObject({ confirmationPending: false })
+    expect(indexedDb.writes.filter((row) => row.buffer instanceof ArrayBuffer)).toHaveLength(1)
+    expect(indexedDb.writes).toHaveLength(3)
     firstCache.close()
     vi.mocked(verifyModelIntegrity).mockResolvedValueOnce(undefined)
     const restartedCache = new ModelCache(createStatusPanel())
     await expect(restartedCache.getCached()).resolves.toBeInstanceOf(ArrayBuffer)
+  })
+
+  it('does not let a late confirmation overwrite a newer cache write', async () => {
+    const indexedDb = stubIndexedDb()
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const firstBuffer = bufferFromBytes([1, 2, 3])
+    const secondBuffer = bufferFromBytes([4, 5, 6])
+    for (const buffer of [firstBuffer, secondBuffer]) {
+      registerModelDownloadConfirmation(buffer, {
+        accessKey: 'test-key',
+        receiptId: 'd'.repeat(32),
+        fetchImpl: vi.fn() as unknown as typeof fetch,
+      })
+    }
+    let finishFirst!: () => void
+    const confirm = vi.mocked(confirmCachedModelDownload)
+    confirm.mockClear()
+    confirm.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFirst = resolve
+        }),
+    )
+    const first = new ModelCache(createStatusPanel()).putCached(firstBuffer, false)
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce())
+    await new ModelCache(createStatusPanel()).putCached(secondBuffer, false)
+    const current = indexedDb.getConfirmationRow()
+    finishFirst()
+    await expect(first).rejects.toThrow('模型缓存已被其他下载替换')
+    expect(indexedDb.getConfirmationRow()).toBe(current)
+    expect(indexedDb.getStoredRow()?.cacheWriteId).toBe(current?.cacheWriteId)
+    expect(current?.confirmationPending).toBe(false)
+    expect(indexedDb.writes.filter((row) => row.buffer instanceof ArrayBuffer)).toHaveLength(2)
   })
 
   it('rejects bad model buffers when cache write verification is enabled by default', async () => {

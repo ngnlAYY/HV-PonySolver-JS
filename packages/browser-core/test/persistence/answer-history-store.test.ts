@@ -83,6 +83,26 @@ describe('HistoryStore', () => {
     expect(new HistoryStore(localStorage).get('main')).toEqual([validSuccessRecord, validErrorRecord])
   })
 
+  it('reuses unchanged parsed history and refreshes only changed values without exposing cached objects', () => {
+    const storage = new MemoryEnumerableStorage()
+    const key = `${HISTORY_ENTRY_PREFIX}main:cached`
+    storage.values.set(key, JSON.stringify(validSuccessRecord))
+    storage.values.set(HISTORY_KEY, JSON.stringify({ main: [validManualRecord] }))
+    const store = new HistoryStore(storage)
+    const parse = vi.spyOn(JSON, 'parse')
+    const initial = store.get('main')
+    const firstParseCount = parse.mock.calls.length
+    initial[0]!.elapsed = 999
+    expect(store.get('main')[0]?.elapsed).toBe(validManualRecord.elapsed)
+    expect(parse.mock.calls.length).toBe(firstParseCount)
+    storage.values.set(key, JSON.stringify({ ...validSuccessRecord, answers: 'changed' }))
+    expect(store.get('main')).toContainEqual({ ...validSuccessRecord, answers: 'changed' })
+    expect(parse.mock.calls.length).toBe(firstParseCount + 1)
+    storage.values.delete(key)
+    expect(store.get('main')).toEqual([validManualRecord])
+    parse.mockRestore()
+  })
+
   it('self-heals corrupted legacy JSON when adding a record', async () => {
     localStorage.setItem(HISTORY_KEY, '{bad json')
     const store = new HistoryStore(localStorage)

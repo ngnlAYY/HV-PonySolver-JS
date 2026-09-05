@@ -25,6 +25,8 @@ The mode is a build-time choice, never runtime detection or fallback:
 
 The direct CLI form is `node scripts/build-extension.mjs --model-mode remote|packaged`. Production packaged builds accept no model-path or integrity override. Before replacing `apps/extension/dist`, the builder requires the fixed input to be a regular non-symlink file with exactly 9,914,448 bytes and the canonical SHA-256 from `@hv-pony-solver/shared/ort-model`. The archive provides integrity checks, not encryption or confidentiality; installed package contents can be inspected.
 
+The public build entry delegates configuration, policy, asset verification, inventory/auditing, archive writing and target orchestration to `scripts/build/`. ZIP compression streams bounded chunks to disk with an incremental archive hash; fixed timestamps and sorted entries preserve reproducibility. Firefox smoke scripts share only WebDriver process/request/cleanup mechanics; their product assertions remain separate.
+
 ## Runtime architecture
 
 The page-facing content script is identical in both modes. It owns bounded DOM observation, same-origin image loading, status/history rendering, answer clicks and the native submit-button click. Once answer history exists, it also prefetches the inference session at page load, so the first captcha of a browsing session does not pay the cold-start cost; fresh installs stay lazy and never spend a monthly download slot before their first captcha.
@@ -54,6 +56,8 @@ The broker validates extension ID, Hentaiverse/options origins, exact protocol s
 
 ## Model and runtime ownership
 
+Chromium reuses a successful `claim` only within the same background epoch and Offscreen `contextId`. Concurrent waiters share the handshake with independent cancellation; a failed or timed-out claim, replacement document, or background restart requires a new handshake. Content and options requests share timeout/cancellation settlement mechanics while retaining their respective shared-Port and per-request-Port policies.
+
 Every artifact contains:
 
 - `inference-worker.js`;
@@ -73,6 +77,10 @@ Packaged mode constructs none of those remote capabilities. It fetches the exten
 | Model bytes               | model IndexedDB  | bundled package asset | No                          |
 | Model access Key          | secret IndexedDB | not read or changed   | No                          |
 | Ordinary settings/history | `storage.local`  | `storage.local`       | Through an in-memory mirror |
+
+The content mirror retains only the application's settings/history namespaces, including both worlds so experienced-user prefetch remains compatible. Initialization merges changes by key (first old value, latest new value), stops after five seconds or cancellation, and fails closed above 1,024 distinct buffered keys. Page teardown also cancels initialization. Up to four prefix indices avoid repeated full scans. History reuses parsed values only while their serialized strings match; returned records are copied and the final reconciliation after a write is retained.
+
+A ready synchronous mirror supplies panel settings directly. The panel discards only its own synchronous render mutations, preserving pending page mutations and visibility changes when externally inserted `div#csp` elements disappear.
 
 The remote options page enables the initially disabled Key fieldset after its handlers exist. It never echoes the stored Key. “Verify and save” settles Key validity with an unmetered HEAD probe and persists the Key without spending a monthly download. “Query download count” reads the saved Key's current monthly status without spending a download; when enforcement is disabled it reports `无次数限制（模型下载次数限制未开启）`. “Download model” uses the saved Key to download, verify and cache the model; if a valid local cache already exists, it reports the cache hit without spending another download. A real-model GET only reserves a ten-minute receipt. The Host confirms that receipt with `POST /quota` after byte-length/SHA-256 verification and a completed model IndexedDB transaction, so an interrupted or uncached response is not counted. A hanging Key, quota, or model operation can be cancelled from the page, which aborts the in-flight request on both sides.
 

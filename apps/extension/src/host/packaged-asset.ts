@@ -1,4 +1,6 @@
 import { resolveFetchImplementation } from '@hv-pony-solver/browser-core/platform/fetch'
+import { cancelByteStream, readBoundedByteStream, sha256Hex } from '@hv-pony-solver/browser-core/platform/byte-stream'
+import { raceAbort } from '@hv-pony-solver/browser-core/utils/abort-race'
 
 export type PackagedAssetIntegrity = Readonly<{
   byteLength: number
@@ -6,11 +8,7 @@ export type PackagedAssetIntegrity = Readonly<{
 }>
 
 async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
-  try {
-    await body?.cancel()
-  } catch {
-    // Cancellation is best-effort cleanup and must not replace the primary error.
-  }
+  cancelByteStream(body)
 }
 
 function declaredLength(response: Response, label: string): number | null {
@@ -28,58 +26,12 @@ function declaredLength(response: Response, label: string): number | null {
   return parsed
 }
 
-async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', buffer)
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 function abortError(label: string): Error {
   return new Error(`${label} 加载已取消`)
 }
 
 function waitForAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined, label: string): Promise<T> {
-  if (!signal) {
-    return promise
-  }
-  if (signal.aborted) {
-    return Promise.reject(abortError(label))
-  }
-
-  return new Promise<T>((resolve, reject) => {
-    let settled = false
-    const cleanup = (): void => signal.removeEventListener('abort', onAbort)
-    const onAbort = (): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      cleanup()
-      reject(abortError(label))
-    }
-
-    signal.addEventListener('abort', onAbort, { once: true })
-    promise.then(
-      (value) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        cleanup()
-        resolve(value)
-      },
-      (error: unknown) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        cleanup()
-        reject(error)
-      },
-    )
-    if (signal.aborted) {
-      onAbort()
-    }
-  })
+  return raceAbort(promise, signal, () => abortError(label))
 }
 
 async function readExactBody(
@@ -88,43 +40,12 @@ async function readExactBody(
   label: string,
   signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
-  const reader = body.getReader()
-  const output = new Uint8Array(expectedByteLength)
-  let offset = 0
-  let primaryError: unknown
-  try {
-    while (true) {
-      const { done, value } = await waitForAbort(reader.read(), signal, label)
-      if (done) {
-        break
-      }
-      if (offset + value.byteLength > expectedByteLength) {
-        throw new Error(`${label} 大小校验失败`)
-      }
-      output.set(value, offset)
-      offset += value.byteLength
-    }
-    if (offset !== expectedByteLength) {
-      throw new Error(`${label} 大小校验失败`)
-    }
-  } catch (error) {
-    primaryError = error
-    try {
-      void reader.cancel().catch(() => undefined)
-    } catch {
-      // Preserve the read, length, or cancellation error that caused cleanup.
-    }
-  } finally {
-    try {
-      reader.releaseLock()
-    } catch {
-      // Releasing a failed or still-pending reader is best-effort cleanup.
-    }
-  }
-  if (primaryError !== undefined) {
-    throw primaryError
-  }
-  return output.buffer
+  return readBoundedByteStream(body, {
+    expectedByteLength,
+    maxByteLength: expectedByteLength,
+    sizeError: () => new Error(`${label} 大小校验失败`),
+    wait: (promise) => raceAbort(promise, signal, () => abortError(label)),
+  })
 }
 
 export async function loadPackagedAsset(

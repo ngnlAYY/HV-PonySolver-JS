@@ -76,6 +76,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 
 - 用户脚本通过 GM 桥接访问特权 API；扩展内容脚本不得接收模型 Key 或模型字节。
 - 扩展远程模型 Key 只保存在扩展源 IndexedDB；普通设置和历史使用 `storage.local`。不得把 Key 降级保存到页面存储、查询字符串或可回显控件。
+- 内容脚本镜像初始化按 key 合并变更，并受超时、取消和不同 key 数量上限约束；读取快照失败时必须清理监听器。历史解析缓存必须观察外部写入，不能省略写入后的最终校对。
 - 调用原生 `fetch` 时必须保留正确接收者，使用项目已有的 fetch 解析辅助函数，避免 `Illegal invocation`。
 - 跨上下文消息必须执行严格 schema、来源、大小、超时和取消校验。不要把 `unknown` 消息直接断言为可信类型。
 - 验证码图片消息保持明确的大小上限；模型字节使用可转移 `ArrayBuffer`，不得改为无界 Base64 或重复拷贝。
@@ -86,6 +87,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 - 当前 ORT 模型和定制 WASM 的文件名、URL、对象键、字节长度与 SHA-256 是一组原子契约。替换资产时必须同步共享清单、Worker 配置、构建器、测试和文档。
 - 模型和 WASM 下载必须拒绝重定向，并同时执行最大长度、声明长度、实际长度和 SHA-256 校验；失败内容不得进入缓存。
 - 远程扩展只有在完整读取、校验并成功写入 IndexedDB 后，才可向后端确认一次下载。
+- 模型二进制与确认元数据必须在同一初始事务内写入并绑定同一写入身份；确认后只更新匹配的元数据，旧确认不得覆盖新模型状态。
 - 内置扩展构建只接受仓库约定的固定模型输入，构建产物必须审计模型身份、CSP、权限、Host 权限、动态导入和远程可执行代码。
 - 扩展 JS、Worker、ORT glue 和 WASM 必须随包分发；不得引入远程可执行代码。
 - 远程扩展产物不得包含 `.ort`；内置扩展产物必须且只能包含清单声明的一个 `.ort`。
@@ -126,7 +128,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 
 ## 测试与验证
 
-项目要求 Node.js `>=24.15.0`，并由 `package.json` 固定 `pnpm@11.21.0`。优先使用 `corepack pnpm`，不要让不兼容的全局 pnpm 接管脚本。
+项目要求 Node.js `>=24.15.0`，并由 `package.json` 固定 `pnpm@12.3.0`。优先使用 `corepack pnpm`，不要让不兼容的全局 pnpm 接管脚本。
 
 先运行与改动直接相关的最小测试，再按风险扩大范围。常用定向命令：
 
@@ -203,3 +205,49 @@ corepack pnpm --filter @hv-pony-solver/model-worker render-config
 - 本文列出的命令、默认值或安全约束已不再符合源码。
 
 维护时以当前源码、测试和工作流为依据，参考历史文档结构但不要保留与本项目无关的规则。更新后至少执行 Markdown 格式检查、`git diff --check` 和受影响的文档漂移测试。
+
+<!-- gitnexus:start -->
+
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **HV-PonySolver-JS** (5533 symbols, 17819 relationships, 422 execution flows).
+
+> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
+
+## Always Do
+
+- **MUST run impact before editing.** Use `impact({target: "symbolName", direction: "upstream"})` or `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .`; report callers, processes, and risk. Never substitute grep for graph analysis.
+- **MUST analyze graph changes before committing.** Use `detect_changes({scope: "all"})` (MCP) or `node .gitnexus/run.cjs detect-changes --scope all --repo .` (CLI fallback). `partial: true` or `truncated: true` is not a clean check — a zero means unseen, not unaffected; re-run it. For regression review: `detect_changes({scope: "compare", base_ref: "main"})` or `node .gitnexus/run.cjs detect-changes --scope compare --base-ref "main" --repo .`.
+- MUST warn on HIGH/CRITICAL `risk` pre-edit; never use `riskSharedAxes` to waive a HIGH/CRITICAL `risk` warning. Compare File/symbol: MCP File omits axes; Graph-RAG expands File.
+- **MUST treat `risk: UNKNOWN` as unresolved, not as low.** An empty caller set is not evidence the symbol is unused — it can also mean the callers are not resolvable by the index (plain-object property access, dynamic dispatch, cross-language calls). `impact` pairs `UNKNOWN` with a `riskNote` saying so. Confirm with a text search before treating the symbol as safe to change or delete; do not proceed on the strength of a zero.
+- **MUST use `query({search_query: "concept"})` for concepts/flows, `context({name: "symbolName"})` for a named symbol, or `impact` for blast radius, on read-only callers, dependencies, imports, or execution flow.** Graph first; text search only for empty/`UNKNOWN`/literals.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+
+## Never Do
+
+- NEVER edit a function, class, or method before MCP/CLI impact analysis.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis, and never read `UNKNOWN` as an all-clear — it means the walk could not answer, which is the one verdict that requires confirming by other means.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit before MCP/CLI graph change analysis.
+
+## Resources
+
+| Resource                                          | Use for                                  |
+| ------------------------------------------------- | ---------------------------------------- |
+| `gitnexus://repo/HV-PonySolver-JS/context`        | Codebase overview, check index freshness |
+| `gitnexus://repo/HV-PonySolver-JS/clusters`       | All functional areas                     |
+| `gitnexus://repo/HV-PonySolver-JS/processes`      | All execution flows                      |
+| `gitnexus://repo/HV-PonySolver-JS/process/{name}` | Step-by-step execution trace             |
+
+## CLI
+
+| Task                                         | Read this skill file                               |
+| -------------------------------------------- | -------------------------------------------------- |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md`       |
+| Blast radius / "What breaks if I change X?"  | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?"             | `.claude/skills/gitnexus-debugging/SKILL.md`       |
+| Rename / extract / split / refactor          | `.claude/skills/gitnexus-refactoring/SKILL.md`     |
+| Tools, resources, schema reference           | `.claude/skills/gitnexus-guide/SKILL.md`           |
+| Index, status, clean, wiki CLI commands      | `.claude/skills/gitnexus-cli/SKILL.md`             |
+
+<!-- gitnexus:end -->

@@ -26,25 +26,27 @@ describe('Chromium offscreen lifecycle', () => {
     vi.clearAllMocks()
     mocks.closeDocument.mockResolvedValue(undefined)
     mocks.createDocument.mockResolvedValue(undefined)
+    mocks.getContexts.mockReset().mockResolvedValue([])
   })
 
   it('coalesces concurrent creation attempts', async () => {
     let resolveContexts: ((contexts: unknown[]) => void) | undefined
-    mocks.getContexts.mockImplementation(
+    mocks.getContexts.mockResolvedValue([{ contextId: 'created' }]).mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           resolveContexts = resolve
         }),
     )
-    const { ensureOffscreenDocument } = await lifecycle()
+    const { ensureOffscreenDocument, offscreenDocumentIdentity } = await lifecycle()
 
     const first = ensureOffscreenDocument()
     const second = ensureOffscreenDocument()
     resolveContexts?.([])
     await Promise.all([first, second])
 
-    expect(mocks.getContexts).toHaveBeenCalledTimes(1)
+    expect(mocks.getContexts).toHaveBeenCalledTimes(2)
     expect(mocks.createDocument).toHaveBeenCalledTimes(1)
+    expect(offscreenDocumentIdentity()).toBe('created')
   })
 
   it('does not create another document when a matching context exists', async () => {

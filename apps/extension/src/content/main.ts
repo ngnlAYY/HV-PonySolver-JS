@@ -15,6 +15,7 @@ import { watchModelCredentialsRevision } from './credentials-watch'
 import { startContentRuntime } from './content-runtime'
 import { scheduleExperiencedPrefetch } from './prefetch'
 import { ExtensionStorageMirror } from './storage-mirror'
+import { isContentStorageKey } from './storage-config'
 
 function createContentApp(storage: ExtensionStorageMirror): App {
   const history = new HistoryStore(storage)
@@ -47,6 +48,9 @@ function createContentApp(storage: ExtensionStorageMirror): App {
   return app
 }
 
-void startContentRuntime(() => ExtensionStorageMirror.create(), createContentApp).catch((error: unknown) => {
+void startContentRuntime(
+  (signal) => ExtensionStorageMirror.create({ signal, acceptsKey: isContentStorageKey }),
+  createContentApp,
+).catch((error: unknown) => {
   logError('扩展启动失败:', error instanceof Error ? error.message : String(error))
 })

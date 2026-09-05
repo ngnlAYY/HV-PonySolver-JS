@@ -51,13 +51,12 @@ function isHistoryRecord(value: unknown): value is HistoryRecord {
   return isBoundedHistoryText(value.message)
 }
 
-function parseHistoryRoot(storage: TextStorage): Record<string, unknown> | null {
+function parseHistoryRoot(raw: string | null): Record<string, unknown> | null {
   try {
-    const raw = storage.getItem(HISTORY_KEY) || '{}'
-    if (raw.length > HISTORY_ROOT_MAX_LENGTH) {
+    if (raw !== null && raw.length > HISTORY_ROOT_MAX_LENGTH) {
       return null
     }
-    const parsed: unknown = JSON.parse(raw)
+    const parsed: unknown = JSON.parse(raw ?? '{}')
     return isRecordObject(parsed) ? parsed : null
   } catch {
     return null
@@ -74,14 +73,12 @@ function isEnumerableTextStorage(storage: TextStorage): storage is EnumerableTex
 }
 
 function sortHistoryRecords(records: HistoryRecord[]): HistoryRecord[] {
-  return records
-    .map((record, index) => ({ index, record }))
-    .sort((left, right) => {
-      const leftTimestamp = Number.isFinite(left.record.timestamp) ? (left.record.timestamp ?? 0) : 0
-      const rightTimestamp = Number.isFinite(right.record.timestamp) ? (right.record.timestamp ?? 0) : 0
-      return rightTimestamp - leftTimestamp || left.index - right.index
-    })
-    .map(({ record }) => record)
+  // 支持的浏览器均提供稳定排序，相同时间戳保持原有顺序。
+  return records.sort((left, right) => {
+    const leftTimestamp = Number.isFinite(left.timestamp) ? (left.timestamp ?? 0) : 0
+    const rightTimestamp = Number.isFinite(right.timestamp) ? (right.timestamp ?? 0) : 0
+    return rightTimestamp - leftTimestamp
+  })
 }
 
 function createHistoryEntryId(): string {
@@ -119,6 +116,9 @@ function completeRecord(record: HistoryRecord): HistoryRecord {
 }
 
 export class HistoryStore {
+  private legacyRaw: string | null | undefined
+  private legacyRoot: Record<string, unknown> | null = null
+  private readonly parsedEntries = new Map<string, Readonly<{ raw: string; record: HistoryRecord | null }>>()
   constructor(
     private readonly storage: TextStorage,
     private readonly entryIdFactory: () => string = createHistoryEntryId,
@@ -127,12 +127,14 @@ export class HistoryStore {
   get(world: World): HistoryRecord[] {
     const legacyRecords = this.getLegacyRecords(world)
     if (!isEnumerableTextStorage(this.storage)) {
-      return legacyRecords
+      return legacyRecords.map((record) => ({ ...record }))
     }
     return sortHistoryRecords([
       ...this.getKeyedRecords(this.storage, world).map(({ record }) => record),
       ...legacyRecords,
-    ]).slice(0, HISTORY_MAX)
+    ])
+      .slice(0, HISTORY_MAX)
+      .map((record) => ({ ...record }))
   }
 
   hasHistory(): boolean {
@@ -174,7 +176,7 @@ export class HistoryStore {
   private addLegacy(world: World, record: HistoryRecord): HistoryMutation {
     let root: Record<string, unknown>
     try {
-      root = parseHistoryRoot(this.storage) ?? {}
+      root = this.readLegacyRoot() ?? {}
     } catch (error) {
       warn('读取损坏记录失败，将重建记录:', formatErrorMessage(error))
       root = {}
@@ -200,12 +202,21 @@ export class HistoryStore {
 
   private getLegacyRecords(world: World): HistoryRecord[] {
     try {
-      const root = parseHistoryRoot(this.storage)
+      const root = this.readLegacyRoot()
       return root ? getWorldRecords(root, world) : []
     } catch (error) {
       warn('读取记录失败:', formatErrorMessage(error))
       return []
     }
+  }
+
+  private readLegacyRoot(): Record<string, unknown> | null {
+    const raw = this.storage.getItem(HISTORY_KEY)
+    if (raw !== this.legacyRaw) {
+      this.legacyRoot = parseHistoryRoot(raw)
+      this.legacyRaw = raw !== null && raw.length > HISTORY_ROOT_MAX_LENGTH ? undefined : raw
+    }
+    return this.legacyRoot
   }
 
   private getKeyedRecords(
@@ -214,26 +225,43 @@ export class HistoryStore {
     invalidKeys: string[] = [],
   ): KeyedHistoryRecord[] {
     const records: KeyedHistoryRecord[] = []
+    const prefix = `${HISTORY_ENTRY_PREFIX}${world}:`
+    const presentKeys = new Set<string>()
     try {
-      for (const [key, value] of storage.getItemsByPrefix(`${HISTORY_ENTRY_PREFIX}${world}:`)) {
+      for (const [key, value] of storage.getItemsByPrefix(prefix)) {
+        presentKeys.add(key)
         try {
           if (value.length > HISTORY_ENTRY_MAX_LENGTH) {
+            this.parsedEntries.delete(key)
             invalidKeys.push(key)
             continue
           }
-          const parsed: unknown = JSON.parse(value)
-          if (isHistoryRecord(parsed)) {
-            records.push({ key, record: parsed })
+          let cached = this.parsedEntries.get(key)
+          if (!cached || cached.raw !== value) {
+            const parsed: unknown = JSON.parse(value)
+            cached = { raw: value, record: isHistoryRecord(parsed) ? parsed : null }
+            if (!this.parsedEntries.has(key) && this.parsedEntries.size >= HISTORY_MAX * 2) {
+              const oldest = this.parsedEntries.keys().next().value
+              if (oldest !== undefined) this.parsedEntries.delete(oldest)
+            }
+            this.parsedEntries.set(key, cached)
+          }
+          if (cached.record) {
+            records.push({ key, record: cached.record })
           } else {
             invalidKeys.push(key)
           }
         } catch (error) {
+          this.parsedEntries.delete(key)
           invalidKeys.push(key)
           warn('读取单条记录失败:', formatErrorMessage(error))
         }
       }
     } catch (error) {
       warn('读取单条记录列表失败:', formatErrorMessage(error))
+    }
+    for (const key of this.parsedEntries.keys()) {
+      if (key.startsWith(prefix) && !presentKeys.has(key)) this.parsedEntries.delete(key)
     }
     return records.sort((left, right) => {
       const leftTimestamp = Number.isFinite(left.record.timestamp) ? (left.record.timestamp ?? 0) : 0
@@ -248,7 +276,7 @@ export class HistoryStore {
       return
     }
     try {
-      if (raw.length <= HISTORY_ROOT_MAX_LENGTH && isRecordObject(JSON.parse(raw) as unknown)) {
+      if (this.readLegacyRoot() !== null) {
         return
       }
     } catch {

@@ -1,19 +1,18 @@
 import assert from 'node:assert/strict'
-import { execFile as execFileCallback, spawn } from 'node:child_process'
+import { execFile as execFileCallback } from 'node:child_process'
 import { constants } from 'node:fs'
 import { access, readFile } from 'node:fs/promises'
-import net from 'node:net'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
 import { firefox } from '@playwright/test'
+import { findExecutable, startWebDriver, createWebDriverClient } from './browser/webdriver.mjs'
 
 import {
   assertBrowserVersionForRun,
   browserSupport,
   firefoxArguments,
-  geckodriverArguments,
   parseFirefoxVersion,
   parseGeckodriverVersion,
 } from './browser-support.mjs'
@@ -27,105 +26,6 @@ const buildManifestPath = path.resolve(sourceDir, 'build-manifest.json')
 const firefoxBinary = process.env.FIREFOX_EXECUTABLE_PATH || firefox.executablePath()
 const addonId = 'hv-pony-solver@ngnl.host'
 const extensionUuid = '11111111-2222-4333-8444-555555555555'
-
-async function findExecutable(name) {
-  if (name.includes(path.sep)) {
-    return name
-  }
-  for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
-    if (directory) {
-      const candidate = path.join(directory, name)
-      try {
-        await access(candidate, constants.X_OK)
-        return candidate
-      } catch {
-        // Keep looking through PATH.
-      }
-    }
-  }
-  return name
-}
-
-async function reservePort() {
-  const server = net.createServer()
-  await new Promise((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolve)
-  })
-  const address = server.address()
-  await new Promise((resolve) => server.close(resolve))
-  if (!address || typeof address === 'string') {
-    throw new Error('无法分配 geckodriver 测试端口')
-  }
-  return address.port
-}
-
-async function waitForWebDriver(port, driver, output) {
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline) {
-    if (driver.exitCode !== null) {
-      throw new Error(`geckodriver 提前退出: ${output.join('')}`)
-    }
-    try {
-      const response = await globalThis.fetch(`http://127.0.0.1:${port}/status`)
-      if (response.ok) {
-        return
-      }
-    } catch {
-      // Driver is still starting.
-    }
-    await new Promise((resolve) => globalThis.setTimeout(resolve, 50))
-  }
-  throw new Error(`等待 geckodriver 启动超时: ${output.join('')}`)
-}
-
-async function startWebDriver(executable) {
-  const port = await reservePort()
-  const output = []
-  const driver = spawn(executable, geckodriverArguments(port), { stdio: ['ignore', 'pipe', 'pipe'] })
-  driver.stdout.on('data', (chunk) => output.push(String(chunk)))
-  driver.stderr.on('data', (chunk) => output.push(String(chunk)))
-  const stop = async () => {
-    if (driver.exitCode !== null) {
-      return
-    }
-    await new Promise((resolve) => {
-      const killTimer = globalThis.setTimeout(() => {
-        if (driver.exitCode === null) {
-          driver.kill('SIGKILL')
-        }
-      }, 2_000)
-      driver.once('exit', () => {
-        globalThis.clearTimeout(killTimer)
-        resolve()
-      })
-      driver.kill('SIGTERM')
-    })
-  }
-  try {
-    await waitForWebDriver(port, driver, output)
-  } catch (error) {
-    await stop()
-    throw error
-  }
-  return { port, stop }
-}
-
-function createWebDriverClient(port) {
-  const endpoint = `http://127.0.0.1:${port}`
-  return async (method, pathname, body) => {
-    const response = await globalThis.fetch(`${endpoint}${pathname}`, {
-      method,
-      headers: body === undefined ? undefined : { 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-    const payload = await response.json()
-    if (!response.ok || payload.value?.error) {
-      throw new Error(payload.value?.message || `WebDriver HTTP ${response.status}`)
-    }
-    return payload.value
-  }
-}
 
 await access(manifestPath)
 await access(buildManifestPath)

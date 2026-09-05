@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   addRuntimeMessageListener: vi.fn(),
   closeOffscreenDocumentIfIdle: vi.fn(),
   hasOffscreenDocument: vi.fn(),
+  offscreenDocumentIdentity: vi.fn<() => string | null>(() => null),
   offscreenReleases: [] as Array<ReturnType<typeof vi.fn>>,
   registerBroker: vi.fn(),
   registerOpenOptionsAction: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('../../src/background/chromium-offscreen', () => ({
   acquireOffscreenAdmission: mocks.acquireOffscreenAdmission,
   closeOffscreenDocumentIfIdle: mocks.closeOffscreenDocumentIfIdle,
   hasOffscreenDocument: mocks.hasOffscreenDocument,
+  offscreenDocumentIdentity: mocks.offscreenDocumentIdentity,
 }))
 vi.mock('../../src/platform/webextension', () => ({
   addRuntimeMessageListener: mocks.addRuntimeMessageListener,
@@ -66,6 +68,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.offscreenReleases.length = 0
   mocks.hasOffscreenDocument.mockResolvedValue(false)
+  mocks.offscreenDocumentIdentity.mockReturnValue(null)
   mocks.acquireOffscreenAdmission.mockImplementation(async () => {
     const release = vi.fn()
     mocks.offscreenReleases.push(release)
@@ -99,6 +102,67 @@ beforeEach(() => {
 })
 
 describe('target-specific extension bootstraps', () => {
+  it('shares a claim within one context and reclaims a replacement document', async () => {
+    mocks.offscreenDocumentIdentity.mockReturnValue('context-shared')
+    registerChromiumBackground()
+    const invoke = mocks.registerBroker.mock.calls[0]![0] as HostInvoker
+    await Promise.all(
+      ['a', 'b'].map((id) =>
+        invoke({ protocol: PROTOCOL_VERSION, type: 'prepare', requestId: id }, new AbortController().signal),
+      ),
+    )
+    expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'claim')).toHaveLength(1)
+    mocks.offscreenDocumentIdentity.mockReturnValue('context-replaced')
+    await invoke({ protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'c' }, new AbortController().signal)
+    expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'claim')).toHaveLength(2)
+    expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'request')).toHaveLength(3)
+  })
+
+  it('keeps a shared claim alive when only one waiter cancels', async () => {
+    mocks.offscreenDocumentIdentity.mockReturnValue('context-cancel-one')
+    let finishClaim!: (value: unknown) => void
+    const original = mocks.sendRuntimeMessage.getMockImplementation()!
+    mocks.sendRuntimeMessage.mockImplementation((message: Record<string, unknown>) =>
+      message.operation === 'claim'
+        ? new Promise((resolve) => {
+            finishClaim = resolve
+          })
+        : original(message),
+    )
+    registerChromiumBackground()
+    const invoke = mocks.registerBroker.mock.calls[0]![0] as HostInvoker
+    const controller = new AbortController()
+    const first = invoke({ protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'cancel-a' }, controller.signal)
+    const second = invoke(
+      { protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'keep-b' },
+      new AbortController().signal,
+    )
+    await vi.waitFor(() => expect(finishClaim).toBeTypeOf('function'))
+    controller.abort()
+    await expect(first).rejects.toThrow('已取消')
+    const sent = mocks.sendRuntimeMessage.mock.calls.find(([message]) => message.operation === 'claim')![0]
+    finishClaim({ type: OFFSCREEN_MESSAGE_TYPE, operation: 'claimed', epoch: sent.epoch, idleGeneration: null })
+    await expect(second).resolves.toMatchObject({ ok: true })
+    expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'claim')).toHaveLength(1)
+  })
+
+  it('expires a hung shared claim and releases its admission', async () => {
+    vi.useFakeTimers()
+    mocks.offscreenDocumentIdentity.mockReturnValue('context-timeout')
+    mocks.sendRuntimeMessage.mockReturnValue(new Promise(() => undefined))
+    registerChromiumBackground()
+    const invoke = mocks.registerBroker.mock.calls[0]![0] as HostInvoker
+    const result = invoke(
+      { protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'claim-timeout' },
+      new AbortController().signal,
+    )
+    const rejected = expect(result).rejects.toThrow('接管超时')
+    await vi.advanceTimersByTimeAsync(5_000)
+    await rejected
+    expect(mocks.offscreenReleases[0]).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
   it('claims the Offscreen owner before each uniquely identified Chromium request', async () => {
     registerChromiumBackground({ allowOptions: false })
     expect(mocks.registerBroker).toHaveBeenCalledWith(expect.any(Function), { allowOptions: false })
@@ -187,9 +251,8 @@ describe('target-specific extension bootstraps', () => {
   })
 
   it('releases admission when cancellation interrupts a hanging Offscreen claim', async () => {
-    mocks.sendRuntimeMessage.mockImplementation(
-      (message: Record<string, unknown>) =>
-        message.operation === 'claim' ? new Promise<never>(() => undefined) : Promise.resolve(undefined),
+    mocks.sendRuntimeMessage.mockImplementation((message: Record<string, unknown>) =>
+      message.operation === 'claim' ? new Promise<never>(() => undefined) : Promise.resolve(undefined),
     )
     registerChromiumBackground()
     const invokeHost = mocks.registerBroker.mock.calls[0]![0] as HostInvoker

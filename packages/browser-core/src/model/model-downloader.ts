@@ -1,5 +1,6 @@
 import { inferenceTimeoutConfig } from '../inference/inference-config'
 import { resolveFetchImplementation } from '../platform/fetch'
+import { readBoundedByteStream } from '../platform/byte-stream'
 import { raceAbort } from '../utils/abort-race'
 import { MODEL_DOWNLOAD_RECEIPT_HEADER, normalizeModelDownloadReceiptId } from '@hv-pony-solver/shared'
 import {
@@ -284,60 +285,15 @@ async function readModelResponse(
   // their length claim is unproven until the caller's hash check passes.
   const expectedContentLength =
     declaredByteLength === null ? expectedByteLength : trustDeclared ? declaredByteLength : null
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  const bytes = expectedContentLength === null ? null : new Uint8Array(expectedContentLength)
-  let totalBytes = 0
-  try {
-    while (true) {
-      const { done, value } = await deadline.run(() => reader.read())
-      if (done) {
-        break
-      }
-      const nextTotalBytes = totalBytes + value.byteLength
-      if (expectedContentLength !== null && nextTotalBytes > expectedContentLength) {
-        throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedContentLength}`)
-      }
-      if (expectedByteLength !== null && nextTotalBytes > expectedByteLength) {
-        throw new Error(`下载模型大小校验失败: ${nextTotalBytes} != ${expectedByteLength}`)
-      }
-      if (nextTotalBytes > maxByteLength) {
-        throw new Error(`下载模型大小校验失败: ${nextTotalBytes} > ${maxByteLength}`)
-      }
-      if (bytes) {
-        bytes.set(value, totalBytes)
-      } else {
-        chunks.push(value)
-      }
-      totalBytes = nextTotalBytes
-    }
-    if (bytes) {
-      if (totalBytes !== expectedContentLength) {
-        throw new Error(`下载模型大小校验失败: ${totalBytes} != ${expectedContentLength}`)
-      }
-      return bytes.buffer
-    }
-    const mergedBytes = new Uint8Array(totalBytes)
-    let offset = 0
-    for (const chunk of chunks) {
-      mergedBytes.set(chunk, offset)
-      offset += chunk.byteLength
-    }
-    return mergedBytes.buffer
-  } catch (error) {
-    try {
-      await deadline.runPromise(reader.cancel())
-    } catch {
-      // Preserve the read/validation/deadline error.
-    }
-    throw error
-  } finally {
-    try {
-      reader.releaseLock()
-    } catch {
-      // Reader cleanup must not mask the primary result or error.
-    }
-  }
+  return readBoundedByteStream(response.body, {
+    expectedByteLength: expectedContentLength,
+    maxByteLength: expectedByteLength === null ? maxByteLength : Math.min(expectedByteLength, maxByteLength),
+    sizeError: (actual, limit) =>
+      new Error(
+        `下载模型大小校验失败: ${actual} ${expectedContentLength !== null || expectedByteLength !== null ? '!=' : '>'} ${limit}`,
+      ),
+    wait: deadline.runPromise,
+  })
 }
 
 export async function downloadModel(

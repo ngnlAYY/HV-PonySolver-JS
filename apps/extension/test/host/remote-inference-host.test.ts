@@ -135,20 +135,8 @@ describe('createRemoteInferenceHost', () => {
       workerFactory: () => Worker
     }
     const modelCache = detectorInternals.modelCache
-    const cacheInternals = modelCache as unknown as {
-      downloadModelImpl: (
-        signal: AbortSignal | undefined,
-        options: { integrity: { byteLength: number; sha256: string }; verifyIntegrity: boolean },
-      ) => Promise<ArrayBuffer>
-    }
-
     try {
-      await expect(
-        cacheInternals.downloadModelImpl(undefined, {
-          integrity: { byteLength: modelBuffer.byteLength, sha256: 'unused-with-verification-disabled' },
-          verifyIntegrity: false,
-        }),
-      ).resolves.toEqual(modelBuffer)
+      await expect(modelCache.download(undefined, false)).resolves.toEqual(modelBuffer)
       expect(storageGet).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY)
 
       expect(detectorInternals.workerFactory()).toBeInstanceOf(TestWorker)

@@ -8,6 +8,22 @@ import { parseModelManifest, readModelManifest } from './model-manifest.mjs'
 
 const sha256 = 'ABCDEFabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123'
 
+test('manifest brace matching does not mistake unrelated divisions for regex literals', () => {
+  const manifest = parseModelManifest(
+    `
+    export const MODEL_INTEGRITY = {
+      unrelated: 10 / 2,
+      nested: { ratio: 8 / 2 },
+      byteLength: 3,
+      sha256: '${sha256}',
+    }
+  `,
+    { requireVersion: false },
+  )
+  assert.equal(manifest.byteLength, 3)
+  assert.equal(manifest.sha256, sha256.toLowerCase())
+})
+
 test('parseModelManifest reads version and canonical integrity fields', () => {
   const manifest = parseModelManifest(`
     export const MODEL_VERSION = 'model-2026-06-18'
@@ -85,47 +101,63 @@ test('parseModelManifest allows trailing comments after MODEL_VERSION', () => {
 
 test('parseModelManifest rejects continued MODEL_VERSION expressions', () => {
   assert.throws(
-    () => parseModelManifest(`
+    () =>
+      parseModelManifest(
+        `
       export const MODEL_VERSION = 'model'
         + '-suffix'
       export const MODEL_INTEGRITY = { byteLength: 3, sha256: '${sha256}' } as const
-    `, { sourcePath: 'fixture/model.ts' }),
+    `,
+        { sourcePath: 'fixture/model.ts' },
+      ),
     /Invalid MODEL_VERSION in fixture\/model\.ts: unexpected token after literal value/,
   )
 })
 
 test('parseModelManifest rejects continued integrity property expressions', () => {
   assert.throws(
-    () => parseModelManifest(`
+    () =>
+      parseModelManifest(
+        `
       export const MODEL_VERSION = 'model'
       export const MODEL_INTEGRITY = {
         byteLength: 3
           + 4,
         sha256: '${sha256}',
       } as const
-    `, { sourcePath: 'fixture/model.ts' }),
+    `,
+        { sourcePath: 'fixture/model.ts' },
+      ),
     /Invalid MODEL_INTEGRITY\.byteLength in fixture\/model\.ts: unexpected token after literal value/,
   )
 
   assert.throws(
-    () => parseModelManifest(`
+    () =>
+      parseModelManifest(
+        `
       export const MODEL_VERSION = 'model'
       export const MODEL_INTEGRITY = {
         byteLength: 3,
         sha256: '${sha256}'
           + 'suffix',
       } as const
-    `, { sourcePath: 'fixture/model.ts' }),
+    `,
+        { sourcePath: 'fixture/model.ts' },
+      ),
     /Invalid MODEL_INTEGRITY\.sha256 in fixture\/model\.ts: unexpected token after literal value/,
   )
 })
 
 test('parseModelManifest does not match manifest names inside longer identifiers', () => {
   assert.throws(
-    () => parseModelManifest(`
+    () =>
+      parseModelManifest(
+        `
       export const SOME_MODEL_VERSION = 'decoy-version'
       export const SOME_MODEL_INTEGRITY = { byteLength: 3, sha256: '${sha256}' } as const
-    `, { sourcePath: 'fixture/model.ts' }),
+    `,
+        { sourcePath: 'fixture/model.ts' },
+      ),
     /Unable to read MODEL_VERSION from fixture\/model\.ts/,
   )
 })
@@ -193,10 +225,11 @@ test('parseModelManifest reports missing integrity fields with source path', () 
 
 test('parseModelManifest rejects invalid sha256 values', () => {
   assert.throws(
-    () => parseModelManifest(
-      "export const MODEL_VERSION = 'model'\nexport const MODEL_INTEGRITY = { byteLength: 3, sha256: 'not-a-sha256' } as const",
-      { sourcePath: 'fixture/model.ts' },
-    ),
+    () =>
+      parseModelManifest(
+        "export const MODEL_VERSION = 'model'\nexport const MODEL_INTEGRITY = { byteLength: 3, sha256: 'not-a-sha256' } as const",
+        { sourcePath: 'fixture/model.ts' },
+      ),
     /Invalid MODEL_INTEGRITY\.sha256 in fixture\/model\.ts: not-a-sha256/,
   )
 })
@@ -207,10 +240,13 @@ test('readModelManifest reads manifests from the configured repo root and relati
   const manifestPath = join(repoRoot, relativePath)
   try {
     await mkdir(dirname(manifestPath), { recursive: true })
-    await writeFile(manifestPath, `
+    await writeFile(
+      manifestPath,
+      `
       export const MODEL_VERSION = 'fixture-model'
       export const MODEL_INTEGRITY = { byteLength: 3, sha256: '${sha256}' } as const
-    `)
+    `,
+    )
 
     const manifest = await readModelManifest(repoRoot, { relativePath })
 
