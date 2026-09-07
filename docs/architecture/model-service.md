@@ -1,5 +1,7 @@
 # Model Worker 服务架构
 
+最后复核：2026-09-07。
+
 本文描述 `apps/model-worker` 的请求边界、依赖方向和持久状态协议。它是开发与评审导航，不替代运行时清单、Wrangler 模板或运维手册中的权威配置。模型、ORT 模型和公开 WASM 的文件名、对象键、长度与 SHA-256 以 [`packages/shared/src/`](../../packages/shared/src/) 下的契约为准；部署、探测、回滚和 Cloudflare 操作以 [`docs/model-worker-ops.md`](../model-worker-ops.md) 为准。
 
 ## 组件边界与目录

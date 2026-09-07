@@ -119,7 +119,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 - 面向用户的提示、错误和设置说明使用清晰中文；注释重点解释原因、约束和安全边界，不重复代码表面行为。
 - 错误应保留真实原因和可诊断上下文，但在 UI 或响应中不得泄露 Key、内部对象标识或敏感配置。
 - 网络断开、HTTP 错误、解析失败、完整性失败和额度拒绝应尽量区分；不要用统一的“连接已断开”掩盖后端真实错误。
-- 修改公开行为、命令、默认值、路由、响应头、资产或构建方式时，同步更新 `README.md`、相关 `docs/`、测试以及 `scripts/check-docs-drift*`。
+- 修改公开行为、命令、默认值、路由、响应头、资产或构建方式时，同步更新 `README.md`、相关 `docs/`、测试以及 `scripts/docs-drift/` 中对应的事实提取器和测试。
 - `apps/model-worker/wrangler.template.toml` 是 Wrangler 配置权威来源；生成的 `wrangler.toml` 不应手工维护。
 - 新增维护文档按 `docs/README.md` 的主题目录归档，并遵循 `docs/development/documentation.md` 的联动与链接规则；当前目录与迁移记录见 `docs/development/directory-layout.md`，后续实施也应同步包命令、测试发现、CI 和文档引用。
 
@@ -142,14 +142,14 @@ mise exec -- pnpm --filter @hv-pony-solver/browser-core test
 mise exec -- pnpm --filter @hv-pony-solver/userscript test
 mise exec -- pnpm --filter @hv-pony-solver/extension test
 mise exec -- pnpm --filter @hv-pony-solver/model-worker test
-node --test "scripts/docs-drift/test/*.test.mjs"
+mise exec -- node --test "scripts/docs-drift/test/*.test.mjs"
 ```
 
-提交前的默认完整检查：
+提交前的默认完整检查；首次执行前先按下文准备 Model Worker 本地测试配置：
 
 ```bash
 mise exec -- pnpm check
-node scripts/ci/assert-pinned-actions.mjs
+mise exec -- node scripts/ci/assert-pinned-actions.mjs
 git diff --check
 ```
 
@@ -159,7 +159,7 @@ git diff --check
 
 - `mise exec -- pnpm test` 会先执行各工作区测试，再执行 `scripts/**/*.test.mjs` 根级测试。
 - `mise exec -- pnpm -r test:coverage` 不包含根级 `scripts/**/*.test.mjs`；它不能替代 `mise exec -- pnpm test`，也不能单独证明 GitHub Actions 的 `test` job 会通过。
-- Model Worker 测试或配置改动前，按 CI 方式生成测试配置：
+- 包含 Model Worker 的测试或构建（包括根 `pnpm check`）前，按 CI 方式生成测试配置。该命令会覆盖生成的 `wrangler.toml`；已有自定义配置时先在仓库外备份，验证结束后恢复：
 
 ```bash
 MODEL_KEYS_KV_NAMESPACE_ID=test-kv \
@@ -170,6 +170,7 @@ mise exec -- pnpm --filter @hv-pony-solver/model-worker render-config
 - 修改默认或内置用户脚本运行时后，分别检查对应 bundle profile，不能用一个预算替代另一个。
 - 修改扩展构建、安全边界或浏览器协议后，至少运行相关扩展构建和 E2E；远程、内置、Chromium、Firefox、最低版本与 Firefox Android 证据证明不同边界，不能互相替代。
 - 没有受保护 Key 时，不得把 load-only 测试描述成已完成真实模型鉴权推理。
+- 纯文档修改至少运行 `mise exec -- pnpm format:check`、`mise exec -- pnpm docs:check`、文档漂移测试和 `git diff --check`；vendor 下的项目 Runtime README 不在默认格式/链接门禁范围内，修改时单独核对。
 
 如果完整检查因环境能力缺失而无法执行，应明确记录未运行项目、原因和替代验证，不得笼统声称“全部通过”。
 

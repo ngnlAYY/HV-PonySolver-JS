@@ -30,15 +30,15 @@ mise exec -- pnpm install --frozen-lockfile
 
 先运行能直接证明修改正确的最小命令，再按边界扩大：
 
-| 修改区域                                      | 最小验证                                           | 补充验证                                                                          |
-| --------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `packages/shared` 契约或资产                  | shared `typecheck`、`test`                         | `docs:check`；受影响应用检查                                                      |
-| `packages/browser-core` DOM、答题、面板或推理 | browser-core `typecheck`、`test`                   | `architecture:check`、`browser-sinks:check`、页面 E2E                             |
-| `apps/userscript` 构建或运行时                | userscript `typecheck`、`test`、`build`            | default/bundled 两个 bundle profile；页面 E2E                                     |
-| `apps/extension` 消息、权限、缓存或打包       | extension `typecheck`、`test`、`build`             | content、Chromium、Firefox、packaged、最低版本边界                                |
-| `apps/model-worker` 路由、额度或配置          | 渲染测试配置、worker `typecheck`、`test`           | `docs:check`；需要线上绑定时再执行 `check:deployment`，并记录环境与目标           |
-| `scripts`、根配置或工作流                     | 对应 `scripts/**/*.test.mjs` 或 `pnpm test`        | `lint`、`docs:check`、`architecture:check`、`browser-sinks:check`、pinned-actions |
-| `README.md` 或 `docs/`                        | `node --test "scripts/docs-drift/test/*.test.mjs"` | `pnpm docs:check`、`git diff --check`                                             |
+| 修改区域                                      | 最小验证                                           | 补充验证                                                                                          |
+| --------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `packages/shared` 契约或资产                  | shared `typecheck`、`test`                         | `docs:check`；受影响应用检查                                                                      |
+| `packages/browser-core` DOM、答题、面板或推理 | browser-core `typecheck`、`test`                   | `architecture:check`、`browser-sinks:check`、页面 E2E                                             |
+| `apps/userscript` 构建或运行时                | userscript `typecheck`、`test`、`build`            | default/bundled 两个 bundle profile；页面 E2E                                                     |
+| `apps/extension` 消息、权限、缓存或打包       | extension `typecheck`、`test`、`build`             | content、Chromium、Firefox、packaged、最低版本边界                                                |
+| `apps/model-worker` 路由、额度或配置          | 渲染测试配置、worker `typecheck`、`test`           | `docs:check`；需要线上绑定时再执行 `check:deployment`，并记录环境与目标                           |
+| `scripts`、根配置或工作流                     | 对应 `scripts/**/*.test.mjs` 或 `pnpm test`        | `format:check`、`lint`、`docs:check`、`architecture:check`、`browser-sinks:check`、pinned-actions |
+| `README.md` 或 `docs/`                        | `node --test "scripts/docs-drift/test/*.test.mjs"` | `pnpm format:check`、`pnpm docs:check`、`git diff --check`                                        |
 
 修改公开命令、默认值、路由、资产或构建方式时，[`README.md`](../../README.md)、主题文档、测试和 [`scripts/docs-drift/`](../../scripts/docs-drift/) 必须一起检查。
 
@@ -82,7 +82,11 @@ Vitest 主要覆盖 TypeScript/运行时逻辑；包内显式列出的 Node `tes
 
 新增脚本应优先复用 `scripts/lib/`，避免重复根目录解析、直接运行判断或忽略目录列表。
 
-## 5. Model Worker 测试配置
+## 5. 根配置职责
+
+根 `package.json` 同时是 workspace 命令、Prettier 规则和包管理器版本的入口；`mise.toml` 只负责 Node.js/pnpm 工具版本；`eslint.config.mjs` 是全仓库 flat config；`tsconfig.base.json` 提供共享 TypeScript 编译选项；`.prettierignore` 保持生成物、vendor 和锁文件的忽略边界。已删除的 `prettier.config.js` 和 `vitest.workspace.ts` 不再是配置来源。修改根配置后至少运行 `format:check`、`lint`、根 Node 测试和 `docs:check`。
+
+## 6. Model Worker 测试配置
 
 测试和静态检查使用占位绑定，不得使用生产 KV、R2 标识或生产 Key：
 
@@ -101,9 +105,11 @@ mise exec -- pnpm --filter @hv-pony-solver/model-worker test
 
 `check:deployment` 需要线上绑定、配置或服务可达性时才执行。它不是离线单元测试；执行时必须明确记录目标环境、是否使用受保护凭据以及探测结果，不能用占位绑定把部署探测伪装成通过。
 
-`apps/model-worker/wrangler.toml` 是生成物，不应手工编辑或提交；权威来源是 `apps/model-worker/wrangler.template.toml` 和渲染器。CI 测试 job 使用占位绑定，部署 job 只有秘密完整时才使用 deploy 环境变量。
+`apps/model-worker/wrangler.toml` 是生成物，不应手工编辑或提交；权威来源是 `apps/model-worker/wrangler.template.toml` 和渲染器。CI 测试 job 使用占位绑定，部署 job 只有秘密完整时才使用 deploy 环境变量；未勾选发布时可安全跳过线上探测，显式发布但缺少秘密必须 fail closed。
 
-## 6. 浏览器证据边界
+运行根 `pnpm check` 前，若当前没有可复用的测试配置，先用上面的 `test-kv` 和 `test-bucket` 渲染配置；若工作区已有真实或受保护的 `wrangler.toml`，先保存其状态并确认渲染目标，不要无说明地覆盖。配置生成属于有副作用的准备步骤，不应在仅审阅源码时自动执行。
+
+## 7. 浏览器证据边界
 
 ```bash
 mise exec -- pnpm test:e2e:userscript
@@ -117,7 +123,7 @@ Chromium 与 Firefox、远程模型与内置模型、内容脚本 smoke 与实�
 
 没有受保护生产凭据时，不能把 load-only、fixture 或未执行的 authenticated smoke 描述为真实模型鉴权推理。`extension-remote-authenticated-e2e` 在配置未启用时状态为 skipped，不产生鉴权证据；如果显式要求执行鉴权路径而缺少 Key，必须 fail closed。受保护 Key 只允许在显式 CI environment 中读取，不能出现在日志、测试快照、URL 或文档。
 
-## 7. CI job 与本地命令
+## 8. CI job 与本地命令
 
 [`verify-monorepo.yml`](../../.github/workflows/verify-monorepo.yml) 当前包含 15 个 job：
 
@@ -139,11 +145,11 @@ Chromium 与 Firefox、远程模型与内置模型、内容脚本 smoke 与实�
 | extension-artifact                 | release-gate preflight                                    | 内置扩展 artifact 发布门禁                                            |
 | extension-release                  | release-gate preflight 加 Release API                     | main 分支远程模型桌面 ZIP 发布                                        |
 
-[`deploy-cloudflare-model-worker.yml`](../../.github/workflows/deploy-cloudflare-model-worker.yml) 是独立手动部署流程：要求 main，先审计依赖、渲染配置、typecheck、worker tests 和 Wrangler dry-run；只有显式勾选发布且四项 Cloudflare 配置完整时才部署。缺少秘密时应安全跳过，不用伪造值。
+[`deploy-cloudflare-model-worker.yml`](../../.github/workflows/deploy-cloudflare-model-worker.yml) 是独立手动部署流程：要求 main，先审计依赖、渲染配置、typecheck、worker tests 和 Wrangler dry-run；未勾选发布且缺少秘密时跳过线上 dry-run/deploy，显式勾选发布但四项 Cloudflare 配置不完整时必须 fail closed，不用伪造值。
 
 CI 多个 job 重复安装 mise、解析 pnpm store、缓存依赖和安装浏览器。未来可抽取 composite action，但必须保持权限、条件、缓存 key、environment 和发布依赖图；改动后运行 `benchmark-workflow-cost.test.mjs`、`workflow-security-contract.test.mjs` 和完整 CI。
 
-## 8. 包体、ORT 与生成物
+## 9. 包体、ORT 与生成物
 
 default userscript profile 由 `bundle:check:default` 检查，预算 256 KiB；bundled profile 由 `bundle:check:bundled` 检查，预算 1 MiB。两个 profile 必须分别报告，压缩构建不能替代默认门禁。
 
@@ -167,13 +173,13 @@ git diff --check
 
 不得用 `git reset --hard` 或 `git checkout --` 清理用户改动。
 
-## 9. 目录、贡献和注释规范
+## 10. 目录、贡献和注释规范
 
 目录分组建议、迁移顺序和“单目录不要堆放大量文件”的约束见 [`directory-layout.md`](directory-layout.md)。提交范围、代码风格、注释要求和文档同步规则见 [`contributing.md`](contributing.md)。这两份文档由仓库审计任务维护；本页只保留验证相关内容。
 
 移动文件前必须同步 package script、README、工作流、测试路径和 docs-drift 读取，再分组运行完整 `pnpm check`。注释应解释安全边界、失败关闭、生成物生命周期或测试证据限制；重复描述代码表面行为的注释应删除。新增脚本应提供 CLI 用法和错误上下文，跨边界输入从 `unknown` 校验，避免 `any`、非空断言和隐式兼容路径。
 
-## 10. 提交前检查清单
+## 11. 提交前检查清单
 
 提交前默认运行：
 

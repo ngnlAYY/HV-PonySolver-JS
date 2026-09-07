@@ -1,6 +1,8 @@
 # Model Worker 运维手册
 
-最后复核：2026-08-30。
+最后复核：2026-09-07。
+
+运行时配置的权威来源是 [`apps/model-worker/wrangler.template.toml`](../apps/model-worker/wrangler.template.toml)，模型、ORT 模型和 WASM 的文件名、对象键、长度及 SHA-256 以 [`packages/shared/src/`](../packages/shared/src/) 为准。`apps/model-worker/wrangler.toml` 和 `.wrangler/` 是生成物，不手工维护。
 
 ## 无效 Key 模式
 
@@ -13,7 +15,7 @@
 
 ## 部署与分层验收
 
-Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。GitHub 手动部署 workflow 的 `enable_model_download_quota` 默认开启；关闭时真实模型 GET 不执行月度额度限制、不创建回执也不保存确认次数，客户端查询显示“无次数限制（模型下载次数限制未开启）”，意外发送且回执格式正确的 `POST /quota` 返回 `409` 而不是伪造确认成功，缺失或畸形回执仍返回 `400`。
+Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。首次发布由 Wrangler 的 `new_sqlite_classes` 迁移创建 `ModelDownloadQuota`；它不需要环境变量或 GitHub secret。GitHub 手动部署 workflow 的 `enable_model_download_quota` 默认开启；关闭时真实模型 GET 不执行月度额度限制、不创建回执也不保存确认次数，客户端查询显示“无次数限制（模型下载次数限制未开启）”，意外发送且回执格式正确的 `POST /quota` 返回 `409` 而不是伪造确认成功，缺失或畸形回执仍返回 `400`。当前协议没有 cancel 端点；未确认的 reserve 由 Durable Object 的十分钟 TTL 清理。
 
 配置渲染器会拒绝缺失或漂移的 `MODEL_DOWNLOAD_QUOTAS` Durable Object 绑定、`ModelDownloadQuota` 类名、`v1` migration tag 或 `new_sqlite_classes` 声明，防止回滚/部署配置静默丢失持久状态契约。
 
@@ -48,7 +50,7 @@ Model Worker 还依赖 `MODEL_DOWNLOAD_QUOTAS` SQLite-backed Durable Object。�
 | 无 Key `HEAD`，`error` 模式 | `403`；精确回显 Origin；`Cache-Control: no-store`；`Vary` 包含 `Origin`                                                                                                                                                          |
 | 精简 WASM `HEAD`            | `200`；`Access-Control-Allow-Origin: *`；`Content-Type: application/wasm`；一年 immutable 缓存；长度匹配共享契约；存在 ETag                                                                                                      |
 
-必要时可在本地手动运行同一检查；`MODEL_WORKER_PROBE_ID` 只能使用不含凭据和用户数据的唯一标识：
+必要时可在本地手动运行同一检查；先使用 `mise exec -- pnpm install --frozen-lockfile` 准备仓库依赖。`MODEL_WORKER_PROBE_ID` 只能使用不含凭据和用户数据的唯一标识：
 
 ```bash
 MODEL_WORKER_URL=https://models.ngnl.host/yolo26n-640.onnx \
@@ -57,7 +59,7 @@ MODEL_WORKER_RUNTIME_WASM_URL=https://models.ngnl.host/runtime/ort-wasm-simd-25d
 MODEL_WORKER_RUNTIME_WASM_BYTE_LENGTH=1267937 \
 MODEL_WORKER_INVALID_KEY_MODE=decoy \
 MODEL_WORKER_PROBE_ID=manual-$(date +%s) \
-pnpm --filter @hv-pony-solver/model-worker check:deployment
+mise exec -- pnpm --filter @hv-pony-solver/model-worker check:deployment
 ```
 
 无 Key `HEAD 200` 在 `decoy` 模式只证明 decoy 路径正常，不证明真实模型授权或 artifact 正确。ORT 和 WASM 探测会发现新路由未部署、公开 WASM 对象缺失或对象长度漂移，但不读取并重新哈希真实 ORT 模型内容。

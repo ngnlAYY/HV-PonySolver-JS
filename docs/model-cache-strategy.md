@@ -1,6 +1,8 @@
 # 模型缓存与计次策略
 
-最后复核：2026-08-30。
+最后复核：2026-09-07。
+
+实现导航：浏览器核心的编排入口是 [`ModelCache`](../packages/browser-core/src/model/model-cache.ts)，IndexedDB 事务由 [`IndexedDbModelStore`](../packages/browser-core/src/model/indexeddb-model-store.ts) 管理，记录校验由 [`model-cache-record.ts`](../packages/browser-core/src/model/model-cache-record.ts) 负责，共享下载由 [`shared-model-downloads.ts`](../packages/browser-core/src/model/shared-model-downloads.ts) 负责。用户脚本和扩展只注入各自的 Key、Fetch、Worker 或包内模型来源，不应在适配层复制缓存状态机。
 
 ## 当前决策
 
@@ -61,6 +63,8 @@ HEAD 验证 Key（不计次）
 `ModelCache` 保留原有调用接口，IndexedDB 生命周期、记录校验和共享下载分别由 `indexeddb-model-store`、`model-cache-record`、`shared-model-downloads` 管理。关闭缓存或收到 `versionchange` 时同时取消数据库操作和共享下载。
 
 并发消费者只共享同一次网络 GET；每个仍在等待的消费者获得独立、可转移的 `ArrayBuffer` 所有权，并复制同一幂等确认回执。这样一个推理 Worker 转移缓冲区时不会把另一个缓存调用的字节 detach。
+
+维护时先区分三种结果：缓存命中表示记录和确认元数据均通过校验；下载成功表示内存中的模型可供当前推理使用；缓存确认失败表示当前调用仍可继续，但后续实例必须重新下载。涉及取消、`versionchange`、并发下载或确认代次时，至少检查核心 `test/model` 中的缓存、下载和完整性测试，并同步检查用户脚本与扩展的模型来源测试。
 
 ## 未来可选方案
 

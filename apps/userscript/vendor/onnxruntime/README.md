@@ -1,6 +1,6 @@
 # 定制 ONNX Runtime Web bundle
 
-最后复核：2026-08-25。
+最后复核：2026-09-07。
 
 `ort.wasm.bundle.min.mjs` 内置 ONNX Runtime Web `1.27.0` 的 JavaScript API 与 Emscripten glue，不包含 WebAssembly 二进制。用户脚本的 `build:bundled-runtime` 会内置本文件；扩展构建器也会复制并审计它，但为扩展同时打包匹配的 WASM。
 
@@ -21,12 +21,12 @@
 
 ## 复现与采用
 
-在仓库根目录运行 `corepack pnpm build:onnx-runtime` 生成隔离产物。确认终端输出的版本、长度和哈希后，才可追加 `-- --install` 替换受版本控制的 bundle，并生成被 Git 忽略的算子配置。安装后至少运行：
+在仓库根目录运行 `mise exec -- pnpm build:onnx-runtime` 生成隔离产物。确认终端输出的版本、长度和哈希后，才可追加 `-- --install` 替换受版本控制的 bundle，并生成被 Git 忽略的算子配置。安装后至少运行：
 
 ```bash
-corepack pnpm verify:onnx-runtime
-corepack pnpm docs:check
-corepack pnpm --filter @hv-pony-solver/extension test
+mise exec -- pnpm verify:onnx-runtime
+mise exec -- pnpm docs:check
+mise exec -- pnpm --filter @hv-pony-solver/extension test
 ```
 
 更完整的构建目录、R2 对象和原子更新要求见仓库根目录的 `docs/onnx-runtime.md`。

@@ -2,13 +2,28 @@
 
 本轮审计覆盖源码、目录、模块化、风格、注释、文档、测试与构建/CI 的维护结构，并补充维护者文档。核心结论：工作区和浏览器领域划分已有良好基础；优先改进架构门禁覆盖、脚本目录分组、公共导出面与文档导航，随后再处理职责集中的协议/基准模块和大型测试。
 
-本报告是当前工作区快照，包含开始审计时已有的未提交工具链、CI 与文档修改。此次交付新增文档及导航，没有移动源码、修改业务行为或提交 Git。优先级表示后续维护顺序，不是安全漏洞等级。
+本报告记录初次审计时的工作区快照，包含当时已有的未提交工具链、CI 与文档修改。初次审计只新增文档及导航，没有移动源码、修改业务行为或提交 Git。优先级表示当时建议的维护顺序，不是安全漏洞等级。
 
-后续已进入实施：脚本目录、公共导出、协议/基准、大型测试和门禁的更新见[实施记录](../development/implementation-plan.md)。下文数字、失败现象和验证范围保留初次审计时的语境；代码链接随迁移更新到当前入口，不表示原问题仍然存在。
+后续实施及根配置精简已完成，并纳入提交 `ef5efc9`；迁移映射与验证证据见[实施记录](../development/implementation-plan.md)。下文数字、失败现象和验证范围保留初次审计时的语境；代码链接随迁移更新到当前入口，不表示原问题仍然存在。
+
+## 后续处理状态
+
+| 审计项  | `ef5efc9` 中的处理结果                                                                                  |
+| ------- | ------------------------------------------------------------------------------------------------------- |
+| A1      | 补齐相对路径与反向类型依赖检查，增加真实路径解析、缺失目录失败关闭和回归测试                            |
+| A2      | 根与扩展两级脚本按职责迁移，直属文件均为 0                                                              |
+| A3 / A9 | 补齐文档导航、架构与开发手册，并为公共存储、答案和令牌契约增加必要注释                                  |
+| A4      | 清理第一方格式债务，将 `format:check` 接入本地与 CI；锁文件和第三方资产继续排除                         |
+| A5      | `browser-core` 与 `shared` 改为显式 exports，保留经验证的现有调用者                                     |
+| A6 / A7 | 已拆分协议、benchmark、Worker 与文档测试；Broker、Offscreen、核心缓存/Worker 协调器和缓存测试保留原结构 |
+| A8      | 增加维护文档的本地链接/锚点门禁；架构时序与未纳入事实提取器的语义仍需人工核对                           |
+| A10     | mise 工具链与脚本入口已统一；尚未抽取跨 job 初始化步骤，保留各 job 的权限和证据隔离                     |
+
+根 Prettier 配置已合入 `package.json`，根 Vitest workspace 配置已删除，ESLint 公共规则已合并。完整检查与已执行浏览器场景的边界以[实施验证证据](../development/implementation-plan.md#验证证据)为准；当前目录数量见[实施后盘点](source-inventory.md#实施后盘点)。
 
 ## 范围与方法
 
-写入本轮文档前，共盘点 372 个 Git 已跟踪或未忽略且实际存在的文件。排除 3 个第三方 vendor 文件后为 369 个自有维护文件。生成的模型、构建输出、coverage、Wrangler 配置、依赖与索引不作为业务源码。
+写入本轮文档前，共盘点 372 个 Git 已跟踪或未忽略且实际存在的文件。排除 vendor 与 `other/` 目录下的 3 个文件后为 369 个自有维护文件。生成的模型、构建输出、coverage、Wrangler 配置、依赖与索引不作为业务源码。
 
 | 区域                    | `src` 文件 / 行 | 测试及辅助代码文件 / 行 | 非测试脚本文件 / 行 |
 | ----------------------- | --------------- | ----------------------- | ------------------- |
@@ -28,7 +43,7 @@
 
 ## 优化优先级
 
-| 编号 | 优先级 | 发现 / 建议                                                   | 置信度                     | 本轮状态                 |
+| 编号 | 优先级 | 发现 / 建议                                                   | 置信度                     | 初次审计状态             |
 | ---- | ------ | ------------------------------------------------------------- | -------------------------- | ------------------------ |
 | A1   | P1     | 架构门禁漏掉 Worker 的核心相对路径导入和部分反向类型导入      | 高：规则与合成输入直接复现 | 已记录；规则待补强       |
 | A2   | P1     | 扩展和根脚本目录混合职责，分别有 30 / 24 个直属文件           | 高：完整目录盘点           | 已提供逐组迁移方案       |
@@ -43,7 +58,7 @@
 
 ## A1：架构门禁覆盖不完整
 
-证据：[BOUNDARY_RULES](../../scripts/checks/check-architecture-boundaries.mjs#L35)对 Model Worker 的禁止列表包含 `@hv-pony-solver/browser-core`，却未覆盖等价的 `packages/browser-core/src` 相对路径；[检查循环](../../scripts/checks/check-architecture-boundaries.mjs#L138)默认跳过 type-only 导入，只有少数规则显式设置 `includeTypeOnly`。
+初次审计时，[架构检查器](../../scripts/checks/check-architecture-boundaries.mjs)中的 `BOUNDARY_RULES` 对 Model Worker 的禁止列表包含 `@hv-pony-solver/browser-core`，却未覆盖等价的 `packages/browser-core/src` 相对路径；检查循环默认跳过 type-only 导入，只有少数规则显式设置 `includeTypeOnly`。这些缺口已在后续实施中修正。
 
 直接使用检查器导出的解析和匹配函数，得到以下结果。合成输入只在内存中求值，没有写入业务源码或执行这些导入：
 
@@ -55,7 +70,7 @@
 
 因此，“当前 architecture:check 通过”只能证明现有规则通过，不能证明这些结构约束已被完整保护。全量源码导入盘点没有发现当前业务采用这些违规路径，本项不是已发生的运行时故障。
 
-可在仓库根目录复查同一组规则匹配结果：
+可在仓库根目录使用当前检查器复查同一组规则匹配结果：
 
 ```bash
 mise exec -- node --input-type=module <<'JS'
@@ -77,13 +92,13 @@ for (const [fromDir, source] of probes) {
 JS
 ```
 
-本轮输出依次为 `blocked: false`、`false`、`true`。这验证解析与规则匹配层，不执行示例模块，也不替代实际类型检查。
+初次审计输出依次为 `blocked: false`、`false`、`true`；在 `ef5efc9` 上复查，三项均为 `blocked: true`。这验证解析与规则匹配层，不执行示例模块，也不替代真实路径回归和实际类型检查。
 
 建议先为禁止方向增加合成回归用例，再统一包名与相对路径的判定，按每条规则的意图决定是否包含类型依赖。推理与 UI 间有意允许的 type-only 契约要保留；禁止 shared/核心反向依赖应用的规则则应覆盖类型。无需引入新架构框架。
 
 ## A2：先整理脚本目录
 
-| 当前目录                             | 直属文件数 | 观察                                                       |
+| 审计时目录                           | 直属文件数 | 观察                                                       |
 | ------------------------------------ | ---------- | ---------------------------------------------------------- |
 | `apps/extension/scripts`             | 30         | build、benchmark、smoke、模型下载、fixture、发布与测试并列 |
 | 根 `scripts`                         | 24         | 质量门禁、工作流契约、模型、ORT、E2E 与测试并列            |
@@ -130,7 +145,7 @@ JS
 - `scripts/docs-drift/architecture-docs.mjs`
 - `scripts/docs-drift/extension-docs.mjs`
 
-这里包含包管理器生成的锁文件，不应不加区分地批量修复。默认 [check 链](../../package.json#L45)没有 Prettier 检查，而 `format` 是全仓写操作。建议先明确第一方源码/文档的格式检查范围和 vendor/生成物排除，再清理已确认的格式债务，最后把只读格式检查纳入门禁。本轮只格式化修改的文档。
+这里包含包管理器生成的锁文件，不应不加区分地批量修复。初次审计时默认 [check 链](../../package.json)没有 Prettier 检查，而 `format` 是全仓写操作。当时建议先明确第一方源码/文档的格式检查范围和 vendor/生成物排除，再清理已确认的格式债务，最后把只读格式检查纳入门禁；初次审计只格式化修改的文档。上述改进已在后续实施中完成。
 
 ## A5：公共导出与目录耦合
 
@@ -140,19 +155,19 @@ JS
 
 ## A6 / A7：按职责拆分模块与测试
 
-| 热点                                                                                          | 当前行数 | 建议评估的边界                                                  |
-| --------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------- |
-| [扩展 messages.ts](../../apps/extension/src/protocol/messages.ts)                             | 541      | Port/Offscreen 协议、各自 guard、图片编解码；类型与校验保持靠近 |
-| [核心 onnx-worker-client.ts](../../packages/browser-core/src/inference/onnx-worker-client.ts) | 510      | 模型/初始化准备与检测队列/恢复；先确认共享状态所有权            |
-| [核心 model-downloader.ts](../../packages/browser-core/src/model/model-downloader.ts)         | 504      | 下载响应、回执/额度、Key 验证；复用已有有界流和 Fetch 工具      |
-| [扩展 broker.ts](../../apps/extension/src/background/broker.ts)                               | 421      | 来源准入、Port/request 生命周期、凭证代际；保留组合入口         |
-| [扩展 ordinary-settings.ts](../../apps/extension/src/options/ordinary-settings.ts)            | 403      | 字段定义、解析、脏字段与持久化队列                              |
-| [扩展 offscreen-bootstrap.ts](../../apps/extension/src/offscreen/offscreen-bootstrap.ts)      | 336      | epoch/claim、活动请求、取消历史、空闲退避                       |
-| [benchmark-contract.mjs](../../apps/extension/scripts/benchmark/benchmark-contract.mjs)       | 817      | 参数、矩阵、统计结果和证据验证                                  |
-| [benchmark-runner.mjs](../../apps/extension/scripts/benchmark/benchmark-runner.mjs)           | 636      | 浏览器/页面初始化、采样、汇总和清理                             |
-| [原 check-docs-drift.test.mjs](../../scripts/docs-drift/test/)                                | 1,586    | 按命令、资产、Worker、扩展、结构契约拆分测试                    |
-| [原 Worker index.test.ts](../../apps/model-worker/test/)                                      | 1,382    | HTTP/CORS、模型/WASM、quota、异常与超时                         |
-| [model-downloader.test.ts](../../packages/browser-core/test/model/model-downloader.test.ts)   | 1,171    | 流长度/哈希、HTTP 错误、额度与确认、取消                        |
+| 热点                                                                                          | 审计时行数 | 当时建议评估的边界                                              |
+| --------------------------------------------------------------------------------------------- | ---------- | --------------------------------------------------------------- |
+| [扩展 messages.ts](../../apps/extension/src/protocol/messages.ts)                             | 541        | Port/Offscreen 协议、各自 guard、图片编解码；类型与校验保持靠近 |
+| [核心 onnx-worker-client.ts](../../packages/browser-core/src/inference/onnx-worker-client.ts) | 510        | 模型/初始化准备与检测队列/恢复；先确认共享状态所有权            |
+| [核心 model-downloader.ts](../../packages/browser-core/src/model/model-downloader.ts)         | 504        | 下载响应、回执/额度、Key 验证；复用已有有界流和 Fetch 工具      |
+| [扩展 broker.ts](../../apps/extension/src/background/broker.ts)                               | 421        | 来源准入、Port/request 生命周期、凭证代际；保留组合入口         |
+| [扩展 ordinary-settings.ts](../../apps/extension/src/options/ordinary-settings.ts)            | 403        | 字段定义、解析、脏字段与持久化队列                              |
+| [扩展 offscreen-bootstrap.ts](../../apps/extension/src/offscreen/offscreen-bootstrap.ts)      | 336        | epoch/claim、活动请求、取消历史、空闲退避                       |
+| [benchmark-contract.mjs](../../apps/extension/scripts/benchmark/benchmark-contract.mjs)       | 817        | 参数、矩阵、统计结果和证据验证                                  |
+| [benchmark-runner.mjs](../../apps/extension/scripts/benchmark/benchmark-runner.mjs)           | 636        | 浏览器/页面初始化、采样、汇总和清理                             |
+| [原 check-docs-drift.test.mjs](../../scripts/docs-drift/test/)                                | 1,586      | 按命令、资产、Worker、扩展、结构契约拆分测试                    |
+| [原 Worker index.test.ts](../../apps/model-worker/test/)                                      | 1,382      | HTTP/CORS、模型/WASM、quota、异常与超时                         |
+| [model-downloader.test.ts](../../packages/browser-core/test/model/model-downloader.test.ts)   | 1,171      | 流长度/哈希、HTTP 错误、额度与确认、取消                        |
 
 大文件本身不等于不正确。上述建议依据同一文件内存在多条变化轴；拆分收益仍需在实施时用依赖关系和测试证明。Worker 的 `handleRequest` 主体约 55 行，已有多个独立处理函数，不属于本轮应优先拆解的协调器。
 
@@ -192,6 +207,6 @@ AST 盘点发现 142 个源码文件中 89 个没有注释，但其中包含短�
 
 本轮没有运行完整 `pnpm check`：coverage、全仓生产构建、生产扩展打包审计和两个完整 bundle profile 没有作为本轮全套门禁执行。没有运行真实浏览器 E2E、真实 GM 管理器、受保护远程模型鉴权、最低浏览器版本或 Firefox Android 验证，也没有检查线上 Worker/KV/R2 或依赖漏洞数据库。测试和静态检查通过不代表这些边界已经验收。
 
-## 后续实施顺序
+## 初次审计建议的实施顺序
 
 先补强 A1 的门禁回归，然后按目录方案分批迁移扩展脚本与根脚本；每批只处理路径。随后收敛公共导出，按已验证的变化轴拆分协议/基准和大型测试。格式基线和 README 收敛独立处理，避免把行为、路径、格式和长文档迁移混在一个 diff 中。

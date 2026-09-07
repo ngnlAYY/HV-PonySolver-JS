@@ -4,17 +4,17 @@ HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓
 
 当前版本的核心约束：
 
-- 新版用户脚本只下载并运行 `.ort` 模型。
-- 旧版用户脚本仍可通过原有 `.onnx` 路径工作。
-- 默认构建不内置 ONNX Runtime，运行时从固定版本的 jsDelivr 地址加载完整版。
-- 显式内置构建只内置精简 JS glue，精简 WASM 仍从 R2 下载。
-- 两种构建都从 Model Worker 下载同一个 `.ort` 模型。
-- 默认运行时和内置运行时之间没有自动回退。
+- 当前用户脚本只下载并运行 `.ort` 模型。
+- Model Worker 为旧版客户端保留原有 `.onnx` 路由。
+- 用户脚本默认构建不内置 ONNX Runtime，运行时从固定版本的 jsDelivr 地址加载完整版。
+- 用户脚本显式内置构建只内置精简 JS glue，精简 WASM 仍从 R2 下载。
+- 用户脚本的两种构建都从 Model Worker 下载同一个 `.ort` 模型。
+- 用户脚本的默认运行时和内置运行时之间没有自动回退。
 - 模型访问密钥只允许通过 `Authorization: Bearer` 传递，不接受查询字符串密钥。
 - 扩展版为 Chrome、Edge 和 Firefox 生成 Chromium/Firefox MV3 产物；默认远程下载模型，也可显式构建无需 Key 的内置模型版本；所有可执行 JS、Worker 和 WASM 均随扩展打包。
 - 用户脚本与扩展共用 `packages/browser-core` 的 DOM、答题、推理和模型契约，但拥有独立的平台适配器和构建产物。
 
-维护者可从[文档导航](docs/README.md)进入[整体架构](docs/architecture/overview.md)、[开发验证](docs/development/verification.md)和[目录组织方案](docs/development/directory-layout.md)。本轮源码、结构、风格、注释与文档审计见[仓库审计报告](docs/audits/2026-09-07-repository-audit.md)。
+维护者可从[文档导航](docs/README.md)进入[整体架构](docs/architecture/overview.md)、[开发验证](docs/development/verification.md)和[当前目录组织](docs/development/directory-layout.md)。源码、结构、风格、注释与文档的历史审计见[仓库审计报告](docs/audits/2026-09-07-repository-audit.md)，已完成的目录、模块和配置改动见[实施记录](docs/development/implementation-plan.md)。
 
 当前客户端版本：
 
@@ -114,11 +114,13 @@ Cloudflare Model Worker
 | `apps/extension`        | Chromium/Firefox 扩展入口、消息协议、设置页、构建器和浏览器测试 |
 | `apps/model-worker`     | Cloudflare Model Worker、Wrangler 配置和部署契约检查            |
 | `packages/browser-core` | 用户脚本与扩展共用的标准浏览器 DOM、答题、推理、模型和渲染逻辑  |
-| `packages/shared`       | 用户脚本和 Model Worker 共用的模型、令牌及 ORT 资产契约         |
-| `docs`                  | 运行时、运维和架构补充文档                                      |
+| `packages/shared`       | 浏览器端和 Model Worker 共用的模型、令牌及 ORT 资产契约         |
+| `docs`                  | 文档导航、架构、开发手册、历史审计及运行时/缓存/运维专题        |
 | `other`                 | 可供人工上传或归档的精简运行时生成物                            |
 | `scripts`               | 仓库级构建、校验、文档漂移和发布辅助脚本                        |
 | `.github/workflows`     | 验证、安全扫描和 Model Worker 部署工作流                        |
+
+根 `scripts/` 按 `checks/`、`ci/`、`docs-drift/`、`model/`、`ort-runtime/`、`e2e/`、`lib/` 分组；扩展脚本按构建、基准、浏览器、E2E、fixture、模型和发布分组。根命令仍统一从 [package.json](package.json) 调用。共享包使用显式 exports，新增跨包入口时同步包清单和[架构边界检查](scripts/checks/check-architecture-boundaries.mjs)。
 
 ## 模型格式与兼容关系
 
@@ -268,21 +270,48 @@ mise exec -- pnpm install --frozen-lockfile
 ```bash
 mise exec -- node --version
 mise exec -- pnpm --version
+
+MODEL_KEYS_KV_NAMESPACE_ID=test-kv \
+MODEL_BUCKET_NAME=test-bucket \
+mise exec -- pnpm --filter @hv-pony-solver/model-worker render-config
+
 mise exec -- pnpm check
 ```
 
+首次运行包含 Model Worker 的测试或构建前，需要生成上面的本地测试配置。`test-kv` 和 `test-bucket` 只用于本地验证；生成命令会覆盖 `apps/model-worker/wrangler.toml`，已有自定义生成配置时应先在仓库外备份，验证后恢复。生产配置与发布步骤见[Worker 运维](docs/model-worker-ops.md)。
+
 下文简写的 `pnpm` 和 `node` 命令均假定当前 shell 已[激活 mise](https://mise.jdx.dev/cli/activate.html)；未激活时在命令前加 `mise exec --`。升级工具时同步修改 `mise.toml` 和 `package.json`，再更新本节及工具版本契约测试。
+
+### 根配置职责
+
+| 配置                                                                          | 负责内容                                                        |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| [mise.toml](mise.toml)                                                        | 本地与 CI 的精确工具版本                                        |
+| [package.json](package.json)                                                  | 公共命令、包管理器声明、Node 兼容要求，以及 `prettier` 格式规则 |
+| [pnpm-workspace.yaml](pnpm-workspace.yaml) / [pnpm-lock.yaml](pnpm-lock.yaml) | 工作区、依赖覆盖规则和冻结依赖解析                              |
+| [eslint.config.mjs](eslint.config.mjs)                                        | JavaScript/TypeScript 静态规则与日志模块例外                    |
+| [tsconfig.base.json](tsconfig.base.json)                                      | 五个工作区继承的严格编译选项                                    |
+| [.prettierignore](.prettierignore)                                            | 排除 vendor、运行时生成物、pnpm 锁文件和本地协调状态的格式化    |
+
+各工作区通过自己的 `vitest.config.ts` 执行测试，由根命令递归调度。格式化规则集中在 `package.json#prettier`；格式化忽略清单只控制 Prettier 处理范围，Git 跟踪仍由 Git 的忽略规则决定。
 
 ## 快速构建
 
 ### 浏览器扩展
 
+构建远程模型版：
+
 ```bash
 pnpm --filter @hv-pony-solver/extension build
+```
+
+已有经过校验的固定 `model/yolo26n-640.ort` 时，可以改为构建内置模型版：
+
+```bash
 pnpm --filter @hv-pony-solver/extension build:packaged
 ```
 
-`build` 默认等价于 `--model-mode remote`，需要 Key 下载模型；`build:packaged` 等价于 `--model-mode packaged`，只从固定的 `model/yolo26n-640.ort` 读取模型，不接受生产路径覆盖，也不在运行时回退到远程下载。当前扩展版本为 `0.1.1`。每次构建都会清理并重新生成 `apps/extension/dist/`：
+`build` 默认等价于 `--model-mode remote`，构建时不需要 Key，运行后通过 Key 下载模型；`build:packaged` 等价于 `--model-mode packaged`，只从固定的 `model/yolo26n-640.ort` 读取模型，不接受生产路径覆盖，也不在运行时回退到远程下载。当前扩展版本为 `0.1.1`。每次构建都会清理并重新生成 `apps/extension/dist/`；下面列出两种模式各自的产物，单次构建只保留所选模式的 ZIP：
 
 ```text
 chromium/                                      Chrome、Edge 解压目录
@@ -433,12 +462,14 @@ CI 的独立最低版本任务下载并实际运行 Chromium 116 与 Firefox Des
 
 手动触发 `Repository CI` 时可选择 `publish_extension_release=true`，从 `main` 创建当前版本对应的 `extension-v0.1.1` GitHub Release，并附带远程模型版 Chromium/Firefox ZIP、SHA-256 与 artifact 元数据。该入口默认关闭，要求完整仓库门禁、双浏览器 smoke、最低桌面版本和受保护 Key 的真实远程推理全部通过；它不发布到浏览器商店，也不声称 Firefox Android 已验证。内置模型 artifact 仍使用 `publish_extension_artifact=true` 和独立 Android 142 证据。完整格式与受保护 CI 环境配置见 [`docs/browser-extension.md`](docs/browser-extension.md)。
 
-校验本地 `.ort` 模型：
+校验本地旧版 ONNX 模型：
 
 ```bash
-MODEL_FILE=/path/to/yolo26n-640.ort \
+MODEL_FILE=/path/to/yolo26n-640.onnx \
 pnpm --filter @hv-pony-solver/userscript verify-model-integrity
 ```
+
+`verify-model-integrity` 使用 [packages/shared/src/model.ts](packages/shared/src/model.ts) 中的旧版 ONNX 长度和 SHA-256。当前 ORT 输入由 `build:packaged` 按 [ort-assets.ts](packages/shared/src/ort-assets.ts) 校验；两种模型的完整性清单分别维护。
 
 `mise exec -- pnpm benchmark:extension:product` 要求本地固定的 `model/yolo26n-640.ort` 和可运行的 Chromium。它默认连续识别 100 次，可传入 `--iterations 1000` 延长运行；另测冷/热 `prepare`、四标签页并发、20 次取消尝试后恢复（分别记录实际取消和抢先完成次数）、4000×4000 合成图片和缓存关闭后重新命中。报告写入 `apps/extension/dist/product-benchmark/product-benchmark.json`。识别使用正式内置模型 ZIP 和真实 content client → broker → Offscreen → Worker → ORT；缓存阶段使用生产下载器与 IndexedDB，仅通过 localhost 回放下载确认，不访问生产 Key 或模型服务。该基准与原有 transport 矩阵独立，不作为发布证据或 CI 性能门槛。
 
@@ -535,8 +566,8 @@ apps/model-worker/wrangler.template.toml
 ### 生成 Wrangler 配置
 
 ```bash
-MODEL_KEYS_KV_NAMESPACE_ID=<kv-namespace-id> \
-MODEL_BUCKET_NAME=<r2-bucket-name> \
+MODEL_KEYS_KV_NAMESPACE_ID='<kv-namespace-id>' \
+MODEL_BUCKET_NAME='<r2-bucket-name>' \
 INVALID_KEY_MODE=decoy \
 MODEL_DOWNLOAD_QUOTA_ENABLED=true \
 pnpm --filter @hv-pony-solver/model-worker render-config
@@ -566,7 +597,7 @@ GET, HEAD, OPTIONS
 `/quota` 支持 `GET, POST, OPTIONS`：`GET` 查询次数，`POST` 在客户端完成完整性校验和 IndexedDB 缓存后确认一次下载。
 
 - 未知路径返回 `404`。
-- 不支持的方法返回 `405`，并设置 `Allow: GET, HEAD, OPTIONS`。
+- 模型和 Runtime 路由不支持的方法返回 `405`，并设置 `Allow: GET, HEAD, OPTIONS`；`/quota` 的 `Allow` 为 `GET, POST, OPTIONS`。
 - `HEAD` 返回与 `GET` 一致的响应头，但不返回响应体。
 - 模型响应使用 `application/octet-stream` 和 `Cache-Control: no-store`。
 - 模型响应的 `Content-Disposition` 文件名取对应公开路径的最后一段；路径以 `/` 结尾时回退到共享清单中的标准文件名。
@@ -667,8 +698,8 @@ Worker 总是检查 R2 对象的精确长度。Cloudflare R2 只有在上传时�
 本地部署流程：
 
 ```bash
-MODEL_KEYS_KV_NAMESPACE_ID=<kv-namespace-id> \
-MODEL_BUCKET_NAME=<r2-bucket-name> \
+MODEL_KEYS_KV_NAMESPACE_ID='<kv-namespace-id>' \
+MODEL_BUCKET_NAME='<r2-bucket-name>' \
 INVALID_KEY_MODE=decoy \
 pnpm --filter @hv-pony-solver/model-worker render-config
 
@@ -711,7 +742,7 @@ ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFull
 
 `architecture:check` 保护关键依赖边界：`inferenceTimeoutConfig` 继续集中管理异步超时，`StatusPanel` 继续负责 UI 状态输出，`Model Worker Core` 继续与 Userscript 浏览器代码隔离。
 
-推荐的本地检查顺序：
+准备好[本地测试绑定](#环境要求)后，推荐的定向检查顺序如下；提交前使用 `mise exec -- pnpm check` 执行包含扩展打包、覆盖率和全仓构建的完整门禁：
 
 ```bash
 pnpm format:check
@@ -723,6 +754,15 @@ pnpm architecture:check
 pnpm browser-sinks:check
 pnpm bundle:check
 pnpm verify:onnx-runtime
+```
+
+仅修改文档时，使用对应的文档验证即可：
+
+```bash
+mise exec -- pnpm format:check
+mise exec -- pnpm docs:check
+mise exec -- node --test "scripts/docs-drift/test/*.test.mjs"
+git diff --check
 ```
 
 测试范围包括：
@@ -751,8 +791,8 @@ pnpm verify:onnx-runtime
 - 检查外部 GitHub Action 是否固定到完整 commit SHA，要求 Docker Action 使用完整 `sha256` digest，并强制每个 `actions/checkout` 设置 `persist-credentials: false`。
 - 依赖审计、第一方格式检查、ESLint 和 TypeScript 类型检查。
 - JavaScript/TypeScript CodeQL 扫描，并在 Pull Request 中执行依赖审查。
-- 文档漂移、架构边界和浏览器危险调用检查。
-- 工作区测试与覆盖率。
+- 文档漂移与本地链接、架构边界和浏览器危险调用检查。
+- 工作区及根级 `scripts/**/*.test.mjs` 测试，以及工作区覆盖率；递归覆盖率命令不包含根级测试。
 - 默认外部 profile 构建及 `256 KiB` 预算。
 - 显式内置 profile 构建及 `1 MiB` 预算。
 - Pull Request 和 `main` push 执行用户脚本 Playwright Chromium E2E；手动运行由 `run_userscript_e2e` 控制。
@@ -786,7 +826,7 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - 扩展内容脚本不接收模型 Key 或模型字节。远程版本只有设置页可发起 Key 验证和模型下载请求；内置版本不构建 Key 存储、验证或远程下载能力。
 - 验证码图片为兼容扩展 JSON 消息边界继续使用有上限的 Base64；模型从 Host 以可转移的二进制 `ArrayBuffer` 交给推理 Worker，初始化后由 Worker 转回同一所有权供缓存。单消费者路径不复制整份模型，并发消费者各自取得独立缓冲区，避免一个 Worker 的 transfer detach 另一个缓存调用的字节；模型不使用 Base64 或分片。
 - 模型和 WASM 的 R2 对象必须与共享清单中的长度和 SHA-256 一致；Worker 在响应前强制检查长度，并在 R2 提供 SHA-256 元数据时强制比对，客户端继续校验实际响应字节。
-- 原始 Key、规范化 Key、配额对象标识和配额状态均不得写入日志或响应。
+- 日志不得记录原始 Key、规范化 Key、配额对象标识或配额状态。已鉴权的 `/quota` 响应按公开 schema 返回额度状态，不回显 Key 或内部对象标识。
 - `decoy` 模式的未鉴权 `200` 不表示真实模型泄漏。
 - `HEAD` 请求不计配额，且 decoy 响应头的 `Content-Length` 与 `ETag` 来自诱饵对象，与真实对象不同；叠加公开的真实模型 SHA-256，构成可区分有效与无效 Key 的探测面。这是当前接受的权衡，缓解方向记录在 [`docs/model-worker-ops.md`](docs/model-worker-ops.md) 的「待办运维项」。
 - 部署检查、静态测试和浏览器 E2E 分别证明不同边界，不能相互替代。
@@ -889,7 +929,7 @@ pnpm --filter @hv-pony-solver/extension build:packaged
 先构建内置 profile，再检查内置预算：
 
 ```bash
-pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
+pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 pnpm bundle:check:bundled
 ```
 
@@ -910,7 +950,7 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 - [文档导航](docs/README.md)：按维护任务查找架构、开发和审计资料。
 - [整体架构](docs/architecture/overview.md)：工作区依赖、平台差异、数据所有权和权威模块。
 - [开发与验证](docs/development/verification.md)：本地工具链、定向测试、CI 命令和证据边界。
-- [目录组织与迁移方案](docs/development/directory-layout.md)：平铺文件分组、模块拆分及引用迁移步骤。
+- [目录组织与维护](docs/development/directory-layout.md)：当前脚本分组、模块职责及后续迁移检查。
 - [代码风格与注释](docs/development/contributing.md)、[文档维护](docs/development/documentation.md)：日常修改与文档联动规则。
 - [审计优化实施记录](docs/development/implementation-plan.md)：目录迁移、模块拆分、门禁补强与验证结果。
 - [2026-09-07 仓库审计](docs/audits/2026-09-07-repository-audit.md)：全仓盘点、优化优先级与本次验证范围。

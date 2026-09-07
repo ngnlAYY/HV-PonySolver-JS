@@ -25,7 +25,7 @@ The mode is a build-time choice, never runtime detection or fallback:
 
 The direct CLI form is `node scripts/build/build-extension.mjs --model-mode remote|packaged`. Production packaged builds accept no model-path or integrity override. Before replacing `apps/extension/dist`, the builder requires the fixed input to be a regular non-symlink file with exactly 9,914,448 bytes and the canonical SHA-256 from `@hv-pony-solver/shared/ort-model`. The archive provides integrity checks, not encryption or confidentiality; installed package contents can be inspected.
 
-The public build entry delegates configuration, policy, asset verification, inventory/auditing, archive writing and target orchestration to `scripts/build/`. ZIP compression streams bounded chunks to disk with an incremental archive hash; fixed timestamps and sorted entries preserve reproducibility. Firefox smoke scripts share only WebDriver process/request/cleanup mechanics; their product assertions remain separate.
+The public build entry delegates configuration, policy, asset verification, inventory/auditing, archive writing and target orchestration to `scripts/build/`. ZIP compression streams bounded chunks to disk with an incremental archive hash; fixed timestamps and sorted entries preserve reproducibility. Firefox smoke scripts share only WebDriver process/request/cleanup mechanics; their product assertions remain separate. The remaining maintenance scripts are grouped by responsibility: `scripts/benchmark/`, `scripts/browser/`, `scripts/e2e/`, `scripts/fixtures/`, `scripts/model/` and `scripts/release/`. The package commands are the supported entry points; direct script paths should follow these directories.
 
 ## Runtime architecture
 
@@ -142,6 +142,14 @@ For the current release these placeholders resolve to `hv-pony-solver-chromium-0
 Every unpacked target contains a `build-manifest.json` with `modelDelivery` and per-file identities. Packaged metadata additionally records the canonical model identity. The deterministic test fixture records its committed `expected.classId` and `expected.confidence` oracle in both build and artifact metadata; smoke evidence must match that oracle. ZIP ordering and timestamps are deterministic. Generated `dist` files and the local model source are ignored and must not be staged.
 
 Load `apps/extension/dist/chromium` through Chrome's `chrome://extensions` or Edge's `edge://extensions` developer mode. For Firefox, use `about:debugging#/runtime/this-firefox` and select `apps/extension/dist/firefox/manifest.json`. The toolbar action opens `options.html`; it is not a popup.
+
+## Script and test entry points
+
+The extension package discovers Node tests recursively with `node --test "scripts/**/*.test.mjs"`; this includes build, benchmark, browser, E2E, fixture and release contract tests. The benchmark contract is an explicit compatibility facade: parameter/matrix rules live in `scripts/benchmark/benchmark-config.mjs`, sample statistics in `benchmark-statistics.mjs`, result schema checks in `benchmark-result.mjs`, comparison rules in `benchmark-comparison.mjs`, and CSV rendering in `benchmark-csv.mjs`. `benchmark-runner.mjs` owns browser process and sampling orchestration and should not become a second source of contract rules.
+
+Browser support checks compare a browser's complete version string where a boundary requires it. `normalizeBrowserVersionForComparison()` only removes trailing zero components, so `140.15.0` and `140.15` are equivalent while `140.15.1` remains different. Minimum support and exact minimum execution still use the major version policy in `scripts/browser/browser-support.mjs`.
+
+The main smoke paths are `scripts/e2e/chromium-content-smoke.mjs` for the deterministic content fixture, `chromium-load-smoke.mjs` and `firefox-load-smoke.mjs` for production remote load-only checks, and the two `*-packaged-model-smoke.mjs` scripts for packaged inference. Load-only success proves loading and ordinary controls only; it never proves Key authentication, model download or inference. Packaged smoke evidence is archive-bound and must not be reused as remote authentication evidence.
 
 ## Validation and release evidence
 

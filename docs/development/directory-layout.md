@@ -29,6 +29,8 @@ scripts/
 
 核心业务目录已经按领域分组。`browser-core/src` 的 `app`、`captcha`、`inference`、`model`、`persistence`、`platform`、`status-panel`、`utils` 与对应测试目录保持镜像；用户脚本的薄适配器继续按 `app`、`captcha`、`inference`、`model`、`persistence`、`status-panel`、`userscript` 分组。大协调模块是否继续拆分，要以状态所有权和测试边界为准，不按文件数量机械拆分。
 
+根配置保持按工具职责分开：`package.json` 提供 workspace 脚本、Prettier 规则和包管理器声明，`mise.toml` 固定 Node.js/pnpm，`eslint.config.mjs` 提供全仓库 flat config，`tsconfig.base.json` 提供共享 TypeScript 选项，`.prettierignore` 定义生成物和第三方资产的格式忽略边界。已删除的独立 Prettier 配置和 Vitest workspace 不应重新引入。
+
 ## 扩展脚本迁移映射
 
 下表是已完成的“迁移前名称 → 当前路径”。同名测试随被测模块移动；应用包的 scripts 字段继续提供稳定命令名。

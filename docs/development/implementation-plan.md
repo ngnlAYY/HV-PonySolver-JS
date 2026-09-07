@@ -1,6 +1,6 @@
 # 审计优化实施记录
 
-依据 [2026-09-07 审计](../audits/2026-09-07-repository-audit.md)与[目录方案](directory-layout.md)实施。用户已要求进入实施；本记录用于约束范围、保留行为和记录验证，不包含提交、推送或部署。
+依据 [2026-09-07 审计](../audits/2026-09-07-repository-audit.md)与[目录方案](directory-layout.md)实施。本页记录已经完成的范围、迁移过程和验证；目录、模块、文档及根配置改动已纳入本地提交 `ef5efc9`。长期维护步骤见[开发与验证](verification.md)。
 
 ## 目标与范围
 
@@ -40,7 +40,7 @@
 
 逐文件映射如下；未列出的已有子目录文件只更新必要引用，不移动：
 
-| 当前路径                                                     | 目标路径                                                              |
+| 迁移前路径                                                   | 迁移后路径                                                            |
 | ------------------------------------------------------------ | --------------------------------------------------------------------- |
 | `apps/extension/scripts/build-extension.mjs`                 | `apps/extension/scripts/build/build-extension.mjs`                    |
 | `apps/extension/scripts/build-extension.test.mjs`            | `apps/extension/scripts/build/build-extension.test.mjs`               |
@@ -153,7 +153,7 @@
 
 本轮未使用受保护 Key、未执行生产模型下载/鉴权、未运行 Chromium 116、Firefox Android 142 或生产部署。内置推理使用确定性的 fixture 模型，不代表 canonical 模型准确率。Broker、Offscreen、核心缓存/Worker 协调器和 CI 初始化复用保留原结构；其状态所有权或收益尚不足以支持本轮进一步拆分。
 
-验收后默认扩展产物恢复为 remote，目录中不包含 `.ort`；用户脚本恢复为 external profile。已测试的 fixture ZIP 和浏览器证据另存于本地临时目录，生成的 Worker 配置按实施前备份恢复。所有源码与文档修改留在工作区，未创建提交、推送或发布。
+验收后默认扩展产物恢复为 remote，目录中不包含 `.ort`；用户脚本恢复为 external profile。已测试的 fixture ZIP 和浏览器证据留作本地临时验收材料，生成的 Worker 配置按实施前备份恢复。随后按用户要求创建本地提交 `ef5efc9`；该次交付没有执行推送或发布。
 
 ## 根配置精简
 
@@ -167,3 +167,7 @@
 修改前捕获配置基线，实施后确认 10 个 Prettier 解析与忽略样例、7 个 ESLint 生效配置和根包及五个工作区的测试/类型检查命令完全一致；Prettier 从根、应用、共享包文件均能自动发现根 `package.json`。规则、测试集合、工具版本、工作区和依赖保持，已有未提交改动继续保留。
 
 本次 `mise exec -- pnpm check` 完整通过，包含五工作区测试、234 个根测试、覆盖率、构建和全部静态门禁；Action 固定版本检查和 `git diff --check` 通过。测试使用占位 Worker 绑定，结束后按字节恢复原生成配置。本次仅修改管理配置和文档，未重新运行浏览器 E2E。
+
+## 后续维护边界
+
+上述通过数和浏览器版本属于实施时的验收记录。后续文档更新以当前源码、配置与命令为准，并单独运行格式、文档漂移、链接和相关回归；更新文档本身不会刷新这里的业务测试或浏览器证据。仍未执行的受保护鉴权、Chromium 116、Firefox Android 142 和生产发布保持原有独立门禁。

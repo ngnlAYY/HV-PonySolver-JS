@@ -18,6 +18,8 @@
 
 包边界由 [browser-core/package.json](../../packages/browser-core/package.json) 的显式 exports 和根级架构检查共同约束。共享核心只能依赖 [shared](../../packages/shared/src/index.ts) 的纯契约；用户脚本依赖核心和 shared，不应把用户脚本实现反向导入核心。新增跨包导入、移动模块或改变导出时，运行 `architecture:check` 并检查对应测试。
 
+核心包的根入口适合跨领域应用组装；领域子路径只公开已盘点的稳定模块。修改导出表时，同时用真实 workspace 消费者执行 TypeScript 类型检查和 Node 的 `import.meta.resolve` 解析验证，避免 TypeScript `paths` 或 bundler alias 掩盖缺失的 package export。
+
 ## 目录导航
 
 目录已经按领域分组，新增源码应继续放入已有领域目录，避免把大量文件堆在 `src` 根目录。`index.ts` 是公开聚合入口，不是新业务代码的放置位置。

@@ -53,6 +53,14 @@
 
 `pnpm docs:check` 先运行 [check-docs-drift.mjs](../../scripts/docs-drift/check-docs-drift.mjs)，检查 README 与四篇既有专题的源码事实，再运行 [document-links.mjs](../../scripts/docs-drift/document-links.mjs)，检查维护文档中的本地文件、目录和标题锚点。链接检查排除代码块、行内代码、外部 URL 和声明的生成目录，并核对符号链接的真实目标；不存在或不可扫描的仓库根会失败。
 
+`apps/userscript/vendor/onnxruntime/README.md` 是项目维护的 Runtime 随附说明，不在默认格式和链接门禁范围内。修改时单独核对其中的命令、路径和资产身份，并在仓库根目录检查该文件的格式：
+
+```bash
+mise exec -- pnpm exec prettier --check --ignore-path /dev/null apps/userscript/vendor/onnxruntime/README.md
+```
+
+该命令在 POSIX shell 或 Git Bash 中只对明确列出的 README 绕过忽略清单；第三方压缩代码与许可证继续按供应链约束维护。
+
 链接门禁支持本仓库使用的内联 Markdown 链接，不解析 reference-style 链接、HTML 链接或全部 Markdown 扩展语法，也不验证外部网站可用性。它不能代替跨模块语义审阅；新架构页的时序和职责仍需对照源码。若将新页中的契约纳入漂移门禁，应先增加会拒绝真实漂移的测试，再扩展现有事实提取器。
 
 ## README 的后续收敛
