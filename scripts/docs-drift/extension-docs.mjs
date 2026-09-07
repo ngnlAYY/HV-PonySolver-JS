@@ -10,13 +10,7 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
     errors.push('extension browser support Firefox Android minimum versions disagree')
   }
 
-  const requiredScripts = [
-    'build',
-    'build:packaged',
-    'test:e2e:content',
-    'test:e2e:chromium',
-    'test:e2e:packaged',
-  ]
+  const requiredScripts = ['build', 'build:packaged', 'test:e2e:content', 'test:e2e:chromium', 'test:e2e:packaged']
   for (const script of requiredScripts) {
     if (typeof extensionPackageJson.scripts?.[script] !== 'string') {
       errors.push(`apps/extension/package.json scripts.${script} is missing`)

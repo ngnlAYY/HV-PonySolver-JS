@@ -53,7 +53,7 @@ jobs:
           persist-credentials: false
 
       - name: Check external Action pins
-        run: node scripts/assert-pinned-actions.mjs
+        run: node scripts/ci/assert-pinned-actions.mjs
 
       - name: Validate extension Release target
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_extension_release }}
@@ -80,22 +80,29 @@ jobs:
             exit 1
           fi
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Security audit
         run: pnpm audit:high
+
+      - name: Check formatting
+        run: pnpm format:check
 
       - name: Lint
         run: pnpm lint
@@ -173,16 +180,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -206,16 +217,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -259,16 +274,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -305,16 +324,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -340,7 +363,7 @@ jobs:
 
       - name: Install pinned geckodriver
         id: geckodriver
-        run: node apps/extension/scripts/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
+        run: node apps/extension/scripts/browser/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
 
       - name: Extension content E2E smoke
         run: pnpm test:e2e:extension:content
@@ -397,18 +420,23 @@ jobs:
             echo 'enabled=true' >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set up pnpm
+      - name: Set up mise
         if: ${{ steps.protected_remote_model.outputs.enabled == 'true' }}
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
+      - name: Resolve pnpm store
         if: ${{ steps.protected_remote_model.outputs.enabled == 'true' }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        if: ${{ steps.protected_remote_model.outputs.enabled == 'true' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         if: ${{ steps.protected_remote_model.outputs.enabled == 'true' }}
@@ -434,16 +462,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -463,7 +495,7 @@ jobs:
 
       - name: Install pinned geckodriver
         id: geckodriver
-        run: node apps/extension/scripts/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
+        run: node apps/extension/scripts/browser/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
 
       - name: Build deterministic packaged fixture
         run: pnpm --filter @hv-pony-solver/extension build:packaged:fixture
@@ -501,16 +533,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -536,7 +572,7 @@ jobs:
 
       - name: Install pinned geckodriver
         id: geckodriver
-        run: node apps/extension/scripts/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
+        run: node apps/extension/scripts/browser/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
 
       - name: Build deterministic packaged fixture
         run: pnpm --filter @hv-pony-solver/extension build:packaged:fixture
@@ -576,18 +612,23 @@ jobs:
             echo 'enabled=true' >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set up pnpm
+      - name: Set up mise
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
+      - name: Resolve pnpm store
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
@@ -618,7 +659,7 @@ jobs:
       - name: Install pinned geckodriver
         id: geckodriver
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
-        run: node apps/extension/scripts/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
+        run: node apps/extension/scripts/browser/install-geckodriver.mjs "$RUNNER_TEMP/geckodriver"
 
       - name: Download and verify canonical model
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
@@ -626,15 +667,15 @@ jobs:
           PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
           PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
           PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
-        run: node apps/extension/scripts/download-canonical-model.mjs
+        run: node apps/extension/scripts/model/download-canonical-model.mjs
 
       - name: Run canonical-model-only package tests
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
         run: >-
           node --test
           --test-name-pattern='production packaged builds stay free|CLI preflight verifies only'
-          apps/extension/scripts/build-extension.test.mjs
-          apps/extension/scripts/release-gate.test.mjs
+          apps/extension/scripts/build/build-extension.test.mjs
+          apps/extension/scripts/release/release-gate.test.mjs
 
       - name: Build canonical packaged extensions
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
@@ -656,7 +697,7 @@ jobs:
       - name: Create canonical desktop E2E attestation
         if: ${{ steps.canonical_model_config.outputs.enabled == 'true' }}
         run: |
-          node apps/extension/scripts/release-gate.mjs attest \
+          node apps/extension/scripts/release/release-gate.mjs attest \
             --evidence-dir "$RUNNER_TEMP/canonical-e2e-evidence" \
             --attestation apps/extension/dist/canonical-gate-attestation.json
 
@@ -684,16 +725,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -759,7 +804,7 @@ jobs:
           PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
           PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
           PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
-        run: node apps/extension/scripts/release-gate.mjs preflight
+        run: node apps/extension/scripts/release/release-gate.mjs preflight
 
       - name: Transfer complete extension release gate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -789,16 +834,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -845,16 +894,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          run_install: false
+          version: '2026.9.1'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: '.node-version'
-          cache: pnpm
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -870,7 +923,7 @@ jobs:
           PACKAGED_MODEL_URL: ${{ secrets.PACKAGED_MODEL_URL || vars.PACKAGED_MODEL_URL }}
           PACKAGED_MODEL_BEARER_TOKEN: ${{ secrets.PACKAGED_MODEL_BEARER_TOKEN }}
           PACKAGED_MODEL_AUTH_REQUIRED: ${{ vars.PACKAGED_MODEL_AUTH_REQUIRED }}
-        run: node apps/extension/scripts/release-gate.mjs preflight
+        run: node apps/extension/scripts/release/release-gate.mjs preflight
 
       - name: Publish extension artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -902,10 +955,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Set up mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          node-version-file: '.node-version'
+          version: '2026.9.1'
+          install_args: node
 
       - name: Download tested remote-model desktop extension packages
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0

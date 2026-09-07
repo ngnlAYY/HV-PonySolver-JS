@@ -1,7 +1,7 @@
 import { lstat, realpath } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { browserSupport } from '../browser-support.mjs'
+import { browserSupport } from '../browser/browser-support.mjs'
 import {
   extensionRoot,
   repositoryRoot,

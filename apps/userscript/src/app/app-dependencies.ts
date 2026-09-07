@@ -1,8 +1,4 @@
-import {
-  ModelAccessKeyRejectedError,
-  probeModelAccessKey,
-  type AppDependencies,
-} from '@hv-pony-solver/browser-core'
+import { ModelAccessKeyRejectedError, probeModelAccessKey, type AppDependencies } from '@hv-pony-solver/browser-core'
 
 import { getAnswerMode } from '../captcha/answer-mode-settings'
 import { AnswerSubmitter } from '../captcha/answer-submitter'

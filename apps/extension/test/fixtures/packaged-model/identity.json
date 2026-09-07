@@ -5,20 +5,12 @@
   "input": {
     "name": "images",
     "type": "float32",
-    "dimensions": [
-      1,
-      3,
-      640,
-      640
-    ]
+    "dimensions": [1, 3, 640, 640]
   },
   "output": {
     "name": "output0",
     "type": "float32",
-    "dimensions": [
-      1,
-      6
-    ]
+    "dimensions": [1, 6]
   },
   "expected": {
     "classId": 0,

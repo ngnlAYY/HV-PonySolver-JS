@@ -14,6 +14,8 @@ HV PonySolver JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript 单仓
 - 扩展版为 Chrome、Edge 和 Firefox 生成 Chromium/Firefox MV3 产物；默认远程下载模型，也可显式构建无需 Key 的内置模型版本；所有可执行 JS、Worker 和 WASM 均随扩展打包。
 - 用户脚本与扩展共用 `packages/browser-core` 的 DOM、答题、推理和模型契约，但拥有独立的平台适配器和构建产物。
 
+维护者可从[文档导航](docs/README.md)进入[整体架构](docs/architecture/overview.md)、[开发验证](docs/development/verification.md)和[目录组织方案](docs/development/directory-layout.md)。本轮源码、结构、风格、注释与文档审计见[仓库审计报告](docs/audits/2026-09-07-repository-audit.md)。
+
 当前客户端版本：
 
 | 客户端     | 当前版本 | 版本权威来源                   |
@@ -245,26 +247,31 @@ apps/userscript/src/inference/onnx-runtime-assets.ts
 
 ## 环境要求
 
-| 工具     | 要求                         |
-| -------- | ---------------------------- |
-| Node.js  | `>= 24.15.0`                 |
-| pnpm     | `12.3.0`                     |
-| Corepack | 推荐启用，用于固定 pnpm 版本 |
+| 工具    | 要求                                    |
+| ------- | --------------------------------------- |
+| mise    | 管理本地与 CI 的 Node.js、pnpm 工具版本 |
+| Node.js | `24.15.0`（最低兼容要求 `>= 24.15.0`）  |
+| pnpm    | `12.3.0`                                |
 
-仓库根目录的 `.node-version` 将本地工具链和 GitHub Actions 精确固定为 Node.js `24.15.0`；`package.json#engines` 保留 `>= 24.15.0` 的最低兼容要求。
+仓库根目录的 `mise.toml` 是本地与 GitHub Actions 的工具版本来源，精确固定 Node.js `24.15.0` 和 pnpm `12.3.0`；`package.json#engines` 保留 `>= 24.15.0` 的最低兼容要求，`package.json#packageManager` 与 mise 的 pnpm 版本保持一致。npm 包依赖仍由 pnpm 工作区和 `pnpm-lock.yaml` 管理。
 
-安装依赖：
-
-```bash
-corepack enable
-pnpm install
-```
-
-如果当前 shell 中的 `pnpm` 不是项目声明的版本，直接使用：
+按 [mise 官方说明](https://mise.jdx.dev/getting-started.html) 安装 mise 后，在仓库根目录安装工具与依赖：
 
 ```bash
-corepack pnpm install
+mise trust
+mise install
+mise exec -- pnpm install --frozen-lockfile
 ```
+
+首次 `mise trust` 用于信任仓库工具配置。后续命令可以通过 `mise exec --` 执行，无需修改全局 Node.js 或 pnpm：
+
+```bash
+mise exec -- node --version
+mise exec -- pnpm --version
+mise exec -- pnpm check
+```
+
+下文简写的 `pnpm` 和 `node` 命令均假定当前 shell 已[激活 mise](https://mise.jdx.dev/cli/activate.html)；未激活时在命令前加 `mise exec --`。升级工具时同步修改 `mise.toml` 和 `package.json`，再更新本节及工具版本契约测试。
 
 ## 快速构建
 
@@ -349,40 +356,41 @@ pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
 
 ### 仓库级命令
 
-| 命令                                                        | 作用                                                                                                                                         |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm build`                                                | 构建所有工作区包，用户脚本使用默认外部 profile                                                                                               |
-| `pnpm lint`                                                 | 执行 ESLint                                                                                                                                  |
-| `pnpm typecheck`                                            | 对所有工作区执行 TypeScript 类型检查                                                                                                         |
-| `pnpm test`                                                 | 执行工作区和仓库级测试                                                                                                                       |
-| `pnpm test:coverage`                                        | 生成覆盖率报告                                                                                                                               |
-| `pnpm docs:check`                                           | 检查 README 与源码、配置和资产清单的漂移                                                                                                     |
-| `pnpm architecture:check`                                   | 检查跨层和跨应用导入边界                                                                                                                     |
-| `pnpm browser-sinks:check`                                  | 检查浏览器危险调用白名单                                                                                                                     |
-| `pnpm bundle:check`                                         | 构建未压缩的默认 profile 并检查 `256 KiB` 预算                                                                                               |
-| `pnpm bundle:check:default`                                 | 检查当前产物的默认 profile 预算                                                                                                              |
-| `pnpm bundle:check:bundled`                                 | 检查当前产物的内置 profile 预算                                                                                                              |
-| `pnpm benchmark:inference`                                  | 执行推理预处理和解析基准，不作为 CI 性能门槛                                                                                                 |
-| `pnpm benchmark:extension`                                  | 执行有界 Chromium CI transport smoke（4 个场景、1,600 次操作、约 201 MiB 负载）；不作为性能比较证据                                          |
-| `pnpm benchmark:extension:full`                             | 显式执行代表性双浏览器矩阵（16 个场景、343,200 次操作、约 335 GiB 负载）；仅用于有意的本地基线/候选比较                                      |
-| `pnpm benchmark:extension:quick`                            | 执行降低采样的 Chromium transport smoke；不能作为性能比较证据                                                                                |
-| `pnpm benchmark:extension:product`                          | 使用本地固定模型测量实际 Chromium 消息与 ORT 推理链路，并在 localhost 回放模型下载、缓存和确认                                               |
-| `pnpm benchmark:extension:exhaustive`                       | 显式执行完整 transport 尺寸矩阵；成本显著高于默认代表性矩阵                                                                                  |
-| `pnpm test:e2e:userscript`                                  | 执行用户脚本 Playwright Chromium 测试                                                                                                        |
-| `pnpm test:e2e:extension:content`                           | 加载临时 Chromium 扩展并执行确定性内容脚本整链 fixture                                                                                       |
-| `pnpm test:e2e:extension:chromium:load-only`                | 加载生产远程 Chromium 产物，仅验证加载与普通设置，不声称已验证远程模型                                                                       |
-| `pnpm test:e2e:extension:chromium:authenticated`            | 从受保护环境读取 `KvKey`，验证真实模型后至少执行一次 `detect`；缺少 Key 时 fail closed                                                       |
-| `pnpm test:e2e:extension:firefox:load-only`                 | 用 Firefox 临时安装生产远程 ZIP，并验证当前设置页控件；不声称已执行鉴权推理                                                                  |
-| `pnpm --filter @hv-pony-solver/extension test:e2e:packaged` | 在真实 Chromium 和 Firefox 中验证内置模型、无 Key 推理及会话重建                                                                             |
-| `pnpm check:userscript`                                     | 执行用户脚本聚合检查                                                                                                                         |
-| `pnpm check:browser-core`                                   | 执行共用浏览器核心的类型、单元和契约检查                                                                                                     |
-| `pnpm check:extension`                                      | 执行扩展类型、测试、双目标构建和 Firefox 严格 lint                                                                                           |
-| `pnpm extension:package-check`                              | 重新生成扩展双目标产物，并执行 Firefox 严格 lint                                                                                             |
-| `pnpm check:model-worker`                                   | 执行 Model Worker 聚合检查                                                                                                                   |
-| `pnpm check:quick`                                          | 依次执行 `lint`、`typecheck`、`test`、`docs:check`、`architecture:check`、`browser-sinks:check`、`extension:package-check` 和 `bundle:check` |
-| `pnpm check`                                                | 先执行 `check:quick`，再执行 `test:coverage` 和 `build`                                                                                      |
-| `pnpm build:onnx-runtime`                                   | 从固定上游构建精简 ONNX Runtime                                                                                                              |
-| `pnpm verify:onnx-runtime`                                  | 校验已纳入仓库的精简 glue                                                                                                                    |
+| 命令                                                        | 作用                                                                                                                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm build`                                                | 构建所有工作区包，用户脚本使用默认外部 profile                                                                                                               |
+| `pnpm format:check`                                         | 检查第一方源码、配置与文档格式；排除生成物、第三方资产和 pnpm 锁文件                                                                                         |
+| `pnpm lint`                                                 | 执行 ESLint                                                                                                                                                  |
+| `pnpm typecheck`                                            | 对所有工作区执行 TypeScript 类型检查                                                                                                                         |
+| `pnpm test`                                                 | 执行工作区和仓库级测试                                                                                                                                       |
+| `pnpm test:coverage`                                        | 生成覆盖率报告                                                                                                                                               |
+| `pnpm docs:check`                                           | 检查契约文档与源码/资产的漂移，以及维护文档的本地链接和标题锚点                                                                                              |
+| `pnpm architecture:check`                                   | 检查跨层和跨应用导入边界                                                                                                                                     |
+| `pnpm browser-sinks:check`                                  | 检查浏览器危险调用白名单                                                                                                                                     |
+| `pnpm bundle:check`                                         | 构建未压缩的默认 profile 并检查 `256 KiB` 预算                                                                                                               |
+| `pnpm bundle:check:default`                                 | 检查当前产物的默认 profile 预算                                                                                                                              |
+| `pnpm bundle:check:bundled`                                 | 检查当前产物的内置 profile 预算                                                                                                                              |
+| `pnpm benchmark:inference`                                  | 执行推理预处理和解析基准，不作为 CI 性能门槛                                                                                                                 |
+| `pnpm benchmark:extension`                                  | 执行有界 Chromium CI transport smoke（4 个场景、1,600 次操作、约 201 MiB 负载）；不作为性能比较证据                                                          |
+| `pnpm benchmark:extension:full`                             | 显式执行代表性双浏览器矩阵（16 个场景、343,200 次操作、约 335 GiB 负载）；仅用于有意的本地基线/候选比较                                                      |
+| `pnpm benchmark:extension:quick`                            | 执行降低采样的 Chromium transport smoke；不能作为性能比较证据                                                                                                |
+| `pnpm benchmark:extension:product`                          | 使用本地固定模型测量实际 Chromium 消息与 ORT 推理链路，并在 localhost 回放模型下载、缓存和确认                                                               |
+| `pnpm benchmark:extension:exhaustive`                       | 显式执行完整 transport 尺寸矩阵；成本显著高于默认代表性矩阵                                                                                                  |
+| `pnpm test:e2e:userscript`                                  | 执行用户脚本 Playwright Chromium 测试                                                                                                                        |
+| `pnpm test:e2e:extension:content`                           | 加载临时 Chromium 扩展并执行确定性内容脚本整链 fixture                                                                                                       |
+| `pnpm test:e2e:extension:chromium:load-only`                | 加载生产远程 Chromium 产物，仅验证加载与普通设置，不声称已验证远程模型                                                                                       |
+| `pnpm test:e2e:extension:chromium:authenticated`            | 从受保护环境读取 `KvKey`，验证真实模型后至少执行一次 `detect`；缺少 Key 时 fail closed                                                                       |
+| `pnpm test:e2e:extension:firefox:load-only`                 | 用 Firefox 临时安装生产远程 ZIP，并验证当前设置页控件；不声称已执行鉴权推理                                                                                  |
+| `pnpm --filter @hv-pony-solver/extension test:e2e:packaged` | 在真实 Chromium 和 Firefox 中验证内置模型、无 Key 推理及会话重建                                                                                             |
+| `pnpm check:userscript`                                     | 执行用户脚本聚合检查                                                                                                                                         |
+| `pnpm check:browser-core`                                   | 执行共用浏览器核心的类型、单元和契约检查                                                                                                                     |
+| `pnpm check:extension`                                      | 执行扩展类型、测试、双目标构建和 Firefox 严格 lint                                                                                                           |
+| `pnpm extension:package-check`                              | 重新生成扩展双目标产物，并执行 Firefox 严格 lint                                                                                                             |
+| `pnpm check:model-worker`                                   | 执行 Model Worker 聚合检查                                                                                                                                   |
+| `pnpm check:quick`                                          | 依次执行 `format:check`、`lint`、`typecheck`、`test`、`docs:check`、`architecture:check`、`browser-sinks:check`、`extension:package-check` 和 `bundle:check` |
+| `pnpm check`                                                | 先执行 `check:quick`，再执行 `test:coverage` 和 `build`                                                                                                      |
+| `pnpm build:onnx-runtime`                                   | 从固定上游构建精简 ONNX Runtime                                                                                                                              |
+| `pnpm verify:onnx-runtime`                                  | 校验已纳入仓库的精简 glue                                                                                                                                    |
 
 ### 用户脚本命令
 
@@ -432,7 +440,7 @@ MODEL_FILE=/path/to/yolo26n-640.ort \
 pnpm --filter @hv-pony-solver/userscript verify-model-integrity
 ```
 
-`corepack pnpm benchmark:extension:product` 要求本地固定的 `model/yolo26n-640.ort` 和可运行的 Chromium。它默认连续识别 100 次，可传入 `--iterations 1000` 延长运行；另测冷/热 `prepare`、四标签页并发、20 次取消尝试后恢复（分别记录实际取消和抢先完成次数）、4000×4000 合成图片和缓存关闭后重新命中。报告写入 `apps/extension/dist/product-benchmark/product-benchmark.json`。识别使用正式内置模型 ZIP 和真实 content client → broker → Offscreen → Worker → ORT；缓存阶段使用生产下载器与 IndexedDB，仅通过 localhost 回放下载确认，不访问生产 Key 或模型服务。该基准与原有 transport 矩阵独立，不作为发布证据或 CI 性能门槛。
+`mise exec -- pnpm benchmark:extension:product` 要求本地固定的 `model/yolo26n-640.ort` 和可运行的 Chromium。它默认连续识别 100 次，可传入 `--iterations 1000` 延长运行；另测冷/热 `prepare`、四标签页并发、20 次取消尝试后恢复（分别记录实际取消和抢先完成次数）、4000×4000 合成图片和缓存关闭后重新命中。报告写入 `apps/extension/dist/product-benchmark/product-benchmark.json`。识别使用正式内置模型 ZIP 和真实 content client → broker → Offscreen → Worker → ORT；缓存阶段使用生产下载器与 IndexedDB，仅通过 localhost 回放下载确认，不访问生产 Key 或模型服务。该基准与原有 transport 矩阵独立，不作为发布证据或 CI 性能门槛。
 
 合成纯白 PNG 只用于固定负载，不能证明识别准确率。报告给出 P50/P95、模型 GET/确认/二进制与元数据写入次数，以及连续识别前后的 CDP 堆快照；未测量的 WASM/网络缓冲峰值和 Port/监听器总数保留为 `null`，不把快照变化解释为泄漏证明。比较候选版本时应使用同一机器、浏览器、模型、迭代数与空闲系统状态。
 
@@ -447,7 +455,7 @@ pnpm --filter @hv-pony-solver/model-worker test
 pnpm --filter @hv-pony-solver/model-worker build
 ```
 
-pnpm 11 会将 `deploy` 识别为自身命令。部署 Model Worker 时必须显式使用：
+为明确执行本工作区的部署脚本，部署 Model Worker 时必须显式使用：
 
 ```bash
 pnpm --filter @hv-pony-solver/model-worker run deploy
@@ -485,6 +493,7 @@ other/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da
 
 ```bash
 pnpm verify:onnx-runtime
+pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm test
@@ -705,6 +714,7 @@ ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFull
 推荐的本地检查顺序：
 
 ```bash
+pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm test
@@ -737,9 +747,9 @@ pnpm verify:onnx-runtime
 
 `.github/workflows/verify-monorepo.yml` 在 Pull Request、`main` 推送和手动触发时执行：
 
-- 使用 `.node-version` 固定的 Node.js `24.15.0` 和冻结依赖安装。
+- 通过固定 commit SHA 的 `jdx/mise-action` 安装 `mise.toml` 声明的 Node.js `24.15.0` 和 pnpm `12.3.0`，保留 pnpm store 缓存并执行冻结依赖安装。
 - 检查外部 GitHub Action 是否固定到完整 commit SHA，要求 Docker Action 使用完整 `sha256` digest，并强制每个 `actions/checkout` 设置 `persist-credentials: false`。
-- 依赖审计、ESLint 和 TypeScript 类型检查。
+- 依赖审计、第一方格式检查、ESLint 和 TypeScript 类型检查。
 - JavaScript/TypeScript CodeQL 扫描，并在 Pull Request 中执行依赖审查。
 - 文档漂移、架构边界和浏览器危险调用检查。
 - 工作区测试与覆盖率。
@@ -786,11 +796,13 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 ### pnpm 版本不匹配
 
 ```bash
-corepack pnpm --version
-corepack pnpm install
+mise install
+mise exec -- node --version
+mise exec -- pnpm --version
+mise exec -- pnpm install --frozen-lockfile
 ```
 
-项目固定 pnpm `12.3.0`。不要让全局 pnpm 的其他主版本接管项目脚本。
+项目固定 pnpm `12.3.0`。使用 `mise exec -- pnpm` 可明确选择仓库版本；若直接执行 `pnpm` 仍命中其他版本，请检查当前 shell 的 mise 激活配置。
 
 ### 默认构建无法加载 ONNX Runtime
 
@@ -895,6 +907,13 @@ pnpm --filter @hv-pony-solver/model-worker run deploy
 
 ## 相关文档
 
+- [文档导航](docs/README.md)：按维护任务查找架构、开发和审计资料。
+- [整体架构](docs/architecture/overview.md)：工作区依赖、平台差异、数据所有权和权威模块。
+- [开发与验证](docs/development/verification.md)：本地工具链、定向测试、CI 命令和证据边界。
+- [目录组织与迁移方案](docs/development/directory-layout.md)：平铺文件分组、模块拆分及引用迁移步骤。
+- [代码风格与注释](docs/development/contributing.md)、[文档维护](docs/development/documentation.md)：日常修改与文档联动规则。
+- [审计优化实施记录](docs/development/implementation-plan.md)：目录迁移、模块拆分、门禁补强与验证结果。
+- [2026-09-07 仓库审计](docs/audits/2026-09-07-repository-audit.md)：全仓盘点、优化优先级与本次验证范围。
 - [`docs/onnx-runtime.md`](docs/onnx-runtime.md)：精简运行时资产、哈希和复现说明。
 - [`docs/browser-extension.md`](docs/browser-extension.md)：扩展架构、权限、构建、加载、存储和验证边界。
 - [`docs/model-cache-strategy.md`](docs/model-cache-strategy.md)：浏览器缓存、Worker `no-store` 与下载确认计次策略。

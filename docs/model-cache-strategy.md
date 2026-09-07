@@ -77,11 +77,11 @@ HEAD 验证 Key（不计次）
 修改缓存、下载或额度确认逻辑时至少运行：
 
 ```bash
-corepack pnpm --filter @hv-pony-solver/browser-core test
-corepack pnpm --filter @hv-pony-solver/userscript test
-corepack pnpm --filter @hv-pony-solver/extension test
-corepack pnpm --filter @hv-pony-solver/model-worker test
-corepack pnpm docs:check
+mise exec -- pnpm --filter @hv-pony-solver/browser-core test
+mise exec -- pnpm --filter @hv-pony-solver/userscript test
+mise exec -- pnpm --filter @hv-pony-solver/extension test
+mise exec -- pnpm --filter @hv-pony-solver/model-worker test
+mise exec -- pnpm docs:check
 ```
 
 手动验收应覆盖缓存命中、完整性失败、IndexedDB 写入失败、重复确认、回执失效、5 次已确认、并发预留占满、UTC 月切换、额度关闭以及真实/诱饵对象隔离。

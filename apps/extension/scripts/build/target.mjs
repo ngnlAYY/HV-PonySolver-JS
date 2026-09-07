@@ -1,7 +1,7 @@
 import { cp, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { build } from 'esbuild'
-import { browserSupport } from '../browser-support.mjs'
+import { browserSupport } from '../browser/browser-support.mjs'
 import { extensionRoot, version, runtimeGlueSource, runtimeWasmSource, runtimeWasmFilename } from './config.mjs'
 import { createManifest, normalizeModelDelivery } from './policy.mjs'
 import { extensionRuntimeGluePlugin, packagedModelIdentityPlugin, fixtureDetectHookPlugin } from './assets.mjs'

@@ -26,10 +26,13 @@ function responseWithBody(
 
 describe('loadPackagedAsset', () => {
   it('fetches the fixed extension URL and accepts only exact bytes', async () => {
-    const fetchImpl = vi.fn(async () => new Response(exactBytes, {
-      status: 200,
-      headers: { 'content-length': String(exactBytes.byteLength) },
-    })) as unknown as typeof fetch
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(exactBytes, {
+          status: 200,
+          headers: { 'content-length': String(exactBytes.byteLength) },
+        }),
+    ) as unknown as typeof fetch
 
     const result = await loadPackagedAsset(
       'chrome-extension://extension-id/model/yolo26n-640.ort',
@@ -47,10 +50,13 @@ describe('loadPackagedAsset', () => {
 
   it('hands the caller signal to the fetch and aborts after resolution', async () => {
     const controller = new AbortController()
-    const fetchImpl = vi.fn(async () => new Response(exactBytes, {
-      status: 200,
-      headers: { 'content-length': String(exactBytes.byteLength) },
-    })) as unknown as typeof fetch
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(exactBytes, {
+          status: 200,
+          headers: { 'content-length': String(exactBytes.byteLength) },
+        }),
+    ) as unknown as typeof fetch
 
     controller.abort(new Error('推理请求已取消'))
     await expect(
@@ -62,22 +68,22 @@ describe('loadPackagedAsset', () => {
         controller.signal,
       ),
     ).rejects.toThrow('扩展内置模型 加载已取消')
-    expect(fetchImpl).toHaveBeenCalledWith(
-      'chrome-extension://extension-id/model/yolo26n-640.ort',
-      {
-        cache: 'force-cache',
-        redirect: 'error',
-        signal: controller.signal,
-      },
-    )
+    expect(fetchImpl).toHaveBeenCalledWith('chrome-extension://extension-id/model/yolo26n-640.ort', {
+      cache: 'force-cache',
+      redirect: 'error',
+      signal: controller.signal,
+    })
   })
 
   it('cancels a non-success response without replacing the HTTP error', async () => {
     const body = { cancel: vi.fn(async () => Promise.reject(new Error('cancel failed'))) }
-    const fetchImpl = vi.fn(async () => responseWithBody(body as unknown as ReadableStream<Uint8Array>, { status: 404 })) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () =>
+      responseWithBody(body as unknown as ReadableStream<Uint8Array>, { status: 404 }),
+    ) as unknown as typeof fetch
 
-    await expect(loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl))
-      .rejects.toThrow('模型 读取失败: HTTP 404')
+    await expect(
+      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
+    ).rejects.toThrow('模型 读取失败: HTTP 404')
     expect(body.cancel).toHaveBeenCalledTimes(1)
   })
 
@@ -85,13 +91,13 @@ describe('loadPackagedAsset', () => {
     'rejects declared Content-Length %j before acquiring a reader',
     async (contentLength) => {
       const body = { cancel: vi.fn(async () => undefined), getReader: vi.fn() }
-      const fetchImpl = vi.fn(async () => responseWithBody(
-        body as unknown as ReadableStream<Uint8Array>,
-        { contentLength },
-      )) as unknown as typeof fetch
+      const fetchImpl = vi.fn(async () =>
+        responseWithBody(body as unknown as ReadableStream<Uint8Array>, { contentLength }),
+      ) as unknown as typeof fetch
 
-      await expect(loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl))
-        .rejects.toThrow('模型 Content-Length 无效')
+      await expect(
+        loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
+      ).rejects.toThrow('模型 Content-Length 无效')
       expect(body.cancel).toHaveBeenCalledTimes(1)
       expect(body.getReader).not.toHaveBeenCalled()
     },
@@ -99,13 +105,13 @@ describe('loadPackagedAsset', () => {
 
   it('rejects a mismatched declared length before acquiring a reader', async () => {
     const body = { cancel: vi.fn(async () => undefined), getReader: vi.fn() }
-    const fetchImpl = vi.fn(async () => responseWithBody(
-      body as unknown as ReadableStream<Uint8Array>,
-      { contentLength: '4' },
-    )) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () =>
+      responseWithBody(body as unknown as ReadableStream<Uint8Array>, { contentLength: '4' }),
+    ) as unknown as typeof fetch
 
-    await expect(loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl))
-      .rejects.toThrow('模型 大小校验失败')
+    await expect(
+      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
+    ).rejects.toThrow('模型 大小校验失败')
     expect(body.cancel).toHaveBeenCalledTimes(1)
     expect(body.getReader).not.toHaveBeenCalled()
   })
@@ -113,8 +119,9 @@ describe('loadPackagedAsset', () => {
   it('rejects a response without a readable body', async () => {
     const fetchImpl = vi.fn(async () => responseWithBody(null)) as unknown as typeof fetch
 
-    await expect(loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl))
-      .rejects.toThrow('模型 响应正文不可用')
+    await expect(
+      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
+    ).rejects.toThrow('模型 响应正文不可用')
   })
 
   it.each([
@@ -135,10 +142,13 @@ describe('loadPackagedAsset', () => {
       releaseLock: vi.fn(() => events.push('release')),
     }
     const body = { getReader: vi.fn(() => reader) }
-    const fetchImpl = vi.fn(async () => responseWithBody(body as unknown as ReadableStream<Uint8Array>)) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () =>
+      responseWithBody(body as unknown as ReadableStream<Uint8Array>),
+    ) as unknown as typeof fetch
 
-    await expect(loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl))
-      .rejects.toThrow('模型 大小校验失败')
+    await expect(
+      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
+    ).rejects.toThrow('模型 大小校验失败')
     expect(events).toEqual(['cancel', 'release'])
   })
 
@@ -149,10 +159,13 @@ describe('loadPackagedAsset', () => {
       releaseLock: vi.fn(),
     }
     const body = { getReader: vi.fn(() => reader) }
-    const fetchImpl = vi.fn(async () => responseWithBody(body as unknown as ReadableStream<Uint8Array>)) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () =>
+      responseWithBody(body as unknown as ReadableStream<Uint8Array>),
+    ) as unknown as typeof fetch
 
-    await expect(loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl))
-      .rejects.toThrow('stream failed')
+    await expect(
+      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
+    ).rejects.toThrow('stream failed')
     expect(reader.cancel).toHaveBeenCalledTimes(1)
     expect(reader.releaseLock).toHaveBeenCalledTimes(1)
   })
@@ -167,7 +180,9 @@ describe('loadPackagedAsset', () => {
       }),
     }
     const body = { getReader: vi.fn(() => reader) }
-    const fetchImpl = vi.fn(async () => responseWithBody(body as unknown as ReadableStream<Uint8Array>)) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () =>
+      responseWithBody(body as unknown as ReadableStream<Uint8Array>),
+    ) as unknown as typeof fetch
 
     const loading = loadPackagedAsset(
       'moz-extension://id/model/test.ort',
@@ -216,37 +231,33 @@ describe('loadPackagedAsset', () => {
     const controller = new AbortController()
     let removals = 0
     const originalRemove = controller.signal.removeEventListener.bind(controller.signal)
-    const removeListener = vi.spyOn(controller.signal, 'removeEventListener').mockImplementation(
-      (type, listener, options) => {
+    const removeListener = vi
+      .spyOn(controller.signal, 'removeEventListener')
+      .mockImplementation((type, listener, options) => {
         originalRemove(type, listener, options)
         removals += 1
         if (removals === 3) {
           controller.abort()
         }
-      },
-    )
+      })
     let reads = 0
     const reader = {
       read: vi.fn(async () => {
         reads += 1
-        return reads === 1
-          ? { done: false as const, value: exactBytes }
-          : { done: true as const, value: undefined }
+        return reads === 1 ? { done: false as const, value: exactBytes } : { done: true as const, value: undefined }
       }),
       cancel: vi.fn(async () => undefined),
       releaseLock: vi.fn(),
     }
     const body = { getReader: vi.fn(() => reader) }
-    const fetchImpl = vi.fn(async () => responseWithBody(body as unknown as ReadableStream<Uint8Array>)) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () =>
+      responseWithBody(body as unknown as ReadableStream<Uint8Array>),
+    ) as unknown as typeof fetch
 
     try {
-      await expect(loadPackagedAsset(
-        'moz-extension://id/model/test.ort',
-        exactIntegrity,
-        '模型',
-        fetchImpl,
-        controller.signal,
-      )).rejects.toThrow('模型 加载已取消')
+      await expect(
+        loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl, controller.signal),
+      ).rejects.toThrow('模型 加载已取消')
       expect(removals).toBe(3)
       expect(reader.cancel).not.toHaveBeenCalled()
     } finally {
@@ -255,9 +266,12 @@ describe('loadPackagedAsset', () => {
   })
 
   it('rejects same-sized bytes with a different SHA-256', async () => {
-    const fetchImpl = vi.fn(async () => new Response(Uint8Array.from([3, 2, 1]), { status: 200 })) as unknown as typeof fetch
+    const fetchImpl = vi.fn(
+      async () => new Response(Uint8Array.from([3, 2, 1]), { status: 200 }),
+    ) as unknown as typeof fetch
 
-    await expect(loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl))
-      .rejects.toThrow('模型 完整性校验失败')
+    await expect(
+      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
+    ).rejects.toThrow('模型 完整性校验失败')
   })
 })

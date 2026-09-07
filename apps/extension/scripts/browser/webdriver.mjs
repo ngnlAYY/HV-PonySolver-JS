@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { access } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
-import { geckodriverArguments } from '../browser-support.mjs'
+import { geckodriverArguments } from './browser-support.mjs'
 
 async function findExecutable(name) {
   if (name.includes(path.sep)) {

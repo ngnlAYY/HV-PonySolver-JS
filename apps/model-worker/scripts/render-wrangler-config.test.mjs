@@ -73,7 +73,7 @@ async function runValidate(wranglerConfig) {
 }
 
 async function runModelWorkerVitest(env) {
-  return execFileAsync('corepack', ['pnpm', 'exec', 'vitest', 'run', 'test/env.test.ts'], {
+  return execFileAsync('mise', ['exec', '--', 'pnpm', 'exec', 'vitest', 'run', 'test/env.test.ts'], {
     cwd: workerDir,
     env: {
       ...process.env,

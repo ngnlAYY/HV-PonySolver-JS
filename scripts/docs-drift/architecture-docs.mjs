@@ -15,7 +15,9 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
   const errors = []
   for (const configName of requiredConfigs) {
     if (!inferenceConfigSource.includes(`export const ${configName}`)) {
-      errors.push(`packages/browser-core/src/inference/inference-config.ts is missing expected config export ${configName}`)
+      errors.push(
+        `packages/browser-core/src/inference/inference-config.ts is missing expected config export ${configName}`,
+      )
       continue
     }
     if (!readme.includes(configName)) {
@@ -35,12 +37,7 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
 }
 
 function checkArchitectureGuardrails(readme) {
-  const requiredTerms = [
-    'architecture:check',
-    'inferenceTimeoutConfig',
-    'StatusPanel',
-    'Model Worker Core',
-  ]
+  const requiredTerms = ['architecture:check', 'inferenceTimeoutConfig', 'StatusPanel', 'Model Worker Core']
   const errors = []
   for (const term of requiredTerms) {
     if (!readme.includes(term)) {

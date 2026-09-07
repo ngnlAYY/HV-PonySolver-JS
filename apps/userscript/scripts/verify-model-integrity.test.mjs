@@ -18,10 +18,14 @@ test('verify-model-integrity CLI exits 0 for a matching model and canonical mani
     await writeCanonicalManifest(fixture.root, bytes)
     await writeFile(modelPath, bytes)
 
-    const result = await runCli(sourceScriptPath, {
-      ...process.env,
-      MODEL_FILE: modelPath,
-    }, ['--repo-root', fixture.root])
+    const result = await runCli(
+      sourceScriptPath,
+      {
+        ...process.env,
+        MODEL_FILE: modelPath,
+      },
+      ['--repo-root', fixture.root],
+    )
 
     assert.equal(result.code, 0)
     assert.match(result.stdout, /Model integrity verified/)
@@ -39,10 +43,14 @@ test('verify-model-integrity CLI exits 1 for a mismatched model and canonical ma
     await writeCanonicalManifest(fixture.root, Buffer.from([1, 2, 3]))
     await writeFile(modelPath, Buffer.from([4, 5]))
 
-    const result = await runCli(sourceScriptPath, {
-      ...process.env,
-      MODEL_FILE: modelPath,
-    }, ['--repo-root', fixture.root])
+    const result = await runCli(
+      sourceScriptPath,
+      {
+        ...process.env,
+        MODEL_FILE: modelPath,
+      },
+      ['--repo-root', fixture.root],
+    )
 
     assert.equal(result.code, 1)
     assert.match(result.stderr, /Model integrity mismatch/)
@@ -62,10 +70,14 @@ test('verify-model-integrity CLI accepts numeric separators in canonical byteLen
     await writeCanonicalManifestSource(fixture.root, '1_234', bytes)
     await writeFile(modelPath, bytes)
 
-    const result = await runCli(sourceScriptPath, {
-      ...process.env,
-      MODEL_FILE: modelPath,
-    }, ['--repo-root', fixture.root])
+    const result = await runCli(
+      sourceScriptPath,
+      {
+        ...process.env,
+        MODEL_FILE: modelPath,
+      },
+      ['--repo-root', fixture.root],
+    )
 
     assert.equal(result.code, 0)
     assert.match(result.stdout, /Model integrity verified/)
@@ -89,10 +101,13 @@ test('verify-model-integrity CLI reads the default canonical manifest when MODEL
     await writeFile(modelPath, Buffer.from([1, 2, 3]))
     const expectedByteLength = await readCanonicalByteLength()
 
-    const result = await runCli(sourceScriptPath, withoutManifestOverride({
-      ...process.env,
-      MODEL_FILE: modelPath,
-    }))
+    const result = await runCli(
+      sourceScriptPath,
+      withoutManifestOverride({
+        ...process.env,
+        MODEL_FILE: modelPath,
+      }),
+    )
 
     assert.equal(result.code, 1)
     assert.match(result.stderr, /Model integrity mismatch/)
@@ -119,11 +134,15 @@ test('verify-model-integrity CLI ignores manifest path environment overrides', a
     await writeManifest(overrideManifestPath, modelBytes)
     await writeFile(modelPath, modelBytes)
 
-    const result = await runCli(sourceScriptPath, {
-      ...process.env,
-      MODEL_FILE: modelPath,
-      HV_PONY_SOLVER_MODEL_MANIFEST_PATH: overrideManifestPath,
-    }, ['--repo-root', fixture.root])
+    const result = await runCli(
+      sourceScriptPath,
+      {
+        ...process.env,
+        MODEL_FILE: modelPath,
+        HV_PONY_SOLVER_MODEL_MANIFEST_PATH: overrideManifestPath,
+      },
+      ['--repo-root', fixture.root],
+    )
 
     assert.equal(result.code, 1)
     assert.match(result.stderr, /Model integrity mismatch/)
@@ -146,7 +165,10 @@ async function writeCanonicalManifest(root, bytes) {
 async function writeCanonicalManifestSource(root, byteLengthSource, bytes) {
   const manifestPath = join(root, 'packages/shared/src/model.ts')
   await mkdir(dirname(manifestPath), { recursive: true })
-  await writeFile(manifestPath, `export const MODEL_INTEGRITY = { byteLength: ${byteLengthSource}, sha256: '${sha256(bytes)}' } as const\n`)
+  await writeFile(
+    manifestPath,
+    `export const MODEL_INTEGRITY = { byteLength: ${byteLengthSource}, sha256: '${sha256(bytes)}' } as const\n`,
+  )
 }
 
 async function writeManifest(manifestPath, bytes) {

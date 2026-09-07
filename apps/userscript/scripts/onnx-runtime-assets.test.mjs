@@ -7,10 +7,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
 
-import {
-  ORT_RUNTIME_WASM_FILENAME,
-  ORT_RUNTIME_WASM_INTEGRITY,
-} from '@hv-pony-solver/shared/ort-runtime'
+import { ORT_RUNTIME_WASM_FILENAME, ORT_RUNTIME_WASM_INTEGRITY } from '@hv-pony-solver/shared/ort-runtime'
 
 import {
   assetIntegrityMatches,

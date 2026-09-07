@@ -97,12 +97,7 @@ describe('loadVerifiedRuntimeWasm', () => {
     const fetchImpl = vi.fn(async () => response) as unknown as typeof fetch
     const controller = new AbortController()
 
-    const loading = loadVerifiedRuntimeAsset(
-      'ONNX Runtime WASM',
-      expectedAsset,
-      fetchImpl,
-      controller.signal,
-    )
+    const loading = loadVerifiedRuntimeAsset('ONNX Runtime WASM', expectedAsset, fetchImpl, controller.signal)
     await vi.waitFor(() => expect(reader.read).toHaveBeenCalledTimes(1))
     controller.abort(new Error('runtime download cancelled'))
 
@@ -123,12 +118,7 @@ describe('loadVerifiedRuntimeWasm', () => {
         }),
     ) as unknown as typeof fetch
     const controller = new AbortController()
-    const loading = loadVerifiedRuntimeAsset(
-      'ONNX Runtime WASM',
-      expectedAsset,
-      fetchImpl,
-      controller.signal,
-    )
+    const loading = loadVerifiedRuntimeAsset('ONNX Runtime WASM', expectedAsset, fetchImpl, controller.signal)
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1))
 
     controller.abort(new Error('runtime download cancelled'))

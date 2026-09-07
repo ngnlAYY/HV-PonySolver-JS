@@ -1,4 +1,4 @@
-import { parseModelManifest } from '../model-manifest.mjs'
+import { parseModelManifest } from '../model/model-manifest.mjs'
 
 function checkModelManifestDocs(modelSource, readme) {
   const expectedModel = parseModelManifest(modelSource)

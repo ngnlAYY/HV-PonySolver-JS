@@ -2,7 +2,7 @@
 
 本文档适用于仓库根目录及其全部子目录，用于约束自动化代理和人工维护者的开发、验证与交付方式。若后续某个子目录增加更具体的 `AGENTS.md`，则该文件只覆盖其所在目录及下级目录；未覆盖部分仍遵循本文档。
 
-最后复核：2026-08-25。
+最后复核：2026-09-07。
 
 ## 项目定位
 
@@ -21,6 +21,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 ## 开始工作前
 
 1. 先阅读本文件、`README.md` 以及与任务直接相关的 `docs/` 文档。
+   维护者导航见 `docs/README.md`；架构、开发规范与验证分别位于 `docs/architecture/` 和 `docs/development/`，历史审计快照位于 `docs/audits/`。
 2. 检查 `git status --short --branch`，保留用户已有改动，不得擅自覆盖、清理或重置。
 3. 仓库根目录存在 `.codegraph/` 时，定位符号、调用链或架构关系应先使用 `codegraph explore`，再按需读取具体文件。
 4. 优先做范围最小、可验证的修改；不要借当前任务进行无关重构、依赖升级或格式化全仓库。
@@ -28,21 +29,23 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 
 ## 仓库结构与职责
 
-| 路径                    | 职责                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------- |
-| `apps/userscript`       | 用户脚本入口、GM 平台桥接、用户脚本构建与浏览器测试                               |
-| `apps/extension`        | Chromium/Firefox 扩展入口、后台代理、推理 Host、设置页、打包与浏览器测试          |
-| `apps/model-worker`     | Cloudflare Worker、Key 鉴权、R2 资产响应、Durable Object 下载额度及 Wrangler 配置 |
-| `packages/browser-core` | 用户脚本和扩展共用的 DOM、验证码、答题、推理、模型下载、状态面板与平台接口        |
-| `packages/shared`       | 浏览器端和 Model Worker 共用的模型、答案、令牌及 ORT 资产契约                     |
-| `scripts`               | 仓库级校验、文档漂移、架构门禁、包体预算、E2E 和发布辅助脚本                      |
-| `docs`                  | 扩展架构、模型缓存策略、Model Worker 运维和 ONNX Runtime 补充文档                 |
-| `model`                 | 内置扩展构建使用的本地固定模型输入；大体积模型不应随意纳入 Git                    |
-| `other`                 | 可供人工上传或归档的运行时生成物，不是默认源码入口                                |
-| `config`                | 本地生成配置；已被 Git 忽略，不得重新跟踪                                         |
-| `.github/workflows`     | 仓库 CI 与 Model Worker 手动部署流程                                              |
+| 路径                    | 职责                                                                                          |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| `apps/userscript`       | 用户脚本入口、GM 平台桥接、用户脚本构建与浏览器测试                                           |
+| `apps/extension`        | Chromium/Firefox 扩展入口、后台代理、推理 Host、设置页、打包与浏览器测试                      |
+| `apps/model-worker`     | Cloudflare Worker、Key 鉴权、R2 资产响应、Durable Object 下载额度及 Wrangler 配置             |
+| `packages/browser-core` | 用户脚本和扩展共用的 DOM、验证码、答题、推理、模型下载、状态面板与平台接口                    |
+| `packages/shared`       | 浏览器端和 Model Worker 共用的模型、答案、令牌及 ORT 资产契约                                 |
+| `scripts`               | 仓库级校验、文档漂移、架构门禁、包体预算、E2E 和发布辅助脚本                                  |
+| `docs`                  | 文档导航；`architecture/` 架构、`development/` 开发、`audits/` 审计及现有运行时/缓存/运维专题 |
+| `model`                 | 内置扩展构建使用的本地固定模型输入；大体积模型不应随意纳入 Git                                |
+| `other`                 | 可供人工上传或归档的运行时生成物，不是默认源码入口                                            |
+| `config`                | 本地生成配置；已被 Git 忽略，不得重新跟踪                                                     |
+| `.github/workflows`     | 仓库 CI 与 Model Worker 手动部署流程                                                          |
 
 ## 依赖方向与模块边界
+
+根 `scripts/` 按 `checks/`、`ci/`、`docs-drift/`、`model/`、`ort-runtime/`、`e2e/` 和 `lib/` 分组；扩展 `scripts/` 按 `build/`、`benchmark/`、`browser/`、`e2e/`、`model/`、`fixtures/` 和 `release/` 分组。不要重新把入口和测试平铺到两级脚本根目录；文档测试集中在 `scripts/docs-drift/test/`，根与扩展 Node 测试使用带引号的 `scripts/**/*.test.mjs` 递归发现。
 
 - `packages/shared` 应保持与浏览器 DOM、GM API、WebExtension API 和 Cloudflare 运行时无关。
 - `packages/browser-core` 可以依赖 `packages/shared`，但必须通过平台接口接收存储、网络和页面能力，不能直接依赖用户脚本或扩展实现。
@@ -50,6 +53,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 - `apps/model-worker` 可以依赖 `packages/shared` 的纯契约，不得导入浏览器端应用代码或 DOM 逻辑。
 - 超时、状态面板、模型资产和协议常量应继续由各自权威模块集中管理，不得在调用方复制一套隐式常量。
 - 新增跨包导入或移动文件后必须运行 `architecture:check`；不要通过深层相对路径绕开 package export 或架构门禁。
+- `browser-core` 与 `shared` 使用显式 package exports；新增公共子路径前先确认调用者和契约，不恢复任意源文件的通配导出。架构 CLI 对缺失的受保护目录失败关闭，反向类型依赖同样受检查。
 
 ## 浏览器端关键不变量
 
@@ -110,13 +114,14 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 ## 编码与文档规范
 
 - 使用 TypeScript 严格类型和 ESM；跨边界输入从 `unknown` 开始验证，避免无依据的类型断言、`any` 和非空断言。
-- 遵循现有 ESLint、Prettier 和局部代码风格。仅格式化本次涉及的文件，避免产生无关 diff。
+- ESLint 规则以根 `eslint.config.mjs` 为准；Prettier 规则集中在根 `package.json#prettier`，忽略规则保留在 `.prettierignore`。遵循局部代码风格，仅格式化本次涉及的文件，避免产生无关 diff。
 - 命名应表达领域含义；协议字段、HTTP 头和外部 API 名称保留其标准英文拼写。
 - 面向用户的提示、错误和设置说明使用清晰中文；注释重点解释原因、约束和安全边界，不重复代码表面行为。
 - 错误应保留真实原因和可诊断上下文，但在 UI 或响应中不得泄露 Key、内部对象标识或敏感配置。
 - 网络断开、HTTP 错误、解析失败、完整性失败和额度拒绝应尽量区分；不要用统一的“连接已断开”掩盖后端真实错误。
 - 修改公开行为、命令、默认值、路由、响应头、资产或构建方式时，同步更新 `README.md`、相关 `docs/`、测试以及 `scripts/check-docs-drift*`。
 - `apps/model-worker/wrangler.template.toml` 是 Wrangler 配置权威来源；生成的 `wrangler.toml` 不应手工维护。
+- 新增维护文档按 `docs/README.md` 的主题目录归档，并遵循 `docs/development/documentation.md` 的联动与链接规则；当前目录与迁移记录见 `docs/development/directory-layout.md`，后续实施也应同步包命令、测试发现、CI 和文档引用。
 
 ## 配置与秘密
 
@@ -128,38 +133,38 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 
 ## 测试与验证
 
-项目要求 Node.js `>=24.15.0`，并由 `package.json` 固定 `pnpm@12.3.0`。优先使用 `corepack pnpm`，不要让不兼容的全局 pnpm 接管脚本。
+项目通过根目录 `mise.toml` 统一管理本地与 CI 工具链，精确固定 Node.js `24.15.0` 和 pnpm `12.3.0`。`package.json` 保留 Node.js `>=24.15.0` 的兼容要求以及 `pnpm@12.3.0` 的包管理器声明，必须与 mise 配置同步。首次运行 `mise trust`、`mise install`，再运行 `mise exec -- pnpm install --frozen-lockfile` 安装 npm 依赖。优先使用 `mise exec -- pnpm`；包脚本和已激活 mise 的 shell 内可以直接调用 `pnpm`。
 
 先运行与改动直接相关的最小测试，再按风险扩大范围。常用定向命令：
 
 ```bash
-corepack pnpm --filter @hv-pony-solver/browser-core test
-corepack pnpm --filter @hv-pony-solver/userscript test
-corepack pnpm --filter @hv-pony-solver/extension test
-corepack pnpm --filter @hv-pony-solver/model-worker test
-node --test scripts/check-docs-drift.test.mjs
+mise exec -- pnpm --filter @hv-pony-solver/browser-core test
+mise exec -- pnpm --filter @hv-pony-solver/userscript test
+mise exec -- pnpm --filter @hv-pony-solver/extension test
+mise exec -- pnpm --filter @hv-pony-solver/model-worker test
+node --test "scripts/docs-drift/test/*.test.mjs"
 ```
 
 提交前的默认完整检查：
 
 ```bash
-corepack pnpm check
-node scripts/assert-pinned-actions.mjs
+mise exec -- pnpm check
+node scripts/ci/assert-pinned-actions.mjs
 git diff --check
 ```
 
-`corepack pnpm check` 包含 lint、类型检查、工作区与根级测试、文档漂移、架构边界、浏览器危险调用、扩展打包、包体预算、覆盖率和全仓库构建。
+`mise exec -- pnpm check` 包含第一方格式检查、lint、类型检查、工作区与根级测试、文档漂移与链接、架构边界、浏览器危险调用、扩展打包、包体预算、覆盖率和全仓库构建。格式检查使用 `.gitignore` 与 `.prettierignore` 排除生成物、第三方资产和 pnpm 锁文件。
 
 特别注意：
 
-- `corepack pnpm test` 会先执行各工作区测试，再执行 `scripts/**/*.test.mjs` 根级测试。
-- `corepack pnpm -r test:coverage` 不包含根级 `scripts/**/*.test.mjs`；它不能替代 `corepack pnpm test`，也不能单独证明 GitHub Actions 的 `test` job 会通过。
+- `mise exec -- pnpm test` 会先执行各工作区测试，再执行 `scripts/**/*.test.mjs` 根级测试。
+- `mise exec -- pnpm -r test:coverage` 不包含根级 `scripts/**/*.test.mjs`；它不能替代 `mise exec -- pnpm test`，也不能单独证明 GitHub Actions 的 `test` job 会通过。
 - Model Worker 测试或配置改动前，按 CI 方式生成测试配置：
 
 ```bash
 MODEL_KEYS_KV_NAMESPACE_ID=test-kv \
 MODEL_BUCKET_NAME=test-bucket \
-corepack pnpm --filter @hv-pony-solver/model-worker render-config
+mise exec -- pnpm --filter @hv-pony-solver/model-worker render-config
 ```
 
 - 修改默认或内置用户脚本运行时后，分别检查对应 bundle profile，不能用一个预算替代另一个。
@@ -171,7 +176,8 @@ corepack pnpm --filter @hv-pony-solver/model-worker render-config
 ## GitHub Actions 与部署
 
 - 仓库只维护两个工作流：`.github/workflows/verify-monorepo.yml` 的 `Repository CI`，以及 `.github/workflows/deploy-cloudflare-model-worker.yml` 的手动部署流程。
-- GitHub Action 必须固定到完整 40 位 commit SHA，Docker Action 必须固定到完整 `sha256` digest，并通过 `scripts/assert-pinned-actions.mjs` 校验。
+- 两个工作流使用 `jdx/mise-action` 读取根目录 `mise.toml`，并保留 pnpm store 缓存及冻结依赖安装；仅需 Node.js 的发布步骤可以限定安装 `node`。
+- GitHub Action 必须固定到完整 40 位 commit SHA，Docker Action 必须固定到完整 `sha256` digest，并通过 `scripts/ci/assert-pinned-actions.mjs` 校验。
 - 修改 CI 时要核对本地命令与 job 实际命令，尤其不能遗漏根级 Node 测试。
 - CodeQL 属于仓库安全门禁。修复告警后要等待目标分支的新分析完成，并同时检查最新分析结果和告警实例状态。
 - Model Worker 部署默认不应发生。只有手动输入明确允许发布且 Cloudflare secrets 完整时才可执行真实部署。
@@ -205,49 +211,3 @@ corepack pnpm --filter @hv-pony-solver/model-worker render-config
 - 本文列出的命令、默认值或安全约束已不再符合源码。
 
 维护时以当前源码、测试和工作流为依据，参考历史文档结构但不要保留与本项目无关的规则。更新后至少执行 Markdown 格式检查、`git diff --check` 和受影响的文档漂移测试。
-
-<!-- gitnexus:start -->
-
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **HV-PonySolver-JS** (5533 symbols, 17819 relationships, 422 execution flows).
-
-> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
-
-## Always Do
-
-- **MUST run impact before editing.** Use `impact({target: "symbolName", direction: "upstream"})` or `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .`; report callers, processes, and risk. Never substitute grep for graph analysis.
-- **MUST analyze graph changes before committing.** Use `detect_changes({scope: "all"})` (MCP) or `node .gitnexus/run.cjs detect-changes --scope all --repo .` (CLI fallback). `partial: true` or `truncated: true` is not a clean check — a zero means unseen, not unaffected; re-run it. For regression review: `detect_changes({scope: "compare", base_ref: "main"})` or `node .gitnexus/run.cjs detect-changes --scope compare --base-ref "main" --repo .`.
-- MUST warn on HIGH/CRITICAL `risk` pre-edit; never use `riskSharedAxes` to waive a HIGH/CRITICAL `risk` warning. Compare File/symbol: MCP File omits axes; Graph-RAG expands File.
-- **MUST treat `risk: UNKNOWN` as unresolved, not as low.** An empty caller set is not evidence the symbol is unused — it can also mean the callers are not resolvable by the index (plain-object property access, dynamic dispatch, cross-language calls). `impact` pairs `UNKNOWN` with a `riskNote` saying so. Confirm with a text search before treating the symbol as safe to change or delete; do not proceed on the strength of a zero.
-- **MUST use `query({search_query: "concept"})` for concepts/flows, `context({name: "symbolName"})` for a named symbol, or `impact` for blast radius, on read-only callers, dependencies, imports, or execution flow.** Graph first; text search only for empty/`UNKNOWN`/literals.
-- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
-
-## Never Do
-
-- NEVER edit a function, class, or method before MCP/CLI impact analysis.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis, and never read `UNKNOWN` as an all-clear — it means the walk could not answer, which is the one verdict that requires confirming by other means.
-- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
-- NEVER commit before MCP/CLI graph change analysis.
-
-## Resources
-
-| Resource                                          | Use for                                  |
-| ------------------------------------------------- | ---------------------------------------- |
-| `gitnexus://repo/HV-PonySolver-JS/context`        | Codebase overview, check index freshness |
-| `gitnexus://repo/HV-PonySolver-JS/clusters`       | All functional areas                     |
-| `gitnexus://repo/HV-PonySolver-JS/processes`      | All execution flows                      |
-| `gitnexus://repo/HV-PonySolver-JS/process/{name}` | Step-by-step execution trace             |
-
-## CLI
-
-| Task                                         | Read this skill file                               |
-| -------------------------------------------- | -------------------------------------------------- |
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md`       |
-| Blast radius / "What breaks if I change X?"  | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?"             | `.claude/skills/gitnexus-debugging/SKILL.md`       |
-| Rename / extract / split / refactor          | `.claude/skills/gitnexus-refactoring/SKILL.md`     |
-| Tools, resources, schema reference           | `.claude/skills/gitnexus-guide/SKILL.md`           |
-| Index, status, clean, wiki CLI commands      | `.claude/skills/gitnexus-cli/SKILL.md`             |
-
-<!-- gitnexus:end -->

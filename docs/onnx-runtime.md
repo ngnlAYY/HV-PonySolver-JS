@@ -58,7 +58,7 @@ pnpm build:onnx-runtime
 命令不会上传 R2、部署 Worker 或发布客户端。`pnpm build:onnx-runtime -- --install` 还会替换受版本控制的 `apps/userscript/vendor/onnxruntime/ort.wasm.bundle.min.mjs`，并重新生成被 Git 忽略的 `config/onnxruntime/required_operators_and_types.config`。采用新输出前必须有意更新 `ONNX_RUNTIME_ASSETS`、共享 Runtime 清单、Worker 模板、扩展构建审计、测试和文档，随后运行：
 
 ```bash
-corepack pnpm verify:onnx-runtime
-corepack pnpm docs:check
-corepack pnpm --filter @hv-pony-solver/extension test
+mise exec -- pnpm verify:onnx-runtime
+mise exec -- pnpm docs:check
+mise exec -- pnpm --filter @hv-pony-solver/extension test
 ```

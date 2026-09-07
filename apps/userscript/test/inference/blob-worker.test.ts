@@ -38,7 +38,9 @@ describe('createBlobWorker', () => {
       },
     )
 
-    expect(() => createBlobWorker('')).toThrow('当前页面的内容安全策略（CSP）阻止了 blob: Worker；请让站点放宽 worker-src 后重试')
+    expect(() => createBlobWorker('')).toThrow(
+      '当前页面的内容安全策略（CSP）阻止了 blob: Worker；请让站点放宽 worker-src 后重试',
+    )
   })
 
   it('still revokes the blob URL when Worker construction fails', () => {

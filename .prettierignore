@@ -1,0 +1,9 @@
+# 第三方压缩资产由长度和哈希校验，不作为手写源码重新格式化。
+apps/userscript/vendor/
+other/
+
+# 由 pnpm 生成，避免格式器与包管理器争用序列化结果。
+pnpm-lock.yaml
+
+# 本地协调状态不是项目源码。
+.omx/

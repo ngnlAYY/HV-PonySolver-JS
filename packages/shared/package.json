@@ -5,7 +5,12 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./*": "./src/*.ts"
+    "./answer": "./src/answer.ts",
+    "./model": "./src/model.ts",
+    "./ort-assets": "./src/ort-assets.ts",
+    "./ort-model": "./src/ort-model.ts",
+    "./ort-runtime": "./src/ort-runtime.ts",
+    "./token": "./src/token.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

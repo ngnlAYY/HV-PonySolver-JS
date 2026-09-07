@@ -1,8 +1,4 @@
-import {
-  callbackError,
-  resolveRawExtensionApi,
-  type StorageChanges,
-} from './webextension-api'
+import { callbackError, resolveRawExtensionApi, type StorageChanges } from './webextension-api'
 
 export async function storageGetAll(): Promise<Record<string, unknown>> {
   const { api, promiseStyle } = resolveRawExtensionApi()
@@ -57,9 +53,7 @@ export async function storageRemove(keys: string | string[]): Promise<void> {
   })
 }
 
-export function addStorageChangeListener(
-  listener: (changes: StorageChanges, areaName: string) => void,
-): () => void {
+export function addStorageChangeListener(listener: (changes: StorageChanges, areaName: string) => void): () => void {
   const event = resolveRawExtensionApi().api.storage.onChanged
   event.addListener(listener)
   return () => event.removeListener(listener)

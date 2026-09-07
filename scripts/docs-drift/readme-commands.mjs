@@ -6,6 +6,16 @@ function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
 
   const errors = []
   const readmeLines = readme.split(/\r?\n/)
+  for (const required of [
+    'mise.toml',
+    'mise install',
+    'mise exec -- pnpm install --frozen-lockfile',
+    'mise exec -- pnpm check',
+  ]) {
+    if (!readme.includes(required)) {
+      errors.push(`README.md mise setup must document ${required}`)
+    }
+  }
   const nodeVersion =
     typeof rootPackageJson.engines?.node === 'string'
       ? rootPackageJson.engines.node.match(/\d+\.\d+\.\d+/u)?.[0]
@@ -40,6 +50,7 @@ function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
     return errors
   }
   for (const commandName of [
+    'format:check',
     'lint',
     'typecheck',
     'test',

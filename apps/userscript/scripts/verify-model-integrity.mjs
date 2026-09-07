@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readModelManifest } from '../../../scripts/model-manifest.mjs'
+import { readModelManifest } from '../../../scripts/model/model-manifest.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const defaultRepoRoot = resolve(scriptDir, '../../..')
@@ -87,4 +87,3 @@ async function readExpectedIntegrity(repoRoot = defaultRepoRoot) {
     sha256: manifest.sha256,
   }
 }
-
