@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '../../src/app/app'
 import type { AppDependencies, SolverService } from '../../src/app/app-dependencies'
+import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
+import { CaptchaSolver } from '../../src/captcha/captcha-solver'
 import type { CaptchaTarget } from '../../src/captcha/captcha-target'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
 import { PermanentModelError } from '../../src/model/permanent-model-error'
@@ -124,6 +126,60 @@ describe('App', () => {
     await settleDom()
     expect(harness.trigger).toHaveBeenCalledTimes(1)
   })
+
+  it.each(['auto', 'manual'] as const)(
+    'includes preparation and retries in %s history without counting clock changes or previous targets',
+    async (answerMode) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
+      const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+      const captcha = appendCaptcha('/timing-first.png')
+      const button = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!
+      vi.spyOn(button, 'click').mockImplementation(() => undefined)
+      const panel = createPanel()
+      const detector = createDetector()
+      vi.mocked(detector.prepare)
+        .mockImplementation(async () => delay(200))
+        .mockRejectedValueOnce(new Error('temporary preparation failure'))
+      vi.mocked(detector.detect).mockImplementation(async () => {
+        await delay(50)
+        vi.setSystemTime(Date.now() - 10_000)
+        return { success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [], candidates: [] }
+      })
+      const solver = new CaptchaSolver(
+        panel,
+        detector,
+        {
+          get: async () => {
+            await delay(30)
+            return new Blob(['captcha'])
+          },
+        },
+        new AnswerSubmitter(
+          async () => [500, 500],
+          async () => [0, 0],
+        ),
+        async () => {
+          await delay(20)
+          return answerMode
+        },
+      )
+      const { app } = createHarness({ panel, detector, solver })
+      apps.push(app)
+      app.init()
+      await settleDom()
+
+      const record = answerMode === 'auto' ? panel.addSuccess : panel.addManualResult
+      expect(record).toHaveBeenLastCalledWith(['TS'], { TS: 0.9 }, answerMode === 'auto' ? 1050 : 550)
+      expect(panel.setStatus).toHaveBeenLastCalledWith({ inference: '完成 50ms' })
+      expect(button.click).toHaveBeenCalledTimes(answerMode === 'auto' ? 1 : 0)
+
+      captcha.querySelector('img')!.src = '/timing-second.png'
+      await settleDom()
+
+      expect(record).toHaveBeenCalledTimes(2)
+      expect(record).toHaveBeenLastCalledWith(['TS'], { TS: 0.9 }, answerMode === 'auto' ? 800 : 300)
+    },
+  )
 
   it('suppresses repeated solver failures for the same captcha during the cooldown', async () => {
     const captcha = appendCaptcha('/captcha.png')

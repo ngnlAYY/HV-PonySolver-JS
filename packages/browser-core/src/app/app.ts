@@ -257,6 +257,7 @@ export class App {
         return
       }
       this.solverFailureSuppressionAt = null
+      const startedAt = performance.now()
       const prepareResult = await this.prepareTarget(target, credentialsRevision, signal)
       if (prepareResult !== 'prepared') {
         if (
@@ -272,7 +273,7 @@ export class App {
       this.failedCaptchaTarget = null
       this.transientSuppressionAt = null
       this.solverFailureSuppressionAt = null
-      const result = await this.solver.trigger(target)
+      const result = await this.solver.trigger(target, startedAt)
       if (result.handled && this.isTargetCurrent(target, signal)) {
         this.lastCaptchaTarget = target
       } else if (!result.handled && result.captchaKey === target.captchaKey && this.isTargetCurrent(target, signal)) {

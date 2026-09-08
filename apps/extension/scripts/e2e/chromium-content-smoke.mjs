@@ -161,6 +161,10 @@ try {
   await automaticPage.waitForTimeout(300)
   assert.equal(await automaticPage.locator('#riddlesubmit').getAttribute('data-submit-count'), '1')
   await automaticPage.locator('.ponyLog').filter({ hasText: 'TS' }).waitFor()
+  await automaticPage
+    .locator('.ponyLog')
+    .filter({ hasText: /推理状态：完成 \d+ms/u })
+    .waitFor()
 
   await options.evaluate(
     () =>
@@ -172,6 +176,10 @@ try {
   const manualPage = await context.newPage()
   await manualPage.goto('https://hentaiverse.org/extension-manual-fixture')
   await manualPage.locator('.ponyLog').filter({ hasText: '手动' }).waitFor({ timeout: 15_000 })
+  await manualPage
+    .locator('.ponyLog')
+    .filter({ hasText: /推理状态：完成 \d+ms/u })
+    .waitFor({ timeout: 15_000 })
   assert.equal(await manualPage.locator('#riddlesubmit').getAttribute('data-submit-count'), '0')
   assert.equal(await manualPage.locator('input[name="riddleanswer[]"]').nth(2).isChecked(), true)
 

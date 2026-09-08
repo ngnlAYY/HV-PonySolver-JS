@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { MODEL_DOWNLOAD_RECEIPT_HEADER, MODEL_INTEGRITY, MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 
@@ -9,6 +9,7 @@ import {
   createEnv,
   createModelFixture,
   fetchWorker,
+  type MockR2Bucket,
   type MockModelDownloadQuotaNamespace,
   modelRequest,
   quotaRequest,
@@ -60,6 +61,32 @@ describe('quota-http', () => {
     await expect(afterDownload.json()).resolves.toEqual(
       expect.objectContaining({ used: 1, remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - 1 }),
     )
+  })
+
+  it('rechecks quota at reservation when another download consumes the last slot after preflight', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
+    for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT - 1; index += 1) {
+      const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+      await response.arrayBuffer()
+      await confirmDownloadedModel(fixture, env, response)
+    }
+    const readObject = env.MODEL_BUCKET.get.bind(env.MODEL_BUCKET)
+    const getObject = vi.spyOn(env.MODEL_BUCKET, 'get').mockImplementationOnce(async (key) => {
+      const competingDownload = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+      expect(competingDownload.status).toBe(200)
+      await competingDownload.arrayBuffer()
+      await confirmDownloadedModel(fixture, env, competingDownload)
+      return readObject(key)
+    })
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+
+    expect(response.status).toBe(429)
+    expect(response.headers.has(MODEL_DOWNLOAD_RECEIPT_HEADER)).toBe(false)
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedPaths.at(-1)).toBe('/reserve')
+    const object = await getObject.mock.results[0]?.value
+    expect(await object?.body.getReader().read()).toEqual({ done: true, value: undefined })
   })
 
   it('requires a valid Bearer Key for quota status even in decoy mode', async () => {
@@ -148,8 +175,9 @@ describe('quota-http', () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {
       keyValues: new Map([[fixture.validKey, '1']]),
-      quotaError: new Error('quota status unavailable'),
+      quotaStatusError: new Error('quota status unavailable'),
     })
+    const bucket = env.MODEL_BUCKET as MockR2Bucket
 
     const methodResponse = await fetchWorker(quotaRequest(fixture, 'HEAD'), env)
     expect(methodResponse.status).toBe(405)
@@ -162,6 +190,7 @@ describe('quota-http', () => {
     expect(failureResponse.status).toBe(503)
     expect(failureResponse.headers.get('retry-after')).toBe('5')
     expect(await failureResponse.text()).toBe('Service Unavailable')
+    expect(bucket.requestedKeys).toEqual([])
   })
 
   it('shares one five-download quota across ONNX, ORT, and canonical token casing', async () => {
@@ -192,7 +221,7 @@ describe('quota-http', () => {
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
 
     const quota = env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace
-    expect(quota.requestedIdentities).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT * 2 + 1)
+    expect(quota.requestedIdentities).toHaveLength(MODEL_MONTHLY_DOWNLOAD_LIMIT * 3 + 1)
     expect(new Set(quota.requestedIdentities).size).toBe(1)
     expect(quota.requestedIdentities[0]).toMatch(/^[0-9a-f]{64}$/)
     expect(quota.requestedIdentities[0]).not.toContain(CANONICAL_ACCESS_TOKEN)
@@ -235,7 +264,7 @@ describe('quota-http', () => {
       await confirmDownloadedModel(fixture, env, response)
     }
     expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toHaveLength(
-      MODEL_MONTHLY_DOWNLOAD_LIMIT * 2,
+      MODEL_MONTHLY_DOWNLOAD_LIMIT * 3,
     )
   })
 
@@ -248,7 +277,10 @@ describe('quota-http', () => {
       await response.arrayBuffer()
       await confirmDownloadedModel(fixture, env, response)
     }
+    const bucket = env.MODEL_BUCKET as MockR2Bucket
+    const readsBeforeExhaustedRequest = bucket.requestedKeys.length
     expect((await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).status).toBe(429)
+    expect(bucket.requestedKeys.length).toBe(readsBeforeExhaustedRequest)
 
     // HEAD is unmetered, so an exhausted Key still identifies itself as valid by
     // reporting the real object's size. Clients rely on this to verify a Key
@@ -259,7 +291,7 @@ describe('quota-http', () => {
     expect(headResponse.headers.get('content-length')).toBe(String(MODEL_INTEGRITY.byteLength))
     expect(headResponse.headers.get('retry-after')).toBeNull()
     expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toHaveLength(
-      MODEL_MONTHLY_DOWNLOAD_LIMIT * 2 + 1,
+      MODEL_MONTHLY_DOWNLOAD_LIMIT * 3 + 1,
     )
   })
 

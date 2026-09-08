@@ -59,6 +59,8 @@ export type EnvOptions = Readonly<{
   bucketGetError?: Error
   bucketHeadError?: Error
   quotaError?: Error
+  quotaStatusError?: Error
+  quotaReserveError?: Error
   quotaNamespace?: ModelDownloadQuotaNamespace
   quotaNow?: () => Date
   quotaEnabled?: boolean
@@ -106,6 +108,7 @@ export class MockR2Bucket implements ModelBucket {
 
 export class MockModelDownloadQuotaNamespace implements ModelDownloadQuotaNamespace {
   readonly requestedIdentities: string[] = []
+  readonly requestedPaths: string[] = []
   private readonly usage = new Map<
     string,
     { month: string; used: number; pending: Map<string, number>; confirmed: Set<string> }
@@ -114,6 +117,8 @@ export class MockModelDownloadQuotaNamespace implements ModelDownloadQuotaNamesp
   constructor(
     private readonly error?: Error,
     private readonly now: () => Date = () => new Date(),
+    private readonly statusError?: Error,
+    private readonly reserveError?: Error,
   ) {}
 
   idFromName(name: string): DurableObjectId {
@@ -125,8 +130,12 @@ export class MockModelDownloadQuotaNamespace implements ModelDownloadQuotaNamesp
     return {
       fetch: async (request: Request): Promise<Response> => {
         this.requestedIdentities.push(identity)
-        if (this.error) throw this.error
         if (request.method !== 'POST') return new Response('Not Found', { status: 404 })
+        const pathname = new URL(request.url).pathname
+        this.requestedPaths.push(pathname)
+        if (this.error) throw this.error
+        if (pathname === '/status' && this.statusError) throw this.statusError
+        if (pathname === '/reserve' && this.reserveError) throw this.reserveError
         const now = this.now()
         const month = utcMonthKey(now)
         const stored = this.usage.get(identity)
@@ -138,7 +147,6 @@ export class MockModelDownloadQuotaNamespace implements ModelDownloadQuotaNamesp
           if (expiresAt <= now.getTime()) state.pending.delete(receiptId)
         }
         this.usage.set(identity, state)
-        const pathname = new URL(request.url).pathname
         if (pathname === '/status') {
           return Response.json({
             limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
@@ -317,7 +325,13 @@ export function createEnv(fixture: ModelFixture, options: EnvOptions = {}): Env 
     MODEL_KEYS: new MockKvNamespace(options.keyValues, options.keyError),
     MODEL_BUCKET: new MockR2Bucket(objects, options.bucketGetError, options.bucketHeadError),
     MODEL_DOWNLOAD_QUOTAS:
-      options.quotaNamespace ?? new MockModelDownloadQuotaNamespace(options.quotaError, options.quotaNow),
+      options.quotaNamespace ??
+      new MockModelDownloadQuotaNamespace(
+        options.quotaError,
+        options.quotaNow,
+        options.quotaStatusError,
+        options.quotaReserveError,
+      ),
     PUBLIC_MODEL_PATH: fixture.publicModelPath,
     PUBLIC_QUOTA_PATH: fixture.publicQuotaPath,
     REAL_MODEL_OBJECT_KEY: fixture.realModelObjectKey,

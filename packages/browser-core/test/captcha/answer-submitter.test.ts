@@ -378,6 +378,84 @@ describe('AnswerSubmitter', () => {
       expect(checkboxes[ANSWER_CODES.indexOf('TS')]).toHaveProperty('checked', true)
     })
 
+    it('keeps a user selection manual when it is checked during a multi-click delay', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) checkbox.checked = false
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99)
+      const submitter = createSubmitter([0, 0], [100, 100])
+
+      try {
+        const firstSubmit = submitter.submit(form, ['TS', 'RA'], vi.fn(), vi.fn(), {
+          confidences: { TS: 0.9, RA: 0.1 },
+        })
+        await vi.waitFor(() => expect(checkboxes[ANSWER_CODES.indexOf('TS')]!.checked).toBe(true))
+        checkboxes[ANSWER_CODES.indexOf('RA')]!.click()
+        await vi.runAllTimersAsync()
+        await firstSubmit
+
+        const secondSubmit = submitter.submit(form, ['FS', 'RD', 'PP'], vi.fn(), vi.fn(), {
+          confidences: { TS: 0.9, RA: 0.1, FS: 0.8, RD: 0.7, PP: 0.6 },
+        })
+        await vi.runAllTimersAsync()
+        await secondSubmit
+
+        expect(checkboxes[ANSWER_CODES.indexOf('RA')]).toHaveProperty('checked', true)
+      } finally {
+        randomSpy.mockRestore()
+      }
+    })
+
+    it('updates confidence for an answer that was already automatic', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) checkbox.checked = false
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const submitter = createSubmitter([0, 0], [0, 0])
+
+      const firstSubmit = submitter.submit(form, ['TS'], vi.fn(), vi.fn(), { confidences: { TS: 0.1 } })
+      await vi.runAllTimersAsync()
+      await firstSubmit
+      const secondSubmit = submitter.submit(form, ['TS'], vi.fn(), vi.fn(), { confidences: { TS: 0.9 } })
+      await vi.runAllTimersAsync()
+      await secondSubmit
+      const thirdSubmit = submitter.submit(form, ['TS', 'RA', 'FS', 'RD', 'PP'], vi.fn(), vi.fn(), {
+        confidences: { RA: 0.2, FS: 0.8, RD: 0.7, PP: 0.6 },
+      })
+      await vi.runAllTimersAsync()
+      await thirdSubmit
+
+      expect(checkboxes[ANSWER_CODES.indexOf('TS')]).toHaveProperty('checked', true)
+    })
+
+    it('keeps an automatic answer manual after the user unchecks and rechecks it', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) checkbox.checked = false
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const submitter = createSubmitter([0, 0], [0, 0])
+      const ra = checkboxes[ANSWER_CODES.indexOf('RA')]!
+
+      const firstSubmit = submitter.submit(form, ['TS', 'RA'], vi.fn(), vi.fn(), {
+        confidences: { TS: 0.9, RA: 0.1 },
+      })
+      await vi.runAllTimersAsync()
+      await firstSubmit
+      ra.click()
+      ra.click()
+      const secondSubmit = submitter.submit(form, ['FS', 'RD', 'PP'], vi.fn(), vi.fn(), {
+        confidences: { TS: 0.9, RA: 0.1, FS: 0.8, RD: 0.7, PP: 0.6 },
+      })
+      await vi.runAllTimersAsync()
+      await secondSubmit
+
+      expect(ra).toHaveProperty('checked', true)
+    })
+
     it('does not submit when the form action changes while timing settings are pending', async () => {
       const form = createForm(true)
       form.action = '/submit'

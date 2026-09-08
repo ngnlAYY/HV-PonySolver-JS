@@ -90,6 +90,27 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
   if (access.decision === 'forbidden') {
     return textResponse(request, 'Forbidden', 403)
   }
+  let quotaToken: string | null = null
+  if (access.decision === 'real' && request.method === 'GET' && config.downloadQuotaEnabled) {
+    quotaToken = access.canonicalToken
+    if (!quotaToken) {
+      throw new Error('Authorized model request is missing a canonical token')
+    }
+    try {
+      const quota = await readModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, quotaToken)
+      if (quota.used >= quota.limit) {
+        return quotaExceededResponse(request, quota.retryAfterSeconds)
+      }
+    } catch (error) {
+      // Avoid opening an R2 body when quota storage cannot answer the preflight.
+      logWorkerWarning({
+        route: route.logRoute,
+        errorKind: 'quota-storage-unavailable',
+        errorName: workerErrorName(error),
+      })
+      return serviceUnavailableResponse(request, QUOTA_FAILURE_RETRY_AFTER_SECONDS)
+    }
+  }
   const objectKey = access.decision === 'real' ? route.realObjectKey : config.decoyModelObjectKey
   const object = await readObjectForRequest(request, env, objectKey)
   if (!object) {
@@ -100,16 +121,12 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
     return internalErrorResponse(request)
   }
   const response = modelObjectResponse(request, object, route.filename)
-  if (access.decision !== 'real' || request.method !== 'GET' || !config.downloadQuotaEnabled) {
+  if (quotaToken === null) {
     return response
   }
 
-  if (!access.canonicalToken) {
-    await cancelResponseBody(response)
-    throw new Error('Authorized model request is missing a canonical token')
-  }
   try {
-    const quota = await reserveModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, access.canonicalToken)
+    const quota = await reserveModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, quotaToken)
     if (quota.allowed) {
       return attachModelDownloadReceipt(response, quota.receiptId)
     }

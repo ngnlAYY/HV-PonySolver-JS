@@ -5,7 +5,8 @@ import type { CaptchaTarget } from '../captcha/captcha-target'
 
 export interface SolverService {
   readonly isBusy: boolean
-  trigger(target?: CaptchaTarget): Promise<SolveResult>
+  /** startedAt 使用当前页面的 performance.now()，供历史计入模型准备时间。 */
+  trigger(target?: CaptchaTarget, startedAt?: number): Promise<SolveResult>
 }
 
 export type AppDependencies = Readonly<{

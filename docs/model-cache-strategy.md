@@ -1,6 +1,6 @@
 # 模型缓存与计次策略
 
-最后复核：2026-09-07。
+最后复核：2026-09-08。
 
 实现导航：浏览器核心的编排入口是 [`ModelCache`](../packages/browser-core/src/model/model-cache.ts)，IndexedDB 事务由 [`IndexedDbModelStore`](../packages/browser-core/src/model/indexeddb-model-store.ts) 管理，记录校验由 [`model-cache-record.ts`](../packages/browser-core/src/model/model-cache-record.ts) 负责，共享下载由 [`shared-model-downloads.ts`](../packages/browser-core/src/model/shared-model-downloads.ts) 负责。用户脚本和扩展只注入各自的 Key、Fetch、Worker 或包内模型来源，不应在适配层复制缓存状态机。
 
@@ -52,7 +52,7 @@ HEAD 验证 Key（不计次）
 - 模型与 Runtime 下载只接受可流式读取的响应正文；`body === null` 时失败关闭，不使用无法在分配前执行大小上限的 `arrayBuffer()` fallback。
 - 客户端只有在模型完整读取、校验且成功写入 IndexedDB 后才确认；下载或缓存失败时不确认，回执自然失效。
 - 同一回执重复确认是幂等操作，不会重复计次；未知或失效回执返回 `409`。
-- 5 次已经确认后，新的真实模型 `GET` 返回不可缓存的 `429`；已确认与待确认槽位合计达到 5 且仍有回执未失效时，新请求返回可重试的 `503`，避免并发越过硬上限。
+- 5 次已经确认后，新的真实模型 `GET` 在读取 R2 前通过只读额度预检返回不可缓存的 `429`；预检查询失败返回 `503`，同样不读取 R2。允许继续的请求仍在对象完整性检查后原子预留回执；已确认与待确认槽位合计达到 5 且仍有回执未失效时，返回可重试的 `503`，避免并发越过硬上限。
 - `HEAD`、`OPTIONS`、诱饵模型和 Runtime 不计次。
 - `MODEL_DOWNLOAD_QUOTA_ENABLED=false` 时不预留、不确认也不递增次数；查询明确显示“无次数限制”，而不是伪造有限的剩余次数；格式正确的意外确认请求返回 `409`，缺失或畸形回执返回 `400`，不得伪造确认成功。
 

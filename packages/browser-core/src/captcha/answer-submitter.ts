@@ -287,10 +287,12 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       if (!checkbox) {
         continue
       }
+      const wasChecked = checkbox.checked
+      const wasAutomatic = this.automaticConfidences.has(checkbox)
       if (!checkbox.checked) {
         this.clickCheckbox(checkbox)
       }
-      if (checkbox.checked) {
+      if (checkbox.checked && (!wasChecked || wasAutomatic)) {
         this.automaticConfidences.set(checkbox, confidenceForIndex(index, options?.confidences, previouslyAutomatic))
       }
       if (i < order.length - 1) {

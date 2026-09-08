@@ -71,19 +71,18 @@ export class CaptchaSolver {
     return this.busy
   }
 
-  trigger(target: CaptchaTarget | null = findCaptchaTarget()): Promise<SolveResult> {
+  trigger(target: CaptchaTarget | null = findCaptchaTarget(), startedAt = performance.now()): Promise<SolveResult> {
     if (this.busy) {
       return Promise.resolve({ handled: false, captchaKey: null })
     }
     this.busy = true
-    return this.solve(target).finally(() => {
+    return this.solve(target, startedAt).finally(() => {
       this.busy = false
     })
   }
 
-  private async solve(target: CaptchaTarget | null): Promise<SolveResult> {
-    const startedAt = Date.now()
-    const elapsed = (): number => Date.now() - startedAt
+  private async solve(target: CaptchaTarget | null, startedAt: number): Promise<SolveResult> {
+    const elapsed = (): number => Math.round(performance.now() - startedAt)
     let captchaKey: string | null = null
     const result = (handled: boolean): SolveResult => ({ handled, captchaKey })
     const signal: AbortSignal | undefined = this.getAbortSignal?.()
@@ -116,6 +115,7 @@ export class CaptchaSolver {
 
       this.panel.setStatus({ inference: '获取图片' })
       captchaKey = target.captchaKey
+      const imageStartedAt = performance.now()
       const imageOutcome = await retryTransient(
         () => this.imageLoader.get(target.captchaKey, signal),
         isCurrent,
@@ -130,8 +130,9 @@ export class CaptchaSolver {
       }
       const blob = imageOutcome.value
 
-      this.panel.setStatus({ inference: `图片获取完成 ${elapsed()}ms` })
+      this.panel.setStatus({ inference: `图片获取完成 ${Math.round(performance.now() - imageStartedAt)}ms` })
       this.panel.setStatus({ inference: '推理请求中' })
+      const detectionStartedAt = performance.now()
       const detectionOutcome = await retryTransient(
         () => this.detector.detect(blob, signal),
         isCurrent,
@@ -148,11 +149,14 @@ export class CaptchaSolver {
         return result(false)
       }
       const detectionResult: YoloParseResult = detectionOutcome.value
+      const detectionElapsed = Math.round(performance.now() - detectionStartedAt)
 
       const answerMode = await this.getAnswerMode()
       if (!isCurrent()) {
         return result(false)
       }
+      // 共用流程在页面侧统计完整识别请求；扩展 Host 不转发推理状态。
+      this.panel.setStatus({ inference: `完成 ${detectionElapsed}ms` })
 
       if (detectionResult.success && detectionResult.ponies.length) {
         if (answerMode === 'manual') {

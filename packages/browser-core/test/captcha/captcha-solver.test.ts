@@ -199,6 +199,7 @@ describe('CaptchaSolver', () => {
     expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
     expect(panel.addManualResult).not.toHaveBeenCalled()
+    expect(panel.setStatus).not.toHaveBeenCalledWith({ inference: expect.stringMatching(/^完成 /) })
   })
 
   it('does not submit when cancellation happens after detection', async () => {
@@ -249,6 +250,7 @@ describe('CaptchaSolver', () => {
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
     expect(panel.addSuccess).not.toHaveBeenCalled()
     expect(panel.addManualResult).not.toHaveBeenCalled()
+    expect(panel.setStatus).not.toHaveBeenCalledWith({ inference: expect.stringMatching(/^完成 /) })
   })
 
   it('does not record a manual result when the captcha changes while answer mode loads', async () => {
@@ -373,7 +375,7 @@ describe('CaptchaSolver', () => {
   })
 
   it('retries a transient inference failure without a DOM mutation and records no error after recovery', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
     try {
       appendCaptcha()
       const detector = createDetector(
@@ -401,6 +403,8 @@ describe('CaptchaSolver', () => {
       expect(imageLoader.get).toHaveBeenCalledTimes(1)
       expect(detector.detect).toHaveBeenCalledTimes(2)
       expect(panel.addError).not.toHaveBeenCalled()
+      expect(panel.setStatus).toHaveBeenLastCalledWith({ inference: '完成 250ms' })
+      expect(panel.addManualResult).toHaveBeenCalledWith(['RA'], { RA: 0.95 }, 250)
     } finally {
       vi.useRealTimers()
     }

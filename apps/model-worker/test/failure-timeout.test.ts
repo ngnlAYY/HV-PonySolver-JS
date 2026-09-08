@@ -75,7 +75,7 @@ describe('failure-timeout', () => {
 
     expect(response.status).toBe(500)
     expect(await response.text()).toBe('Internal Server Error')
-    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toEqual([])
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedPaths).toEqual(['/status'])
   })
 
   it('fails closed on real model HEAD metadata drift without expecting a response body', async () => {
@@ -196,19 +196,40 @@ describe('failure-timeout', () => {
 
   it('returns a retryable 503 when quota storage fails', async () => {
     const fixture = createModelFixture()
-    const response = await fetchWorker(
-      authorizedModelRequest(fixture, 'GET'),
-      createEnv(fixture, {
-        keyValues: new Map([[fixture.validKey, '1']]),
-        quotaError: new Error(`quota failed for ${fixture.validKey}`),
-      }),
-    )
+    const env = createEnv(fixture, {
+      keyValues: new Map([[fixture.validKey, '1']]),
+      quotaStatusError: new Error(`quota failed for ${fixture.validKey}`),
+    })
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
 
     expect(response.status).toBe(503)
     expect(response.headers.get('Retry-After')).toBe('5')
     expect(response.headers.get('access-control-expose-headers')).toBe('Retry-After')
     expect(response.headers.get('Cache-Control')).toBe('no-store')
     expect(await response.text()).toBe('Service Unavailable')
+    expect((env.MODEL_BUCKET as MockR2Bucket).requestedKeys).toEqual([])
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedPaths).toEqual(['/status'])
+  })
+
+  it('keeps the reserve failure cleanup path after quota preflight succeeds', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map([[fixture.validKey, '1']]),
+      quotaReserveError: new Error('quota reserve failed'),
+    })
+    const getObject = vi.spyOn(env.MODEL_BUCKET, 'get')
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+
+    expect(response.status).toBe(503)
+    expect(await response.text()).toBe('Service Unavailable')
+    expect((env.MODEL_BUCKET as MockR2Bucket).requestedKeys).toEqual([fixture.realModelObjectKey])
+    expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedPaths).toEqual([
+      '/status',
+      '/reserve',
+    ])
+    const object = await getObject.mock.results[0]?.value
+    expect(await object?.body.getReader().read()).toEqual({ done: true, value: undefined })
   })
 
   it('logs only secret-free classification fields when quota storage fails', async () => {
