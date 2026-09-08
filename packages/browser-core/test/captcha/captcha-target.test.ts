@@ -90,4 +90,17 @@ describe('findCaptchaTarget', () => {
     answers[1]!.disabled = true
     expect(isSameCaptchaTarget(beforeAnswerDisable, findCaptchaTarget())).toBe(false)
   })
+
+  it('tracks the parsed form action while treating equivalent relative and absolute URLs as stable', () => {
+    appendCandidate({ imageSrc: '/captcha.png', formAction: '/submit' })
+    const initial = findCaptchaTarget()
+    const form = document.querySelector<HTMLFormElement>('form')
+    if (!initial || !form) throw new Error('captcha target missing')
+
+    form.action = 'http://localhost:3000/submit'
+    expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(true)
+
+    form.action = '/other-submit'
+    expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(false)
+  })
 })

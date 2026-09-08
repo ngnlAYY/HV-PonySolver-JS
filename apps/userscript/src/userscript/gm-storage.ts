@@ -1,4 +1,4 @@
-import type { SettingsStorage } from '@hv-pony-solver/browser-core'
+import type { EnumerableTextStorage, SettingsStorage } from '@hv-pony-solver/browser-core'
 
 import { deleteGmValue, getGmValue, getGmValueSync, safeStorage, setGmValue } from './gm-bridge'
 
@@ -40,4 +40,29 @@ export const sensitiveGmSettingsStorage: SettingsStorage = {
   },
 }
 
-export const userscriptHistoryStorage = safeStorage
+export const userscriptHistoryStorage: EnumerableTextStorage = {
+  ...safeStorage,
+  getItemsByPrefix(prefix: string): ReadonlyArray<readonly [string, string]> {
+    const storage = globalThis.localStorage
+    if (!storage) {
+      throw new Error('localStorage 不可用')
+    }
+    const keys = new Set<string>()
+    const length = storage.length
+    for (let index = 0; index < length; index += 1) {
+      const key = storage.key(index)
+      if (key?.startsWith(prefix)) {
+        keys.add(key)
+      }
+    }
+    const entries: Array<readonly [string, string]> = []
+    // 枚举期间其他标签页可能增删记录；按 key 去重，并跳过读取前已删除的值。
+    for (const key of keys) {
+      const value = storage.getItem(key)
+      if (value !== null) {
+        entries.push([key, value])
+      }
+    }
+    return entries
+  },
+}

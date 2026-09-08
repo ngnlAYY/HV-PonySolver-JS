@@ -362,6 +362,25 @@ describe('App', () => {
     expect(harness.trigger.mock.calls[0]?.[0]?.captchaKey).toContain('/captcha-b.png')
   })
 
+  it('abandons the old target and retries when form action changes while prepare is pending', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const form = captcha.querySelector<HTMLFormElement>('form')
+    if (!form) throw new Error('captcha form missing')
+    form.action = '/submit'
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare).mockImplementation(async () => {
+      form.action = '/other-submit'
+    })
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+    expect(harness.trigger.mock.calls[0]?.[0]?.formAction).toBe('http://localhost:3000/other-submit')
+  })
+
   it('retries after prepare failure and defers scans while the solver reports busy', async () => {
     const harness = createHarness()
     vi.mocked(harness.detector.prepare).mockRejectedValueOnce(new Error('prepare failed'))

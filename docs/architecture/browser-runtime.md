@@ -89,7 +89,7 @@ sequenceDiagram
     Solver->>Panel: 状态与历史
 ```
 
-`CaptchaSolver` 在图片、推理和提交阶段都检查 AbortSignal 与 `isSameCaptchaTarget`。取消、超时或新目标到达后，旧任务不能继续点击或提交。答案提交器在开始和等待后再次确认表单 action、checkbox 数量、节点身份、所属表单、连接状态和禁用状态；相关约束集中在 [answer-submitter.ts](../../packages/browser-core/src/captcha/answer-submitter.ts)。
+`CaptchaTarget` 在捕获时保存解析后的 `form.action`，`App` 与 `CaptchaSolver` 在准备、图片、推理和提交阶段通过 `isSameCaptchaTarget` 复核该地址及控件身份。地址变化会使旧任务失效；相对与绝对写法解析到同一 URL 时仍是同一目标。取消、超时或新目标到达后，旧任务不能继续点击或提交。答案提交器在开始和等待后再次确认表单 action、checkbox 数量、节点身份、所属表单、连接状态和禁用状态；相关约束集中在 [answer-submitter.ts](../../packages/browser-core/src/captcha/answer-submitter.ts)。
 
 保留答案时，程序自动勾选和用户手动勾选通过 WeakMap 与 change 监听区分；超过上限时只按置信度移除自动项。手动模式只记录识别结果，不自动提交。随机兜底由 [CaptchaSolver](../../packages/browser-core/src/captcha/captcha-solver.ts) 的配置控制，修改时必须同时检查提交测试和 App 级取消测试。
 
@@ -114,7 +114,7 @@ sequenceDiagram
 
 [ModelCache](../../packages/browser-core/src/model/model-cache.ts) 编排缓存读取、共享下载、写入和确认；[indexeddb-model-store.ts](../../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务和生命周期；[model-cache-record.ts](../../packages/browser-core/src/model/model-cache-record.ts) 校验记录；[shared-model-downloads.ts](../../packages/browser-core/src/model/shared-model-downloads.ts) 合并同一时刻的网络下载。对带下载确认回执的远程模型，内容与待确认元数据先在同一事务落盘；确认成功并将匹配元数据改为已确认后，后续读取才允许命中。没有确认回执的路径不会额外发送确认请求。关闭或 `versionchange` 必须取消数据库操作和共享下载。
 
-用户脚本模型 Key 走 [model-settings.ts](../../apps/userscript/src/model/model-settings.ts) 与 [sensitiveGmSettingsStorage](../../apps/userscript/src/userscript/gm-storage.ts)。普通设置使用 `gmSettingsStorage`；Key 使用敏感存储，GM API 不可用时拒绝写入页面可读的 localStorage。历史则由 [answer-history-store.ts](../../apps/userscript/src/persistence/answer-history-store.ts) 注入普通用户脚本存储，并由核心 HistoryStore 执行记录校验、限额和排序。
+用户脚本模型 Key 走 [model-settings.ts](../../apps/userscript/src/model/model-settings.ts) 与 [sensitiveGmSettingsStorage](../../apps/userscript/src/userscript/gm-storage.ts)。普通设置使用 `gmSettingsStorage`；Key 使用敏感存储，GM API 不可用时拒绝写入页面可读的 localStorage。历史由 [answer-history-store.ts](../../apps/userscript/src/persistence/answer-history-store.ts) 注入 `userscriptHistoryStorage`，按前缀无缓存枚举同源 localStorage，复用核心 HistoryStore 的独立键追加、校验与排序。枚举先取得 key 快照，再跳过已被其他标签删除的值；有效旧根键只读保留，不再用整份 JSON 读改写新增历史。读取最多返回每世界 50 条，独立键在稳定追加后裁剪到 50；并发期间可暂时多存，旧根兼容数据也可能继续保留在底层。
 
 缓存策略、`GET /quota`、`POST /quota`、确认时机和 `no-store` 约束请只在[模型缓存专题](../model-cache-strategy.md)维护。不要在平台适配器中复制额度或缓存状态机。
 

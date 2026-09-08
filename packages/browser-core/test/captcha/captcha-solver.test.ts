@@ -1,7 +1,7 @@
 import { ANSWER_CODES } from '@hv-pony-solver/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AnswerSubmitter } from '../../src/captcha/answer-submitter'
+import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 import { CaptchaSolver } from '../../src/captcha/captcha-solver'
 import type { ImageLoader } from '../../src/captcha/captcha-types'
 import { solverConfig } from '../../src/captcha/solver-config'
@@ -23,6 +23,24 @@ function appendCaptcha(): HTMLDivElement {
   master.append(form, imageContainer)
   document.body.appendChild(master)
   return master
+}
+
+function appendSubmittableCaptcha(): HTMLFormElement {
+  const master = appendCaptcha()
+  const form = master.querySelector<HTMLFormElement>('form')
+  if (!form) throw new Error('captcha form missing')
+  form.action = '/submit'
+  for (let index = 0; index < 6; index += 1) {
+    const answer = document.createElement('input')
+    answer.name = 'riddleanswer[]'
+    answer.type = 'checkbox'
+    form.append(answer)
+  }
+  const submit = document.createElement('input')
+  submit.id = 'riddlesubmit'
+  submit.type = 'button'
+  form.append(submit)
+  return form
 }
 
 function createPanel(): StatusPanel {
@@ -251,6 +269,70 @@ describe('CaptchaSolver', () => {
     expect(panel.addSuccess).not.toHaveBeenCalled()
     expect(panel.addManualResult).not.toHaveBeenCalled()
     expect(panel.setStatus).not.toHaveBeenCalledWith({ inference: expect.stringMatching(/^完成 /) })
+  })
+
+  it('cancels submission when form action changes during detection', async () => {
+    const form = appendSubmittableCaptcha()
+    const submit = form.querySelector<HTMLInputElement>('#riddlesubmit')
+    if (!submit) throw new Error('captcha submit button missing')
+    const detector = createDetector(
+      vi.fn(async () => {
+        form.action = '/other-submit'
+        return { success: true, ponies: ['RA'], confidences: { RA: 0.97 }, detections: [], candidates: [] }
+      }),
+    )
+    const panel = createPanel()
+    const solver = new CaptchaSolver(
+      panel,
+      detector,
+      { get: async () => new Blob(['captcha']) },
+      new AnswerSubmitter(
+        async () => [0, 0],
+        async () => [0, 0],
+      ),
+      async () => 'auto',
+    )
+    const clickSpy = vi.spyOn(submit, 'click')
+
+    await solver.trigger()
+
+    expect(clickSpy).not.toHaveBeenCalled()
+    expect(panel.addSuccess).not.toHaveBeenCalled()
+  })
+
+  it('cancels submission when form action changes while answer mode loads', async () => {
+    const form = appendSubmittableCaptcha()
+    const submit = form.querySelector<HTMLInputElement>('#riddlesubmit')
+    if (!submit) throw new Error('captcha submit button missing')
+    const detector = createDetector(
+      vi.fn(async () => ({
+        success: true,
+        ponies: ['RA'],
+        confidences: { RA: 0.97 },
+        detections: [],
+        candidates: [],
+      })),
+    )
+    const panel = createPanel()
+    const solver = new CaptchaSolver(
+      panel,
+      detector,
+      { get: async () => new Blob(['captcha']) },
+      new AnswerSubmitter(
+        async () => [0, 0],
+        async () => [0, 0],
+      ),
+      async () => {
+        form.action = '/other-submit'
+        return 'auto'
+      },
+    )
+    const clickSpy = vi.spyOn(submit, 'click')
+
+    await solver.trigger()
+
+    expect(clickSpy).not.toHaveBeenCalled()
+    expect(panel.addSuccess).not.toHaveBeenCalled()
   })
 
   it('does not record a manual result when the captcha changes while answer mode loads', async () => {
