@@ -108,10 +108,12 @@ export class ModelCache {
       // 内容与待确认状态在同一事务内落盘，随后只更新不包含模型的元数据。
       await this.store.write([row, confirmation], context)
       this.store.assertOperationActive(context)
+      const confirmationController = new AbortController()
       await this.store.waitForOperation(
-        confirmCachedModelDownload(buffer, context.signal),
+        Promise.resolve().then(() => confirmCachedModelDownload(buffer, confirmationController.signal)),
         context,
         '模型下载缓存确认超时',
+        () => confirmationController.abort(new ModelCacheLifecycleError('模型缓存操作已取消')),
       )
       this.store.assertOperationActive(context)
       if (confirmationPending) await this.store.confirm(confirmation, context)

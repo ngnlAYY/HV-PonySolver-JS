@@ -1,6 +1,8 @@
 export type World = 'isekai' | 'main'
 
 export type HistoryRecordBase = Readonly<{
+  /** HistoryStore 分配的排序序号，与显示时刻分离；旧记录可缺省。 */
+  sequence?: number
   timestamp?: number
   time?: string
   elapsed: number

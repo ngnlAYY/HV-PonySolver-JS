@@ -37,6 +37,8 @@ function isHistoryRecord(value: unknown): value is HistoryRecord {
     return false
   }
   const hasValidOptionalFields =
+    (value.sequence === undefined ||
+      (typeof value.sequence === 'number' && Number.isSafeInteger(value.sequence) && value.sequence > 0)) &&
     (value.timestamp === undefined || Number.isFinite(value.timestamp)) &&
     (value.time === undefined || isBoundedHistoryText(value.time))
   if (!hasValidOptionalFields) {
@@ -72,13 +74,12 @@ function isEnumerableTextStorage(storage: TextStorage): storage is EnumerableTex
   return typeof (storage as Partial<EnumerableTextStorage>).getItemsByPrefix === 'function'
 }
 
-function sortHistoryRecords(records: HistoryRecord[]): HistoryRecord[] {
-  // 支持的浏览器均提供稳定排序，相同时间戳保持原有顺序。
-  return records.sort((left, right) => {
-    const leftTimestamp = Number.isFinite(left.timestamp) ? (left.timestamp ?? 0) : 0
-    const rightTimestamp = Number.isFinite(right.timestamp) ? (right.timestamp ?? 0) : 0
-    return rightTimestamp - leftTimestamp
-  })
+function compareHistoryRecords(left: HistoryRecord, right: HistoryRecord): number {
+  const sequenceDifference = (right.sequence ?? 0) - (left.sequence ?? 0)
+  const leftTimestamp = Number.isFinite(left.timestamp) ? (left.timestamp ?? 0) : 0
+  const rightTimestamp = Number.isFinite(right.timestamp) ? (right.timestamp ?? 0) : 0
+  // 旧记录仍按时刻排序；序号和时刻均相同时保留稳定输入顺序。
+  return sequenceDifference || rightTimestamp - leftTimestamp
 }
 
 function createHistoryEntryId(): string {
@@ -89,9 +90,10 @@ function createHistoryEntryId(): string {
   return `${Date.now().toString(36)}-${fallbackEntrySequence.toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
-function completeRecord(record: HistoryRecord): HistoryRecord {
+function completeRecord(record: HistoryRecord, sequence: number): HistoryRecord {
   const now = Date.now()
   const base = {
+    sequence,
     timestamp: typeof record.timestamp === 'number' && Number.isFinite(record.timestamp) ? record.timestamp : now,
     time: (record.time ?? new Date(now).toLocaleTimeString('zh-CN', { hour12: false })).slice(
       0,
@@ -119,6 +121,7 @@ export class HistoryStore {
   private legacyRaw: string | null | undefined
   private legacyRoot: Record<string, unknown> | null = null
   private readonly parsedEntries = new Map<string, Readonly<{ raw: string; record: HistoryRecord | null }>>()
+  private readonly sequences: Record<World, number> = { main: 0, isekai: 0 }
   constructor(
     private readonly storage: TextStorage,
     private readonly entryIdFactory: () => string = createHistoryEntryId,
@@ -129,10 +132,8 @@ export class HistoryStore {
     if (!isEnumerableTextStorage(this.storage)) {
       return legacyRecords.map((record) => ({ ...record }))
     }
-    return sortHistoryRecords([
-      ...this.getKeyedRecords(this.storage, world).map(({ record }) => record),
-      ...legacyRecords,
-    ])
+    return [...this.getKeyedRecords(this.storage, world).map(({ record }) => record), ...legacyRecords]
+      .sort(compareHistoryRecords)
       .slice(0, HISTORY_MAX)
       .map((record) => ({ ...record }))
   }
@@ -148,15 +149,28 @@ export class HistoryStore {
   }
 
   add(world: World, record: HistoryRecord): HistoryMutation {
-    const completedRecord = completeRecord(record)
+    const currentRecords = this.get(world)
+    const sequence =
+      currentRecords.reduce((latest, current) => Math.max(latest, current.sequence ?? 0), this.sequences[world]) + 1
+    if (!Number.isSafeInteger(sequence)) {
+      return this.mutation(currentRecords, Promise.reject(new Error('历史记录排序序号已达到上限')))
+    }
+    // 先保留本实例序号，异步写入尚不可见时下一条记录也不能复用它。
+    this.sequences[world] = sequence
+    const completedRecord = completeRecord(record, sequence)
     if (isEnumerableTextStorage(this.storage)) {
-      return this.addKeyed(world, completedRecord, this.storage)
+      return this.addKeyed(world, completedRecord, this.storage, currentRecords)
     }
     return this.addLegacy(world, completedRecord)
   }
 
-  private addKeyed(world: World, record: HistoryRecord, storage: EnumerableTextStorage): HistoryMutation {
-    const records = sortHistoryRecords([record, ...this.get(world)]).slice(0, HISTORY_MAX)
+  private addKeyed(
+    world: World,
+    record: HistoryRecord,
+    storage: EnumerableTextStorage,
+    currentRecords: HistoryRecord[],
+  ): HistoryMutation {
+    const records = [record, ...currentRecords].sort(compareHistoryRecords).slice(0, HISTORY_MAX)
     const entryKey = `${HISTORY_ENTRY_PREFIX}${world}:${this.entryIdFactory()}`
     let write: void | Promise<void>
     try {
@@ -263,11 +277,9 @@ export class HistoryStore {
     for (const key of this.parsedEntries.keys()) {
       if (key.startsWith(prefix) && !presentKeys.has(key)) this.parsedEntries.delete(key)
     }
-    return records.sort((left, right) => {
-      const leftTimestamp = Number.isFinite(left.record.timestamp) ? (left.record.timestamp ?? 0) : 0
-      const rightTimestamp = Number.isFinite(right.record.timestamp) ? (right.record.timestamp ?? 0) : 0
-      return rightTimestamp - leftTimestamp || right.key.localeCompare(left.key)
-    })
+    return records.sort(
+      (left, right) => compareHistoryRecords(left.record, right.record) || right.key.localeCompare(left.key),
+    )
   }
 
   private async repairCorruptedLegacyRoot(storage: EnumerableTextStorage): Promise<void> {

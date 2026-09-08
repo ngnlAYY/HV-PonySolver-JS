@@ -1,10 +1,27 @@
 import type * as ModelIntegrityModule from '../../src/model/model-integrity'
+import type * as ModelDownloaderModule from '../../src/model/model-downloader'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../src/model/model-downloader', () => ({
-  confirmCachedModelDownload: vi.fn(async () => undefined),
-  downloadModel: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
+const confirmationRef = vi.hoisted(() => ({
+  value: undefined as typeof ModelDownloaderModule.confirmCachedModelDownload | undefined,
 }))
+
+function getRealConfirmCachedModelDownload(): typeof ModelDownloaderModule.confirmCachedModelDownload {
+  if (!confirmationRef.value) {
+    throw new Error('real confirmation implementation unavailable')
+  }
+  return confirmationRef.value
+}
+
+vi.mock('../../src/model/model-downloader', async (importOriginal) => {
+  const actual = await importOriginal<typeof ModelDownloaderModule>()
+  confirmationRef.value = actual.confirmCachedModelDownload
+  return {
+    ...actual,
+    confirmCachedModelDownload: vi.fn(async () => undefined),
+    downloadModel: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
+  }
+})
 vi.mock('../../src/model/model-integrity', async (importOriginal) => {
   const actual = await importOriginal<typeof ModelIntegrityModule>()
   return {
@@ -666,7 +683,7 @@ describe('ModelCache', () => {
 
     await expect(writePromise).resolves.toBeUndefined()
 
-    expect(confirmDownload).toHaveBeenCalledWith(buffer, undefined)
+    expect(confirmDownload).toHaveBeenCalledWith(buffer, expect.any(AbortSignal))
     expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^已缓存 \d+ms$/) })
   })
 
@@ -799,6 +816,154 @@ describe('ModelCache', () => {
 
     await expect(writePromise).rejects.toThrow('模型缓存操作已取消')
     expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels a late quota confirmation when the cache closes independently', async () => {
+    const indexedDb = stubIndexedDb()
+    const buffer = bufferFromBytes([1, 2, 3])
+    let resolveConfirmation!: (response: Response) => void
+    let requestSignal: AbortSignal | undefined
+    const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal
+      return new Promise<Response>((resolve) => {
+        resolveConfirmation = resolve
+      })
+    }) as unknown as typeof fetch
+    const confirmation = { accessKey: 'offline-test-key', fetchImpl, receiptId: 'e'.repeat(32) }
+    registerModelDownloadConfirmation(buffer, confirmation)
+    vi.mocked(confirmCachedModelDownload).mockImplementationOnce(getRealConfirmCachedModelDownload())
+    const cache = new ModelCache(createStatusPanel())
+    const putPromise = cache.putCached(buffer, false)
+
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1))
+    expect(requestSignal?.aborted).toBe(false)
+    indexedDb.database.onversionchange?.(new Event('versionchange') as IDBVersionChangeEvent)
+
+    await expect(putPromise).rejects.toThrow('模型缓存操作已取消')
+    expect(requestSignal?.aborted).toBe(true)
+
+    resolveConfirmation(Response.json({ confirmed: true }))
+    await Promise.resolve()
+    expect(getModelDownloadConfirmation(buffer)).toBe(confirmation)
+    expect(indexedDb.getStoredRow()).toMatchObject({ confirmationPending: true })
+    expect(indexedDb.getConfirmationRow()).toMatchObject({ confirmationPending: true })
+  })
+
+  it('cancels quota confirmation when its caller aborts', async () => {
+    const indexedDb = stubIndexedDb()
+    const buffer = bufferFromBytes([1, 2, 3])
+    let resolveConfirmation!: (response: Response) => void
+    let requestSignal: AbortSignal | undefined
+    const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal
+      return new Promise<Response>((resolve) => {
+        resolveConfirmation = resolve
+      })
+    }) as unknown as typeof fetch
+    const confirmation = { accessKey: 'offline-test-key', fetchImpl, receiptId: 'f'.repeat(32) }
+    registerModelDownloadConfirmation(buffer, confirmation)
+    vi.mocked(confirmCachedModelDownload).mockImplementationOnce(getRealConfirmCachedModelDownload())
+    const controller = new AbortController()
+    const cache = new ModelCache(createStatusPanel())
+    const putPromise = cache.putCached(buffer, false, false, controller.signal)
+
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1))
+    expect(requestSignal?.aborted).toBe(false)
+    controller.abort()
+
+    await expect(putPromise).rejects.toThrow('模型缓存操作已取消')
+    expect(requestSignal?.aborted).toBe(true)
+    resolveConfirmation(Response.json({ confirmed: true }))
+    await Promise.resolve()
+    expect(getModelDownloadConfirmation(buffer)).toBe(confirmation)
+    expect(indexedDb.getConfirmationRow()).toMatchObject({ confirmationPending: true })
+  })
+
+  it('cancels quota confirmation when the cache operation deadline expires', async () => {
+    vi.useFakeTimers()
+    const indexedDb = stubIndexedDb()
+    const buffer = bufferFromBytes([1, 2, 3])
+    let resolveConfirmation!: (response: Response) => void
+    let requestSignal: AbortSignal | undefined
+    const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal
+      return new Promise<Response>((resolve) => {
+        resolveConfirmation = resolve
+      })
+    }) as unknown as typeof fetch
+    const confirmation = { accessKey: 'offline-test-key', fetchImpl, receiptId: '1'.repeat(32) }
+    registerModelDownloadConfirmation(buffer, confirmation)
+    vi.mocked(confirmCachedModelDownload).mockImplementationOnce(getRealConfirmCachedModelDownload())
+    const cache = new ModelCache(createStatusPanel())
+    const putPromise = cache.putCached(buffer, true, true)
+
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1))
+    const rejection = expect(putPromise).rejects.toThrow('模型下载缓存确认超时')
+    await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelCacheTimeoutMs)
+
+    await rejection
+    expect(requestSignal?.aborted).toBe(true)
+    resolveConfirmation(Response.json({ confirmed: true }))
+    await Promise.resolve()
+    expect(getModelDownloadConfirmation(buffer)).toBe(confirmation)
+    expect(indexedDb.getConfirmationRow()).toMatchObject({ confirmationPending: true })
+  })
+
+  it('confirms cache metadata and clears the receipt normally', async () => {
+    const indexedDb = stubIndexedDb()
+    const buffer = bufferFromBytes([1, 2, 3])
+    const fetchImpl = vi.fn(async () => Response.json({ confirmed: true })) as unknown as typeof fetch
+    const confirmation = { accessKey: 'offline-test-key', fetchImpl, receiptId: '2'.repeat(32) }
+    registerModelDownloadConfirmation(buffer, confirmation)
+    vi.mocked(confirmCachedModelDownload).mockImplementationOnce(getRealConfirmCachedModelDownload())
+    const cache = new ModelCache(createStatusPanel())
+
+    await expect(cache.putCached(buffer, false)).resolves.toBeUndefined()
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(indexedDb.getStoredRow()).toMatchObject({ confirmationPending: true })
+    expect(indexedDb.getConfirmationRow()).toMatchObject({ confirmationPending: false })
+    expect(getModelDownloadConfirmation(buffer)).toBeUndefined()
+  })
+
+  it('allows the same cache instance to confirm in a new generation after cancellation', async () => {
+    const indexedDb = stubIndexedDb()
+    const oldBuffer = bufferFromBytes([1, 2, 3])
+    const newBuffer = bufferFromBytes([4, 5, 6])
+    let resolveOldConfirmation!: (response: Response) => void
+    let requestCount = 0
+    const fetchImpl = vi.fn(() => {
+      requestCount += 1
+      if (requestCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveOldConfirmation = resolve
+        })
+      }
+      return Promise.resolve(Response.json({ confirmed: true }))
+    }) as unknown as typeof fetch
+    const oldConfirmation = { accessKey: 'offline-test-key', fetchImpl, receiptId: '3'.repeat(32) }
+    registerModelDownloadConfirmation(oldBuffer, oldConfirmation)
+    vi.mocked(confirmCachedModelDownload).mockImplementation(getRealConfirmCachedModelDownload())
+    const cache = new ModelCache(createStatusPanel())
+    const oldPutPromise = cache.putCached(oldBuffer, false)
+    await vi.waitFor(() => expect(requestCount).toBe(1))
+    indexedDb.database.onversionchange?.(new Event('versionchange') as IDBVersionChangeEvent)
+    await expect(oldPutPromise).rejects.toThrow('模型缓存操作已取消')
+
+    const newConfirmation = { accessKey: 'offline-test-key', fetchImpl, receiptId: '4'.repeat(32) }
+    registerModelDownloadConfirmation(newBuffer, newConfirmation)
+    await expect(cache.putCached(newBuffer, false)).resolves.toBeUndefined()
+    expect(requestCount).toBe(2)
+    expect(indexedDb.getStoredRow()?.buffer).not.toBe(oldBuffer)
+    const currentConfirmation = indexedDb.getConfirmationRow()
+    expect(currentConfirmation).toMatchObject({ confirmationPending: false })
+    expect(getModelDownloadConfirmation(newBuffer)).toBeUndefined()
+
+    resolveOldConfirmation(Response.json({ confirmed: true }))
+    await Promise.resolve()
+    expect(getModelDownloadConfirmation(oldBuffer)).toBe(oldConfirmation)
+    expect(indexedDb.getConfirmationRow()).toBe(currentConfirmation)
+    expect(indexedDb.getConfirmationRow()).toMatchObject({ confirmationPending: false })
   })
 })
 
