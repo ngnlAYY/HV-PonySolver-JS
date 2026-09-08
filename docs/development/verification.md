@@ -6,6 +6,8 @@
 
 仓库是 pnpm workspace，由根目录 [`mise.toml`](../../mise.toml) 固定 Node.js 24.15.0、pnpm 12.3.0。根 [`package.json`](../../package.json) 的 `engines.node` 是最低兼容要求 `>=24.15.0`，`packageManager` 固定为 `pnpm@12.3.0`。`mise.toml` 是本地和 GitHub Actions 的工具版本来源，不要重新引入 `.node-version`、Corepack 或 `setup-node` 作为第二套来源。
 
+[`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `pmOnFail: ignore` 是有意的兼容边界：pnpm 12 只维护不含 YAML document separator 的 project lock，而不在 [`pnpm-lock.yaml`](../../pnpm-lock.yaml) 前写 package-manager environment document。GitHub Dependency Graph 和 Pull Request Dependency Review 因此能读取 workspace 的真实依赖变化。代价是不能把 pnpm 自身的 package-manager mismatch failure 当成版本证明；本仓库改由 mise pin、`packageManager` 声明、`pnpm install --frozen-lockfile` 和 `node-version-contract.test.mjs` fail closed 保证一致性。
+
 首次准备环境：
 
 ```bash
@@ -84,7 +86,7 @@ Vitest 主要覆盖 TypeScript/运行时逻辑；包内显式列出的 Node `tes
 
 ## 5. 根配置职责
 
-根 `package.json` 同时是 workspace 命令、Prettier 规则和包管理器版本的入口；`mise.toml` 只负责 Node.js/pnpm 工具版本；`eslint.config.mjs` 是全仓库 flat config；`tsconfig.base.json` 提供共享 TypeScript 编译选项；`.prettierignore` 保持生成物、vendor 和锁文件的忽略边界。已删除的 `prettier.config.js` 和 `vitest.workspace.ts` 不再是配置来源。修改根配置后至少运行 `format:check`、`lint`、根 Node 测试和 `docs:check`。
+根 `package.json` 同时是 workspace 命令、Prettier 规则和包管理器版本声明的入口；`mise.toml` 只负责 Node.js/pnpm 工具版本；`pnpm-workspace.yaml` 负责 workspace、覆盖规则和单文档锁文件策略；`pnpm-lock.yaml` 只保存可冻结重放的 project dependency graph；`eslint.config.mjs` 是全仓库 flat config；`tsconfig.base.json` 提供共享 TypeScript 编译选项；`.prettierignore` 保持生成物、vendor 和锁文件的忽略边界。已删除的 `prettier.config.js` 和 `vitest.workspace.ts` 不再是配置来源。修改根配置后至少运行 `format:check`、`lint`、根 Node 测试、冻结安装和 `docs:check`。
 
 ## 6. Model Worker 测试配置
 

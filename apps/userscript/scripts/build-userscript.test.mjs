@@ -24,6 +24,10 @@ const runtimeManifest = {
   externalFullRuntime: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
     wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/',
+    mjsUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.mjs',
+    mjsByteLength: 46_614,
+    mjsSha256: 'd'.repeat(64),
+    mjsMaxByteLength: 64_000,
     wasmUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm',
     wasmByteLength: 26_827_543,
     wasmSha256: 'c'.repeat(64),
@@ -90,6 +94,10 @@ test('build options select external full and bundled minimal runtime providers',
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.byteLength),
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.sha256),
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.maxByteLength),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_MJS_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.mjsUrl),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_MJS_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.mjsByteLength),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_MJS_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.mjsSha256),
+    __HV_PONY_SOLVER_EXTERNAL_ORT_MJS_MAX_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.mjsMaxByteLength),
     __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmUrl),
     __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.wasmByteLength),
     __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmSha256),
@@ -148,14 +156,15 @@ test('default build downloads the pinned full runtime and excludes minimal runti
   assert.match(result.output, /cdn\.jsdelivr\.net\/npm\/onnxruntime-web@1\.27\.0\/dist\//)
   assert.match(result.output, /models\.ngnl\.host\/yolo26n-640\.ort/)
   assert.match(result.output, /wasmBinary/)
+  assert.match(result.output, /ort-wasm-simd-threaded\.jsep\.mjs/)
   assert.match(result.output, /ort-wasm-simd-threaded\.jsep\.wasm/)
   assert.doesNotMatch(result.output, /models\.ngnl\.host\/runtime\/ort-wasm-simd-/)
   const metafile = JSON.parse(result.metafile)
   const workerOutput = Object.values(metafile.worker.outputs)[0]
-  // Baseline 2026-08: the verified external-runtime loader and bounded startup
-  // queue measure ~26.4KB unminified. Keep roughly 20% headroom without making
-  // the default userscript absorb the 360KB third-party runtime itself.
-  assert.ok(workerOutput.bytes < 32_000, `external worker bundle ${workerOutput.bytes} bytes exceeds 32000`)
+  // Baseline 2026-09: the three verified external assets, bounded startup queue,
+  // and retained JSEP MJS lifecycle measure ~33.1KB unminified. Keep roughly 20%
+  // headroom without making the default userscript absorb third-party runtime bytes.
+  assert.ok(workerOutput.bytes < 40_000, `external worker bundle ${workerOutput.bytes} bytes exceeds 40000`)
 })
 
 test('bundled build embeds the custom glue and uses the verified first-party minimal WASM', async () => {
@@ -163,6 +172,7 @@ test('bundled build embeds the custom glue and uses the verified first-party min
   assert.match(result.output, /wasmBinary/)
   assert.match(result.output, /models\.ngnl\.host\/runtime\/ort-wasm-simd-/)
   assert.doesNotMatch(result.output, /cdn\.jsdelivr\.net\/npm\/onnxruntime-web@1\.27\.0\/dist\/ort\.min\.js/)
+  assert.doesNotMatch(result.output, /ort-wasm-simd-threaded\.jsep\.mjs/)
   const metafile = JSON.parse(result.metafile)
   const workerOutput = Object.values(metafile.worker.outputs)[0]
   assert.ok(workerOutput.bytes < 250_000, `bundled worker bundle ${workerOutput.bytes} bytes exceeds 250000`)

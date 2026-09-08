@@ -88,6 +88,9 @@ test('fails clearly when README omits ONNX Runtime asset manifest field names', 
         .replaceAll('externalFullRuntime.byteLength', 'external full runtime byte length')
         .replaceAll('externalFullRuntime.sha256', 'external full runtime sha256')
         .replaceAll('externalFullRuntime.maxByteLength', 'external full runtime max byte length')
+        .replaceAll('externalFullRuntime.mjsByteLength', 'external full runtime MJS byte length')
+        .replaceAll('externalFullRuntime.mjsSha256', 'external full runtime MJS sha256')
+        .replaceAll('externalFullRuntime.mjsMaxByteLength', 'external full runtime MJS max byte length')
         .replaceAll('bundleAsset.byteLength', 'bundle asset byte length')
         .replaceAll('bundleAsset.sha256', 'bundle asset sha256')
         .replaceAll('bundleAsset.maxByteLength', 'bundle asset max byte length')
@@ -102,6 +105,9 @@ test('fails clearly when README omits ONNX Runtime asset manifest field names', 
     assert.match(result.stderr, /README.md.*externalFullRuntime\.byteLength/s)
     assert.match(result.stderr, /README.md.*externalFullRuntime\.sha256/s)
     assert.match(result.stderr, /README.md.*externalFullRuntime\.maxByteLength/s)
+    assert.match(result.stderr, /README.md.*externalFullRuntime\.mjsByteLength/s)
+    assert.match(result.stderr, /README.md.*externalFullRuntime\.mjsSha256/s)
+    assert.match(result.stderr, /README.md.*externalFullRuntime\.mjsMaxByteLength/s)
     assert.match(result.stderr, /README.md.*bundleAsset\.byteLength/s)
     assert.match(result.stderr, /README.md.*bundleAsset\.sha256/s)
     assert.match(result.stderr, /README.md.*bundleAsset\.maxByteLength/s)
@@ -154,6 +160,31 @@ test('fails clearly when README omits ONNX Runtime asset verification command an
     assert.match(result.stderr, /README.md.*wasmAsset\.url/s)
     assert.match(result.stderr, /README.md.*externalFullRuntime/s)
     assert.match(result.stderr, /README.md.*bundledMinimalRuntime/s)
+  })
+})
+
+test('fails clearly when ONNX Runtime docs omit the external JSEP MJS contract and lifecycle', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const runtimeDocPath = join(fixtureRoot, 'docs/onnx-runtime.md')
+    const runtimeDoc = await readFile(runtimeDocPath, 'utf8')
+    await writeFile(
+      runtimeDocPath,
+      runtimeDoc
+        .replaceAll(
+          'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.mjs',
+          'https://cdn.example/ort.jsep.mjs',
+        )
+        .replaceAll('externalFullRuntime.mjsSha256', 'external full runtime MJS hash')
+        .replaceAll('wasmPaths', 'WASM paths')
+        .replaceAll('onFirstSessionInitSettled', 'first session init cleanup'),
+    )
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /docs\/onnx-runtime\.md.*ort-wasm-simd-threaded\.jsep\.mjs/s)
+    assert.match(result.stderr, /docs\/onnx-runtime\.md.*externalFullRuntime\.mjsSha256/s)
+    assert.match(result.stderr, /docs\/onnx-runtime\.md.*wasmPaths/s)
+    assert.match(result.stderr, /docs\/onnx-runtime\.md.*onFirstSessionInitSettled/s)
   })
 })
 

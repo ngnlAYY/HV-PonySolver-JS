@@ -26,6 +26,7 @@ type OnnxRuntime = typeof Ort
 type RuntimeInitializer = (runtime: OnnxRuntime) => void | Promise<void>
 type WorkerHooks = Readonly<{
   beforeDetect?(): void | Promise<unknown>
+  onFirstSessionInitSettled?(): void | Promise<unknown>
 }>
 
 class FatalInferenceError extends Error {
@@ -66,6 +67,7 @@ export function startOnnxWorker(
   const workerScope = globalThis as unknown as WorkerScope
   let session: Ort.InferenceSession | undefined
   let runtimeInitialization: Promise<void> | undefined
+  let firstSessionInitStarted = false
   let requestTail: Promise<void> = Promise.resolve()
   // Detect requests are processed serially, so the canvas, its context, and
   // the CHW output buffer are allocated once per worker and reused per frame.
@@ -131,12 +133,20 @@ export function startOnnxWorker(
   }
 
   async function initializeSession(modelBuffer: ArrayBuffer): Promise<void> {
-    await ensureRuntimeInitialized()
-    await releaseSession()
-    session = await runtime.InferenceSession.create(modelBuffer, {
-      executionProviders: ['wasm'],
-      graphOptimizationLevel: 'disabled',
-    })
+    const isFirstSessionInit = !firstSessionInitStarted
+    firstSessionInitStarted = true
+    try {
+      await ensureRuntimeInitialized()
+      await releaseSession()
+      session = await runtime.InferenceSession.create(modelBuffer, {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'disabled',
+      })
+    } finally {
+      if (isFirstSessionInit) {
+        await hooks.onFirstSessionInitSettled?.()
+      }
+    }
   }
 
   async function detect(imageBlob: Blob): Promise<ReturnType<typeof parseYoloOutputTensor>> {

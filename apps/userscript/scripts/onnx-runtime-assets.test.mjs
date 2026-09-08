@@ -31,6 +31,13 @@ test('parses the custom bundle and content-addressed first-party WASM contract',
   )
   assert.equal(manifest.externalFullRuntime.wasmBaseUrl, 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/')
   assert.equal(
+    manifest.externalFullRuntime.mjsUrl,
+    'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.mjs',
+  )
+  assert.equal(manifest.externalFullRuntime.mjsByteLength, 46_614)
+  assert.equal(manifest.externalFullRuntime.mjsSha256, 'e'.repeat(64))
+  assert.equal(manifest.externalFullRuntime.mjsMaxByteLength, 64_000)
+  assert.equal(
     manifest.externalFullRuntime.wasmUrl,
     'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm',
   )
@@ -69,6 +76,26 @@ test('rejects external full runtime URL drift', () => {
   assert.throws(
     () => parseOnnxRuntimeAssetsManifest(manifestSource().replace('cdn.jsdelivr.net', 'cdn.example')),
     /External ONNX Runtime script URL drift/,
+  )
+  assert.throws(
+    () =>
+      parseOnnxRuntimeAssetsManifest(
+        manifestSource().replace('ort-wasm-simd-threaded.jsep.mjs', 'ort-wasm-simd-threaded.mjs'),
+      ),
+    /External ONNX Runtime JSEP MJS URL drift/,
+  )
+})
+
+test('rejects an invalid or over-budget external JSEP MJS integrity contract', () => {
+  assert.throws(
+    () =>
+      parseOnnxRuntimeAssetsManifest(manifestSource().replace(`mjsSha256: '${'e'.repeat(64)}'`, "mjsSha256: 'bad'")),
+    /externalFullRuntime\.mjs\.sha256/,
+  )
+  assert.throws(
+    () =>
+      parseOnnxRuntimeAssetsManifest(manifestSource().replace('mjsMaxByteLength: 64_000', 'mjsMaxByteLength: 40_000')),
+    /external full runtime JSEP MJS exceeds mjsMaxByteLength/,
   )
 })
 
@@ -123,6 +150,10 @@ function manifestSource() {
   externalFullRuntime: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
     wasmBaseUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/',
+    mjsUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.mjs',
+    mjsByteLength: 46_614,
+    mjsSha256: '${'e'.repeat(64)}',
+    mjsMaxByteLength: 64_000,
     wasmUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm',
     wasmByteLength: 26_827_543,
     wasmSha256: '${'d'.repeat(64)}',

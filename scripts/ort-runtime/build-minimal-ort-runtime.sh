@@ -4,7 +4,7 @@ set -euo pipefail
 ORT_TAG=v1.27.0
 ORT_COMMIT=8f0278c77bf44b0cc83c098c6c722b92a36ac4b5
 PIP_VERSION=26.1.1
-ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 PYTHON_REQUIREMENTS="$ROOT_DIR/scripts/ort-runtime/requirements.txt"
 BUILD_ROOT="$(node "$ROOT_DIR/scripts/ort-runtime/resolve-ort-build-root.mjs" "${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}")"
 ORT_SOURCE="$BUILD_ROOT/onnxruntime"

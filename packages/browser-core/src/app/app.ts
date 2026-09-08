@@ -180,8 +180,30 @@ export class App {
     })
   }
 
+  private currentTargetSnapshot(target: CaptchaTarget, signal?: AbortSignal): CaptchaTarget | null {
+    if (this.destroyed || signal?.aborted === true) {
+      return null
+    }
+    const currentTarget = findCaptchaTarget()
+    return isSameCaptchaTarget(target, currentTarget) ? currentTarget : null
+  }
+
   private isTargetCurrent(target: CaptchaTarget, signal?: AbortSignal): boolean {
-    return !this.destroyed && signal?.aborted !== true && isSameCaptchaTarget(target, findCaptchaTarget())
+    return this.currentTargetSnapshot(target, signal) !== null
+  }
+
+  private recoverFailedTargetAfterSubmitEnabled(target: CaptchaTarget): void {
+    if (
+      this.solverFailureSuppressionAt === null ||
+      !this.failedCaptchaTarget?.controls.submitDisabled ||
+      target.controls.submitDisabled ||
+      !isSameCaptchaTarget(this.failedCaptchaTarget, target)
+    ) {
+      return
+    }
+    this.failedCaptchaTarget = null
+    this.lastCaptchaTarget = null
+    this.solverFailureSuppressionAt = null
   }
 
   private async prepareTarget(
@@ -233,6 +255,7 @@ export class App {
       if (this.destroyed || this.solver.isBusy || !target) {
         return
       }
+      this.recoverFailedTargetAfterSubmitEnabled(target)
       if (
         this.transientSuppressionAt !== null &&
         Date.now() - this.transientSuppressionAt >= TRANSIENT_FAILURE_RETRY_AFTER_MS &&
@@ -260,12 +283,13 @@ export class App {
       const startedAt = performance.now()
       const prepareResult = await this.prepareTarget(target, credentialsRevision, signal)
       if (prepareResult !== 'prepared') {
-        if (
-          (prepareResult === 'permanent-failure' || prepareResult === 'transient-failure') &&
-          this.isTargetCurrent(target, signal)
-        ) {
-          this.failedCaptchaTarget = target
-          this.lastCaptchaTarget = target
+        const failedTarget =
+          prepareResult === 'permanent-failure' || prepareResult === 'transient-failure'
+            ? this.currentTargetSnapshot(target, signal)
+            : null
+        if (failedTarget) {
+          this.failedCaptchaTarget = failedTarget
+          this.lastCaptchaTarget = failedTarget
           this.transientSuppressionAt = prepareResult === 'transient-failure' ? Date.now() : null
         }
         return
@@ -274,17 +298,19 @@ export class App {
       this.transientSuppressionAt = null
       this.solverFailureSuppressionAt = null
       const result = await this.solver.trigger(target, startedAt)
-      if (result.handled && this.isTargetCurrent(target, signal)) {
-        this.lastCaptchaTarget = target
-      } else if (!result.handled && result.captchaKey === target.captchaKey && this.isTargetCurrent(target, signal)) {
-        this.lastCaptchaTarget = target
-        this.failedCaptchaTarget = target
+      const currentTarget = this.currentTargetSnapshot(target, signal)
+      if (result.handled && currentTarget) {
+        this.lastCaptchaTarget = currentTarget
+      } else if (!result.handled && result.captchaKey === target.captchaKey && currentTarget) {
+        this.lastCaptchaTarget = currentTarget
+        this.failedCaptchaTarget = currentTarget
         this.solverFailureSuppressionAt = Date.now()
       }
     } catch (error) {
-      if (target && this.isTargetCurrent(target, signal)) {
-        this.lastCaptchaTarget = target
-        this.failedCaptchaTarget = target
+      const failedTarget = target ? this.currentTargetSnapshot(target, signal) : null
+      if (failedTarget) {
+        this.lastCaptchaTarget = failedTarget
+        this.failedCaptchaTarget = failedTarget
         this.transientSuppressionAt = null
         this.solverFailureSuppressionAt = Date.now()
         warn('处理验证码失败:', formatErrorMessage(error))

@@ -10,9 +10,10 @@
 
 - `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js`
 - `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/`
+- `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.mjs`
 - `https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm`
 
-外置 `ort.min.js` 的解压后身份固定为 `360,434` 字节、SHA-256 `de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5`，最大允许 `400,000` 字节；完整版 WASM 固定为 `26,827,543` 字节、SHA-256 `78feeeb3d08f6bcee94d938ed322f69073bb8076b5f9d34697a574ffba8deb48`，最大允许 `30,000,000` 字节。Worker 使用 `redirect: error` 并行下载两项资产，只接受可流式读取的响应正文，分别约束声明/实际大小，再验证精确长度和哈希；`body === null` 时失败关闭，不使用会先分配完整响应的 `arrayBuffer()` fallback。两项都成功后才通过临时 Blob URL 执行 JS，并把已验证的 WASM 赋给 `ort.env.wasm.wasmBinary`；失败不会执行响应内容，也不会回退。启动期间的请求队列上限为两个。
+外置 `ort.min.js` 的解压后身份固定为 `360,434` 字节、SHA-256 `de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5`，最大允许 `400,000` 字节；JSEP MJS 使用 `externalFullRuntime.mjsByteLength = 46,614`、`externalFullRuntime.mjsSha256 = 3ee381d20a80f51a788a1c4a5872f6f1d047538dd4342f4af00062de5f9ea4c6` 和 `externalFullRuntime.mjsMaxByteLength = 64,000`；完整版 WASM 固定为 `26,827,543` 字节、SHA-256 `78feeeb3d08f6bcee94d938ed322f69073bb8076b5f9d34697a574ffba8deb48`，最大允许 `30,000,000` 字节。Worker 使用 `redirect: error` 并行下载 JS、MJS、WASM 三项资产，只接受可流式读取的响应正文，分别约束声明/实际大小，再验证精确长度和哈希；`body === null` 时失败关闭，不使用会先分配完整响应的 `arrayBuffer()` fallback。三项都成功后才执行 classic JS，并把 JSEP MJS Blob URL 交给 `ort.env.wasm.wasmPaths = { mjs: url }`、把已验证的 WASM 赋给 `ort.env.wasm.wasmBinary`；失败不会执行响应内容，也不会回退。classic script Blob URL 在 `importScripts()` 返回或抛错时同步撤销。MJS URL 若在交接前失败会立即撤销；交接后由 `onFirstSessionInitSettled` 在首次 `InferenceSession.create` 成功或失败后只撤销一次，后续重复初始化不会再次撤销。启动期间的请求队列上限为两个。
 
 显式 `build:bundled-runtime` profile 内置项目构建的精简 JS glue。其 Worker 只从 `models.ngnl.host` 下载内容寻址的精简 WASM，校验字节长度和 SHA-256 后赋给 `ort.env.wasm.wasmBinary`。两个 profile 使用同一份远程 ORT 模型和 WASM Execution Provider；运行时与模型格式都没有自动回退。
 

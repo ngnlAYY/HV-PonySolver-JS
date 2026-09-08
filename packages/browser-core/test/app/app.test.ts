@@ -127,6 +127,55 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(1)
   })
 
+  it('handles checkbox-driven submit readiness with one detect, submit, and history entry', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const answers = Array.from(captcha.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]'))
+    const button = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.disabled = true
+    for (const answer of answers) {
+      answer.addEventListener('change', () => {
+        const selectedCount = answers.filter((candidate) => candidate.checked).length
+        button.disabled = selectedCount === 0 || selectedCount >= 4
+      })
+    }
+    const panel = createPanel()
+    const detector = createDetector()
+    vi.mocked(detector.detect).mockResolvedValue({
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.99 },
+      detections: [],
+      candidates: [],
+    })
+    const solver = new CaptchaSolver(
+      panel,
+      detector,
+      { get: async () => new Blob(['captcha']) },
+      new AnswerSubmitter(
+        async () => [0, 0],
+        async () => [0, 0],
+      ),
+      async () => 'auto',
+    )
+    const buttonClick = vi.spyOn(button, 'click')
+    const { app } = createHarness({ panel, detector, solver })
+    apps.push(app)
+
+    app.init()
+    await settleDom()
+
+    expect(detector.detect).toHaveBeenCalledTimes(1)
+    expect(buttonClick).toHaveBeenCalledTimes(1)
+    expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+
+    expect(detector.detect).toHaveBeenCalledTimes(1)
+    expect(buttonClick).toHaveBeenCalledTimes(1)
+    expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['auto', 'manual'] as const)(
     'includes preparation and retries in %s history without counting clock changes or previous targets',
     async (answerMode) => {
@@ -300,7 +349,7 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(2)
   })
 
-  it('retries the same failed captcha when its submit button becomes enabled', async () => {
+  it('retries a suppressed failed captcha exactly once when its submit button becomes enabled', async () => {
     const captcha = appendCaptcha('/captcha.png')
     const submit = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!
     submit.disabled = true
@@ -314,10 +363,119 @@ describe('App', () => {
     await settleDom()
     expect(harness.trigger).toHaveBeenCalledTimes(1)
 
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    submit.disabled = false
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+
+    captcha.appendChild(document.createElement('strong'))
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['unhandled', 'exception'] as const)(
+    'captures the latest enabled snapshot after a solver %s and suppresses pending scans',
+    async (failure) => {
+      const captcha = appendCaptcha('/captcha.png')
+      const submit = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!
+      submit.disabled = true
+      const harness = createHarness()
+      harness.trigger.mockImplementation(async (target?: CaptchaTarget) => {
+        submit.disabled = false
+        if (failure === 'exception') {
+          throw new Error('solver failed')
+        }
+        return { handled: false, captchaKey: target?.captchaKey ?? null }
+      })
+      apps.push(harness.app)
+
+      harness.app.init()
+      await settleDom()
+
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+      captcha.appendChild(document.createElement('span'))
+      await settleDom()
+
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('captures the latest enabled snapshot after prepare fails and suppresses pending scans', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const submit = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!
+    submit.disabled = true
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare).mockImplementation(async () => {
+      submit.disabled = false
+      throw new PermanentModelError('模型 Key 无效')
+    })
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+    expect(harness.trigger).not.toHaveBeenCalled()
+
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+    expect(harness.trigger).not.toHaveBeenCalled()
+  })
+
+  it('does not let submit readiness bypass a permanent prepare failure', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const submit = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!
+    submit.disabled = true
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare).mockRejectedValue(new PermanentModelError('模型 Key 无效'))
+    apps.push(harness.app)
+
+    harness.app.init()
+    await settleDom()
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+
     submit.disabled = false
     await settleDom()
 
-    expect(harness.trigger).toHaveBeenCalledTimes(2)
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+    expect(harness.trigger).not.toHaveBeenCalled()
+  })
+
+  it('keeps a transient prepare failure suppressed through submit readiness until its retry window expires', async () => {
+    const captcha = appendCaptcha('/captcha.png')
+    const submit = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!
+    submit.disabled = true
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare).mockRejectedValue(new Error('host down'))
+    apps.push(harness.app)
+
+    harness.app.init()
+    await vi.advanceTimersByTimeAsync(1_100)
+    await Promise.resolve()
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
+
+    submit.disabled = false
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(100)
+    await Promise.resolve()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
+    expect(harness.trigger).not.toHaveBeenCalled()
+
+    vi.setSystemTime(Date.now() + 30_000)
+    captcha.appendChild(document.createElement('span'))
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(1_100)
+    await Promise.resolve()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(6)
+    expect(harness.trigger).not.toHaveBeenCalled()
   })
 
   it('starts solving when a form action recovers from cross-origin to same-origin', async () => {

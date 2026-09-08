@@ -153,6 +153,30 @@ export class AnswerSubmitter implements AnswerSubmissionService {
   ): Promise<void> {
     const signal = options?.signal
     const shouldStop = (): boolean => signal?.aborted === true || options?.isCurrent?.() === false
+    const automaticConfidenceWrites = new Map<
+      HTMLInputElement,
+      Readonly<{ previous: number | undefined; written: number }>
+    >()
+    const writeAutomaticConfidence = (checkbox: HTMLInputElement, confidence: number): void => {
+      const existingWrite = automaticConfidenceWrites.get(checkbox)
+      automaticConfidenceWrites.set(checkbox, {
+        previous: existingWrite ? existingWrite.previous : this.automaticConfidences.get(checkbox),
+        written: confidence,
+      })
+      this.automaticConfidences.set(checkbox, confidence)
+    }
+    const cleanStaleAutomaticConfidences = (): void => {
+      for (const [checkbox, { previous, written }] of automaticConfidenceWrites) {
+        if (this.automaticConfidences.get(checkbox) !== written) {
+          continue
+        }
+        if (previous === undefined) {
+          this.automaticConfidences.delete(checkbox)
+        } else {
+          this.automaticConfidences.set(checkbox, previous)
+        }
+      }
+    }
 
     if (shouldStop()) {
       return
@@ -184,22 +208,28 @@ export class AnswerSubmitter implements AnswerSubmissionService {
 
     const currentControls = (): SubmissionControls | null => {
       if (shouldStop()) {
+        cleanStaleAutomaticConfidences()
         return null
       }
       const current = readControls(form)
       if (current.checkboxes.length !== ANSWER_CODES.length || !current.button) {
+        cleanStaleAutomaticConfidences()
         return null
       }
       const controls: SubmissionControls = {
         checkboxes: current.checkboxes,
         button: current.button,
       }
-      return hasSameControls(expectedControls, controls) &&
-        form.action === expectedFormAction &&
-        isSameOriginForm(form) &&
-        controlsAreUsable(form, controls)
-        ? controls
-        : null
+      if (
+        !hasSameControls(expectedControls, controls) ||
+        form.action !== expectedFormAction ||
+        !isSameOriginForm(form) ||
+        !controlsAreUsable(form, controls)
+      ) {
+        cleanStaleAutomaticConfidences()
+        return null
+      }
+      return controls
     }
 
     const indices = ponies.map((pony) => ANSWER_CODES.indexOf(pony)).filter((index) => index >= 0)
@@ -293,7 +323,7 @@ export class AnswerSubmitter implements AnswerSubmissionService {
         this.clickCheckbox(checkbox)
       }
       if (checkbox.checked && (!wasChecked || wasAutomatic)) {
-        this.automaticConfidences.set(checkbox, confidenceForIndex(index, options?.confidences, previouslyAutomatic))
+        writeAutomaticConfidence(checkbox, confidenceForIndex(index, options?.confidences, previouslyAutomatic))
       }
       if (i < order.length - 1) {
         await sleep(randDelay(multiClickDelay), signal)
@@ -314,8 +344,9 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     }
 
     controls.button.click()
-    if (!shouldStop()) {
-      onSubmitted()
+    if (!currentControls()) {
+      return
     }
+    onSubmitted()
   }
 }

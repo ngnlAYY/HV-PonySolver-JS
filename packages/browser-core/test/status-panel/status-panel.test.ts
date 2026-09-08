@@ -148,12 +148,15 @@ describe('StatusPanel history persistence', () => {
     expect(document.body.textContent).not.toContain('[TS]')
   })
 
-  it('ignores an older persistence failure after a newer history mutation settles', async () => {
+  it('reconciles an older persistence failure after a newer history mutation settles', async () => {
     const firstPersistence = deferred<HistoryRecord[]>()
     const secondPersistence = deferred<HistoryRecord[]>()
+    const durableRecords: HistoryRecord[] = [
+      { type: 'success', answers: 'RA', elapsed: 20, timestamp: 2, time: '00:00:02' },
+    ]
     let addCount = 0
     const store = {
-      get: vi.fn(() => []),
+      get: vi.fn().mockReturnValueOnce([]).mockReturnValue(durableRecords),
       add: vi.fn((_world: World, record: HistoryRecord) => ({
         records: [record],
         persisted: addCount++ === 0 ? firstPersistence.promise : secondPersistence.promise,
@@ -164,15 +167,15 @@ describe('StatusPanel history persistence', () => {
     panel.create()
     panel.addSuccess(['TS'], {}, 12)
     panel.addSuccess(['RA'], {}, 20)
-    secondPersistence.resolve([{ type: 'success', answers: 'RA', elapsed: 20, timestamp: 2, time: '00:00:02' }])
+    secondPersistence.resolve(durableRecords)
     await vi.waitFor(() => expect(document.body.textContent).toContain('[RA]'))
 
     firstPersistence.reject(new Error('stale failure'))
-    await Promise.resolve()
-    await Promise.resolve()
+    await vi.waitFor(() => expect(document.body.textContent).toContain('历史记录保存失败：Error: stale failure'))
 
     expect(document.body.textContent).toContain('[RA]')
-    expect(document.body.textContent).not.toContain('历史记录保存失败')
+    expect(document.body.textContent).not.toContain('[TS]')
+    expect(store.get).toHaveBeenCalledTimes(2)
   })
 
   it('drops stale async settings writes after a fast destroy and re-create', async () => {

@@ -220,6 +220,156 @@ describe('AnswerSubmitter', () => {
       expect(vi.getTimerCount()).toBe(0)
     })
 
+    it('cleans markers from an aborted partial selection without reversing clicks or inheriting automatic state', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) checkbox.checked = false
+      const ts = checkboxes[ANSWER_CODES.indexOf('TS')]!
+      const tsClick = vi.spyOn(ts, 'click')
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const submitter = createSubmitter([0, 0], [100, 100])
+      const controller = new AbortController()
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99)
+
+      try {
+        const firstSubmit = submitter.submit(form, ['TS', 'RA'], vi.fn(), vi.fn(), {
+          signal: controller.signal,
+          confidences: { TS: 0.01, RA: 0.9 },
+        })
+        await vi.waitFor(() => expect(tsClick).toHaveBeenCalledTimes(1))
+
+        controller.abort()
+        await firstSubmit
+
+        expect(ts).toHaveProperty('checked', true)
+        expect(tsClick).toHaveBeenCalledTimes(1)
+
+        const secondSubmit = submitter.submit(form, ['RA', 'FS', 'RD', 'PP'], vi.fn(), vi.fn(), {
+          confidences: { RA: 0.9, FS: 0.8, RD: 0.7, PP: 0.6 },
+        })
+        await vi.runAllTimersAsync()
+        await secondSubmit
+
+        expect(ts).toHaveProperty('checked', true)
+        expect(tsClick).toHaveBeenCalledTimes(1)
+      } finally {
+        randomSpy.mockRestore()
+      }
+    })
+
+    it('cleans markers when the final submit click synchronously makes the target stale', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) checkbox.checked = false
+      const ts = checkboxes[ANSWER_CODES.indexOf('TS')]!
+      const tsClick = vi.spyOn(ts, 'click')
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      let current = true
+      button.click = vi.fn(() => {
+        current = false
+      })
+      const onSubmitted = vi.fn()
+      const submitter = createSubmitter([0, 0], [0, 0])
+
+      const firstSubmit = submitter.submit(form, ['TS'], vi.fn(), onSubmitted, {
+        isCurrent: () => current,
+        confidences: { TS: 0.01 },
+      })
+      await vi.runAllTimersAsync()
+      await firstSubmit
+
+      expect(button.click).toHaveBeenCalledTimes(1)
+      expect(onSubmitted).not.toHaveBeenCalled()
+      expect(tsClick).toHaveBeenCalledTimes(1)
+
+      current = true
+      button.click = vi.fn()
+      const secondSubmit = submitter.submit(form, ['RA', 'FS', 'RD', 'PP'], vi.fn(), vi.fn(), {
+        confidences: { RA: 0.9, FS: 0.8, RD: 0.7, PP: 0.6 },
+      })
+      await vi.runAllTimersAsync()
+      await secondSubmit
+
+      expect(ts).toHaveProperty('checked', true)
+      expect(tsClick).toHaveBeenCalledTimes(1)
+    })
+
+    it('restores previous automatic confidence when a later marker update becomes stale', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) checkbox.checked = false
+      const ts = checkboxes[ANSWER_CODES.indexOf('TS')]!
+      const submitter = createSubmitter([0, 0], [0, 0])
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+
+      const firstSubmit = submitter.submit(form, ['TS'], vi.fn(), vi.fn(), {
+        confidences: { TS: 0.1 },
+      })
+      await vi.runAllTimersAsync()
+      await firstSubmit
+
+      let current = true
+      button.click = vi.fn(() => {
+        current = false
+      })
+      const staleSubmit = submitter.submit(form, ['TS'], vi.fn(), vi.fn(), {
+        isCurrent: () => current,
+        confidences: { TS: 0.9 },
+      })
+      await vi.runAllTimersAsync()
+      await staleSubmit
+
+      current = true
+      button.click = vi.fn()
+      const nextSubmit = submitter.submit(form, ['RA', 'FS', 'RD', 'PP'], vi.fn(), vi.fn(), {
+        confidences: { RA: 0.9, FS: 0.8, RD: 0.7, PP: 0.6 },
+      })
+      await vi.runAllTimersAsync()
+      await nextSubmit
+
+      expect(ts).toHaveProperty('checked', false)
+    })
+
+    it('does not loop or reverse stale checkbox clicks when preservation is disabled', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) checkbox.checked = false
+      const ts = checkboxes[ANSWER_CODES.indexOf('TS')]!
+      const tsClick = vi.spyOn(ts, 'click')
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      let current = true
+      const buttonClick = vi.fn(() => {
+        current = false
+      })
+      button.click = buttonClick
+      const submitter = createSubmitter([0, 0], [0, 0], false)
+
+      const staleSubmit = submitter.submit(form, ['TS'], vi.fn(), vi.fn(), {
+        isCurrent: () => current,
+      })
+      await vi.runAllTimersAsync()
+      await staleSubmit
+
+      expect(ts).toHaveProperty('checked', true)
+      expect(tsClick).toHaveBeenCalledTimes(1)
+      expect(buttonClick).toHaveBeenCalledTimes(1)
+
+      current = true
+      buttonClick.mockImplementation(() => undefined)
+      const nextSubmit = submitter.submit(form, ['TS'], vi.fn(), vi.fn(), {
+        isCurrent: () => current,
+      })
+      await vi.runAllTimersAsync()
+      await nextSubmit
+
+      expect(ts).toHaveProperty('checked', true)
+      expect(tsClick).toHaveBeenCalledTimes(3)
+      expect(buttonClick).toHaveBeenCalledTimes(2)
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
     it('uses injected submit and multi-click timing ranges', async () => {
       const form = createForm(true)
       const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
@@ -455,6 +605,57 @@ describe('AnswerSubmitter', () => {
 
       expect(ra).toHaveProperty('checked', true)
     })
+
+    it.each(['form action', 'submit control'] as const)(
+      'cleans new automatic markers when the %s changes after an answer click',
+      async (change) => {
+        const form = createForm(true)
+        const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+        for (const checkbox of checkboxes) checkbox.checked = false
+        const ts = checkboxes[ANSWER_CODES.indexOf('TS')]!
+        const tsClick = vi.spyOn(ts, 'click')
+        const initialAction = form.action
+        const initialButton = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+        initialButton.click = vi.fn()
+        let replacementButton: HTMLInputElement | null = null
+        ts.addEventListener(
+          'change',
+          () => {
+            if (change === 'form action') {
+              form.action = '/other-submit'
+              return
+            }
+            replacementButton = initialButton.cloneNode(true) as HTMLInputElement
+            initialButton.replaceWith(replacementButton)
+          },
+          { once: true },
+        )
+        const submitter = createSubmitter([0, 0], [0, 0])
+
+        const staleSubmit = submitter.submit(form, ['TS'], vi.fn(), vi.fn(), {
+          confidences: { TS: 0.01 },
+        })
+        await vi.runAllTimersAsync()
+        await staleSubmit
+
+        expect(ts).toHaveProperty('checked', true)
+        expect(tsClick).toHaveBeenCalledTimes(1)
+        expect(initialButton.click).not.toHaveBeenCalled()
+
+        form.action = initialAction
+        if (replacementButton) {
+          replacementButton.click = vi.fn()
+        }
+        const nextSubmit = submitter.submit(form, ['RA', 'FS', 'RD', 'PP'], vi.fn(), vi.fn(), {
+          confidences: { RA: 0.9, FS: 0.8, RD: 0.7, PP: 0.6 },
+        })
+        await vi.runAllTimersAsync()
+        await nextSubmit
+
+        expect(ts).toHaveProperty('checked', true)
+        expect(tsClick).toHaveBeenCalledTimes(1)
+      },
+    )
 
     it('does not submit when the form action changes while timing settings are pending', async () => {
       const form = createForm(true)

@@ -165,6 +165,46 @@ describe('CaptchaSolver', () => {
     expect(panel.addSuccess).toHaveBeenCalledWith(['RA'], { RA: 0.97 }, expect.any(Number))
   })
 
+  it('detects, submits, and records once when selecting an answer enables submit', async () => {
+    const form = appendSubmittableCaptcha()
+    const answers = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]'))
+    const submit = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    submit.disabled = true
+    for (const answer of answers) {
+      answer.addEventListener('change', () => {
+        submit.disabled = answers.every((candidate) => !candidate.checked)
+      })
+    }
+    const detector = createDetector(
+      vi.fn(async () => ({
+        success: true,
+        ponies: ['TS'],
+        confidences: { TS: 0.99 },
+        detections: [],
+        candidates: [],
+      })),
+    )
+    const panel = createPanel()
+    const solver = new CaptchaSolver(
+      panel,
+      detector,
+      { get: async () => new Blob(['captcha']) },
+      new AnswerSubmitter(
+        async () => [0, 0],
+        async () => [0, 0],
+      ),
+      async () => 'auto',
+    )
+    const submitClick = vi.spyOn(submit, 'click')
+
+    const result = await solver.trigger()
+
+    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(detector.detect).toHaveBeenCalledTimes(1)
+    expect(submitClick).toHaveBeenCalledTimes(1)
+    expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+  })
+
   it('records detected ponies without submitting in manual mode', async () => {
     appendCaptcha()
     const detector = createDetector(

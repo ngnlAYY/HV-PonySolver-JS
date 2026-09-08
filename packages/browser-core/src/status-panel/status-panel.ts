@@ -184,11 +184,7 @@ export class StatusPanel implements StatusPanelContract {
         this.scheduleRender()
       },
       (error: unknown) => {
-        if (
-          !this.el ||
-          lifecycleGeneration !== this.lifecycleGeneration ||
-          mutationGeneration !== this.historyMutationGeneration
-        ) {
+        if (!this.el || lifecycleGeneration !== this.lifecycleGeneration) {
           return
         }
         this.records = this.history.get(this.world)

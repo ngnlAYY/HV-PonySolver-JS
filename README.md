@@ -156,15 +156,15 @@ Cloudflare Model Worker
 
 以下运行时 profile 只适用于用户脚本，并由构建命令决定，不由运行时配置自动选择。扩展版始终使用随包分发的精简 glue 和 WASM，没有外部运行时 profile。
 
-| 项目         | 默认外部完整版                       | 显式内置精简版                          |
-| ------------ | ------------------------------------ | --------------------------------------- |
-| profile 名称 | `external`                           | `bundled`                               |
-| 构建命令     | `build`                              | `build:bundled-runtime`                 |
-| JS 运行时    | 下载并校验 jsDelivr `ort.min.js`     | 构建时内置精简 glue                     |
-| WASM         | 下载并校验 jsDelivr 完整版 WASM      | 从 `models.ngnl.host` 下载内容寻址 WASM |
-| 内容校验     | JS/WASM 最大长度、精确长度和 SHA-256 | WASM 最大长度、精确长度和 SHA-256       |
-| 自动回退     | 无                                   | 无                                      |
-| 包体预算     | `256 KiB`                            | `1 MiB`                                 |
+| 项目         | 默认外部完整版                               | 显式内置精简版                          |
+| ------------ | -------------------------------------------- | --------------------------------------- |
+| profile 名称 | `external`                                   | `bundled`                               |
+| 构建命令     | `build`                                      | `build:bundled-runtime`                 |
+| JS 运行时    | 下载并校验 jsDelivr `ort.min.js` 与 JSEP MJS | 构建时内置精简 glue                     |
+| WASM         | 下载并校验 jsDelivr 完整版 WASM              | 从 `models.ngnl.host` 下载内容寻址 WASM |
+| 内容校验     | JS/MJS/WASM 最大长度、精确长度和 SHA-256     | WASM 最大长度、精确长度和 SHA-256       |
+| 自动回退     | 无                                           | 无                                      |
+| 包体预算     | `256 KiB`                                    | `1 MiB`                                 |
 
 根 `bundle:check` 对不带 `--minify` 的默认 profile 产物执行 `256 KiB` 门禁；显式压缩的发布构建不能替代这项未压缩门禁。
 
@@ -175,6 +175,7 @@ Cloudflare Model Worker
 ```text
 https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js
 https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/
+https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.mjs
 https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.jsep.wasm
 ```
 
@@ -185,17 +186,20 @@ https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.
 | `externalFullRuntime.byteLength`        | `360,434`                                                          |
 | `externalFullRuntime.sha256`            | `de1beb9d172dbda72e56fa2f430c8e4477e97908609859ab47f89fc3e034a8d5` |
 | `externalFullRuntime.maxByteLength`     | `400,000`                                                          |
+| `externalFullRuntime.mjsByteLength`     | `46,614`                                                           |
+| `externalFullRuntime.mjsSha256`         | `3ee381d20a80f51a788a1c4a5872f6f1d047538dd4342f4af00062de5f9ea4c6` |
+| `externalFullRuntime.mjsMaxByteLength`  | `64,000`                                                           |
 | `externalFullRuntime.wasmByteLength`    | `26,827,543`                                                       |
 | `externalFullRuntime.wasmSha256`        | `78feeeb3d08f6bcee94d938ed322f69073bb8076b5f9d34697a574ffba8deb48` |
 | `externalFullRuntime.wasmMaxByteLength` | `30,000,000`                                                       |
 
-ONNX 推理 Worker 以 `redirect: error` 并行下载 `ort.min.js` 和完整版 WASM，分别限制声明/实际大小，并对解压后的实际字节执行精确长度与 SHA-256 校验；只有两项都校验成功后才创建临时 Blob URL、调用 `importScripts()`，并通过 `wasmBinary` 注入已验证的 WASM 字节。启动期间最多暂存两个请求，失败后立即拒绝已排队及后续请求。运行时随后设置：
+ONNX 推理 Worker 以 `redirect: error` 并行下载 `ort.min.js`、JSEP MJS 和完整版 WASM，分别限制声明/实际大小，并对解压后的实际字节执行精确长度与 SHA-256 校验；只有三项都校验成功后才创建临时 Blob URL。classic JS 通过 `importScripts()` 同步执行并立即撤销 URL；JSEP MJS URL 交给 `wasmPaths.mjs`，已验证 WASM 则通过 `wasmBinary` 注入。MJS URL 在交接前失败时立即撤销，交接后由 `onFirstSessionInitSettled` 在首次 `InferenceSession.create` 成功或失败后只撤销一次。启动期间最多暂存两个请求，失败后立即拒绝已排队及后续请求。运行时随后设置：
 
 - `numThreads = 1`
 - `proxy = false`
 - WASM Execution Provider
 
-该模式不会下载项目生成的精简 WASM，也不会在 CDN 或完整性校验失败时切换到内置精简版。远程 JS 和完整版 WASM 都由固定字节身份保护，ORT 不再自行按目录路径下载未验证的 WASM。
+该模式不会下载项目生成的精简 WASM，也不会在 CDN 或完整性校验失败时切换到内置精简版。远程 classic JS、JSEP MJS 和完整版 WASM 都由固定字节身份保护，ORT 不再自行按目录路径下载未验证的辅助模块或 WASM。
 
 ### 显式内置精简版
 
@@ -263,6 +267,8 @@ apps/userscript/src/inference/onnx-runtime-assets.ts
 
 仓库根目录的 `mise.toml` 是本地与 GitHub Actions 的工具版本来源，精确固定 Node.js `24.15.0` 和 pnpm `12.3.0`；`package.json#engines` 保留 `>= 24.15.0` 的最低兼容要求，`package.json#packageManager` 与 mise 的 pnpm 版本保持一致。npm 包依赖仍由 pnpm 工作区和 `pnpm-lock.yaml` 管理。
 
+`pnpm-workspace.yaml` 显式设置 `pmOnFail: ignore`，使 pnpm 12 保持原生的单 project document 锁文件，而不是在项目依赖图前写入 package-manager environment document。提交的 `pnpm-lock.yaml` 因而不含 YAML document separator，可由 GitHub Dependency Graph 和 Pull Request Dependency Review 读取完整 workspace 依赖。该设置不把 pnpm 自身的 package-manager mismatch failure 当作版本门禁；精确版本继续由 mise、`packageManager` 声明、冻结安装和仓库级工具链契约测试共同保证。
+
 按 [mise 官方说明](https://mise.jdx.dev/getting-started.html) 安装 mise 后，在仓库根目录安装工具与依赖：
 
 ```bash
@@ -294,7 +300,7 @@ mise exec -- pnpm check
 | ----------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | [mise.toml](mise.toml)                                                        | 本地与 CI 的精确工具版本                                        |
 | [package.json](package.json)                                                  | 公共命令、包管理器声明、Node 兼容要求，以及 `prettier` 格式规则 |
-| [pnpm-workspace.yaml](pnpm-workspace.yaml) / [pnpm-lock.yaml](pnpm-lock.yaml) | 工作区、依赖覆盖规则和冻结依赖解析                              |
+| [pnpm-workspace.yaml](pnpm-workspace.yaml) / [pnpm-lock.yaml](pnpm-lock.yaml) | 工作区、依赖覆盖、单文档锁文件兼容规则和冻结依赖解析            |
 | [eslint.config.mjs](eslint.config.mjs)                                        | JavaScript/TypeScript 静态规则与日志模块例外                    |
 | [tsconfig.base.json](tsconfig.base.json)                                      | 五个工作区继承的严格编译选项                                    |
 | [.prettierignore](.prettierignore)                                            | 排除 vendor、运行时生成物、pnpm 锁文件和本地协调状态的格式化    |
@@ -746,7 +752,7 @@ pnpm --filter @hv-pony-solver/model-worker check:deployment
 
 旧版 ONNX 模型清单由 `MODEL_VERSION`、`MODEL_INTEGRITY.byteLength` 和 `MODEL_INTEGRITY.sha256` 组成。`MODEL_FILE` 指定本地校验文件，`verify-model-integrity` 执行字节长度和 SHA-256 校验。新版 ORT 使用独立的共享资产清单，不覆盖旧版契约。
 
-ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFullRuntime` 对应默认外置完整版，`bundledMinimalRuntime` 对应显式内置精简版。默认外置 JS 使用 `externalFullRuntime.byteLength`、`externalFullRuntime.sha256` 和 `externalFullRuntime.maxByteLength`；默认外置 WASM 使用 `externalFullRuntime.wasmByteLength`、`externalFullRuntime.wasmSha256` 和 `externalFullRuntime.wasmMaxByteLength`；构建 glue 使用 `bundleAsset.byteLength`、`bundleAsset.sha256` 和 `bundleAsset.maxByteLength`；首方 WASM 使用 `wasmAsset.url`、`wasmAsset.byteLength`、`wasmAsset.sha256` 和 `wasmAsset.maxByteLength`。相关入口为 `build:onnx-runtime` 与 `verify:onnx-runtime`。
+ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFullRuntime` 对应默认外置完整版，`bundledMinimalRuntime` 对应显式内置精简版。默认外置 classic JS 使用 `externalFullRuntime.byteLength`、`externalFullRuntime.sha256` 和 `externalFullRuntime.maxByteLength`；默认外置 JSEP MJS 使用 `externalFullRuntime.mjsByteLength`、`externalFullRuntime.mjsSha256` 和 `externalFullRuntime.mjsMaxByteLength`；默认外置 WASM 使用 `externalFullRuntime.wasmByteLength`、`externalFullRuntime.wasmSha256` 和 `externalFullRuntime.wasmMaxByteLength`；构建 glue 使用 `bundleAsset.byteLength`、`bundleAsset.sha256` 和 `bundleAsset.maxByteLength`；首方 WASM 使用 `wasmAsset.url`、`wasmAsset.byteLength`、`wasmAsset.sha256` 和 `wasmAsset.maxByteLength`。相关入口为 `build:onnx-runtime` 与 `verify:onnx-runtime`。
 
 `architecture:check` 保护关键依赖边界：`inferenceTimeoutConfig` 继续集中管理异步超时，`StatusPanel` 继续负责 UI 状态输出，`Model Worker Core` 继续与 Userscript 浏览器代码隔离。
 
@@ -828,7 +834,7 @@ dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare �
 - 不要把模型 token 写入 URL、日志、README、构建产物或公开配置。
 - 查询字符串密钥不会授权真实模型。
 - `@connect` 和 CORS 只允许网络访问，不代替 token 鉴权。
-- 默认外部 profile 对 jsDelivr `ort.min.js` 和完整版 WASM 都拒绝重定向，只接受可流式读取的响应正文，并校验最大长度、精确长度和 SHA-256；只有两项都通过后才执行 JS 并注入 WASM 字节。
+- 默认外部 profile 对 jsDelivr `ort.min.js`、JSEP MJS 和完整版 WASM 都拒绝重定向，只接受可流式读取的响应正文，并校验最大长度、精确长度和 SHA-256；只有三项都通过后才执行 classic JS、向 `wasmPaths.mjs` 交接 MJS Blob URL 并注入 WASM 字节。
 - 内置 profile 对首方精简 glue 和 WASM 执行固定资产身份与内容完整性校验。
 - 扩展产物不加载远程 JS/WASM；ORT glue、module Worker 和内容寻址 WASM 均随包分发。远程 `.ort` 下载和包内 `.ort` 都按固定长度与 SHA-256 校验；包内模型不加密，也不具备机密性。
 - 扩展内容脚本不接收模型 Key 或模型字节。远程版本只有设置页可发起 Key 验证和模型下载请求；内置版本不构建 Key 存储、验证或远程下载能力。
@@ -860,7 +866,7 @@ mise exec -- pnpm install --frozen-lockfile
 cdn.jsdelivr.net
 ```
 
-默认 profile 没有内置回退。若错误提示运行时大小或 SHA-256 校验失败，应先确认两个固定 URL 都未重定向，JS 实际解压字节匹配 `externalFullRuntime.byteLength` 与 `externalFullRuntime.sha256`，WASM 实际字节匹配 `externalFullRuntime.wasmByteLength` 与 `externalFullRuntime.wasmSha256`；不要放宽对应 `maxByteLength` 或 `wasmMaxByteLength` 上限，也不要跳过校验。需要绕过完整版 CDN 时，应改用显式内置构建；内置构建仍需要访问 `models.ngnl.host` 下载精简 WASM 和 `.ort` 模型。
+默认 profile 没有内置回退。若错误提示运行时大小或 SHA-256 校验失败，应先确认三个固定资产 URL 都未重定向：classic JS 实际解压字节匹配 `externalFullRuntime.byteLength` 与 `externalFullRuntime.sha256`，JSEP MJS 匹配 `externalFullRuntime.mjsByteLength` 与 `externalFullRuntime.mjsSha256`，WASM 匹配 `externalFullRuntime.wasmByteLength` 与 `externalFullRuntime.wasmSha256`；不要放宽对应 `maxByteLength`、`mjsMaxByteLength` 或 `wasmMaxByteLength` 上限，也不要跳过校验。需要绕过完整版 CDN 时，应改用显式内置构建；内置构建仍需要访问 `models.ngnl.host` 下载精简 WASM 和 `.ort` 模型。
 
 ### 精简 WASM 初始化失败
 

@@ -72,6 +72,85 @@ describe('startOnnxWorker', () => {
     expect(postMessage).toHaveBeenCalledWith({ type: 'response', requestId: 1, modelBuffer }, [modelBuffer])
   })
 
+  it('runs the first session-init settled hook once after a successful create', async () => {
+    const { runtime, create } = createRuntime(() => ({ run: vi.fn(), release: vi.fn(async () => undefined) }))
+    const postMessage = vi.fn()
+    const onFirstSessionInitSettled = vi.fn()
+    vi.stubGlobal('postMessage', postMessage)
+    startOnnxWorker(runtime, vi.fn(), { onFirstSessionInitSettled })
+
+    sendWorkerRequest({ type: 'init', requestId: 1, modelBuffer: new ArrayBuffer(4) })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+
+    expect(onFirstSessionInitSettled).toHaveBeenCalledTimes(1)
+    expect(create.mock.invocationCallOrder[0]).toBeLessThan(onFirstSessionInitSettled.mock.invocationCallOrder[0]!)
+    expect(onFirstSessionInitSettled.mock.invocationCallOrder[0]).toBeLessThan(postMessage.mock.invocationCallOrder[0]!)
+
+    sendWorkerRequest({ type: 'init', requestId: 2, modelBuffer: new ArrayBuffer(4) })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(2))
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(onFirstSessionInitSettled).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs the first session-init settled hook once when the first create rejects', async () => {
+    const { runtime, create } = createRuntime(() => ({ run: vi.fn(), release: vi.fn(async () => undefined) }))
+    create.mockRejectedValueOnce(new Error('session init failed'))
+    const postMessage = vi.fn()
+    const onFirstSessionInitSettled = vi.fn()
+    vi.stubGlobal('postMessage', postMessage)
+    startOnnxWorker(runtime, vi.fn(), { onFirstSessionInitSettled })
+
+    sendWorkerRequest({ type: 'init', requestId: 1, modelBuffer: new ArrayBuffer(4) })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    expect(postMessage).toHaveBeenLastCalledWith({
+      type: 'error',
+      requestId: 1,
+      message: 'session init failed',
+    })
+    expect(onFirstSessionInitSettled).toHaveBeenCalledTimes(1)
+
+    sendWorkerRequest({ type: 'init', requestId: 2, modelBuffer: new ArrayBuffer(4) })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(2))
+
+    expect(postMessage.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ type: 'response', requestId: 2 }))
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(onFirstSessionInitSettled).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs the first session-init settled hook once when async runtime initialization rejects', async () => {
+    const { runtime, create } = createRuntime(() => ({ run: vi.fn(), release: vi.fn(async () => undefined) }))
+    const initializeRuntime = vi.fn(async () => {
+      throw new Error('runtime initialization failed')
+    })
+    const postMessage = vi.fn()
+    const onFirstSessionInitSettled = vi.fn()
+    vi.stubGlobal('postMessage', postMessage)
+    startOnnxWorker(runtime, initializeRuntime, { onFirstSessionInitSettled })
+
+    sendWorkerRequest({ type: 'init', requestId: 1, modelBuffer: new ArrayBuffer(4) })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    expect(postMessage).toHaveBeenLastCalledWith({
+      type: 'error',
+      requestId: 1,
+      message: 'runtime initialization failed',
+    })
+    expect(initializeRuntime).toHaveBeenCalledTimes(1)
+    expect(create).not.toHaveBeenCalled()
+    expect(onFirstSessionInitSettled).toHaveBeenCalledTimes(1)
+
+    sendWorkerRequest({ type: 'init', requestId: 2, modelBuffer: new ArrayBuffer(4) })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(2))
+    expect(postMessage).toHaveBeenLastCalledWith({
+      type: 'error',
+      requestId: 2,
+      message: 'runtime initialization failed',
+    })
+    expect(initializeRuntime).toHaveBeenCalledTimes(1)
+    expect(create).not.toHaveBeenCalled()
+    expect(onFirstSessionInitSettled).toHaveBeenCalledTimes(1)
+  })
+
   it('serializes overlapping detects before reusing the shared input buffer', async () => {
     installImageRuntime()
     const runResolvers: Array<(outputs: object) => void> = []

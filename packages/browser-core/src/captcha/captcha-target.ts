@@ -30,7 +30,6 @@ function captureControls(form: HTMLFormElement): CaptchaControlsSnapshot {
 function isSameControls(left: CaptchaControlsSnapshot, right: CaptchaControlsSnapshot): boolean {
   return (
     left.submit === right.submit &&
-    left.submitDisabled === right.submitDisabled &&
     left.answers.length === right.answers.length &&
     left.answers.every(
       (answer, index) => answer === right.answers[index] && left.answerDisabled[index] === right.answerDisabled[index],

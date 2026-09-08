@@ -64,7 +64,10 @@ export function parseOnnxRuntimeAssetsManifest(source, { sourcePath = manifestRe
   const root = extractObject(source, 'ONNX_RUNTIME_ASSETS', sourcePath)
   const externalRuntimeBlock = extractObject(root, 'externalFullRuntime', sourcePath)
   const externalFullRuntime = {
-    ...readAsset(root, 'externalFullRuntime', sourcePath, ['scriptUrl', 'wasmBaseUrl', 'wasmUrl']),
+    ...readAsset(root, 'externalFullRuntime', sourcePath, ['scriptUrl', 'wasmBaseUrl', 'mjsUrl', 'wasmUrl']),
+    mjsByteLength: readInteger(externalRuntimeBlock, 'mjsByteLength', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
+    mjsSha256: readString(externalRuntimeBlock, 'mjsSha256', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
+    mjsMaxByteLength: readInteger(externalRuntimeBlock, 'mjsMaxByteLength', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
     wasmByteLength: readInteger(externalRuntimeBlock, 'wasmByteLength', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
     wasmSha256: readString(externalRuntimeBlock, 'wasmSha256', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
     wasmMaxByteLength: readInteger(
@@ -86,11 +89,15 @@ export function parseOnnxRuntimeAssetsManifest(source, { sourcePath = manifestRe
     wasmAsset,
   }
   assertSha256(externalFullRuntime.sha256, 'ONNX_RUNTIME_ASSETS.externalFullRuntime')
+  assertSha256(externalFullRuntime.mjsSha256, 'ONNX_RUNTIME_ASSETS.externalFullRuntime.mjs')
   assertSha256(externalFullRuntime.wasmSha256, 'ONNX_RUNTIME_ASSETS.externalFullRuntime.wasm')
   assertSha256(bundleAsset.sha256, 'ONNX_RUNTIME_ASSETS.bundleAsset')
   assertSha256(wasmAsset.sha256, 'ONNX_RUNTIME_ASSETS.wasmAsset')
   if (externalFullRuntime.byteLength > externalFullRuntime.maxByteLength) {
     throw new Error('ONNX Runtime external full runtime exceeds maxByteLength')
+  }
+  if (externalFullRuntime.mjsByteLength > externalFullRuntime.mjsMaxByteLength) {
+    throw new Error('ONNX Runtime external full runtime JSEP MJS exceeds mjsMaxByteLength')
   }
   if (externalFullRuntime.wasmByteLength > externalFullRuntime.wasmMaxByteLength) {
     throw new Error('ONNX Runtime external full runtime WASM exceeds wasmMaxByteLength')
@@ -108,6 +115,9 @@ export function parseOnnxRuntimeAssetsManifest(source, { sourcePath = manifestRe
   }
   if (manifest.externalFullRuntime.wasmBaseUrl !== expectedExternalBaseUrl) {
     throw new Error('External ONNX Runtime WASM base URL drift')
+  }
+  if (manifest.externalFullRuntime.mjsUrl !== `${expectedExternalBaseUrl}ort-wasm-simd-threaded.jsep.mjs`) {
+    throw new Error('External ONNX Runtime JSEP MJS URL drift')
   }
   if (manifest.externalFullRuntime.wasmUrl !== `${expectedExternalBaseUrl}ort-wasm-simd-threaded.jsep.wasm`) {
     throw new Error('External ONNX Runtime WASM URL drift')

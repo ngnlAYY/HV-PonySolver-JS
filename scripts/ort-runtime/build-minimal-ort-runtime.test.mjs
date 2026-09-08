@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
+import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
-import { URL } from 'node:url'
+import { fileURLToPath, URL } from 'node:url'
 
 const scriptUrl = new URL('./build-minimal-ort-runtime.sh', import.meta.url)
 
@@ -28,6 +31,26 @@ test('builds JavaScript assets in a disposable copy of the pinned ORT checkout',
   assert.doesNotMatch(source, /git -C "\$ORT_SOURCE" clean/u)
   assert.doesNotMatch(source, /npm --prefix "\$ORT_SOURCE\/js/u)
   assert.match(source, /trap - EXIT/u)
+})
+
+test('rejects invalid arguments before creating an ORT build root from an arbitrary cwd', async (t) => {
+  const temporaryParent = await mkdtemp(join(tmpdir(), 'build-minimal-ort-runtime-'))
+  const cwd = join(temporaryParent, 'arbitrary-cwd')
+  const buildRoot = join(temporaryParent, 'hv-pony-ort-entry-smoke')
+  t.after(() => rm(temporaryParent, { recursive: true, force: true }))
+  await mkdir(cwd)
+
+  const result = spawnSync('bash', [fileURLToPath(scriptUrl), '--invalid-option'], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, ORT_BUILD_ROOT: buildRoot },
+  })
+  assert.equal(result.error, undefined)
+  assert.equal(result.status, 2)
+  const output = `${result.stdout}\n${result.stderr}`
+  assert.match(output, /Usage:/u)
+  assert.doesNotMatch(output, /MODULE_NOT_FOUND/u)
+  await assert.rejects(access(buildRoot), { code: 'ENOENT' })
 })
 
 test('serializes destructive work and revalidates the dedicated build root', async () => {

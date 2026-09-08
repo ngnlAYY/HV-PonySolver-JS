@@ -135,6 +135,17 @@ try {
       }),
   )
 
+  await serviceWorker.evaluate(() => {
+    globalThis.__fixtureDetectCount = 0
+    globalThis.chrome.runtime.onConnect.addListener((port) => {
+      port.onMessage.addListener((message) => {
+        if (message && typeof message === 'object' && message.type === 'detect') {
+          globalThis.__fixtureDetectCount += 1
+        }
+      })
+    })
+  })
+
   let currentHtml = captchaHtml()
   await context.route('https://hentaiverse.org/**', async (route) => {
     const url = new globalThis.URL(route.request().url())
@@ -159,6 +170,7 @@ try {
   assert.equal(await automaticPage.locator('input[name="riddleanswer[]"]').nth(0).isChecked(), true)
   assert.equal(await automaticPage.locator('input[name="riddleanswer[]"]:checked').count(), 1)
   await automaticPage.waitForTimeout(300)
+  assert.equal(await serviceWorker.evaluate(() => globalThis.__fixtureDetectCount), 1)
   assert.equal(await automaticPage.locator('#riddlesubmit').getAttribute('data-submit-count'), '1')
   await automaticPage.locator('.ponyLog').filter({ hasText: 'TS' }).waitFor()
   await automaticPage
@@ -244,7 +256,7 @@ try {
   assert.equal(await bfcachePage.locator('#riddlesubmit').getAttribute('data-submit-count'), '1')
 
   process.stdout.write(
-    'Chromium content fixture verified automatic/manual solve, one submit, keyed history, excluded routes, and BFCache restore.\n',
+    'Chromium content fixture verified automatic/manual solve, one detect/submit, keyed history, excluded routes, and BFCache restore.\n',
   )
 } finally {
   await context.close()

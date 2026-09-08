@@ -7,6 +7,10 @@ const repoRoot = resolve(import.meta.dirname, '../..')
 const expectedNodeVersion = '24.15.0'
 const expectedPnpmVersion = '12.3.0'
 
+function escapeRegularExpression(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
 test('mise pins Node and pnpm consistently with package metadata', async () => {
   const [miseSource, packageSource] = await Promise.all([
     readFile(resolve(repoRoot, 'mise.toml'), 'utf8'),
@@ -77,4 +81,34 @@ test('workspace scripts use the pnpm selected by mise without requiring Corepack
     const packageJson = JSON.parse(await readFile(resolve(repoRoot, file), 'utf8'))
     assert.doesNotMatch(Object.values(packageJson.scripts).join('\n'), /\bcorepack\b/iu, file)
   }
+})
+
+test('pnpm workspace has one fail-closed root lockfile document', async () => {
+  const [workspaceSource, lockSource, packageSource] = await Promise.all([
+    readFile(resolve(repoRoot, 'pnpm-workspace.yaml'), 'utf8'),
+    readFile(resolve(repoRoot, 'pnpm-lock.yaml'), 'utf8'),
+    readFile(resolve(repoRoot, 'package.json'), 'utf8'),
+  ])
+  const pmOnFailEntries = workspaceSource.match(/^pmOnFail:.*$/gmu) ?? []
+  assert.deepEqual(pmOnFailEntries, ['pmOnFail: ignore'])
+
+  const documentMarkers = lockSource.match(/^---$/gmu) ?? []
+  assert.equal(documentMarkers.length, 0)
+  assert.ok(lockSource.startsWith('lockfileVersion:'))
+  const rootImporter = /^importers:\n(?:\n)* {2}\.:\n(?<body>(?: {4}.*(?:\n|$)|\n)*)/mu.exec(lockSource)?.groups?.body
+  assert.ok(rootImporter)
+
+  const rootPackage = JSON.parse(packageSource)
+  const rootDependencyNames = Object.keys({
+    ...rootPackage.dependencies,
+    ...rootPackage.devDependencies,
+    ...rootPackage.optionalDependencies,
+  })
+  assert.ok(rootDependencyNames.length > 0)
+  assert.ok(
+    rootDependencyNames.some((name) => {
+      const escapedName = escapeRegularExpression(name)
+      return new RegExp(`^      (?:${escapedName}|'${escapedName}'|"${escapedName}"):\\n`, 'mu').test(rootImporter)
+    }),
+  )
 })
