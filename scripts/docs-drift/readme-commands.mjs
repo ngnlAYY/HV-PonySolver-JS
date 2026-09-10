@@ -101,10 +101,12 @@ function checkDocumentedPnpmCommands(rootPackageJson, workspacePackageJsons, rea
 }
 
 function commandDescriptionMentions(readme, command, required) {
-  const escapedCommand = command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const commandRowPattern = new RegExp(`^\\|\\s*\`${escapedCommand}\`\\s*\\|(?<description>.*)\\|\\s*$`, 'm')
-  const description = commandRowPattern.exec(readme)?.groups?.description
-  return description?.includes(required) ?? false
+  const commandRowPattern = /^\|\s*`([^`]*)`\s*\|/
+  for (const line of readme.split(/\r?\n/u)) {
+    const match = commandRowPattern.exec(line)
+    if (match?.[1] === command) return line.slice(match[0].length).includes(required)
+  }
+  return false
 }
 
 export { checkRootCheckCommand }

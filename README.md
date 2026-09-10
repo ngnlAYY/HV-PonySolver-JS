@@ -267,7 +267,7 @@ apps/userscript/src/inference/onnx-runtime-assets.ts
 
 仓库根目录的 `mise.toml` 是本地与 GitHub Actions 的工具版本来源，精确固定 Node.js `24.15.0` 和 pnpm `12.3.0`；`package.json#engines` 保留 `>= 24.15.0` 的最低兼容要求，`package.json#packageManager` 与 mise 的 pnpm 版本保持一致。npm 包依赖仍由 pnpm 工作区和 `pnpm-lock.yaml` 管理。
 
-`pnpm-workspace.yaml` 显式设置 `pmOnFail: ignore`，使 pnpm 12 保持原生的单 project document 锁文件，而不是在项目依赖图前写入 package-manager environment document。提交的 `pnpm-lock.yaml` 因而不含 YAML document separator，可由 GitHub Dependency Graph 和 Pull Request Dependency Review 读取完整 workspace 依赖。该设置不把 pnpm 自身的 package-manager mismatch failure 当作版本门禁；精确版本继续由 mise、`packageManager` 声明、冻结安装和仓库级工具链契约测试共同保证。
+`pnpm-workspace.yaml` 显式设置 `pmOnFail: ignore`，使 pnpm 12 保持原生的单 project document 锁文件，而不是在项目依赖图前写入 package-manager environment document；同时启用 `blockExoticSubdeps: true`、`trustPolicy: no-downgrade`，对超过 10080 分钟（7 天）的既有版本使用 `trustPolicyIgnoreAfter: 10080`，并将新依赖的最短发布等待时间设为 10080 分钟。提交的 `pnpm-lock.yaml` 因而不含 YAML document separator，可由 GitHub Dependency Graph 和 Pull Request Dependency Review 读取完整 workspace 依赖；Cloudflare Workers 类型包通过 `minimumReleaseAgeExclude` 明确列为例外。上述设置不把 pnpm 自身的 package-manager mismatch failure 当作版本门禁；精确版本继续由 mise、`packageManager` 声明、冻结安装和仓库级工具链契约测试共同保证。
 
 按 [mise 官方说明](https://mise.jdx.dev/getting-started.html) 安装 mise 后，在仓库根目录安装工具与依赖：
 

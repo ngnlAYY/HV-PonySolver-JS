@@ -6,7 +6,7 @@
 
 仓库是 pnpm workspace，由根目录 [`mise.toml`](../../mise.toml) 固定 Node.js 24.15.0、pnpm 12.3.0。根 [`package.json`](../../package.json) 的 `engines.node` 是最低兼容要求 `>=24.15.0`，`packageManager` 固定为 `pnpm@12.3.0`。`mise.toml` 是本地和 GitHub Actions 的工具版本来源，不要重新引入 `.node-version`、Corepack 或 `setup-node` 作为第二套来源。
 
-[`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `pmOnFail: ignore` 是有意的兼容边界：pnpm 12 只维护不含 YAML document separator 的 project lock，而不在 [`pnpm-lock.yaml`](../../pnpm-lock.yaml) 前写 package-manager environment document。GitHub Dependency Graph 和 Pull Request Dependency Review 因此能读取 workspace 的真实依赖变化。代价是不能把 pnpm 自身的 package-manager mismatch failure 当成版本证明；本仓库改由 mise pin、`packageManager` 声明、`pnpm install --frozen-lockfile` 和 `node-version-contract.test.mjs` fail closed 保证一致性。
+[`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `pmOnFail: ignore` 是有意的兼容边界：pnpm 12 只维护不含 YAML document separator 的 project lock，而不在 [`pnpm-lock.yaml`](../../pnpm-lock.yaml) 前写 package-manager environment document。同时启用 `blockExoticSubdeps: true`、`trustPolicy: no-downgrade`，对超过 10080 分钟（7 天）的既有版本使用 `trustPolicyIgnoreAfter: 10080`，并将新依赖的最短发布等待时间设为 10080 分钟；Cloudflare Workers 类型包通过 `minimumReleaseAgeExclude` 明确列为例外。GitHub Dependency Graph 和 Pull Request Dependency Review 因此能读取 workspace 的真实依赖变化。代价是不能把 pnpm 自身的 package-manager mismatch failure 当成版本证明；本仓库改由 mise pin、`packageManager` 声明、`pnpm install --frozen-lockfile` 和 `node-version-contract.test.mjs` fail closed 保证一致性。
 
 首次准备环境：
 

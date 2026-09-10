@@ -350,15 +350,17 @@ function hasBearerAuthorizationAccessPath(source) {
   if (!authorization) {
     return false
   }
-  const execPattern = new RegExp(
-    String.raw`const\s+(?<match>[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*BEARER_AUTHORIZATION_PATTERN\.exec\(\s*${authorization}\.trim\(\s*\)\s*\)`,
-  )
-  const execMatch = execPattern.exec(stripIgnoredSyntax(body))
+  const normalizedBody = stripIgnoredSyntax(body)
+  const execMatch =
+    /const\s+(?<match>[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*BEARER_AUTHORIZATION_PATTERN\.exec\(\s*(?<authorization>[A-Za-z_$][A-Za-z0-9_$]*)\.trim\(\s*\)\s*\)/.exec(
+      normalizedBody,
+    )
   const matchVariable = execMatch?.groups?.match
-  if (!matchVariable) {
+  if (!matchVariable || execMatch.groups?.authorization !== authorization) {
     return false
   }
-  return new RegExp(String.raw`return\s+${matchVariable}\?\.\[\s*1\s*\]\s*\?\?\s*null`).test(stripIgnoredSyntax(body))
+  const returnMatch = /return\s+(?<match>[A-Za-z_$][A-Za-z0-9_$]*)\?\.\[\s*1\s*\]\s*\?\?\s*null/.exec(normalizedBody)
+  return returnMatch?.groups?.match === matchVariable
 }
 
 function readAuthorizationHeaderVariable(source) {
@@ -403,9 +405,9 @@ function hasBearerAuthorizationSelectionPath(source) {
   if (!tokenVariable) {
     return false
   }
-  const lookupKeysPattern = new RegExp(String.raw`getModelAccessTokenLookupKeys\(\s*${tokenVariable}\s*\)`)
-  const canonicalTokenPattern = new RegExp(String.raw`normalizeModelAccessToken\(\s*${tokenVariable}\s*\)`)
-  return lookupKeysPattern.test(body) && canonicalTokenPattern.test(body)
+  const lookupKeysMatch = /getModelAccessTokenLookupKeys\(\s*(?<argument>[A-Za-z_$][A-Za-z0-9_$]*)\s*\)/.exec(body)
+  const canonicalTokenMatch = /normalizeModelAccessToken\(\s*(?<argument>[A-Za-z_$][A-Za-z0-9_$]*)\s*\)/.exec(body)
+  return lookupKeysMatch?.groups?.argument === tokenVariable && canonicalTokenMatch?.groups?.argument === tokenVariable
 }
 
 // The Authorization header must be parsed exactly once per request: selectModelAccess reads it

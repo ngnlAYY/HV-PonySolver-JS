@@ -8,7 +8,9 @@ const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const workflowsDirectory = join(repositoryRoot, '.github', 'workflows')
 const externalActionKeyPattern = /(?:^[ \t]*(?:-[ \t]*)?|[{,][ \t]*)(?:"uses"|'uses'|uses)[ \t]*:[ \t]*(.*)$/
 const explicitExternalActionKeyPattern = /^[ \t]*(?:-[ \t]*)?\?[ \t]*(?:"uses"|'uses'|uses)[ \t]*(?:#.*)?$/
-const mappingKeyPattern = (name) => new RegExp(`^[ \\t]*(?:"${name}"|'${name}'|${name})[ \\t]*:[ \\t]*(.*)$`)
+const withMappingKeyPattern = /^[ \t]*(?:"with"|'with'|with)[ \t]*:[ \t]*(.*)$/
+const credentialMappingKeyPattern =
+  /^[ \t]*(?:"persist-credentials"|'persist-credentials'|persist-credentials)[ \t]*:[ \t]*(.*)$/
 const commitShaPattern = /^[0-9a-f]{40}$/
 const dockerDigestPattern = /^docker:\/\/[^@\s]+@sha256:[0-9a-f]{64}$/
 const violations = []
@@ -77,8 +79,8 @@ function actionStepBounds(lines, actionLineIndex) {
 
 function checkoutDisablesCredentialPersistence(lines, actionLineIndex) {
   const { start, end } = actionStepBounds(lines, actionLineIndex)
-  const withPattern = mappingKeyPattern('with')
-  const credentialPattern = mappingKeyPattern('persist-credentials')
+  const withPattern = withMappingKeyPattern
+  const credentialPattern = credentialMappingKeyPattern
   const values = []
 
   for (let index = start; index < end; index += 1) {

@@ -7,9 +7,7 @@ const repoRoot = resolve(import.meta.dirname, '../..')
 const expectedNodeVersion = '24.15.0'
 const expectedPnpmVersion = '12.3.0'
 
-function escapeRegularExpression(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
-}
+const rootImporterDependencyPattern = /^ {6}(?:"([^"]+)"|'([^']+)'|([^:\s]+)):\s*$/u
 
 test('mise pins Node and pnpm consistently with package metadata', async () => {
   const [miseSource, packageSource] = await Promise.all([
@@ -91,6 +89,10 @@ test('pnpm workspace has one fail-closed root lockfile document', async () => {
   ])
   const pmOnFailEntries = workspaceSource.match(/^pmOnFail:.*$/gmu) ?? []
   assert.deepEqual(pmOnFailEntries, ['pmOnFail: ignore'])
+  assert.match(workspaceSource, /^blockExoticSubdeps:\s*true$/mu)
+  assert.match(workspaceSource, /^minimumReleaseAge:\s*10080$/mu)
+  assert.match(workspaceSource, /^trustPolicy:\s*no-downgrade$/mu)
+  assert.match(workspaceSource, /^trustPolicyIgnoreAfter:\s*10080$/mu)
 
   const documentMarkers = lockSource.match(/^---$/gmu) ?? []
   assert.equal(documentMarkers.length, 0)
@@ -105,10 +107,13 @@ test('pnpm workspace has one fail-closed root lockfile document', async () => {
     ...rootPackage.optionalDependencies,
   })
   assert.ok(rootDependencyNames.length > 0)
+  const rootImporterLines = rootImporter.split(/\r?\n/u)
   assert.ok(
-    rootDependencyNames.some((name) => {
-      const escapedName = escapeRegularExpression(name)
-      return new RegExp(`^      (?:${escapedName}|'${escapedName}'|"${escapedName}"):\\n`, 'mu').test(rootImporter)
-    }),
+    rootDependencyNames.some((name) =>
+      rootImporterLines.some((line) => {
+        const match = rootImporterDependencyPattern.exec(line)
+        return (match?.[1] ?? match?.[2] ?? match?.[3]) === name
+      }),
+    ),
   )
 })

@@ -1,5 +1,3 @@
-import { escapeRegExp } from '../../../scripts/lib/strings.mjs'
-
 const requiredVariables = ['MODEL_KEYS_KV_NAMESPACE_ID', 'MODEL_BUCKET_NAME']
 const productionModes = new Set(['production', 'deploy'])
 const placeholderValues = new Set(['test-kv', 'test-bucket'])
@@ -73,18 +71,28 @@ function validateConfigValue(name, value, { allowTestPlaceholders = false } = {}
   return value
 }
 
+function hasTomlAssignment(line, assignment) {
+  const trimmed = line.trimStart()
+  return trimmed.startsWith(assignment) && /^\s*=/.test(trimmed.slice(assignment.length))
+}
+
+function readTomlQuotedAssignmentValue(line, assignment) {
+  if (!hasTomlAssignment(line, assignment)) return null
+  const trimmed = line.trimStart()
+  const match = /^\s*=\s*"([^"]*)"\s*$/.exec(trimmed.slice(assignment.length))
+  return match?.[1] ?? null
+}
+
 function readTomlStringAssignmentValues(content, assignment, sourceName) {
-  const escapedAssignment = escapeRegExp(assignment)
-  const assignmentPattern = new RegExp(`^\\s*${escapedAssignment}\\s*=`)
   return content
     .split('\n')
-    .filter((line) => assignmentPattern.test(line))
+    .filter((line) => hasTomlAssignment(line, assignment))
     .map((line) => {
-      const match = line.match(new RegExp(`^\\s*${escapedAssignment}\\s*=\\s*"([^"]*)"\\s*$`))
-      if (!match?.[1]) {
+      const value = readTomlQuotedAssignmentValue(line, assignment)
+      if (!value) {
         throw new Error(`${sourceName} ${assignment} must be a quoted TOML string without extra content`)
       }
-      return match[1]
+      return value
     })
 }
 
@@ -100,31 +108,33 @@ function readTomlStringAssignment(content, assignment, sourceName) {
 }
 
 function readTomlSingleStringArrayAssignment(content, assignment, sourceName) {
-  const escapedAssignment = escapeRegExp(assignment)
-  const assignmentPattern = new RegExp(`^\\s*${escapedAssignment}\\s*=`)
-  const lines = content.split('\n').filter((line) => assignmentPattern.test(line))
+  const lines = content.split('\n').filter((line) => hasTomlAssignment(line, assignment))
   if (lines.length === 0) {
     throw new Error(`${sourceName} must contain ${assignment}`)
   }
   if (lines.length > 1) {
     throw new Error(`${sourceName} must contain exactly one ${assignment}`)
   }
-  const match = lines[0].match(new RegExp(`^\\s*${escapedAssignment}\\s*=\\s*\\[\\s*"([^"]+)"\\s*\\]\\s*$`))
+  const trimmed = lines[0].trimStart()
+  const match = /^\s*=\s*\[\s*"([^"]+)"\s*\]\s*$/.exec(trimmed.slice(assignment.length))
   if (!match?.[1]) {
     throw new Error(`${sourceName} ${assignment} must be a single quoted TOML string array`)
   }
   return match[1]
 }
 
+function isTomlArrayTableHeader(line, tableName) {
+  const trimmed = line.trim()
+  return trimmed.startsWith('[[') && trimmed.endsWith(']]') && trimmed.slice(2, -2).trim() === tableName
+}
+
 function readTomlArrayTableBlocks(content, tableName) {
-  const escapedTableName = escapeRegExp(tableName)
-  const tableHeaderPattern = new RegExp(`^\\s*\\[\\[\\s*${escapedTableName}\\s*\\]\\]\\s*$`)
   const anyTableHeaderPattern = /^\s*\[/
   const blocks = []
   let currentBlock = null
 
   for (const line of content.split('\n')) {
-    if (tableHeaderPattern.test(line)) {
+    if (isTomlArrayTableHeader(line, tableName)) {
       if (currentBlock) {
         blocks.push(currentBlock.join('\n'))
       }

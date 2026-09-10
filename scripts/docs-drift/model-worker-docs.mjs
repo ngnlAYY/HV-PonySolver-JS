@@ -1,4 +1,3 @@
-import { escapeRegExp } from '../lib/strings.mjs'
 import { readModelWorkerHttpFacts } from './model-worker-source-facts.mjs'
 
 function checkModelWorkerDocs(readme, facts) {
@@ -258,10 +257,16 @@ function checkPreflightDocs(errors, line, routeName, allowMethods, allowHeaders)
 }
 
 function findModelWorkerHttpRow(lines, method, pathPrefix = '/') {
-  const escapedMethod = escapeRegExp(method)
-  const escapedPathPrefix = escapeRegExp(pathPrefix)
-  const rowPattern = new RegExp(`^\\|\\s*\`${escapedMethod}\\s+${escapedPathPrefix}`)
-  return lines.find((line) => rowPattern.test(line)) ?? ''
+  const rowPattern = /^\|\s*`([^`]*)`/
+  for (const line of lines) {
+    const match = rowPattern.exec(line)
+    const request = match?.[1]
+    if (!request) continue
+    const separator = request.search(/\s/u)
+    if (separator < 0 || request.slice(0, separator) !== method) continue
+    if (request.slice(separator).trimStart().startsWith(pathPrefix)) return line
+  }
+  return ''
 }
 
 function findMethodNotAllowedDocsLine(lines) {
@@ -269,8 +274,17 @@ function findMethodNotAllowedDocsLine(lines) {
 }
 
 function lineMentionsHeaderValue(line, headerName, value) {
-  const escapedHeaderValue = escapeRegExp(`${headerName}: ${value}`)
-  return new RegExp(`(?:\`${escapedHeaderValue}\`|${escapedHeaderValue}(?=$|[\\s，。;；|)]))`).test(line)
+  const headerValue = `${headerName}: ${value}`
+  if (line.includes(`\`${headerValue}\``)) return true
+  for (
+    let index = line.indexOf(headerValue);
+    index >= 0;
+    index = line.indexOf(headerValue, index + headerValue.length)
+  ) {
+    const next = line[index + headerValue.length]
+    if (next === undefined || /[\s，。;；|)]/u.test(next)) return true
+  }
+  return false
 }
 
 function isMethodNotAllowedDocsLine(line) {

@@ -32,17 +32,22 @@ function extractObject(source, property, sourcePath) {
 }
 
 function readString(source, property, context) {
-  const match = source.match(new RegExp(`(?:^|\\n)\\s*${property}:\\s*'([^']+)'\\s*,?`, 'm'))
-  if (!match?.[1]) throw new Error(`Unable to read ${context}.${property}`)
-  return match[1]
+  const propertyPattern = /(?:^|\n)\s*(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*'(?<value>[^']+)'\s*,?/gm
+  for (const match of source.matchAll(propertyPattern)) {
+    if (match.groups?.name === property) return match.groups.value
+  }
+  throw new Error(`Unable to read ${context}.${property}`)
 }
 
 function readInteger(source, property, context) {
-  const match = source.match(new RegExp(`(?:^|\\n)\\s*${property}:\\s*([0-9][0-9_]*)\\s*,?`, 'm'))
-  if (!match?.[1]) throw new Error(`Unable to read ${context}.${property}`)
-  const value = Number(match[1].replaceAll('_', ''))
-  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid ${context}.${property}`)
-  return value
+  const propertyPattern = /(?:^|\n)\s*(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(?<value>[0-9][0-9_]*)\s*,?/gm
+  for (const match of source.matchAll(propertyPattern)) {
+    if (match.groups?.name !== property) continue
+    const value = Number(match.groups.value.replaceAll('_', ''))
+    if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid ${context}.${property}`)
+    return value
+  }
+  throw new Error(`Unable to read ${context}.${property}`)
 }
 
 function readAsset(source, property, sourcePath, stringFields) {
