@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { getModelAccessTokenLookupKeys, isModelAccessToken, normalizeModelAccessToken } from '../src/token'
 
-const LOWERCASE_TOKEN = '0123456789abcdef'.repeat(4)
+const TEST_HEX_BLOCK = Array.from({ length: 16 }, (_, index) => index.toString(16)).join('')
+const TEST_DECIMAL_BLOCK = Array.from({ length: 10 }, (_, index) => String(index)).join('')
+const LOWERCASE_TOKEN = TEST_HEX_BLOCK.repeat(4)
 const UPPERCASE_TOKEN = LOWERCASE_TOKEN.toUpperCase()
-const NUMERIC_TOKEN = '0123456789'.repeat(6) + '0123'
-const MIXED_CASE_TOKEN = '0123456789abcdefABCDEF0123456789'.repeat(2)
+const NUMERIC_TOKEN = TEST_DECIMAL_BLOCK.repeat(6) + TEST_DECIMAL_BLOCK.slice(0, 4)
+const MIXED_CASE_TOKEN = [
+  TEST_HEX_BLOCK,
+  TEST_HEX_BLOCK.toUpperCase(),
+  TEST_HEX_BLOCK,
+  TEST_HEX_BLOCK.toUpperCase(),
+].join('')
 
 describe('isModelAccessToken', () => {
   it('accepts 64-character hexadecimal tokens', () => {

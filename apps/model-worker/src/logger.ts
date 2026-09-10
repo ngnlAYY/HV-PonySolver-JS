@@ -26,8 +26,7 @@ function sanitizeFieldValue(value: string): string {
 
 function formatFields(fields: WorkerLogFields): string {
   return Object.entries(fields)
-    .filter(([name]) => ALLOWED_FIELD_NAMES.has(name))
-    .map(([name, value]) => `${name}=${sanitizeFieldValue(String(value))}`)
+    .flatMap(([name, value]) => (ALLOWED_FIELD_NAMES.has(name) ? [`${name}=${sanitizeFieldValue(String(value))}`] : []))
     .join(' ')
 }
 

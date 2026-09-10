@@ -114,6 +114,8 @@ function completeRecord(record: HistoryRecord, sequence: number): HistoryRecord 
       }
     case 'error':
       return { ...base, type: record.type, message: record.message.slice(0, HISTORY_TEXT_MAX_LENGTH) }
+    default:
+      throw new Error('未知历史记录类型')
   }
 }
 
@@ -233,6 +235,41 @@ export class HistoryStore {
     return this.legacyRoot
   }
 
+  private cacheParsedEntry(key: string, cached: Readonly<{ raw: string; record: HistoryRecord | null }>): void {
+    const shouldEvict = !this.parsedEntries.has(key) && this.parsedEntries.size >= HISTORY_MAX * 2
+    if (shouldEvict) {
+      const oldest = this.parsedEntries.keys().next().value
+      if (oldest !== undefined) this.parsedEntries.delete(oldest)
+    }
+    this.parsedEntries.set(key, cached)
+  }
+
+  private readKeyedRecord(key: string, value: string, invalidKeys: string[]): KeyedHistoryRecord | null {
+    if (value.length > HISTORY_ENTRY_MAX_LENGTH) {
+      this.parsedEntries.delete(key)
+      invalidKeys.push(key)
+      return null
+    }
+    try {
+      let cached = this.parsedEntries.get(key)
+      if (!cached || cached.raw !== value) {
+        const parsed: unknown = JSON.parse(value)
+        cached = { raw: value, record: isHistoryRecord(parsed) ? parsed : null }
+        this.cacheParsedEntry(key, cached)
+      }
+      if (!cached.record) {
+        invalidKeys.push(key)
+        return null
+      }
+      return { key, record: cached.record }
+    } catch (error) {
+      this.parsedEntries.delete(key)
+      invalidKeys.push(key)
+      warn('读取单条记录失败:', formatErrorMessage(error))
+      return null
+    }
+  }
+
   private getKeyedRecords(
     storage: EnumerableTextStorage,
     world: World,
@@ -244,31 +281,9 @@ export class HistoryStore {
     try {
       for (const [key, value] of storage.getItemsByPrefix(prefix)) {
         presentKeys.add(key)
-        try {
-          if (value.length > HISTORY_ENTRY_MAX_LENGTH) {
-            this.parsedEntries.delete(key)
-            invalidKeys.push(key)
-            continue
-          }
-          let cached = this.parsedEntries.get(key)
-          if (!cached || cached.raw !== value) {
-            const parsed: unknown = JSON.parse(value)
-            cached = { raw: value, record: isHistoryRecord(parsed) ? parsed : null }
-            if (!this.parsedEntries.has(key) && this.parsedEntries.size >= HISTORY_MAX * 2) {
-              const oldest = this.parsedEntries.keys().next().value
-              if (oldest !== undefined) this.parsedEntries.delete(oldest)
-            }
-            this.parsedEntries.set(key, cached)
-          }
-          if (cached.record) {
-            records.push({ key, record: cached.record })
-          } else {
-            invalidKeys.push(key)
-          }
-        } catch (error) {
-          this.parsedEntries.delete(key)
-          invalidKeys.push(key)
-          warn('读取单条记录失败:', formatErrorMessage(error))
+        const record = this.readKeyedRecord(key, value, invalidKeys)
+        if (record) {
+          records.push(record)
         }
       }
     } catch (error) {

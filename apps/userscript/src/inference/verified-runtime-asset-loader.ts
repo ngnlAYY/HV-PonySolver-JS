@@ -13,8 +13,24 @@ export type VerifiedRuntimeAsset = Readonly<{
   maxByteLength: number
 }>
 
-function abortReason(signal: AbortSignal | undefined, label: string): unknown {
-  return signal?.reason ?? new DOMException(`${label} 下载已取消`, 'AbortError')
+function abortReason(signal: AbortSignal | undefined, label: string): Error | DOMException {
+  const reason = signal?.reason
+  return reason instanceof Error || reason instanceof DOMException
+    ? reason
+    : new DOMException(`${label} 下载已取消`, 'AbortError')
+}
+
+function cancelLateResponse(responsePromise: Promise<Response>, signal: AbortSignal, label: string): void {
+  responsePromise
+    .then(
+      (lateResponse) => {
+        if (signal.aborted) {
+          cancelBody(lateResponse.body, abortReason(signal, label))
+        }
+      },
+      () => undefined,
+    )
+    .catch(() => undefined)
 }
 
 async function readBoundedResponse(
@@ -56,20 +72,16 @@ export async function loadVerifiedRuntimeAsset(
   if (signal?.aborted) {
     throw abortReason(signal, label)
   }
-  const responsePromise = resolveFetchImplementation(fetchImpl)(expected.url, {
+  const requestInit: RequestInit = {
     cache: 'force-cache',
     redirect: 'error',
-    ...(signal ? { signal } : {}),
-  })
+  }
   if (signal) {
-    void responsePromise.then(
-      (lateResponse) => {
-        if (signal.aborted) {
-          cancelBody(lateResponse.body, abortReason(signal, label))
-        }
-      },
-      () => undefined,
-    )
+    requestInit.signal = signal
+  }
+  const responsePromise = resolveFetchImplementation(fetchImpl)(expected.url, requestInit)
+  if (signal) {
+    cancelLateResponse(responsePromise, signal, label)
   }
   const response = await raceAbort(responsePromise, signal, () => abortReason(signal, label))
   if (signal?.aborted) {

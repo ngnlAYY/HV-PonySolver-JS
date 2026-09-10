@@ -13,7 +13,7 @@ import { logError } from '@hv-pony-solver/browser-core/utils/logger'
 import { RemoteDetectorClient } from './remote-detector-client'
 import { watchModelCredentialsRevision } from './credentials-watch'
 import { startContentRuntime } from './content-runtime'
-import { scheduleExperiencedPrefetch } from './prefetch'
+import { scheduleExperiencedPrefetch as scheduleExperiencedWarmup } from './prefetch'
 import { ExtensionStorageMirror } from './storage-mirror'
 import { isContentStorageKey } from './storage-config'
 
@@ -44,13 +44,14 @@ function createContentApp(storage: ExtensionStorageMirror): App {
   })
   appReference.current = app
   watchModelCredentialsRevision(storage, () => appReference.current?.recoverAfterModelCredentialsChanged())
-  scheduleExperiencedPrefetch(history, detector, () => appReference.current?.getAbortSignal())
+  scheduleExperiencedWarmup(history, detector, () => appReference.current?.getAbortSignal())
   return app
 }
 
-void startContentRuntime(
+const startupPromise = startContentRuntime(
   (signal) => ExtensionStorageMirror.create({ signal, acceptsKey: isContentStorageKey }),
   createContentApp,
-).catch((error: unknown) => {
+)
+void Promise.resolve(startupPromise).then(undefined, (error: unknown) => {
   logError('扩展启动失败:', error instanceof Error ? error.message : String(error))
 })

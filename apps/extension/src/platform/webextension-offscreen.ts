@@ -8,12 +8,14 @@ export type ChromiumOffscreenApi = Readonly<{
 
 export function getChromiumOffscreenApi(): ChromiumOffscreenApi {
   const { api } = resolveRawExtensionApi()
-  if (!api.runtime.getContexts || !api.offscreen) {
+  const getContexts = api.runtime.getContexts
+  const offscreen = api.offscreen
+  if (!getContexts || !offscreen) {
     throw new Error('当前 Chromium 不支持 Offscreen Document')
   }
   return {
-    getContexts: (filter) => api.runtime.getContexts!(filter),
-    createDocument: (options) => api.offscreen!.createDocument(options),
-    closeDocument: () => api.offscreen!.closeDocument(),
+    getContexts: (filter) => getContexts.call(api.runtime, filter),
+    createDocument: (options) => offscreen.createDocument(options),
+    closeDocument: () => offscreen.closeDocument(),
   }
 }

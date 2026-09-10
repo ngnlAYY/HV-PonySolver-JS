@@ -221,10 +221,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       return textResponse(request, 'Not Found', 404)
     }
     if (request.method === 'OPTIONS') {
+      if (isRuntime) {
+        return preflightResponse(request, {
+          allowMethods: ALLOWED_METHODS,
+          isPublic: true,
+        })
+      }
       return preflightResponse(request, {
         allowMethods: isQuota ? QUOTA_ALLOWED_METHODS : ALLOWED_METHODS,
-        ...(isRuntime ? {} : { allowHeaders: isQuota ? QUOTA_ALLOWED_HEADERS : MODEL_ALLOWED_HEADERS }),
-        isPublic: isRuntime,
+        allowHeaders: isQuota ? QUOTA_ALLOWED_HEADERS : MODEL_ALLOWED_HEADERS,
+        isPublic: false,
       })
     }
     const methodAllowed = isQuota

@@ -43,14 +43,14 @@ function requestHostAttempt(
   options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }>,
 ): Promise<HostSuccessResponse> {
   const { signal, timeoutMs = 95_000 } = options
-  const operationName =
-    request.type === 'verify-key'
-      ? 'Key 验证'
-      : request.type === 'clear-key'
-        ? 'Key 清除'
-        : request.type === 'query-model-quota'
-          ? '额度查询'
-          : '模型下载'
+  let operationName = '模型下载'
+  if (request.type === 'verify-key') {
+    operationName = 'Key 验证'
+  } else if (request.type === 'clear-key') {
+    operationName = 'Key 清除'
+  } else if (request.type === 'query-model-quota') {
+    operationName = '额度查询'
+  }
   if (signal?.aborted) {
     return Promise.reject(new Error(`${operationName}已取消`))
   }

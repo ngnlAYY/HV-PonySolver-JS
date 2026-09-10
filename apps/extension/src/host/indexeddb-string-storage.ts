@@ -264,15 +264,17 @@ export class IndexedDbStringStorage implements AsyncStringStorage {
         })
       transaction.onerror = () => finish(() => reject(transaction.error ?? new Error('IndexedDB 事务失败')))
       transaction.onabort = () =>
-        finish(() =>
-          reject(
-            signal?.aborted
-              ? new Error('扩展 Key 存储操作已取消')
-              : generation !== this.generation
-                ? new Error('扩展 Key 数据库已关闭')
-                : (transaction.error ?? new Error('IndexedDB 事务已中止')),
-          ),
-        )
+        finish(() => {
+          let error: Error
+          if (signal?.aborted) {
+            error = new Error('扩展 Key 存储操作已取消')
+          } else if (generation !== this.generation) {
+            error = new Error('扩展 Key 数据库已关闭')
+          } else {
+            error = transaction.error ?? new Error('IndexedDB 事务已中止')
+          }
+          reject(error)
+        })
       if (signal?.aborted) {
         abortFromSignal()
       } else if (generation !== this.generation) {

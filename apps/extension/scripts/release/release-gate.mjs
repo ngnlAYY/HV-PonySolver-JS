@@ -18,6 +18,14 @@ const requiredTargets = ['chromium', 'firefox']
 const packagedContentSecurityPolicy =
   "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'"
 
+async function readJsonFile(filename, label) {
+  try {
+    return JSON.parse(await readFile(filename, 'utf8'))
+  } catch (error) {
+    throw new Error(`${label} is invalid: ${filename}`, { cause: error })
+  }
+}
+
 function assertExactCanonicalIdentity(identity, label) {
   for (const key of ['filename', 'byteLength', 'sha256']) {
     if (identity?.[key] !== canonicalIdentity[key]) {
@@ -284,7 +292,7 @@ async function run(args) {
       await Promise.all(
         requiredTargets.map(async (target) => [
           target,
-          JSON.parse(await readFile(path.join(options.evidenceDir, `${target}.json`), 'utf8')),
+          await readJsonFile(path.join(options.evidenceDir, `${target}.json`), `${target} E2E evidence`),
         ]),
       ),
     )
@@ -294,8 +302,8 @@ async function run(args) {
   }
   validateReleaseGate({
     artifacts: await discoverArtifacts(options.outputRoot),
-    attestation: JSON.parse(await readFile(options.attestationPath, 'utf8')),
-    androidEvidence: JSON.parse(await readFile(options.androidEvidencePath, 'utf8')),
+    attestation: await readJsonFile(options.attestationPath, 'canonical gate attestation'),
+    androidEvidence: await readJsonFile(options.androidEvidencePath, 'Firefox Android evidence'),
   })
   process.stdout.write('Canonical extension release gate passed, including external Firefox Android 142 evidence\n')
 }

@@ -2,7 +2,11 @@ import { inferenceTimeoutConfig } from '../inference/inference-config'
 import { resolveFetchImplementation } from '../platform/fetch'
 import { readBoundedByteStream } from '../platform/byte-stream'
 import { raceAbort } from '../utils/abort-race'
-import { MODEL_DOWNLOAD_RECEIPT_HEADER, normalizeModelDownloadReceiptId } from '@hv-pony-solver/shared'
+import {
+  MODEL_DOWNLOAD_RECEIPT_HEADER,
+  MODEL_MONTHLY_DOWNLOAD_LIMIT,
+  normalizeModelDownloadReceiptId,
+} from '@hv-pony-solver/shared'
 import {
   clearModelDownloadConfirmation,
   getModelDownloadConfirmation,
@@ -283,8 +287,14 @@ async function readModelResponse(
   }
   // Suspicious declarations collect into chunks instead of a pre-sized buffer:
   // their length claim is unproven until the caller's hash check passes.
-  const expectedContentLength =
-    declaredByteLength === null ? expectedByteLength : trustDeclared ? declaredByteLength : null
+  let expectedContentLength: number | null
+  if (declaredByteLength === null) {
+    expectedContentLength = expectedByteLength
+  } else if (trustDeclared) {
+    expectedContentLength = declaredByteLength
+  } else {
+    expectedContentLength = null
+  }
   return readBoundedByteStream(response.body, {
     expectedByteLength: expectedContentLength,
     maxByteLength: expectedByteLength === null ? maxByteLength : Math.min(expectedByteLength, maxByteLength),
@@ -393,7 +403,7 @@ function parseQuotaStatus(value: unknown): ModelDownloadQuotaStatus {
   }
   if (
     !isSafeNonNegativeInteger(candidate.limit) ||
-    candidate.limit < 1 ||
+    candidate.limit !== MODEL_MONTHLY_DOWNLOAD_LIMIT ||
     !isSafeNonNegativeInteger(candidate.used) ||
     candidate.used > candidate.limit ||
     !isSafeNonNegativeInteger(candidate.remaining) ||

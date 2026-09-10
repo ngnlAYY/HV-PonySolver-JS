@@ -89,8 +89,19 @@ function isStoredQuotaState(value: unknown): value is StoredQuotaState {
     return false
   }
 
+  const confirmedIds = new Set<string>()
+  for (let index = 0; index < confirmed.length; index += 1) {
+    if (!Object.hasOwn(confirmed, index)) {
+      return false
+    }
+    const receiptId = confirmed[index]
+    if (typeof receiptId !== 'string' || normalizeModelDownloadReceiptId(receiptId) !== receiptId) {
+      return false
+    }
+    confirmedIds.add(receiptId)
+  }
+
   const pendingEntries = Object.entries(pending)
-  const confirmedIds = new Set(confirmed)
   return (
     pendingEntries.length + used <= MODEL_MONTHLY_DOWNLOAD_LIMIT &&
     pendingEntries.every(
@@ -102,9 +113,6 @@ function isStoredQuotaState(value: unknown): value is StoredQuotaState {
         !confirmedIds.has(receiptId),
     ) &&
     confirmed.length === used &&
-    confirmed.every(
-      (receiptId) => typeof receiptId === 'string' && normalizeModelDownloadReceiptId(receiptId) === receiptId,
-    ) &&
     confirmedIds.size === confirmed.length
   )
 }
@@ -158,15 +166,26 @@ function isQuotaStatus(value: unknown): value is ModelDownloadQuotaStatus {
     return false
   }
   const candidate = value as Partial<ModelDownloadQuotaStatus>
-  const numbers = [candidate.limit, candidate.used, candidate.remaining, candidate.retryAfterSeconds]
+  const { limit, used, remaining, retryAfterSeconds } = candidate
+  if (
+    typeof limit !== 'number' ||
+    !Number.isSafeInteger(limit) ||
+    typeof used !== 'number' ||
+    !Number.isSafeInteger(used) ||
+    typeof remaining !== 'number' ||
+    !Number.isSafeInteger(remaining) ||
+    typeof retryAfterSeconds !== 'number' ||
+    !Number.isSafeInteger(retryAfterSeconds)
+  ) {
+    return false
+  }
   return (
-    numbers.every((number) => typeof number === 'number' && Number.isSafeInteger(number)) &&
-    candidate.limit! > 0 &&
-    candidate.used! >= 0 &&
-    candidate.used! <= candidate.limit! &&
-    candidate.remaining! >= 0 &&
-    candidate.remaining! === candidate.limit! - candidate.used! &&
-    candidate.retryAfterSeconds! > 0
+    limit === MODEL_MONTHLY_DOWNLOAD_LIMIT &&
+    used >= 0 &&
+    used <= limit &&
+    remaining >= 0 &&
+    remaining === limit - used &&
+    retryAfterSeconds > 0
   )
 }
 
@@ -217,7 +236,12 @@ function confirmationResult(
 
 export class ModelDownloadQuota extends DurableObject<Record<string, never>> {
   async fetch(request: Request): Promise<Response> {
-    const pathname = new URL(request.url).pathname
+    let pathname: string
+    try {
+      pathname = new URL(request.url).pathname
+    } catch {
+      return new Response('Not Found', { status: 404 })
+    }
     if (
       (pathname !== RESERVE_PATH && pathname !== CONFIRM_PATH && pathname !== STATUS_PATH) ||
       request.method !== 'POST'

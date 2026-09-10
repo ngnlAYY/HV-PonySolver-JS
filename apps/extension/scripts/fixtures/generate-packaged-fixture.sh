@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-EXTENSION_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)"
-REPOSITORY_ROOT="$(CDPATH= cd -- "$EXTENSION_ROOT/../.." && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+EXTENSION_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
+REPOSITORY_ROOT="$(CDPATH='' cd -- "$EXTENSION_ROOT/../.." && pwd)"
 FIXTURE_ROOT="$EXTENSION_ROOT/test/fixtures/packaged-model"
 VENV="${PACKAGED_FIXTURE_VENV:-$REPOSITORY_ROOT/.tmp/packaged-fixture-venv}"
 PIP_VERSION=26.1.1

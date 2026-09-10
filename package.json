@@ -54,6 +54,11 @@
     "build:onnx-runtime": "bash scripts/ort-runtime/build-minimal-ort-runtime.sh",
     "verify:onnx-runtime": "pnpm --filter @hv-pony-solver/userscript verify:onnx-runtime"
   },
+  "knip": {
+    "ignoreDependencies": [
+      "cloudflare"
+    ]
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.2.0",

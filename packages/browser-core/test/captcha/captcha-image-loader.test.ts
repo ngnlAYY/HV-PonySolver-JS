@@ -14,6 +14,12 @@ import * as logger from '../../src/utils/logger'
 const FAKE_URL = 'https://hentaiverse.org/captcha/image.jpg'
 const FAKE_BYTES = new TextEncoder().encode('fake-image')
 
+function bodyBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  return copy.buffer
+}
+
 function makeOkResponse(
   bytes: Uint8Array = FAKE_BYTES,
   headers: HeadersInit = {
@@ -21,7 +27,7 @@ function makeOkResponse(
     'content-length': String(bytes.byteLength),
   },
 ): Response {
-  return new Response(bytes, { status: 200, headers })
+  return new Response(bodyBuffer(bytes), { status: 200, headers })
 }
 
 function makeFailResponse(status: number): Response {
@@ -71,6 +77,41 @@ describe('CachedImageLoader', () => {
     expect(fetchStub).toHaveBeenCalledTimes(2)
     expect(logger.warn).toHaveBeenCalledTimes(1)
     expect(vi.mocked(logger.warn).mock.calls[0][0]).toContain('仅缓存读取失败')
+  })
+
+  it('preserves the browser receiver when calling the default fetch', async () => {
+    const fetchStub = vi.fn(function (this: typeof globalThis): Promise<Response> {
+      if (this !== globalThis) {
+        throw new TypeError('Illegal invocation')
+      }
+      return Promise.resolve(makeOkResponse())
+    })
+    globalThis.fetch = fetchStub
+
+    await expect(new CachedImageLoader().get(FAKE_URL)).resolves.toBeInstanceOf(Blob)
+    expect(fetchStub).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels streamed non-OK response bodies before falling back or throwing', async () => {
+    const firstCancel = vi.fn(async () => undefined)
+    const secondCancel = vi.fn(async () => undefined)
+    const firstResponse = {
+      ok: false,
+      status: 504,
+      headers: new Headers(),
+      body: { cancel: firstCancel },
+    } as unknown as Response
+    const secondResponse = {
+      ok: false,
+      status: 503,
+      headers: new Headers(),
+      body: { cancel: secondCancel },
+    } as unknown as Response
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(firstResponse).mockResolvedValueOnce(secondResponse)
+
+    await expect(new CachedImageLoader().get(FAKE_URL)).rejects.toThrow('图片缓存不可用: HTTP 503 (回退也失败)')
+    expect(firstCancel).toHaveBeenCalledTimes(1)
+    expect(secondCancel).toHaveBeenCalledTimes(1)
   })
 
   it('falls back after a cache fetch throws and logs a warning', async () => {
@@ -139,7 +180,7 @@ describe('CachedImageLoader', () => {
     'image/png; charset="unterminated',
   ])('rejects unsupported or malformed Content-Type %j before reading the body', async (type) => {
     const body = { cancel: vi.fn(async () => undefined), getReader: vi.fn() }
-    const headers = type === null ? {} : { 'content-type': type }
+    const headers: HeadersInit = type === null ? {} : { 'content-type': type }
     globalThis.fetch = vi
       .fn()
       .mockResolvedValueOnce(makeStreamResponse(body as unknown as ReadableStream<Uint8Array>, headers))
@@ -258,7 +299,9 @@ describe('CachedImageLoader', () => {
     const controller = new AbortController()
 
     const loadPromise = new CachedImageLoader().get(FAKE_URL, controller.signal)
-    const requestSignal = (fetchStub.mock.calls[0]?.[1] as RequestInit | undefined)?.signal
+    const requestSignal = (
+      fetchStub.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit | undefined]>
+    )[0]?.[1]?.signal
     controller.abort()
 
     await expect(loadPromise).rejects.toMatchObject({ name: 'AbortError' })
@@ -298,7 +341,9 @@ describe('CachedImageLoader', () => {
 
     const loadPromise = new CachedImageLoader(100).get(FAKE_URL)
     const rejection = expect(loadPromise).rejects.toMatchObject({ name: 'TimeoutError' })
-    const requestSignal = (fetchStub.mock.calls[0]?.[1] as RequestInit | undefined)?.signal
+    const requestSignal = (
+      fetchStub.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit | undefined]>
+    )[0]?.[1]?.signal
     await vi.advanceTimersByTimeAsync(100)
     expect(requestSignal?.aborted).toBe(true)
 

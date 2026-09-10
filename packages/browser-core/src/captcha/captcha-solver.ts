@@ -71,21 +71,24 @@ export class CaptchaSolver {
     return this.busy
   }
 
-  trigger(target: CaptchaTarget | null = findCaptchaTarget(), startedAt = performance.now()): Promise<SolveResult> {
+  trigger(
+    target: CaptchaTarget | null = findCaptchaTarget(),
+    startedAt = performance.now(),
+    signal: AbortSignal | undefined = this.getAbortSignal?.(),
+  ): Promise<SolveResult> {
     if (this.busy) {
       return Promise.resolve({ handled: false, captchaKey: null })
     }
     this.busy = true
-    return this.solve(target, startedAt).finally(() => {
+    return this.solve(target, startedAt, signal).finally(() => {
       this.busy = false
     })
   }
 
-  private async solve(target: CaptchaTarget | null, startedAt: number): Promise<SolveResult> {
+  private async solve(target: CaptchaTarget | null, startedAt: number, signal?: AbortSignal): Promise<SolveResult> {
     const elapsed = (): number => Math.round(performance.now() - startedAt)
     let captchaKey: string | null = null
     const result = (handled: boolean): SolveResult => ({ handled, captchaKey })
-    const signal: AbortSignal | undefined = this.getAbortSignal?.()
     const isCurrent = (): boolean =>
       signal?.aborted !== true && target !== null && isSameCaptchaTarget(target, findCaptchaTarget())
     const canRecordError = (): boolean =>

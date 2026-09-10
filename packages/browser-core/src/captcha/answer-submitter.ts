@@ -269,37 +269,31 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       options?.confidences,
     )
 
+    const indicesToClear: number[] = []
     if (!preserveCheckedAnswers) {
       for (let i = 0; i < expectedControls.checkboxes.length; i += 1) {
-        const controls = currentControls()
-        if (!controls) {
-          return
-        }
-        const checkbox = controls.checkboxes[i]
-        if (checkbox?.checked) {
-          this.clickCheckbox(checkbox)
-        }
-        if (checkbox) {
-          this.automaticConfidences.delete(checkbox)
-        }
+        indicesToClear.push(i)
       }
     } else {
       const selectedAutomatic = new Set(automaticIndices)
       for (const index of previouslyAutomatic.keys()) {
-        if (selectedAutomatic.has(index)) {
-          continue
+        if (!selectedAutomatic.has(index)) {
+          indicesToClear.push(index)
         }
-        const controls = currentControls()
-        if (!controls) {
-          return
-        }
-        const checkbox = controls.checkboxes[index]
-        if (checkbox?.checked) {
-          this.clickCheckbox(checkbox)
-        }
-        if (checkbox) {
-          this.automaticConfidences.delete(checkbox)
-        }
+      }
+    }
+
+    for (const index of indicesToClear) {
+      const controls = currentControls()
+      if (!controls) {
+        return
+      }
+      const checkbox = controls.checkboxes[index]
+      if (checkbox?.checked) {
+        this.clickCheckbox(checkbox)
+      }
+      if (checkbox) {
+        this.automaticConfidences.delete(checkbox)
       }
     }
 

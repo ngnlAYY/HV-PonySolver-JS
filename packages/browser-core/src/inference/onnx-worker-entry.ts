@@ -64,6 +64,9 @@ export function startOnnxWorker(
   initializeRuntime: RuntimeInitializer,
   hooks: WorkerHooks = {},
 ): void {
+  // SAFETY: This module is only loaded in a dedicated worker, whose global
+  // scope implements WorkerScope even though TypeScript cannot express that
+  // relationship for globalThis.
   const workerScope = globalThis as unknown as WorkerScope
   let session: Ort.InferenceSession | undefined
   let runtimeInitialization: Promise<void> | undefined

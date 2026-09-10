@@ -617,7 +617,6 @@ describe('AnswerSubmitter', () => {
         const initialAction = form.action
         const initialButton = form.querySelector<HTMLInputElement>('#riddlesubmit')!
         initialButton.click = vi.fn()
-        let replacementButton: HTMLInputElement | null = null
         ts.addEventListener(
           'change',
           () => {
@@ -625,7 +624,7 @@ describe('AnswerSubmitter', () => {
               form.action = '/other-submit'
               return
             }
-            replacementButton = initialButton.cloneNode(true) as HTMLInputElement
+            const replacementButton = initialButton.cloneNode(true) as HTMLInputElement
             initialButton.replaceWith(replacementButton)
           },
           { once: true },
@@ -643,7 +642,8 @@ describe('AnswerSubmitter', () => {
         expect(initialButton.click).not.toHaveBeenCalled()
 
         form.action = initialAction
-        if (replacementButton) {
+        const replacementButton = form.querySelector<HTMLInputElement>('#riddlesubmit')
+        if (replacementButton && replacementButton !== initialButton) {
           replacementButton.click = vi.fn()
         }
         const nextSubmit = submitter.submit(form, ['RA', 'FS', 'RD', 'PP'], vi.fn(), vi.fn(), {

@@ -109,11 +109,9 @@ export class ModelCache {
       await this.store.write([row, confirmation], context)
       this.store.assertOperationActive(context)
       const confirmationController = new AbortController()
-      await this.store.waitForOperation(
-        Promise.resolve().then(() => confirmCachedModelDownload(buffer, confirmationController.signal)),
-        context,
-        '模型下载缓存确认超时',
-        () => confirmationController.abort(new ModelCacheLifecycleError('模型缓存操作已取消')),
+      const confirmationPromise = confirmCachedModelDownload(buffer, confirmationController.signal)
+      await this.store.waitForOperation(confirmationPromise, context, '模型下载缓存确认超时', () =>
+        confirmationController.abort(new ModelCacheLifecycleError('模型缓存操作已取消')),
       )
       this.store.assertOperationActive(context)
       if (confirmationPending) await this.store.confirm(confirmation, context)

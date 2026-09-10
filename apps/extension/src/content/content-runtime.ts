@@ -17,6 +17,10 @@ function reportRestoreError(error: unknown): void {
   logError('扩展恢复失败:', error instanceof Error ? error.message : String(error))
 }
 
+function runRestore(initialize: () => Promise<unknown>, onError: (error: unknown) => void): void {
+  initialize().catch(onError)
+}
+
 export async function startContentRuntime<TStorage extends ContentRuntimeStorage>(
   createStorage: (signal: AbortSignal) => Promise<TStorage>,
   createApp: (storage: TStorage) => ContentRuntimeApp,
@@ -137,7 +141,7 @@ export async function startContentRuntime<TStorage extends ContentRuntimeStorage
       return
     }
     suspended = false
-    void initialize().catch((error: unknown) => {
+    runRestore(initialize, (error: unknown) => {
       reportRestoreError(error)
       terminal = true
       suspended = false

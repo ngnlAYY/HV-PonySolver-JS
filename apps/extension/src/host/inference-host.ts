@@ -11,6 +11,14 @@ import {
   type SerializedModelRequest,
 } from '../protocol/messages'
 
+async function settleModelOperation(operation: Promise<unknown>): Promise<void> {
+  try {
+    await operation
+  } catch {
+    // The caller awaits the original operation; the tail only serializes starts.
+  }
+}
+
 export type InferenceHostDependencies = Readonly<{
   detector: DetectorService
   verifyKey?(candidateKey: string, signal: AbortSignal): Promise<string | undefined>
@@ -111,7 +119,8 @@ export class InferenceHost {
       abortFromDestroy()
     }
 
-    const operation = this.modelOperationTail.then(async () => {
+    const operation = (async (): Promise<string | undefined> => {
+      await this.modelOperationTail
       this.assertModelIntentActive(intent, callerSignal)
       let notice: string | undefined
       if (request.type === 'verify-key') {
@@ -137,11 +146,8 @@ export class InferenceHost {
       }
       this.assertModelIntentActive(intent, callerSignal)
       return notice
-    })
-    this.modelOperationTail = operation.then(
-      () => undefined,
-      () => undefined,
-    )
+    })()
+    this.modelOperationTail = settleModelOperation(operation)
 
     try {
       const notice = await operation

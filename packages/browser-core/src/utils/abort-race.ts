@@ -13,8 +13,21 @@ export type RaceAbortOptions = Readonly<{
   holdOnAbort?: () => boolean
 }>
 
-function defaultAbortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? new DOMException('操作已取消', 'AbortError')
+type AbortRejectionReason = Error | DOMException
+
+function normalizeAbortReason(value: unknown, fallbackMessage: string): AbortRejectionReason {
+  if (value instanceof Error || value instanceof DOMException) {
+    return value
+  }
+  return new DOMException(fallbackMessage, 'AbortError')
+}
+
+function defaultAbortReason(signal: AbortSignal): AbortRejectionReason {
+  return normalizeAbortReason(signal.reason, '操作已取消')
+}
+
+function isAbortSignal(value: AbortSignal | readonly AbortSignal[]): value is AbortSignal {
+  return typeof value === 'object' && value !== null && 'aborted' in value
 }
 
 /**
@@ -27,13 +40,20 @@ export function raceAbort<T>(
   createError?: () => unknown,
   options: RaceAbortOptions = {},
 ): Promise<T> {
-  const watched: AbortSignal[] = Array.isArray(signals) ? [...signals] : signals ? [signals] : []
+  let watched: AbortSignal[]
+  if (signals === undefined) {
+    watched = []
+  } else if (isAbortSignal(signals)) {
+    watched = [signals]
+  } else {
+    watched = [...signals]
+  }
   if (watched.length === 0) {
     return Promise.resolve(promise)
   }
-  const buildReason = (): unknown => {
+  const buildReason = (): AbortRejectionReason => {
     if (createError) {
-      return createError()
+      return normalizeAbortReason(createError(), '操作已取消')
     }
     const aborted = watched.find((signal) => signal.aborted)
     return aborted ? defaultAbortReason(aborted) : new DOMException('操作已取消', 'AbortError')
@@ -41,6 +61,7 @@ export function raceAbort<T>(
   const hold = options.holdOnAbort ?? (() => false)
   const preAborted = watched.find((signal) => signal.aborted)
   if (preAborted && !hold()) {
+    options.onAbort?.()
     void Promise.resolve(promise).catch(() => undefined)
     return Promise.reject(buildReason())
   }

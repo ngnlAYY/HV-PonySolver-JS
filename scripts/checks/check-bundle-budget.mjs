@@ -80,12 +80,14 @@ async function checkBundleBudget({ repoRoot = defaultRepoRoot, profile = 'defaul
     }
     actualBytes = artifactStats.size
   } catch (error) {
-    const reason =
-      error instanceof Error && 'code' in error && error.code === 'ENOENT'
-        ? 'artifact does not exist'
-        : error instanceof Error
-          ? error.message
-          : String(error)
+    let reason
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      reason = 'artifact does not exist'
+    } else if (error instanceof Error) {
+      reason = error.message
+    } else {
+      reason = String(error)
+    }
     throw new Error(
       `Bundle budget check failed: profile=${profile} actual=missing budget=${formatBytes(profileConfig.budgetBytes)} delta=n/a file=${artifactPath}; ${reason}; build the artifact before checking`,
       { cause: error },

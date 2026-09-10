@@ -30,6 +30,14 @@ export function resolveRemoteSmokeMode(args, environment = process.env) {
   return { mode: 'authenticated', key }
 }
 
+async function readJsonFile(filename, label) {
+  try {
+    return JSON.parse(await readFile(filename, 'utf8'))
+  } catch (error) {
+    throw new Error(`${label} is invalid: ${filename}`, { cause: error })
+  }
+}
+
 function captchaHtml() {
   const answers = '<input name="riddleanswer[]" type="checkbox">'.repeat(6)
   return `<!doctype html>
@@ -119,7 +127,7 @@ export async function runRemoteChromiumSmoke(args = process.argv.slice(2), envir
   const profilePath = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-profile-'))
 
   await access(path.join(unpackedPath, 'manifest.json'))
-  const buildManifest = JSON.parse(await readFile(path.join(unpackedPath, 'build-manifest.json'), 'utf8'))
+  const buildManifest = await readJsonFile(path.join(unpackedPath, 'build-manifest.json'), 'Chromium build manifest')
   if (buildManifest.target !== 'chromium' || buildManifest.modelDelivery !== 'remote') {
     throw new Error('Chromium remote smoke requires a Chromium remote-model build')
   }

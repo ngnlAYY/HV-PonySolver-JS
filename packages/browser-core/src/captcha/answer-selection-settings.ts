@@ -4,7 +4,13 @@ export const PRESERVE_CHECKED_ANSWERS_STORAGE_KEY = 'hvPonySolverPreserveChecked
 export const DEFAULT_PRESERVE_CHECKED_ANSWERS = true
 
 export function parsePreserveCheckedAnswers(value: unknown): boolean {
-  return value === '0' ? false : value === '1' ? true : DEFAULT_PRESERVE_CHECKED_ANSWERS
+  if (value === '0') {
+    return false
+  }
+  if (value === '1') {
+    return true
+  }
+  return DEFAULT_PRESERVE_CHECKED_ANSWERS
 }
 
 export function getPreserveCheckedAnswersSync(storage: SettingsStorage): boolean {

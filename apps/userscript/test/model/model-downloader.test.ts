@@ -129,6 +129,7 @@ describe('downloadModel', () => {
       expect.objectContaining<ModelDownloadQuotaExceededError>({
         name: 'ModelDownloadQuotaExceededError',
         message: '本月 5 次模型下载额度已用完',
+        userMessage: '本月 5 次模型下载额度已用完',
         retryAfterSeconds: 3600,
       }),
     )

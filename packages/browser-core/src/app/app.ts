@@ -55,15 +55,23 @@ export class App {
     const recoveryTarget = [this.failedCaptchaTarget, this.preparingCaptchaTarget].find((target) =>
       isSameCaptchaTarget(target, currentTarget),
     )
-    if (!recoveryTarget) {
+    const activeSolve = this.scheduledScan || this.preparingCaptchaTarget !== null || this.solver.isBusy
+    if (!activeSolve && !recoveryTarget) {
       return
     }
     this.modelCredentialsRevision += 1
-    this.failedCaptchaTarget = null
-    this.transientSuppressionAt = null
-    this.solverFailureSuppressionAt = null
-    if (isSameCaptchaTarget(this.lastCaptchaTarget, currentTarget)) {
-      this.lastCaptchaTarget = null
+    if (activeSolve) {
+      // Abort stale detector/solver work, then expose a fresh signal for the recovery scan.
+      this.solveAbortController?.abort()
+      this.solveAbortController = new AbortController()
+    }
+    if (recoveryTarget) {
+      this.failedCaptchaTarget = null
+      this.transientSuppressionAt = null
+      this.solverFailureSuppressionAt = null
+      if (isSameCaptchaTarget(this.lastCaptchaTarget, currentTarget)) {
+        this.lastCaptchaTarget = null
+      }
     }
     this.scheduleSolve()
   }
@@ -124,13 +132,15 @@ export class App {
       if (captchaMaster && (target === captchaMaster || captchaMaster.contains(target as Node))) {
         return true
       }
-      for (const node of record.addedNodes) {
-        if (this.isCaptchaNode(node)) {
+      for (let index = 0; index < record.addedNodes.length; index += 1) {
+        const node = record.addedNodes.item(index)
+        if (node && this.isCaptchaNode(node)) {
           return true
         }
       }
-      for (const node of record.removedNodes) {
-        if (this.isCaptchaNode(node)) {
+      for (let index = 0; index < record.removedNodes.length; index += 1) {
+        const node = record.removedNodes.item(index)
+        if (node && this.isCaptchaNode(node)) {
           return true
         }
       }
@@ -297,7 +307,7 @@ export class App {
       this.failedCaptchaTarget = null
       this.transientSuppressionAt = null
       this.solverFailureSuppressionAt = null
-      const result = await this.solver.trigger(target, startedAt)
+      const result = await this.solver.trigger(target, startedAt, signal)
       const currentTarget = this.currentTargetSnapshot(target, signal)
       if (result.handled && currentTarget) {
         this.lastCaptchaTarget = currentTarget

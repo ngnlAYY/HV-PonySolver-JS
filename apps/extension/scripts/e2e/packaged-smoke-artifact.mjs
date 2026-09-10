@@ -19,6 +19,14 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
+async function readJsonFile(filename, label) {
+  try {
+    return JSON.parse(await readFile(filename, 'utf8'))
+  } catch (error) {
+    throw new Error(`${label} is invalid: ${filename}`, { cause: error })
+  }
+}
+
 function assertPlainObject(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`${label} must be an object`)
@@ -83,12 +91,12 @@ function validatePackagedArtifact(artifact, target, label) {
     throw new Error(`${label} model has an invalid filename`)
   }
   assertFileIdentity(artifact.model, `${label} model`)
-  const oracle =
-    artifact.fixture === true
-      ? validatePackagedOracle(artifact.model.expected, `${label} fixture oracle`)
-      : artifact.model.expected === undefined
-        ? null
-        : validatePackagedOracle(artifact.model.expected, `${label} oracle`)
+  let oracle = null
+  if (artifact.fixture === true) {
+    oracle = validatePackagedOracle(artifact.model.expected, `${label} fixture oracle`)
+  } else if (artifact.model.expected !== undefined) {
+    oracle = validatePackagedOracle(artifact.model.expected, `${label} oracle`)
+  }
 
   assertPlainObject(artifact.archive, `${label} archive`)
   if (
@@ -319,7 +327,7 @@ export async function discoverPackagedArtifact(outputRoot, target) {
   const matchingArtifacts = []
   for (const name of artifactCandidates) {
     const artifactPath = path.join(outputRoot, name)
-    const artifact = JSON.parse(await readFile(artifactPath, 'utf8'))
+    const artifact = await readJsonFile(artifactPath, `${target} packaged artifact`)
     if (artifact.target === target && artifact.modelDelivery === 'packaged') {
       const oracle = validatePackagedArtifact(artifact, target, name)
       matchingArtifacts.push({ artifact, artifactPath, oracle })

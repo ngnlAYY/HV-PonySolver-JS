@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { ANSWER_CODES } from '@hv-pony-solver/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -56,10 +58,12 @@ function createPanel(): StatusPanel {
   }
 }
 
-function createDetector(detect: DetectorService['detect']): DetectorService {
+function createDetector(detect: (...args: Parameters<DetectorService['detect']>) => Promise<object>): DetectorService {
   return {
-    detect,
-    prepare: vi.fn(async () => ({}) as Worker),
+    // SAFETY: These test-only mocks return controlled detector-shaped objects;
+    // production responses are validated by the detector implementation.
+    detect: detect as unknown as DetectorService['detect'],
+    prepare: vi.fn(async () => undefined),
     destroy: vi.fn(),
   }
 }
@@ -218,7 +222,7 @@ describe('CaptchaSolver', () => {
     )
     const { solver, panel, imageLoader, answerSubmitter } = createSolver({
       detector,
-      getAnswerMode: vi.fn(async () => 'manual'),
+      getAnswerMode: async () => 'manual',
     })
 
     const result = await solver.trigger()
@@ -245,10 +249,10 @@ describe('CaptchaSolver', () => {
     )
     const { solver, panel, answerSubmitter } = createSolver({
       detector,
-      getAnswerMode: vi.fn(async () => {
+      getAnswerMode: async () => {
         abortController.abort()
         return 'manual'
-      }),
+      },
       getAbortSignal: () => abortController.signal,
     })
 
@@ -388,10 +392,10 @@ describe('CaptchaSolver', () => {
     )
     const { solver, panel, answerSubmitter } = createSolver({
       detector,
-      getAnswerMode: vi.fn(async () => {
+      getAnswerMode: async () => {
         appendCaptcha()
         return 'manual'
-      }),
+      },
     })
 
     const result = await solver.trigger()
@@ -480,7 +484,7 @@ describe('CaptchaSolver', () => {
       const { solver, panel } = createSolver({
         detector,
         imageLoader,
-        getAnswerMode: vi.fn(async () => 'manual'),
+        getAnswerMode: async () => 'manual',
       })
 
       const resultPromise = solver.trigger()
@@ -514,7 +518,7 @@ describe('CaptchaSolver', () => {
       )
       const { solver, panel, imageLoader } = createSolver({
         detector,
-        getAnswerMode: vi.fn(async () => 'manual'),
+        getAnswerMode: async () => 'manual',
       })
 
       const resultPromise = solver.trigger()

@@ -80,6 +80,7 @@ describe('App', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     document.body.innerHTML = ''
+    history.replaceState(null, '', '/')
   })
 
   afterEach(() => {
@@ -311,6 +312,33 @@ describe('App', () => {
 
     expect(harness.trigger).toHaveBeenCalledTimes(2)
     expect(harness.trigger.mock.calls[1]?.[0]?.captchaKey).toContain('/captcha-b.png')
+  })
+
+  it('does not accept a solve completed after a URL-only navigation', async () => {
+    let resolveFirst: ((result: { handled: boolean; captchaKey: string | null }) => void) | undefined
+    const firstResult = new Promise<{ handled: boolean; captchaKey: string | null }>((resolve) => {
+      resolveFirst = resolve
+    })
+    const harness = createHarness()
+    harness.trigger.mockReturnValueOnce(firstResult).mockImplementation(async (target?: CaptchaTarget) => ({
+      handled: true,
+      captchaKey: target?.captchaKey ?? null,
+    }))
+    apps.push(harness.app)
+
+    harness.app.init()
+    const captcha = appendCaptcha('/captcha.png')
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    history.pushState(null, '', '/next')
+    resolveFirst?.({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    await settleDom()
+
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
   })
 
   it('rescans a handled target when responsive image selection changes through srcset', async () => {
@@ -589,6 +617,73 @@ describe('App', () => {
 
     expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
     expect(harness.trigger).not.toHaveBeenCalled()
+  })
+
+  it('cancels and retries an active solve after model credentials change', async () => {
+    let resolveFirst: ((result: { handled: boolean; captchaKey: string | null }) => void) | undefined
+    const firstResult = new Promise<{ handled: boolean; captchaKey: string | null }>((resolve) => {
+      resolveFirst = resolve
+    })
+    const harness = createHarness()
+    harness.trigger.mockReturnValueOnce(firstResult).mockImplementation(async (target?: CaptchaTarget) => ({
+      handled: true,
+      captchaKey: target?.captchaKey ?? null,
+    }))
+    apps.push(harness.app)
+
+    harness.app.init()
+    appendCaptcha('/captcha.png')
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+    const oldSignal = harness.app.getAbortSignal()
+
+    harness.app.recoverAfterModelCredentialsChanged()
+
+    expect(oldSignal?.aborted).toBe(true)
+    expect(harness.app.getAbortSignal()).not.toBe(oldSignal)
+
+    resolveFirst?.({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    await settleDom()
+
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+  })
+
+  it('passes the captured solve signal when credentials change between prepare and trigger', async () => {
+    const appRef: { current?: App } = {}
+    const detector = createDetector()
+    const prepareThenable = {
+      then(resolve: (value: void) => void): void {
+        resolve()
+        queueMicrotask(() => appRef.current?.recoverAfterModelCredentialsChanged())
+      },
+    }
+    vi.mocked(detector.prepare)
+      .mockReturnValueOnce(prepareThenable as unknown as Promise<void>)
+      .mockResolvedValue(undefined)
+    let submissions = 0
+    const trigger = vi.fn(async (target?: CaptchaTarget, _startedAt?: number, signal?: AbortSignal) => {
+      if (!signal?.aborted) {
+        submissions += 1
+      }
+      return {
+        handled: signal?.aborted !== true,
+        captchaKey: target?.captchaKey ?? null,
+      }
+    })
+    const solver: SolverService = { isBusy: false, trigger }
+    const harness = createHarness({ detector, solver })
+    const app = harness.app
+    appRef.current = app
+    apps.push(app)
+
+    app.init()
+    appendCaptcha('/captcha.png')
+    await settleDom()
+
+    expect(trigger).toHaveBeenCalledTimes(2)
+    expect(trigger.mock.calls[0]?.[2]?.aborted).toBe(true)
+    expect(trigger.mock.calls[1]?.[2]?.aborted).toBe(false)
+    expect(submissions).toBe(1)
   })
 
   it('retries the same failed captcha exactly once after model credentials change', async () => {

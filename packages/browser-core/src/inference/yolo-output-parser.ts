@@ -9,14 +9,15 @@ function roundConfidence(value: number): number {
 }
 
 function insertTopDetection(classIds: number[], confidences: number[], classId: number, confidence: number): void {
-  if (classIds.length === maxDetections && confidence <= confidences[classIds.length - 1]!) {
+  const lowestConfidence = confidences[classIds.length - 1]
+  if (classIds.length === maxDetections && (lowestConfidence === undefined || confidence <= lowestConfidence)) {
     return
   }
 
-  let index = 0
-  while (index < classIds.length && confidence <= confidences[index]!) {
-    index += 1
-  }
+  const insertionIndex = confidences.findIndex(
+    (currentConfidence) => currentConfidence === undefined || confidence > currentConfidence,
+  )
+  const index = insertionIndex === -1 ? classIds.length : insertionIndex
 
   classIds.splice(index, 0, classId)
   confidences.splice(index, 0, confidence)
@@ -31,9 +32,14 @@ function insertTopDetection(classIds: number[], confidences: number[], classId: 
 function buildDetections(classIds: number[], confidences: number[]): Detection[] {
   const detections: Detection[] = []
   for (let i = 0; i < classIds.length; i += 1) {
+    const classId = classIds[i]
+    const confidence = confidences[i]
+    if (classId === undefined || confidence === undefined) {
+      continue
+    }
     detections.push({
-      class_id: classIds[i]!,
-      confidence: roundConfidence(confidences[i]!),
+      class_id: classId,
+      confidence: roundConfidence(confidence),
     })
   }
   return detections

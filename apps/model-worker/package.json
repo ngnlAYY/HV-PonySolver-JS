@@ -13,6 +13,11 @@
     "check:deployment": "node scripts/check-deployment-contract.mjs",
     "deploy": "HV_PONY_SOLVER_RENDER_ENV=deploy pnpm render-config && node scripts/validate-wrangler-config.mjs && wrangler deploy"
   },
+  "knip": {
+    "ignoreDependencies": [
+      "cloudflare"
+    ]
+  },
   "dependencies": {
     "@hv-pony-solver/shared": "workspace:*"
   },

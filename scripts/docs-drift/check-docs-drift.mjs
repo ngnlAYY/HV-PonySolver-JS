@@ -38,9 +38,17 @@ if (isDirectRun(import.meta.url)) {
   }
 }
 
+function parseJson(text, relativePath) {
+  try {
+    return JSON.parse(text)
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${relativePath}`, { cause: error })
+  }
+}
+
 async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
   const readSource = options.readText ?? ((relativePath) => readText(repoRoot, relativePath))
-  const readPackage = async (relativePath) => JSON.parse(await readSource(relativePath))
+  const readPackage = async (relativePath) => parseJson(await readSource(relativePath), relativePath)
   const [
     rootPackageJson,
     userscriptPackageJson,

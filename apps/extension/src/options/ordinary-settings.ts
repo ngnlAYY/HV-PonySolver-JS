@@ -285,6 +285,8 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
         return value === '1' ? '1' : '0'
       case 'historyLimit':
         return String(parsePanelHistoryLimit(value))
+      default:
+        throw new Error(`未知设置字段: ${field}`)
     }
   }
 

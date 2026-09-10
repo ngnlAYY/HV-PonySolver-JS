@@ -1,4 +1,5 @@
 import { imagePreprocessConfig } from '../inference/inference-config'
+import { resolveFetchImplementation } from '../platform/fetch'
 import { raceAbort } from '../utils/abort-race'
 import { warn } from '../utils/logger'
 import type { ImageLoader } from './captcha-types'
@@ -8,8 +9,11 @@ const SUPPORTED_IMAGE_CONTENT_TYPE =
   /^(?:image\/(?:jpeg|png|gif|webp))(?:[ \t]*;[ \t]*[!#$%&'*+.^_`|~0-9A-Za-z-]+[ \t]*=[ \t]*(?:[!#$%&'*+.^_`|~0-9A-Za-z-]+|"(?:[\t\x20\x21\x23-\x5b\x5d-\x7e]|\\[\t\x20-\x7e])*"))*[ \t]*$/iu
 const STRICT_CONTENT_LENGTH = /^(?:0|[1-9]\d*)$/u
 
-function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? new DOMException('图片请求已取消', 'AbortError')
+function abortReason(signal: AbortSignal): Error | DOMException {
+  const reason = signal.reason
+  return reason instanceof Error || reason instanceof DOMException
+    ? reason
+    : new DOMException('图片请求已取消', 'AbortError')
 }
 
 function contentLength(response: Response): number | null {
@@ -136,8 +140,9 @@ export class CachedImageLoader implements ImageLoader {
   }
 
   private async fetchBlob(url: string, cache: RequestCache, signal: AbortSignal, fallback: boolean): Promise<Blob> {
+    const fetchImpl = resolveFetchImplementation()
     const response = await raceAbort(
-      fetch(url, {
+      fetchImpl(url, {
         cache,
         mode: 'same-origin',
         credentials: 'include',
@@ -147,6 +152,11 @@ export class CachedImageLoader implements ImageLoader {
       () => abortReason(signal),
     )
     if (!response.ok) {
+      try {
+        await response.body?.cancel()
+      } catch {
+        // Cancellation is best-effort cleanup and must not replace the HTTP error.
+      }
       const suffix = fallback ? ' (回退也失败)' : ''
       throw new Error(`图片缓存不可用: HTTP ${response.status}${suffix}`)
     }

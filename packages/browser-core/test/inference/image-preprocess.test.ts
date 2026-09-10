@@ -72,6 +72,12 @@ function createWebpHeader(codec: 'VP8X' | 'VP8L' | 'VP8', width: number, height:
   return bytes
 }
 
+function createBlob(bytes: Uint8Array): Blob {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  return new Blob([copy.buffer])
+}
+
 const additionalEncodedDimensionCases = [
   ['GIF87a', (width: number, height: number) => createGifHeader(width, height, '87a')],
   ['GIF89a', (width: number, height: number) => createGifHeader(width, height, '89a')],
@@ -148,14 +154,14 @@ describe('image preprocessing helpers', () => {
     const bytes = createPngHeader(320, 160)
 
     expect(inspectEncodedImageDimensions(bytes)).toEqual({ width: 320, height: 160 })
-    await expect(validateInferenceImageBeforeDecode(new Blob([bytes]))).resolves.toEqual({
+    await expect(validateInferenceImageBeforeDecode(createBlob(bytes))).resolves.toEqual({
       width: 320,
       height: 160,
     })
   })
 
   it('rejects encoded image bytes above the configured limit before reading them', async () => {
-    const blob = new Blob([new Uint8Array(imagePreprocessConfig.maxEncodedBytes + 1)])
+    const blob = createBlob(new Uint8Array(imagePreprocessConfig.maxEncodedBytes + 1))
     const arrayBuffer = vi.fn()
     Object.defineProperty(blob, 'arrayBuffer', { value: arrayBuffer })
 
@@ -164,13 +170,13 @@ describe('image preprocessing helpers', () => {
   })
 
   it('rejects an encoded PNG side length above the configured limit before decode', async () => {
-    const blob = new Blob([createPngHeader(imagePreprocessConfig.maxSourceSide + 1, 1)])
+    const blob = createBlob(createPngHeader(imagePreprocessConfig.maxSourceSide + 1, 1))
 
     await expect(validateInferenceImageBeforeDecode(blob)).rejects.toThrow('验证码图片边长超过限制')
   })
 
   it('rejects encoded PNG total source pixels above the configured limit before decode', async () => {
-    const blob = new Blob([createPngHeader(4_001, 4_000)])
+    const blob = createBlob(createPngHeader(4_001, 4_000))
 
     await expect(validateInferenceImageBeforeDecode(blob)).rejects.toThrow('验证码图片像素总数超过限制')
   })
@@ -182,7 +188,7 @@ describe('image preprocessing helpers', () => {
 
   it('reads JPEG dimensions from a small blob before decode', async () => {
     await expect(
-      validateInferenceImageBeforeDecode(new Blob([createJpegBytes({ width: 320, height: 160 })])),
+      validateInferenceImageBeforeDecode(createBlob(createJpegBytes({ width: 320, height: 160 }))),
     ).resolves.toEqual({
       width: 320,
       height: 160,
@@ -195,7 +201,7 @@ describe('image preprocessing helpers', () => {
       const boundary = createBytes(4_000, 4_000)
 
       expect(inspectEncodedImageDimensions(regular)).toEqual({ width: 320, height: 160 })
-      await expect(validateInferenceImageBeforeDecode(new Blob([boundary]))).resolves.toEqual({
+      await expect(validateInferenceImageBeforeDecode(createBlob(boundary))).resolves.toEqual({
         width: 4_000,
         height: 4_000,
       })
@@ -203,9 +209,9 @@ describe('image preprocessing helpers', () => {
 
     it(`rejects ${format} dimensions above the side and pixel limits`, async () => {
       await expect(
-        validateInferenceImageBeforeDecode(new Blob([createBytes(imagePreprocessConfig.maxSourceSide + 1, 1)])),
+        validateInferenceImageBeforeDecode(createBlob(createBytes(imagePreprocessConfig.maxSourceSide + 1, 1))),
       ).rejects.toThrow('验证码图片边长超过限制')
-      await expect(validateInferenceImageBeforeDecode(new Blob([createBytes(4_001, 4_000)]))).rejects.toThrow(
+      await expect(validateInferenceImageBeforeDecode(createBlob(createBytes(4_001, 4_000)))).rejects.toThrow(
         '验证码图片像素总数超过限制',
       )
     })
@@ -229,18 +235,18 @@ describe('image preprocessing helpers', () => {
   })
 
   it('rejects a truncated small JPEG header before decode', async () => {
-    await expect(validateInferenceImageBeforeDecode(new Blob([new Uint8Array([0xff, 0xd8, 0xff])]))).rejects.toThrow(
+    await expect(validateInferenceImageBeforeDecode(createBlob(new Uint8Array([0xff, 0xd8, 0xff])))).rejects.toThrow(
       '验证码图片 JPEG 缺少尺寸信息',
     )
     await expect(
-      validateInferenceImageBeforeDecode(new Blob([createJpegBytes({ width: 320, height: 160 }).slice(0, 10)])),
+      validateInferenceImageBeforeDecode(createBlob(createJpegBytes({ width: 320, height: 160 }).slice(0, 10))),
     ).rejects.toThrow('验证码图片 JPEG 头无效')
   })
 
   it('validates oversized JPEG dimensions found inside the scan prefix', async () => {
-    const blob = new Blob([
+    const blob = createBlob(
       createJpegBytes({ width: imagePreprocessConfig.maxSourceSide + 1, height: 1, zeroPadding: 70_000 }),
-    ])
+    )
 
     await expect(validateInferenceImageBeforeDecode(blob)).rejects.toThrow('验证码图片边长超过限制')
   })
@@ -249,7 +255,7 @@ describe('image preprocessing helpers', () => {
     const bytes = new Uint8Array(70_000)
     bytes[0] = 0xff
     bytes[1] = 0xd8
-    const blob = new Blob([bytes])
+    const blob = createBlob(bytes)
 
     await expect(validateInferenceImageBeforeDecode(blob)).resolves.toBeNull()
   })

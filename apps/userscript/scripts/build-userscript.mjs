@@ -19,6 +19,14 @@ const bundledWorkerEntryPoint = resolve(appDir, 'src/inference/onnx-worker-bundl
 const metadataPath = resolve(appDir, 'src/userscript/metadata.ts')
 const runtimeProfiles = new Set(['external', 'bundled'])
 
+async function readJsonFile(filename, label) {
+  try {
+    return JSON.parse(await readFile(filename, 'utf8'))
+  } catch (error) {
+    throw new Error(`${label} is invalid: ${filename}`, { cause: error })
+  }
+}
+
 export function parseMinifyFlag(args) {
   let enabled = false
   for (const argument of args) {
@@ -211,7 +219,7 @@ async function main() {
   // The metadata template is extracted from the TS source as before; the
   // version placeholder is replaced at the final artifact level so that the
   // published @version always matches apps/userscript/package.json.
-  const { version: userscriptVersion } = JSON.parse(await readFile(resolve(appDir, 'package.json'), 'utf8'))
+  const { version: userscriptVersion } = await readJsonFile(resolve(appDir, 'package.json'), 'userscript package.json')
   if (typeof userscriptVersion !== 'string' || userscriptVersion.length === 0) {
     throw new Error('apps/userscript/package.json is missing a version string')
   }

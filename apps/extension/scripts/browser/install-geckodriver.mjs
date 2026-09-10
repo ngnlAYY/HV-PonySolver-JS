@@ -33,7 +33,7 @@ async function canonicalizePotentialPath(candidate) {
   while (true) {
     try {
       const canonicalParent = await realpath(current)
-      return path.join(canonicalParent, ...missingSegments.reverse())
+      return path.join(canonicalParent, ...missingSegments.toReversed())
     } catch (error) {
       if (error?.code !== 'ENOENT') {
         throw new Error(`Unable to canonicalize geckodriver output path: ${resolved}`, { cause: error })

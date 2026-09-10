@@ -11,6 +11,7 @@ export type CaptchaTarget = Readonly<{
   master: Element
   form: HTMLFormElement
   formAction: string
+  pageUrl: string
   image: HTMLImageElement
   controls: CaptchaControlsSnapshot
   captchaKey: string
@@ -44,6 +45,7 @@ export function isSameCaptchaTarget(left: CaptchaTarget | null, right: CaptchaTa
     left.master === right.master &&
     left.form === right.form &&
     left.formAction === right.formAction &&
+    left.pageUrl === right.pageUrl &&
     left.image === right.image &&
     isSameControls(left.controls, right.controls) &&
     left.captchaKey === right.captchaKey
@@ -71,7 +73,15 @@ export function findCaptchaTarget(): CaptchaTarget | null {
     const form = master.querySelector<HTMLFormElement>(captchaSelectors.form)
     const captchaKey = image?.currentSrc || image?.src || ''
     if (form && image && captchaKey && isSameOriginUrl(captchaKey) && isSameOriginForm(form)) {
-      return { master, form, formAction: form.action, image, controls: captureControls(form), captchaKey }
+      return {
+        master,
+        form,
+        formAction: form.action,
+        pageUrl: location.href,
+        image,
+        controls: captureControls(form),
+        captchaKey,
+      }
     }
   }
   return null

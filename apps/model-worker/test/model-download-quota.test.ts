@@ -60,6 +60,12 @@ describe('ModelDownloadQuota', () => {
     expect((await quota.fetch(new Request('https://quota.internal/status'))).status).toBe(404)
     expect((await quota.fetch(new Request('https://quota.internal/other', { method: 'POST' }))).status).toBe(404)
     expect((await quota.fetch(new Request('https://quota.internal/confirm', { method: 'POST' }))).status).toBe(400)
+
+    const invalidUrlRequest = new Request('https://quota.internal/reserve', { method: 'POST' })
+    Object.defineProperty(invalidUrlRequest, 'url', { value: 'not a URL' })
+    await expect(runInDurableObject(quota, (instance) => instance.fetch(invalidUrlRequest))).resolves.toMatchObject({
+      status: 404,
+    })
   })
 
   it('counts only a cache confirmation and makes repeated confirmation idempotent', async () => {
@@ -187,6 +193,8 @@ describe('ModelDownloadQuota', () => {
       'invalid',
       { month: 'invalid', used: 0, pending: {}, confirmed: [] },
       { month: '2026-08', used: 4, pending: { [RECEIPT_ID]: Date.now() + 60_000 }, confirmed: [] },
+      { month: '2026-08', used: 1, pending: {}, confirmed: new Array(1) },
+      { month: '2026-08', used: 1, pending: {}, confirmed: ['invalid'] },
     ]
 
     for (const malformedState of malformedStates) {
@@ -237,6 +245,30 @@ describe('ModelDownloadQuota', () => {
           'token',
         ),
       () => readModelDownloadQuota(responseQuotaNamespace(Response.json(null)), 'token'),
+      () =>
+        readModelDownloadQuota(
+          responseQuotaNamespace(
+            Response.json({
+              limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+              used: 0,
+              remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+              retryAfterSeconds: 'invalid',
+            }),
+          ),
+          'token',
+        ),
+      () =>
+        readModelDownloadQuota(
+          responseQuotaNamespace(
+            Response.json({
+              limit: MODEL_MONTHLY_DOWNLOAD_LIMIT + 1,
+              used: 0,
+              remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT + 1,
+              retryAfterSeconds: 60,
+            }),
+          ),
+          'token',
+        ),
       () => confirmModelDownloadQuota(responseQuotaNamespace(Response.json(null)), 'token', RECEIPT_ID),
       () =>
         confirmModelDownloadQuota(

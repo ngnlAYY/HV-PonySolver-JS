@@ -289,6 +289,7 @@ describe('downloadModel', () => {
       expect.objectContaining<ModelDownloadQuotaExceededError>({
         name: 'ModelDownloadQuotaExceededError',
         message: '本月 5 次模型下载额度已用完',
+        userMessage: '本月 5 次模型下载额度已用完',
         retryAfterSeconds: 3600,
       }),
     )
@@ -1022,6 +1023,7 @@ describe('queryModelDownloadQuota', () => {
     const responses = [
       null,
       { enabled: true, limit: 5, used: 1, remaining: 1, retryAfterSeconds: 60 },
+      { enabled: true, limit: 6, used: 0, remaining: 6, retryAfterSeconds: 60 },
       { enabled: false, limit: 5, used: 0, remaining: null, retryAfterSeconds: null },
     ]
     for (const value of responses) {

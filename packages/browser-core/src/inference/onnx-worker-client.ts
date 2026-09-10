@@ -153,7 +153,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       }, inferenceTimeoutConfig.workerPrepareTimeoutMs),
     }
     this.preparation = operation
-    operation.promise = this.createWorker(controller, source, silent)
+    operation.promise = this.createWorker(controller, source, silent ? 'silent' : 'normal')
       .catch((error: unknown) => {
         this.ready = false
         const preparationReason = controller.signal.reason
@@ -267,7 +267,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
   private async createWorker(
     controller: AbortController,
     source: PreparationSource,
-    silent: boolean = false,
+    mode: 'normal' | 'silent' = 'normal',
   ): Promise<void> {
     // Repeated timeouts mean the environment cannot finish a session; rebuilding
     // forever would loop the download quota and CPU without ever recovering.
@@ -275,7 +275,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       throw new Error('ONNX Worker 连续多次请求超时，已停止自动重建')
     }
     const startedAt = Date.now()
-    if (!silent) {
+    if (mode === 'normal') {
       this.panel.setStatus({ session: '初始化中' })
     }
     let createdWorker: Worker | null = null
@@ -302,7 +302,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       this.ready = true
       // Only a completed detect proves the session actually answers on this
       // device, so the consecutive-timeout count survives a successful init.
-      if (!silent) {
+      if (mode === 'normal') {
         this.panel.setSessionReady(Date.now() - startedAt)
       }
     } catch (error) {
@@ -396,7 +396,13 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
 
   private async cacheVerifiedBufferBestEffort(buffer: ArrayBuffer, parentSignal?: AbortSignal): Promise<void> {
     const controller = new AbortController()
-    const abortFromParent = (): void => controller.abort(signalError(parentSignal!, '推理请求已取消'))
+    const abortFromParent = (): void => {
+      if (!parentSignal) {
+        controller.abort(new Error('推理请求已取消'))
+        return
+      }
+      controller.abort(signalError(parentSignal, '推理请求已取消'))
+    }
     const abortFromDestroy = (): void => controller.abort(new Error('Worker 已关闭'))
     parentSignal?.addEventListener('abort', abortFromParent, { once: true })
     this.destroyController.signal.addEventListener('abort', abortFromDestroy, { once: true })

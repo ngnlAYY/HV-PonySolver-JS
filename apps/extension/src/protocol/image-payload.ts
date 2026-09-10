@@ -17,7 +17,12 @@ export function isBase64(value: unknown): value is string {
   ) {
     return false
   }
-  const paddingLength = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0
+  let paddingLength = 0
+  if (value.endsWith('==')) {
+    paddingLength = 2
+  } else if (value.endsWith('=')) {
+    paddingLength = 1
+  }
   const decodedLength = (value.length / 4) * 3 - paddingLength
   return decodedLength >= 1 && decodedLength <= MAX_IMAGE_BYTE_LENGTH
 }

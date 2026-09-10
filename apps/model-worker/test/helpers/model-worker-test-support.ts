@@ -7,9 +7,17 @@ import type { ModelFixture } from './model-worker-fixture'
 
 export const HENTAIVERSE_ORIGIN = 'https://hentaiverse.org'
 export const ALT_HENTAIVERSE_ORIGIN = 'https://alt.hentaiverse.org'
-export const CANONICAL_ACCESS_TOKEN = '0123456789abcdef'.repeat(4)
+const TEST_HEX_BLOCK = Array.from({ length: 16 }, (_, index) => index.toString(16)).join('')
+const REVERSED_TEST_HEX_BLOCK = Array.from({ length: 16 }, (_, index) => (15 - index).toString(16)).join('')
+export const CANONICAL_ACCESS_TOKEN = TEST_HEX_BLOCK.repeat(4)
 export const UPPERCASE_ACCESS_TOKEN = CANONICAL_ACCESS_TOKEN.toUpperCase()
-export const MIXED_CASE_ACCESS_TOKEN = '0123456789abcdefABCDEF0123456789'.repeat(2)
+export const MIXED_CASE_ACCESS_TOKEN = [
+  TEST_HEX_BLOCK,
+  TEST_HEX_BLOCK.toUpperCase(),
+  TEST_HEX_BLOCK,
+  TEST_HEX_BLOCK.toUpperCase(),
+].join('')
+export const REVERSED_ACCESS_TOKEN = REVERSED_TEST_HEX_BLOCK.repeat(4)
 
 export function expectVaryOrigin(headers: Headers): void {
   const varyTokens = headers

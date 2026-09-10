@@ -236,8 +236,14 @@ export function copyRgbaToChwFloat32(rgba: Uint8ClampedArray, output: Float32Arr
   // getImageData guarantees one RGBA quad per pixel, so no per-channel
   // fallback is needed here.
   for (let index = 0, offset = 0; index < plane; index += 1, offset += 4) {
-    output[index] = rgba[offset]! / 255
-    output[plane + index] = rgba[offset + 1]! / 255
-    output[plane * 2 + index] = rgba[offset + 2]! / 255
+    const red = rgba[offset]
+    const green = rgba[offset + 1]
+    const blue = rgba[offset + 2]
+    if (red === undefined || green === undefined || blue === undefined) {
+      throw new Error('RGBA 图像数据长度不足')
+    }
+    output[index] = red / 255
+    output[plane + index] = green / 255
+    output[plane * 2 + index] = blue / 255
   }
 }

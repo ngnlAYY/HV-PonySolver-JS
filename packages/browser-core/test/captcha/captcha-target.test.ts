@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { findCaptchaTarget, isSameCaptchaTarget } from '../../src/captcha/captcha-target'
@@ -33,6 +35,7 @@ function appendCandidate({ imageSrc, formAction }: { imageSrc: string; formActio
 describe('findCaptchaTarget', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
+    history.replaceState(null, '', '/')
   })
 
   it('returns captcha targets with same-origin image and form action', () => {
@@ -104,6 +107,15 @@ describe('findCaptchaTarget', () => {
     expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(true)
 
     form.action = '/other-submit'
+    expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(false)
+  })
+
+  it('treats a page URL change as a new captcha target', () => {
+    appendCandidate({ imageSrc: '/captcha.png', formAction: '/submit' })
+    const initial = findCaptchaTarget()
+
+    history.pushState(null, '', '/next')
+
     expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(false)
   })
 })

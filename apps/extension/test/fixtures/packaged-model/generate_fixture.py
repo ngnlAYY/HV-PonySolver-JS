@@ -1,3 +1,5 @@
+# pyright: reportMissingImports=false
+# These dependencies are installed in the isolated fixture venv by the generator script.
 from pathlib import Path
 
 import numpy as np

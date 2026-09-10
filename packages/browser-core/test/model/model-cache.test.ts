@@ -65,7 +65,12 @@ type TestOpenRequest = TestRequest & {
   onupgradeneeded: ((event: IDBVersionChangeEvent) => void) | null
   result: IDBDatabase
 }
-type TestDatabase = Pick<IDBDatabase, 'close' | 'createObjectStore' | 'onversionchange' | 'transaction'>
+type TestDatabase = {
+  close: () => void
+  createObjectStore: () => IDBObjectStore
+  onversionchange: ((event: IDBVersionChangeEvent) => void) | null
+  transaction: () => IDBTransaction
+}
 
 function bufferFromBytes(bytes: number[]): ArrayBuffer {
   return new Uint8Array(bytes).buffer
@@ -155,7 +160,7 @@ function stubIndexedDb(
     onsuccess: null,
     onblocked: null,
     onupgradeneeded: null,
-    result: database as IDBDatabase,
+    result: database as unknown as IDBDatabase,
     error: openError ?? null,
   }
   const indexedDb = {
@@ -469,7 +474,7 @@ describe('ModelCache', () => {
     const cache = new ModelCache(createStatusPanel())
 
     await cache.getCached()
-    database.onversionchange?.(new Event('versionchange'))
+    database.onversionchange?.(new Event('versionchange') as IDBVersionChangeEvent)
 
     expect(database.close).toHaveBeenCalledTimes(1)
   })
@@ -824,7 +829,7 @@ describe('ModelCache', () => {
     let resolveConfirmation!: (response: Response) => void
     let requestSignal: AbortSignal | undefined
     const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
-      requestSignal = init?.signal
+      requestSignal = init?.signal ?? undefined
       return new Promise<Response>((resolve) => {
         resolveConfirmation = resolve
       })
@@ -855,7 +860,7 @@ describe('ModelCache', () => {
     let resolveConfirmation!: (response: Response) => void
     let requestSignal: AbortSignal | undefined
     const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
-      requestSignal = init?.signal
+      requestSignal = init?.signal ?? undefined
       return new Promise<Response>((resolve) => {
         resolveConfirmation = resolve
       })
@@ -886,7 +891,7 @@ describe('ModelCache', () => {
     let resolveConfirmation!: (response: Response) => void
     let requestSignal: AbortSignal | undefined
     const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
-      requestSignal = init?.signal
+      requestSignal = init?.signal ?? undefined
       return new Promise<Response>((resolve) => {
         resolveConfirmation = resolve
       })

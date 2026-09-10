@@ -9,6 +9,72 @@ import {
   HISTORY_MAX,
 } from '@hv-pony-solver/browser-core/persistence/answer-history-config'
 
+type E2EHistoryRecord = Readonly<{
+  type: string
+  answers: string
+  elapsed: number
+  timestamp: number
+  time: string
+}>
+
+type E2EHistoryStore = Readonly<{
+  get(world: string): E2EHistoryRecord[]
+  add(world: string, record: E2EHistoryRecord): Readonly<{ persisted: Promise<void> }>
+}>
+
+type E2EDetectionResult = Readonly<{
+  success: boolean
+  ponies: string[]
+  confidences: Readonly<Record<string, number>>
+  detections: readonly object[]
+  candidates: readonly object[]
+}>
+
+type E2EDetector = Readonly<{
+  prepare(): Promise<object>
+  detect(): Promise<E2EDetectionResult>
+  destroy(): void
+}>
+
+type E2EModelCache = Readonly<{
+  download(): Promise<ArrayBuffer>
+  putCached(...args: never[]): Promise<void>
+  close(): void
+}>
+
+type E2EApi = Readonly<{
+  timingConfig: {
+    submitDelay: [number, number]
+    multiClickDelay: [number, number]
+  }
+  StatusPanel: new (history: E2EHistoryStore) => object
+  HistoryStore: new () => E2EHistoryStore
+  CaptchaSolver: new (
+    panel: object,
+    detector: E2EDetector,
+    imageLoader: Readonly<{ get(): Promise<Blob> }>,
+    answerSubmitter: object,
+    getAnswerMode: () => Promise<'auto' | 'manual'>,
+  ) => object
+  AnswerSubmitter: new () => object
+  App: new (
+    dependencies: Readonly<{
+      panel: object
+      modelCache: E2EModelCache
+      detector: E2EDetector
+      solver: object
+    }>,
+  ) => Readonly<{ init(): void | Promise<void> }>
+}>
+
+declare global {
+  interface Window {
+    HvPonySolverE2E: E2EApi
+    __hvPonySolverE2EApp: Readonly<{ init(): void | Promise<void> }>
+    __ponyClicks: string[]
+  }
+}
+
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.resolve(dirname, '../..')
 const repoRoot = path.resolve(appRoot, '../..')

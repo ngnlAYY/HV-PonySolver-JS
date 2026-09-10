@@ -69,10 +69,10 @@ export class TimeoutThenSuccessfulWorker {
   onerror: ((event: ErrorEvent) => void) | null = null
   onmessageerror: (() => void) | null = null
 
-  constructor(...args: unknown[]) {
+  constructor(..._args: unknown[]) {
     TimeoutThenSuccessfulWorker.constructedCount += 1
     if (TimeoutThenSuccessfulWorker.constructedCount > 1) {
-      const worker = new SuccessfulWorker(...args)
+      const worker = new SuccessfulWorker()
       TimeoutThenSuccessfulWorker.instances.push(worker)
       return worker
     }

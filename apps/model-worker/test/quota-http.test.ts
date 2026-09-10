@@ -17,6 +17,7 @@ import {
 import {
   CANONICAL_ACCESS_TOKEN,
   HENTAIVERSE_ORIGIN,
+  REVERSED_ACCESS_TOKEN,
   UPPERCASE_ACCESS_TOKEN,
   authorizedModelRequest,
   confirmDownloadedModel,
@@ -337,7 +338,7 @@ describe('quota-http', () => {
 
   it('keeps separate keys on independent monthly quotas', async () => {
     const fixture = createModelFixture()
-    const otherKey = 'fedcba9876543210'.repeat(4)
+    const otherKey = REVERSED_ACCESS_TOKEN
     const env = createEnv(fixture, {
       keyValues: new Map([
         [fixture.validKey, '1'],

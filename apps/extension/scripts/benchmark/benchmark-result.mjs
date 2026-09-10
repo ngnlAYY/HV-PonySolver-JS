@@ -235,7 +235,7 @@ function validateSample(sample, scenario, label) {
   validateProfiler(sample.profiler, label)
 }
 
-function assertSummaryMatchesSamples(invocation, scenario, label) {
+function assertSummaryMatchesSamples(invocation, label) {
   const expected = summarizeMeasuredSamples(invocation.measuredSamples)
   if (!isDeepStrictEqual(invocation.summary, expected)) {
     throw new Error(`${label} summary does not match raw measuredSamples`)
@@ -348,7 +348,7 @@ export function validateBenchmarkResult(result, options = {}) {
       if (!invocation.summary || typeof invocation.summary !== 'object') {
         throw new Error(`${scenario.key} invocation ${invocation.index} summary is required`)
       }
-      assertSummaryMatchesSamples(invocation, scenario, `${scenario.key} invocation ${invocation.index}`)
+      assertSummaryMatchesSamples(invocation, `${scenario.key} invocation ${invocation.index}`)
     }
     if (browserVersions.size !== 1 || driverVersions.size !== 1) {
       throw new Error(`${scenario.key} uses multiple browser or driver versions across invocations`)

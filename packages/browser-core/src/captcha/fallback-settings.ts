@@ -4,7 +4,13 @@ export const RANDOM_ON_FAIL_STORAGE_KEY = 'hvPonySolverRandomOnFail'
 export const DEFAULT_RANDOM_ON_FAIL = true
 
 export function parseRandomOnFail(value: unknown): boolean {
-  return value === '1' ? true : value === '0' ? false : DEFAULT_RANDOM_ON_FAIL
+  if (value === '1') {
+    return true
+  }
+  if (value === '0') {
+    return false
+  }
+  return DEFAULT_RANDOM_ON_FAIL
 }
 
 export function getRandomOnFailSync(storage: SettingsStorage): boolean {

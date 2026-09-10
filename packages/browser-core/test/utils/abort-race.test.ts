@@ -28,11 +28,13 @@ describe('raceAbort', () => {
     const controller = new AbortController()
     controller.abort()
     const operation = deferred<void>()
+    const onAbort = vi.fn()
 
-    const raced = raceAbort(operation.promise, controller.signal, () => new Error('推理请求已取消'))
+    const raced = raceAbort(operation.promise, controller.signal, () => new Error('推理请求已取消'), { onAbort })
 
     operation.reject(new Error('late failure'))
     await expect(raced).rejects.toThrow('推理请求已取消')
+    expect(onAbort).toHaveBeenCalledTimes(1)
   })
 
   it('rejects with the custom error when the signal aborts mid-flight', async () => {

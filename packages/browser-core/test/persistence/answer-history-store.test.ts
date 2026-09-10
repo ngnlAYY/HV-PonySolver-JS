@@ -92,7 +92,7 @@ describe('HistoryStore', () => {
     const parse = vi.spyOn(JSON, 'parse')
     const initial = store.get('main')
     const firstParseCount = parse.mock.calls.length
-    initial[0]!.elapsed = 999
+    Object.assign(initial[0]!, { elapsed: 999 })
     expect(store.get('main')[0]?.elapsed).toBe(validManualRecord.elapsed)
     expect(parse.mock.calls.length).toBe(firstParseCount)
     storage.values.set(key, JSON.stringify({ ...validSuccessRecord, answers: 'changed' }))

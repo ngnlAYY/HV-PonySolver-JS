@@ -198,13 +198,16 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
         scheduleIdleNotification()
       }
     }
-    return {
+    const response: OffscreenClaimResponse = {
       type: OFFSCREEN_MESSAGE_TYPE,
       operation: 'claimed',
       epoch,
       idleGeneration,
-      ...(Object.keys(latestStatus).length === 0 ? {} : { status: latestStatus }),
     }
+    if (Object.keys(latestStatus).length !== 0) {
+      return { ...response, status: latestStatus }
+    }
+    return response
   }
 
   const countKind = (kind: ActiveOffscreenRequest['kind']): number => {
@@ -275,7 +278,14 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
       return false
     }
 
-    const kind = message.request.type === 'detect' ? 'detect' : message.request.type === 'prepare' ? 'prepare' : 'key'
+    let kind: ActiveOffscreenRequest['kind']
+    if (message.request.type === 'detect') {
+      kind = 'detect'
+    } else if (message.request.type === 'prepare') {
+      kind = 'prepare'
+    } else {
+      kind = 'key'
+    }
     const atCapacity =
       (kind === 'detect' && countKind(kind) >= MAX_OFFSCREEN_DETECT_REQUESTS) ||
       (kind === 'prepare' && countKind(kind) >= MAX_OFFSCREEN_PREPARE_REQUESTS) ||

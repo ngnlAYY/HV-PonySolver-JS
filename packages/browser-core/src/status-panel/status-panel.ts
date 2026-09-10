@@ -240,12 +240,13 @@ export class StatusPanel implements StatusPanelContract {
         target instanceof Element && target.tagName === 'DIV' && (target.id === 'csp' || mutation.oldValue === 'csp')
       )
     }
-    return [...mutation.addedNodes, ...mutation.removedNodes].some((node) => {
+    const isCspNode = (node: Node): boolean => {
       if (!(node instanceof Element)) {
         return false
       }
       return (node.tagName === 'DIV' && node.id === 'csp') || node.querySelector('div#csp') !== null
-    })
+    }
+    return Array.from(mutation.addedNodes).some(isCspNode) || Array.from(mutation.removedNodes).some(isCspNode)
   }
 
   private syncCspVisibility(): void {

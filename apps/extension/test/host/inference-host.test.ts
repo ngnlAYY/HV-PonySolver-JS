@@ -240,6 +240,7 @@ describe('InferenceHost', () => {
         throw new Error('模型 Key 验证已取消')
       }
       sideEffects.push('cache', 'session', 'key')
+      return undefined
     })
     vi.mocked(deps.clearKey!).mockImplementationOnce(async () => {
       sideEffects.push('clear')
@@ -279,6 +280,7 @@ describe('InferenceHost', () => {
         throw new Error('模型 Key 验证已取消')
       }
       committedKeys.push(candidateKey)
+      return undefined
     })
     const host = new InferenceHost(deps)
     const first = host.handle({

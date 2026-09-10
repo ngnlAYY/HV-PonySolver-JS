@@ -28,11 +28,20 @@ const firefoxBinary = process.env.FIREFOX_EXECUTABLE_PATH || firefox.executableP
 const addonId = 'hv-pony-solver@ngnl.host'
 const extensionUuid = '11111111-2222-4333-8444-555555555555'
 
+async function readJsonFile(filename, label) {
+  try {
+    return JSON.parse(await readFile(filename, 'utf8'))
+  } catch (error) {
+    throw new Error(`${label} is invalid: ${filename}`, { cause: error })
+  }
+}
+
 await access(manifestPath)
 await access(buildManifestPath)
-const [manifest, buildManifest] = await Promise.all(
-  [manifestPath, buildManifestPath].map(async (filename) => JSON.parse(await readFile(filename, 'utf8'))),
-)
+const [manifest, buildManifest] = await Promise.all([
+  readJsonFile(manifestPath, 'Firefox manifest'),
+  readJsonFile(buildManifestPath, 'Firefox build manifest'),
+])
 if (buildManifest.target !== 'firefox' || buildManifest.modelDelivery !== 'remote') {
   throw new Error('Firefox load-only smoke requires a remote-model build')
 }
@@ -63,7 +72,6 @@ try {
     capabilities: {
       alwaysMatch: {
         browserName: 'firefox',
-        acceptInsecureCerts: true,
         'moz:firefoxOptions': {
           binary: firefoxBinary,
           args: firefoxArguments(),
