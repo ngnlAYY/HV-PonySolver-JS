@@ -12,6 +12,7 @@ import {
 import {
   OFFSCREEN_MESSAGE_TYPE,
   isHostResponse,
+  isModelCredentialsChangedMessage,
   isOffscreenClaimResponse,
   isOffscreenIdleConfirmationResponse,
   isOffscreenIdleMessage,
@@ -211,9 +212,13 @@ async function confirmAndCloseIdleGeneration(generation: number): Promise<void> 
   })
 }
 
-function registerOffscreenRelay(broadcast: (status: HostStatusUpdate) => void): void {
+function registerOffscreenRelay(broadcast: (status: HostStatusUpdate) => void, credentialsChanged: () => void): void {
   addRuntimeMessageListener((message, sender) => {
     if (!isTrustedOffscreenSender(sender)) {
+      return false
+    }
+    if (isModelCredentialsChangedMessage(message)) {
+      credentialsChanged()
       return false
     }
     if (isOffscreenStatusMessage(message) && message.epoch === serviceWorkerEpoch) {
@@ -251,7 +256,7 @@ function claimExistingOffscreen(broadcast: (status: HostStatusUpdate) => void): 
 export function registerChromiumBackground(policy: BrokerPolicy = { allowOptions: true }): void {
   const handle: BrokerHandle | undefined = registerBroker(invokeOffscreenHost, policy)
   const broadcast = (status: HostStatusUpdate): void => handle?.broadcastContentStatus(status)
-  registerOffscreenRelay(broadcast)
+  registerOffscreenRelay(broadcast, () => handle?.broadcastCredentialsChanged())
   claimExistingOffscreen(broadcast)
   registerOpenOptionsAction()
 }

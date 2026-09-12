@@ -714,7 +714,7 @@ describe('broker queue and privilege boundaries', () => {
       { protocol: PROTOCOL_VERSION, type: 'result', requestId: 'clear-63', ok: true },
     ]
     const invokeHost = vi.fn(async () => responses.shift()!)
-    registerBroker(invokeHost)
+    const handle = registerBroker(invokeHost)
     const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
@@ -734,6 +734,7 @@ describe('broker queue and privilege boundaries', () => {
     expect(credentialNotifications()).toBe(0)
 
     options.emitMessage(verifyKeyRequest(61))
+    handle.broadcastCredentialsChanged()
     await vi.waitFor(() => expect(credentialNotifications()).toBe(1))
 
     // A failed clear stays silent.
@@ -745,7 +746,32 @@ describe('broker queue and privilege boundaries', () => {
 
     // A successful clear lets content scripts exit failure suppression at once.
     options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-63' })
+    handle.broadcastCredentialsChanged()
     await vi.waitFor(() => expect(credentialNotifications()).toBe(2))
+  })
+
+  it('broadcasts a committed change after options disconnect even when the request fails', async () => {
+    vi.mocked(storageSet).mockClear()
+    let fail!: (error: Error) => void
+    const handle = registerBroker(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject
+        }),
+    )
+    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    const options = port(OPTIONS_PORT_NAME, { id: 'extension-id', url: 'moz-extension://extension-id/options.html' })
+    platformMocks.connectListener?.(content)
+    platformMocks.connectListener?.(options)
+    options.emitMessage(verifyKeyRequest(64))
+    options.emitDisconnect()
+    handle.broadcastCredentialsChanged()
+    fail(new Error('cancelled after commit'))
+    await vi.waitFor(() => expect(storageSet).toHaveBeenCalledTimes(1))
+    expect(content.postMessage).toHaveBeenCalledExactlyOnceWith({
+      protocol: PROTOCOL_VERSION,
+      type: 'model-credentials-changed',
+    })
   })
 
   it('warns instead of silently swallowing a failed credentials revision persist', async () => {
@@ -757,7 +783,7 @@ describe('broker queue and privilege boundaries', () => {
       requestId: request.requestId,
       ok: true,
     }))
-    registerBroker(invokeHost)
+    const handle = registerBroker(invokeHost)
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
       url: 'moz-extension://extension-id/options.html',
@@ -765,6 +791,7 @@ describe('broker queue and privilege boundaries', () => {
     platformMocks.connectListener?.(options)
 
     options.emitMessage(verifyKeyRequest(0))
+    handle.broadcastCredentialsChanged()
 
     await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled())
     expect(warnSpy).toHaveBeenCalledWith(
@@ -800,7 +827,7 @@ describe('broker queue and privilege boundaries', () => {
       requestId: request.requestId,
       ok: true,
     }))
-    registerBroker(invokeHost)
+    const handle = registerBroker(invokeHost)
     const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
     platformMocks.connectListener?.(content)
     const options = port(OPTIONS_PORT_NAME, {
@@ -810,6 +837,7 @@ describe('broker queue and privilege boundaries', () => {
     platformMocks.connectListener?.(options)
 
     options.emitMessage(verifyKeyRequest(0))
+    handle.broadcastCredentialsChanged()
 
     await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(1))
     expect(vi.mocked(storageSet).mock.calls[0]![0]).toEqual({
@@ -819,6 +847,7 @@ describe('broker queue and privilege boundaries', () => {
 
     // Clearing the Key persists the recovery revision through the same path.
     options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-1' })
+    handle.broadcastCredentialsChanged()
     await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(2))
   })
 
@@ -837,7 +866,7 @@ describe('broker queue and privilege boundaries', () => {
       requestId: request.requestId,
       ok: true,
     }))
-    registerBroker(invokeHost)
+    const handle = registerBroker(invokeHost)
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
       url: 'moz-extension://extension-id/options.html',
@@ -845,8 +874,10 @@ describe('broker queue and privilege boundaries', () => {
     platformMocks.connectListener?.(options)
 
     options.emitMessage(verifyKeyRequest(10))
+    handle.broadcastCredentialsChanged()
     await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(1))
     options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-11' })
+    handle.broadcastCredentialsChanged()
     await vi.waitFor(() =>
       expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'clear-11', ok: true })),
     )
@@ -877,7 +908,7 @@ describe('broker queue and privilege boundaries', () => {
       requestId: request.requestId,
       ok: true,
     }))
-    registerBroker(invokeHost)
+    const handle = registerBroker(invokeHost)
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
       url: 'moz-extension://extension-id/options.html',
@@ -885,9 +916,15 @@ describe('broker queue and privilege boundaries', () => {
     platformMocks.connectListener?.(options)
 
     options.emitMessage(verifyKeyRequest(20))
+    handle.broadcastCredentialsChanged()
+    await vi.waitFor(() =>
+      expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'verify-20', ok: true })),
+    )
     await vi.waitFor(() => expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(1))
     options.emitMessage({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-21' })
+    handle.broadcastCredentialsChanged()
     options.emitMessage(verifyKeyRequest(22))
+    handle.broadcastCredentialsChanged()
     await vi.waitFor(() =>
       expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'verify-22', ok: true })),
     )

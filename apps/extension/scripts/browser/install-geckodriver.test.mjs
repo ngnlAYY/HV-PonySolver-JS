@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -16,6 +16,31 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const extensionRoot = path.resolve(scriptDirectory, '../..')
 const repositoryRoot = path.resolve(extensionRoot, '../..')
+
+for (const protectedKind of ['cwd', 'home']) {
+  test(`rejects geckodriver output ancestors of ${protectedKind} while allowing sibling output`, async (context) => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-geckodriver-ancestor-'))
+    const protectedDirectory = path.join(temporaryRoot, 'protected', 'nested')
+    await mkdir(protectedDirectory, { recursive: true })
+    context.mock.method(
+      protectedKind === 'cwd' ? process : os,
+      protectedKind === 'cwd' ? 'cwd' : 'homedir',
+      () => protectedDirectory,
+    )
+    try {
+      for (const ancestor of [temporaryRoot, path.dirname(protectedDirectory)]) {
+        await assert.rejects(
+          assertSafeGeckodriverOutputDirectory(ancestor),
+          /Refusing to recursively remove protected path/u,
+        )
+      }
+      const siblingOutput = path.join(temporaryRoot, 'output')
+      assert.equal(await assertSafeGeckodriverOutputDirectory(siblingOutput), siblingOutput)
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true })
+    }
+  })
+}
 
 test('guards recursive geckodriver cleanup with canonical temporary roots', async () => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-geckodriver-output-'))

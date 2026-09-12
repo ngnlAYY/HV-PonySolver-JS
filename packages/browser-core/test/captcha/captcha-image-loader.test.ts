@@ -151,11 +151,13 @@ describe('CachedImageLoader', () => {
   })
 
   it.each([
-    'image/jpeg',
-    'image/png; charset = binary',
-    'image/gif ; foo=bar; quoted="value with spaces"',
-    'IMAGE/WEBP;version=1',
-  ])('accepts supported Content-Type %j with optional parameters', async (type) => {
+    ['image/jpeg', 'image/jpeg'],
+    ['image/png; charset = binary', 'image/png'],
+    ['image/gif ; foo=bar; quoted="value with spaces"', 'image/gif'],
+    ['IMAGE/WEBP;version=1', 'image/webp'],
+    ['image/png   ', 'image/png'],
+    ['image/png\t; charset="binary"', 'image/png'],
+  ])('normalizes supported Content-Type %j to Blob type %j', async (type, expectedType) => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       makeOkResponse(FAKE_BYTES, {
         'content-type': type,
@@ -165,6 +167,7 @@ describe('CachedImageLoader', () => {
 
     const result = await new CachedImageLoader().get(FAKE_URL)
 
+    expect(result.type).toBe(expectedType)
     expect(Array.from(new Uint8Array(await result.arrayBuffer()))).toEqual(Array.from(FAKE_BYTES))
   })
 

@@ -4,7 +4,7 @@ import { registerOpenOptionsAction } from '../platform/webextension'
 import type { HostStatusUpdate } from '../protocol/messages'
 import { registerBroker, type BrokerHandle, type BrokerPolicy } from './broker'
 
-export type InferenceHostFactory = (emitStatus: HostStatusEmitter) => InferenceHost
+export type InferenceHostFactory = (emitStatus: HostStatusEmitter, onCredentialsCommitted: () => void) => InferenceHost
 
 export function registerFirefoxBackground(
   hostFactory: InferenceHostFactory,
@@ -12,13 +12,16 @@ export function registerFirefoxBackground(
 ): void {
   let handle: BrokerHandle | null = null
   const pendingStatuses: HostStatusUpdate[] = []
-  const host = hostFactory((status) => {
-    if (handle) {
-      handle.broadcastContentStatus(status)
-      return
-    }
-    pendingStatuses.push(status)
-  })
+  const host = hostFactory(
+    (status) => {
+      if (handle) {
+        handle.broadcastContentStatus(status)
+        return
+      }
+      pendingStatuses.push(status)
+    },
+    () => handle?.broadcastCredentialsChanged(),
+  )
   handle = registerBroker((request, signal) => host.handle(request, signal), policy)
   for (const status of pendingStatuses) {
     handle.broadcastContentStatus(status)

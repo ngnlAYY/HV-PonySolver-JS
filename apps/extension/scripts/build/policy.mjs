@@ -73,7 +73,12 @@ export async function assertSafeBuildOutputRoot(requestedOutputRoot) {
     ...rootCandidates.map((candidate) => canonicalizePotentialPath(candidate)),
   ])
   const filesystemRoot = path.parse(canonicalOutputRoot).root
-  if ([filesystemRoot, canonicalCwd, canonicalHome, canonicalRepository].includes(canonicalOutputRoot)) {
+  if (
+    canonicalOutputRoot === filesystemRoot ||
+    [canonicalCwd, canonicalHome, canonicalRepository].some((protectedPath) =>
+      isPathWithin(protectedPath, canonicalOutputRoot),
+    )
+  ) {
     throw new Error(`Refusing to recursively remove protected path: ${canonicalOutputRoot}`)
   }
 

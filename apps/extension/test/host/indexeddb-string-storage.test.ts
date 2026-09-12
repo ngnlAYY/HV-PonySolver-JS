@@ -258,6 +258,58 @@ describe('IndexedDbStringStorage', () => {
     await expect(writePromise).rejects.toThrow('扩展 Key 存储操作已取消')
   })
 
+  it.each(['set', 'remove'] as const)(
+    'reports a committed %s independently of caller cancellation',
+    async (operation) => {
+      const { transactions } = installIndexedDb()
+      const storage = new IndexedDbStringStorage()
+      const controller = new AbortController()
+      const committed = vi.fn()
+      const pending =
+        operation === 'set'
+          ? storage.set('key', 'value', controller.signal, committed)
+          : storage.remove('key', controller.signal, committed)
+      const transaction = await waitForTransaction(transactions)
+      transaction.abort.mockImplementation(() => {
+        throw new DOMException('committing', 'InvalidStateError')
+      })
+      controller.abort()
+      await expect(pending).rejects.toThrow('已取消')
+      expect(committed).not.toHaveBeenCalled()
+      complete(transaction)
+      complete(transaction)
+      expect(committed).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('does not report a commit when abort succeeds or storage closes before late completion', async () => {
+    const { transactions } = installIndexedDb()
+    const storage = new IndexedDbStringStorage()
+    const committed = vi.fn()
+    const controller = new AbortController()
+    const first = storage.set('key', 'value', controller.signal, committed)
+    await waitForTransaction(transactions)
+    controller.abort()
+    await expect(first).rejects.toThrow('已取消')
+    expect(committed).not.toHaveBeenCalled()
+    const second = storage.set('key', 'next', undefined, committed)
+    const transaction = await waitForTransaction(transactions, 1)
+    await storage.close()
+    await expect(second).rejects.toThrow('已关闭')
+    complete(transaction)
+    expect(committed).not.toHaveBeenCalled()
+  })
+
+  it('reports one normal commit before resolving the write', async () => {
+    const { transactions } = installIndexedDb()
+    const storage = new IndexedDbStringStorage()
+    const committed = vi.fn()
+    const pending = storage.set('key', 'value', undefined, committed)
+    complete(await waitForTransaction(transactions))
+    await pending
+    expect(committed).toHaveBeenCalledTimes(1)
+  })
+
   it('aborts an active write before closing the database', async () => {
     const { database, transactions } = installIndexedDb()
     const storage = new IndexedDbStringStorage()

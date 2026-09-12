@@ -76,7 +76,7 @@ Vitest 主要覆盖 TypeScript/运行时逻辑；包内显式列出的 Node `tes
 - [`check-browser-sinks.mjs`](../../scripts/checks/check-browser-sinks.mjs)：浏览器危险 API 及登记例外。
 - [`check-bundle-budget.mjs`](../../scripts/checks/check-bundle-budget.mjs)：default 256 KiB 与 bundled 1 MiB 包体门禁。
 - [`check-docs-drift.mjs`](../../scripts/docs-drift/check-docs-drift.mjs) 与 `docs-drift/`：从源码、配置和工作流提取事实，检查文档漂移。
-- [`assert-pinned-actions.mjs`](../../scripts/ci/assert-pinned-actions.mjs) 与 `workflow-security-contract.test.mjs`：Action SHA、权限、条件和秘密门禁。同行 YAML flow 步骤中的每个 `uses` 均须检查，checkout 的 `persist-credentials: false` 必须属于该步骤自身；注释、引用文本和 shell block 不充当工作流配置。
+- [`assert-pinned-actions.mjs`](../../scripts/ci/assert-pinned-actions.mjs) 与 `workflow-security-contract.test.mjs`：Action SHA、权限、条件和秘密门禁。同行 YAML flow 步骤中的每个 `uses` 均须检查，quoted 键、Action 引用与凭据值的标准转义先解码；checkout 的 `persist-credentials: false` 必须属于该步骤自身。plain scalar、续行、注释和 shell block 中的文本不充当工作流配置。检查器不是通用 YAML 解析器：多行 quoted key/Action 值，以及相关结构中的 anchor、tag、alias 等不支持写法会明确拒绝，不会静默放行。
 - [`model-manifest.mjs`](../../scripts/model/model-manifest.mjs)、[`model-release-notes.mjs`](../../scripts/model/model-release-notes.mjs)：共享模型身份读取和发布说明。
 - [`assert-clean-ort-source.mjs`](../../scripts/ort-runtime/assert-clean-ort-source.mjs)、[`build-minimal-ort-runtime.sh`](../../scripts/ort-runtime/build-minimal-ort-runtime.sh)、[`resolve-ort-build-root.mjs`](../../scripts/ort-runtime/resolve-ort-build-root.mjs)：独立 ORT 构建根保护。
 - [`run-userscript-e2e.mjs`](../../scripts/e2e/run-userscript-e2e.mjs)：只转发受限的 userscript Playwright 参数。

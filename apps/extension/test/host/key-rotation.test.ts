@@ -24,8 +24,12 @@ it.each(['verify-key', 'clear-key'] as const)(
     document.body.replaceChildren()
     SuccessfulWorker.reset()
     vi.stubGlobal('Worker', SuccessfulWorker)
-    vi.spyOn(IndexedDbStringStorage.prototype, 'set').mockResolvedValue()
-    vi.spyOn(IndexedDbStringStorage.prototype, 'remove').mockResolvedValue()
+    vi.spyOn(IndexedDbStringStorage.prototype, 'set').mockImplementation(async (_key, _value, _signal, committed) =>
+      committed?.(),
+    )
+    vi.spyOn(IndexedDbStringStorage.prototype, 'remove').mockImplementation(async (_key, _signal, committed) =>
+      committed?.(),
+    )
     vi.spyOn(IndexedDbStringStorage.prototype, 'close').mockResolvedValue()
     vi.stubGlobal(
       'fetch',
@@ -37,7 +41,10 @@ it.each(['verify-key', 'clear-key'] as const)(
       ),
     )
 
-    const host = createRemoteInferenceHost()
+    const notifications = vi.fn(() => {
+      for (const receive of receivers) receive({ protocol: PROTOCOL_VERSION, type: 'model-credentials-changed' })
+    })
+    const host = createRemoteInferenceHost(undefined, notifications)
     const detector = (host as unknown as { dependencies: { detector: OnnxWorkerClient } }).dependencies.detector
     const prepare = vi.spyOn(detector, 'prepare')
     const cache = (detector as unknown as { modelCache: ModelCache }).modelCache
@@ -105,7 +112,7 @@ it.each(['verify-key', 'clear-key'] as const)(
             : { protocol: PROTOCOL_VERSION, type: operation, requestId: 'rotate' },
         )
       await expect(rotate()).resolves.toMatchObject({ ok: true })
-      for (const receive of receivers) receive({ protocol: PROTOCOL_VERSION, type: 'model-credentials-changed' })
+      expect(notifications).toHaveBeenCalledTimes(1)
       expect(document.getElementById('riddlemaster')).toBeNull()
 
       appendCaptcha()
@@ -118,6 +125,7 @@ it.each(['verify-key', 'clear-key'] as const)(
 
       // A later credential change must not discard the already usable session.
       await expect(rotate()).resolves.toMatchObject({ ok: true })
+      expect(notifications).toHaveBeenCalledTimes(2)
       await otherClient.prepare()
       expect(download).toHaveBeenCalledTimes(2)
     } finally {
@@ -126,6 +134,70 @@ it.each(['verify-key', 'clear-key'] as const)(
       host.destroy()
       rejectOld(new Error('test cleanup'))
       await Promise.all(warmups)
+    }
+  },
+)
+
+it.each(['verify-key', 'clear-key'] as const)(
+  '%s reconciles a committed Key after caller cancellation without claiming success',
+  async (operation) => {
+    const caller = new AbortController()
+    let committed: (() => void) | undefined
+    const pendingWrite = (signal: AbortSignal | undefined, callback: (() => void) | undefined): Promise<void> => {
+      committed = callback
+      return new Promise((_resolve, reject) =>
+        signal?.addEventListener('abort', () => reject(new Error('Key write cancelled')), { once: true }),
+      )
+    }
+    vi.spyOn(IndexedDbStringStorage.prototype, 'set').mockImplementation((_key, _value, signal, callback) =>
+      pendingWrite(signal, callback),
+    )
+    vi.spyOn(IndexedDbStringStorage.prototype, 'remove').mockImplementation((_key, signal, callback) =>
+      pendingWrite(signal, callback),
+    )
+    vi.spyOn(IndexedDbStringStorage.prototype, 'close').mockResolvedValue()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { headers: { 'content-length': String(ORT_MODEL_INTEGRITY.byteLength) } })),
+    )
+    const notified = vi.fn()
+    const host = createRemoteInferenceHost(undefined, notified)
+    const detector = (host as unknown as { dependencies: { detector: OnnxWorkerClient } }).dependencies.detector
+    const cache = (detector as unknown as { modelCache: ModelCache }).modelCache
+    vi.spyOn(cache, 'getCached').mockResolvedValue(null)
+    let oldSignal: AbortSignal | undefined
+    vi.spyOn(cache, 'download').mockImplementation((signal) => {
+      oldSignal = signal
+      return new Promise((_resolve, reject) =>
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true }),
+      )
+    })
+    const teardown = vi.spyOn(detector, 'cancelPendingPreparation')
+    const oldPreparation = detector.prepare().catch((error: unknown) => error)
+    try {
+      await vi.waitFor(() => expect(oldSignal).toBeInstanceOf(AbortSignal))
+      const response = host.handle(
+        operation === 'verify-key'
+          ? { protocol: PROTOCOL_VERSION, type: operation, requestId: 'cancelled-commit', candidateKey: 'a'.repeat(64) }
+          : { protocol: PROTOCOL_VERSION, type: operation, requestId: 'cancelled-commit' },
+        caller.signal,
+      )
+      await vi.waitFor(() => expect(committed).toBeTypeOf('function'))
+      caller.abort()
+      await expect(response).resolves.toMatchObject({ ok: false })
+      expect(teardown).not.toHaveBeenCalled()
+      committed?.()
+      expect(teardown).toHaveBeenCalledTimes(1)
+      expect(notified).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(notified).toHaveBeenCalledTimes(1))
+      expect(oldSignal?.aborted).toBe(true)
+      await oldPreparation
+      host.destroy()
+      committed?.()
+      expect(teardown).toHaveBeenCalledTimes(1)
+    } finally {
+      host.destroy()
+      await oldPreparation
     }
   },
 )

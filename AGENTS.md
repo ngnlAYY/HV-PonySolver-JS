@@ -83,11 +83,11 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 ### 平台、存储与网络
 
 - 用户脚本通过 GM 桥接访问特权 API；扩展内容脚本不得接收模型 Key 或模型字节。
-- 扩展远程模型 Key 只保存在扩展源 IndexedDB；普通设置和历史使用 `storage.local`。不得把 Key 降级保存到页面存储、查询字符串或可回显控件。Key 保存或清除后，共享 Host 须取消并等待旧的未完成初始化结束，再报告成功和通知内容页；已就绪会话可继续复用。
+- 扩展远程模型 Key 只保存在扩展源 IndexedDB；普通设置和历史使用 `storage.local`。不得把 Key 降级保存到页面存储、查询字符串或可回显控件。Key 的实际事务提交必须独立驱动共享 Host 取消并等待旧的未完成初始化结束，再通知内容页，不能依赖可能已取消的原请求成功响应。调用方取消仍报告取消，但不能宣称撤销已提交的变更；提交前回滚不通知，已关闭 Host 的迟到回调不得唤醒旧生命周期。已就绪会话可继续复用。
 - 内容脚本镜像初始化按 key 合并变更，并受超时、取消和不同 key 数量上限约束；读取快照失败时必须清理监听器。历史解析缓存必须观察外部写入，不能省略写入后的最终校对。
 - 调用原生 `fetch` 时必须保留正确接收者，使用项目已有的 fetch 解析辅助函数，避免 `Illegal invocation`。
 - 跨上下文消息必须执行严格 schema、来源、大小、超时和取消校验。不要把 `unknown` 消息直接断言为可信类型。
-- 验证码图片消息保持明确的大小上限；模型字节使用可转移 `ArrayBuffer`，不得改为无界 Base64 或重复拷贝。
+- 验证码图片消息保持明确的大小上限；HTTP Content-Type 严格校验后规范化为基础 MIME，扩展消息继续使用精确白名单。取消尚未开始的 detect 必须移除队列项并释放图片，不能等慢队头结束再释放。模型字节使用可转移 `ArrayBuffer`，不得改为无界 Base64 或重复拷贝。
 - 异步识别遵循 latest-wins：旧请求完成得更晚时也不能覆盖新请求状态。
 
 ## 模型、运行时与扩展产物
@@ -184,7 +184,7 @@ mise exec -- pnpm --filter @hv-pony-solver/model-worker render-config
 
 - 仓库只维护两个工作流：`.github/workflows/verify-monorepo.yml` 的 `Repository CI`，以及 `.github/workflows/deploy-cloudflare-model-worker.yml` 的手动部署流程。
 - 两个工作流使用 `jdx/mise-action` 读取根目录 `mise.toml`，并保留 pnpm store 缓存及冻结依赖安装；仅需 Node.js 的发布步骤可以限定安装 `node`。
-- GitHub Action 必须固定到完整 40 位 commit SHA，Docker Action 必须固定到完整 `sha256` digest，并通过 `scripts/ci/assert-pinned-actions.mjs` 校验。同行 flow 步骤中的每个 `uses` 均须检查，checkout 凭证配置不能借用相邻步骤或字符串中的字段。
+- GitHub Action 必须固定到完整 40 位 commit SHA，Docker Action 必须固定到完整 `sha256` digest，并通过 `scripts/ci/assert-pinned-actions.mjs` 校验。同行 flow 步骤中的每个 `uses` 均须检查；quoted 键和值的转义先解码，纯标量文本不得被当成配置，无法可靠识别的相关语法须拒绝。checkout 凭证配置不能借用相邻步骤或字符串中的字段。
 - 修改 CI 时要核对本地命令与 job 实际命令，尤其不能遗漏根级 Node 测试。
 - CodeQL 属于仓库安全门禁。扩展 artifact 与 Release 发布必须显式依赖本次 `codeql` 作业并要求成功；分析执行成功不等于没有安全告警。修复告警后要等待目标分支的新分析完成，并同时检查最新分析结果和告警实例状态。
 - Model Worker 部署默认不应发生。只有手动输入明确允许发布且 Cloudflare secrets 完整时才可执行真实部署。
@@ -200,7 +200,7 @@ mise exec -- pnpm --filter @hv-pony-solver/model-worker render-config
 
 ## Git 与交付纪律
 
-- 不使用 `git reset --hard`、`git checkout --` 或其他破坏性命令清理用户改动。
+- 不使用 `git reset --hard`、`git checkout --` 或其他破坏性命令清理用户改动。构建和工具安装的递归输出清理须拒绝仓库、cwd、home 本身及包含它们的祖先目录，即使输出位于临时目录中也不能例外。
 - 提交前检查 `git status`、`git diff`、`git diff --cached` 和 `git diff --check`，确认只包含本任务文件。
 - 不提交 `dist/`、`coverage/`、生成的 `wrangler.toml`、`config/`、临时浏览器配置、测试证据、下载模型或含秘密的文件。
 - commit 信息应概括行为变化，不使用含糊的“update/fix stuff”。

@@ -36,6 +36,11 @@ type PreparationOperation = {
   readonly timeoutId: ReturnType<typeof setTimeout>
 }
 
+type QueuedDetection = Readonly<{
+  run(): Promise<void>
+  cancel(error: Error): void
+}>
+
 class PreparationCancelledError extends Error {
   constructor() {
     super('推理请求已取消')
@@ -51,7 +56,8 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
   private worker: Worker | null = null
   private requestBridge: WorkerRequestBridge | null = null
   private preparation: PreparationOperation | null = null
-  private detectQueue = Promise.resolve()
+  private readonly detectQueue: QueuedDetection[] = []
+  private detectRunning = false
   private ready = false
   private destroyed = false
   private consecutiveDetectErrors = 0
@@ -119,21 +125,59 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
   }
 
   detect(blob: Blob, signal?: AbortSignal): Promise<YoloParseResult> {
-    if (signal?.aborted) {
-      return Promise.reject(new Error('推理请求已取消'))
-    }
-    let workerPosted = false
-    const detectPromise = this.detectQueue.then(() =>
-      this.runDetect(blob, signal, () => {
-        workerPosted = true
-      }),
-    )
-    this.detectQueue = detectPromise.then(
-      () => undefined,
-      () => undefined,
-    )
-    return raceAbort(detectPromise, signal, () => new Error('推理请求已取消'), {
-      holdOnAbort: () => workerPosted,
+    return new Promise((resolve, reject) => {
+      this.assertRequestActive(signal)
+      let started = false
+      let workerPosted = false
+      let settled = false
+      const finish = (complete: () => void): void => {
+        if (settled) return
+        settled = true
+        signal?.removeEventListener('abort', onAbort)
+        complete()
+      }
+      const request: QueuedDetection = {
+        run: async () => {
+          started = true
+          try {
+            const result = await this.runDetect(blob, signal, () => {
+              workerPosted = true
+            })
+            finish(() => resolve(result))
+          } catch (error) {
+            finish(() => reject(error))
+          }
+        },
+        cancel: (error) => finish(() => reject(error)),
+      }
+      const onAbort = (): void => {
+        if (!started) {
+          const index = this.detectQueue.indexOf(request)
+          if (index >= 0) this.detectQueue.splice(index, 1)
+          request.cancel(new Error('推理请求已取消'))
+        } else if (!workerPosted) {
+          request.cancel(new Error('推理请求已取消'))
+        }
+        // 已发送的请求由 runDetect 等待 Worker 完成或终止，不能提前放行下一项。
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      if (signal?.aborted) {
+        onAbort()
+        return
+      }
+      this.detectQueue.push(request)
+      this.startNextDetect()
+    })
+  }
+
+  private startNextDetect(): void {
+    if (this.detectRunning || this.destroyed) return
+    const request = this.detectQueue.shift()
+    if (!request) return
+    this.detectRunning = true
+    void request.run().finally(() => {
+      this.detectRunning = false
+      this.startNextDetect()
     })
   }
 
@@ -143,6 +187,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     }
     this.destroyed = true
     const closedError = new Error('Worker 已关闭')
+    for (const request of this.detectQueue.splice(0)) request.cancel(closedError)
     this.destroyController.abort(closedError)
     this.preparation?.controller.abort(closedError)
     this.rejectPending(closedError)

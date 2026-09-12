@@ -34,6 +34,7 @@ export type BrokerPolicy = Readonly<{
 }>
 export type BrokerHandle = Readonly<{
   dispose(): void
+  broadcastCredentialsChanged(): void
   broadcastContentStatus(status: HostStatusUpdate): void
 }>
 export const MAX_PORT_DETECT_REQUESTS = 2
@@ -380,12 +381,6 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
           if (!isHostResponse(response) || response.requestId !== message.requestId) {
             throw new Error('推理 Host 返回无效或错配消息')
           }
-          if ((message.type === 'verify-key' || message.type === 'clear-key') && response.ok) {
-            // Both credential transitions must reach content scripts live, so a
-            // cleared Key exits the failure-suppression window immediately
-            // instead of waiting for the persisted-revision poll.
-            broadcastCredentialsChanged()
-          }
           post(response)
         })
         .catch((error: unknown) => {
@@ -409,6 +404,7 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
 
   return {
     dispose,
+    broadcastCredentialsChanged,
     broadcastContentStatus(status: HostStatusUpdate): void {
       const update = pickForwardedHostFields(status)
       if (update.model === undefined && update.session === undefined) {

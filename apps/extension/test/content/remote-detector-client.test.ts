@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { CachedImageLoader } from '@hv-pony-solver/browser-core/captcha/captcha-image-loader'
 import { prepareDeadlineConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
 import { isPermanentModelError } from '@hv-pony-solver/browser-core/model/permanent-model-error'
 import type { ExtensionPort } from '../../src/platform/webextension'
@@ -23,7 +24,7 @@ vi.mock('../../src/platform/webextension', async (importOriginal) => {
 
 import { RemoteDetectorClient } from '../../src/content/remote-detector-client'
 import { PREFETCH_MISS_STORAGE_KEY } from '../../src/content/prefetch'
-import { PROTOCOL_VERSION } from '../../src/protocol/messages'
+import { encodeImage, PROTOCOL_VERSION } from '../../src/protocol/messages'
 
 function createPort(): TestPort {
   let messageListener: ((message: unknown) => void) | undefined
@@ -68,6 +69,25 @@ beforeEach(() => {
 })
 
 describe('RemoteDetectorClient', () => {
+  it.each(['image/png; charset=binary', 'IMAGE/PNG ; note="value with spaces"', 'image/png   '])(
+    'encodes images loaded with HTTP Content-Type %j using the strict protocol MIME',
+    async (contentType) => {
+      const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])
+      const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(bytes, {
+          headers: { 'content-type': contentType, 'content-length': String(bytes.length) },
+        }),
+      )
+      try {
+        const blob = await new CachedImageLoader().get('https://hentaiverse.org/captcha.png')
+        await expect(encodeImage(blob)).resolves.toEqual({ mimeType: 'image/png', imageBase64: 'iVBORw0KGgo=' })
+        expect(fetch).toHaveBeenCalledTimes(1)
+      } finally {
+        fetch.mockRestore()
+      }
+    },
+  )
+
   it('ignores stale responses and resolves the matching JSON-safe detection result', async () => {
     const client = new RemoteDetectorClient(statusSink())
     const detectPromise = client.detect(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' }))

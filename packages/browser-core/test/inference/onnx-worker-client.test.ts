@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
@@ -500,6 +504,103 @@ describe('OnnxWorkerClient', () => {
     expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1)
   })
 
+  it('runs surviving queued detects in order after removing a cancelled entry', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    const client = new OnnxWorkerClient(
+      {
+        getCached: vi.fn(async () => new ArrayBuffer(8)),
+        download: vi.fn(),
+        putCached: vi.fn(),
+      },
+      createMockPanel(),
+    )
+    const pending: Promise<unknown>[] = []
+    try {
+      const prepare = client.prepare()
+      pending.push(prepare.catch(() => undefined))
+      await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+      SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+      await prepare
+      const images = [new Blob(['first']), new Blob(['cancelled']), new Blob(['last'])]
+      const first = client.detect(images[0]!)
+      pending.push(first.catch(() => undefined))
+      await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(2))
+      const controller = new AbortController()
+      const cancelled = client.detect(images[1]!, controller.signal)
+      const last = client.detect(images[2]!)
+      pending.push(
+        cancelled.catch(() => undefined),
+        last.catch(() => undefined),
+      )
+      controller.abort()
+      await expect(cancelled).rejects.toThrow('推理请求已取消')
+      SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[1]?.requestId)
+      await first
+      await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(3))
+      expect(SuccessfulWorker.messages[2]).toMatchObject({ type: 'detect', imageBlob: images[2] })
+      SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[2]?.requestId)
+      await expect(last).resolves.toMatchObject({ success: true })
+    } finally {
+      client.destroy()
+      await Promise.all(pending)
+    }
+  })
+
+  it('starts fresh preparation for a surviving detect after the preparing owner cancels', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const getCached = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<ArrayBuffer | null>(() => {}))
+      .mockResolvedValue(new ArrayBuffer(8))
+    const client = new OnnxWorkerClient({ getCached, download: vi.fn(), putCached: vi.fn() }, createMockPanel())
+    const controller = new AbortController()
+    const first = client.detect(new Blob(['first']), controller.signal)
+    const firstRejection = expect(first).rejects.toThrow('推理请求已取消')
+    const second = client.detect(new Blob(['second']))
+    try {
+      await vi.waitFor(() => expect(getCached).toHaveBeenCalledTimes(1))
+      controller.abort()
+      await firstRejection
+      await expect(second).resolves.toMatchObject({ success: true })
+      expect(getCached).toHaveBeenCalledTimes(2)
+    } finally {
+      client.destroy()
+      await Promise.allSettled([first, second])
+    }
+  })
+
+  it('rejects queued detections immediately on destroy without starting them', async () => {
+    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    SuccessfulWorker.autoRespond = false
+    const panel = createMockPanel()
+    const client = new OnnxWorkerClient(
+      {
+        getCached: vi.fn(async () => new ArrayBuffer(8)),
+        download: vi.fn(),
+        putCached: vi.fn(),
+      },
+      panel,
+    )
+    const prepare = client.prepare()
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
+    await prepare
+    const first = client.detect(new Blob(['running']))
+    const firstRejection = expect(first).rejects.toThrow('Worker 已关闭')
+    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(2))
+    const queued = client.detect(new Blob(['queued']))
+    const queuedRejection = expect(queued).rejects.toThrow('Worker 已关闭')
+    const statuses = vi.mocked(panel.setStatus).mock.calls.length
+    client.destroy()
+    await queuedRejection
+    await firstRejection
+    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[1]?.requestId)
+    await Promise.resolve()
+    expect(SuccessfulWorker.messages).toHaveLength(2)
+    expect(panel.setStatus).toHaveBeenCalledTimes(statuses)
+  })
+
   it('keeps an aborted running detect pending until the Worker actually settles', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     SuccessfulWorker.autoRespond = false
@@ -901,4 +1002,71 @@ describe('OnnxWorkerClient', () => {
     expect(SuccessfulWorker.messages.filter((message) => message.type === 'init')).toHaveLength(1)
     expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1)
   })
+})
+
+it('releases cancelled queued image payloads while an unrelated running detect remains pending', () => {
+  const clientUrl = pathToFileURL(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../src/inference/onnx-worker-client.ts'),
+  ).href
+  const output = execFileSync(
+    process.execPath,
+    [
+      '--expose-gc',
+      '--experimental-transform-types',
+      '--input-type=module',
+      '--eval',
+      `
+      import { registerHooks } from 'node:module'
+      import { setTimeout as delay } from 'node:timers/promises'
+      registerHooks({ resolve(specifier, context, nextResolve) {
+        try { return nextResolve(specifier, context) } catch (error) {
+          if (specifier.startsWith('.') && !specifier.endsWith('.ts')) return nextResolve(specifier + '.ts', context)
+          throw error
+        }
+      } })
+      const { OnnxWorkerClient } = await import(${JSON.stringify(clientUrl)})
+      let postedDetects = 0
+      const worker = {
+        onmessage: null, terminate() {},
+        postMessage(message) {
+          if (message.type === 'init') queueMicrotask(() => this.onmessage({ data: {
+            type: 'response', requestId: message.requestId, modelBuffer: message.modelBuffer,
+          } }))
+          else postedDetects += 1
+        },
+      }
+      const client = new OnnxWorkerClient({
+        getCached: async () => new ArrayBuffer(8),
+        download: async () => { throw new Error('unexpected download') }, putCached: async () => {},
+      }, { setStatus() {}, setSessionReady() {} }, () => worker)
+      try {
+        await client.prepare()
+        let runningSettled = false
+        const running = client.detect(new Blob(['head'])).catch(() => {}).finally(() => { runningSettled = true })
+        await delay(0)
+        async function enqueueCancelled() {
+          const refs = []
+          for (let index = 0; index < 50; index += 1) {
+            const blob = new Blob([new Uint8Array(2 * 1024 * 1024)])
+            refs.push(new WeakRef(blob))
+            const controller = new AbortController()
+            const queued = client.detect(blob, controller.signal)
+            controller.abort()
+            await queued.catch(() => {})
+          }
+          return refs
+        }
+        const refs = await enqueueCancelled()
+        for (let attempt = 0; attempt < 4; attempt += 1) { await delay(0); globalThis.gc() }
+        process.stdout.write(JSON.stringify({
+          retained: refs.filter((ref) => ref.deref() !== undefined).length, postedDetects, runningSettled,
+        }))
+        client.destroy()
+        await running
+      } finally { client.destroy() }
+    `,
+    ],
+    { encoding: 'utf8' },
+  )
+  expect(JSON.parse(output)).toEqual({ retained: 0, postedDetects: 1, runningSettled: false })
 })

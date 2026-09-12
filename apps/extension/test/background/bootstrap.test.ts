@@ -738,6 +738,44 @@ describe('target-specific extension bootstraps', () => {
     expect(broadcastContentStatus).toHaveBeenCalledTimes(1)
   })
 
+  it('relays committed credentials only from the exact Offscreen sender', () => {
+    const broadcastCredentialsChanged = vi.fn()
+    mocks.registerBroker.mockReturnValue({
+      dispose: vi.fn(),
+      broadcastContentStatus: vi.fn(),
+      broadcastCredentialsChanged,
+    })
+    registerChromiumBackground()
+    const relay = mocks.addRuntimeMessageListener.mock.calls.at(-1)![0] as RuntimeMessageListener
+    const message = { protocol: PROTOCOL_VERSION, type: 'model-credentials-changed' }
+    for (const sender of [
+      { ...offscreenSender, id: 'other-extension' },
+      { ...offscreenSender, tab: { url: offscreenSender.url } },
+      { ...offscreenSender, url: 'chrome-extension://extension-id/options.html' },
+    ])
+      relay(message, sender, vi.fn())
+    relay({ ...message, extra: true }, offscreenSender, vi.fn())
+    expect(broadcastCredentialsChanged).not.toHaveBeenCalled()
+    relay(message, offscreenSender, vi.fn())
+    expect(broadcastCredentialsChanged).toHaveBeenCalledTimes(1)
+  })
+
+  it('wires Firefox committed credentials independently of request responses', () => {
+    const broadcastCredentialsChanged = vi.fn()
+    mocks.registerBroker.mockReturnValue({
+      dispose: vi.fn(),
+      broadcastContentStatus: vi.fn(),
+      broadcastCredentialsChanged,
+    })
+    let committed: (() => void) | undefined
+    registerFirefoxBackground((_status, onCommitted) => {
+      committed = onCommitted
+      return { handle: vi.fn(), destroy: vi.fn() } as never
+    })
+    committed?.()
+    expect(broadcastCredentialsChanged).toHaveBeenCalledTimes(1)
+  })
+
   it('wires the Firefox Host status emitter to the broker broadcast', () => {
     const broadcastContentStatus = vi.fn()
     mocks.registerBroker.mockImplementation(() => ({ dispose: vi.fn(), broadcastContentStatus }))

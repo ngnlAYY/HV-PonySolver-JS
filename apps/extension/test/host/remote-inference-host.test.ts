@@ -159,7 +159,12 @@ describe('createRemoteInferenceHost', () => {
       // Verification must settle on the HEAD probe alone, never on a metered GET.
       expect(requestedMethods).toEqual(['GET', 'HEAD'])
       expect(cacheDownload).not.toHaveBeenCalled()
-      expect(storageSet).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY, 'f'.repeat(64), expect.any(AbortSignal))
+      expect(storageSet).toHaveBeenCalledWith(
+        MODEL_ACCESS_KEY_STORAGE_KEY,
+        'f'.repeat(64),
+        expect.any(AbortSignal),
+        expect.any(Function),
+      )
 
       await expect(
         host.handle({ protocol: PROTOCOL_VERSION, type: 'download-model', requestId: 'factory-download' }),
@@ -198,7 +203,11 @@ describe('createRemoteInferenceHost', () => {
       await expect(
         host.handle({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'factory-clear' }),
       ).resolves.toMatchObject({ ok: true, requestId: 'factory-clear' })
-      expect(storageRemove).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY, expect.any(AbortSignal))
+      expect(storageRemove).toHaveBeenCalledWith(
+        MODEL_ACCESS_KEY_STORAGE_KEY,
+        expect.any(AbortSignal),
+        expect.any(Function),
+      )
 
       host.destroy()
       expect(detectorDestroy).toHaveBeenCalledTimes(1)

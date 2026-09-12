@@ -7,6 +7,7 @@ import {
   OFFSCREEN_MESSAGE_TYPE,
   errorResponse,
   isOffscreenMessage,
+  modelCredentialsChangedMessage,
   offscreenStatusMessage,
   type HostResponse,
   type HostStatusUpdate,
@@ -15,7 +16,10 @@ import {
   type OffscreenIdleMessage,
 } from '../protocol/messages'
 
-export type OffscreenInferenceHostFactory = (emitStatus: HostStatusEmitter) => InferenceHost
+export type OffscreenInferenceHostFactory = (
+  emitStatus: HostStatusEmitter,
+  onCredentialsCommitted: () => void,
+) => InferenceHost
 
 export const OFFSCREEN_IDLE_TIMEOUT_MS = 30_000
 /** Base delay of the exponential idle-notification backoff: 5s -> 10s -> 20s -> 40s, capped. */
@@ -144,7 +148,15 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
     }
   }
 
-  let host = hostFactory(emitStatus)
+  let hostGeneration = 0
+  const createHost = (): InferenceHost => {
+    const generation = ++hostGeneration
+    return hostFactory(emitStatus, () => {
+      if (hostDestroyed || generation !== hostGeneration) return
+      void sendRuntimeMessage(modelCredentialsChangedMessage()).catch(() => undefined)
+    })
+  }
+  let host = createHost()
 
   const rememberCancellation = (key: string): void => {
     cancelledRequestIds.delete(key)
@@ -296,7 +308,7 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
     }
 
     if (hostDestroyed) {
-      host = hostFactory(emitStatus)
+      host = createHost()
       hostDestroyed = false
       installPageHideTeardown()
     }

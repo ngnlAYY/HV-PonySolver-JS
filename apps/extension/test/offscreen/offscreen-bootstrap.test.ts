@@ -353,3 +353,19 @@ describe('offscreen idle-notification backoff', () => {
     await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledTimes(1))
   })
 })
+
+it('sends committed credential changes over runtime only and ignores callbacks after teardown', () => {
+  let committed: (() => void) | undefined
+  registerOffscreenHost((_status, callback) => {
+    committed = callback
+    return { handle: vi.fn(), destroy: vi.fn() } as never
+  })
+  committed?.()
+  expect(mocks.sendRuntimeMessage).toHaveBeenCalledExactlyOnceWith({
+    protocol: PROTOCOL_VERSION,
+    type: 'model-credentials-changed',
+  })
+  globalThis.dispatchEvent(new Event('pagehide'))
+  committed?.()
+  expect(mocks.sendRuntimeMessage).toHaveBeenCalledTimes(1)
+})

@@ -60,7 +60,7 @@ Host 在 [`src/host/inference-host.ts`](../../apps/extension/src/host/inference-
 
 普通设置和历史存放在 `storage.local`，内容侧通过 [`src/content/storage-mirror.ts`](../../apps/extension/src/content/storage-mirror.ts) 建立同步内存镜像。镜像初始化期间先监听并合并变更，再读取全量快照；初始化有超时、取消和缓冲 Key 上限。写入按 Key 串行、以乐观值供当前页面读取，并在 `storage.onChanged` 提交后校正；前缀索引仅用于有限的历史扫描。`getCommittedItemsByPrefix()` 在该索引基础上还原每个未决键的已提交值，供历史裁剪使用；普通读取仍显示乐观值，本地未决删除和外部已提交变更同样参与快照校正。
 
-远程模式的模型 Key 使用 [`src/host/indexeddb-string-storage.ts`](../../apps/extension/src/host/indexeddb-string-storage.ts) 的独立 IndexedDB。内容脚本不接收 Key，普通设置加载流程只读取 `storage.local`，已保存的 Key 不回显到控件。Key 保存或清除后，远程 Host 先取消并等待共享 Detector 中尚未完成的旧初始化结束，覆盖静默预热及所有 Port 消费者；已经就绪的有效会话继续复用。Broker 随后通过凭证版本消息和持久版本让已有内容页面在后台重启或 Key 修复后重新准备；Key 本身不进入内容脚本消息、URL、普通存储或日志。
+远程模式的模型 Key 使用 [`src/host/indexeddb-string-storage.ts`](../../apps/extension/src/host/indexeddb-string-storage.ts) 的独立 IndexedDB。内容脚本不接收 Key，普通设置加载流程只读取 `storage.local`，已保存的 Key 不回显到控件。Key 的原生 IndexedDB 事务提交回调独立于请求的取消结算：即使调用方已收到取消，仍驱动远程 Host 取消并等待共享 Detector 中尚未完成的旧初始化结束，覆盖静默预热及所有 Port 消费者；已经就绪的有效会话继续复用。提交前真正回滚不会通知，已关闭 Host 的迟到回调也不会重新启动同步。Firefox 通过注入回调、Chromium Offscreen 通过严格验证来源的 runtime 消息通知 Broker，不依赖原请求成功响应。Broker 再通过凭证版本消息和持久版本让已有内容页面在后台重启或 Key 修复后重新准备；Key 本身不进入内容脚本消息、URL、普通存储或日志。
 
 设置页普通字段由 [`src/options/ordinary-settings.ts`](../../apps/extension/src/options/ordinary-settings.ts) 统一加载、解析、脏字段跟踪和串行保存。远程操作按代际取消旧请求；验证与清除还记录按钮点击时的输入修订号，成功返回只清空此后未编辑的输入，同样文字重新输入也会保留。额度查询在后台 Port 瞬断时只进行一次有限重连，验证和下载不自动重放，以避免重复副作用。页面销毁会取消未完成的 Key 操作。
 
@@ -70,7 +70,7 @@ Host 在 [`src/host/inference-host.ts`](../../apps/extension/src/host/inference-
 
 1. 内容或设置页的 `AbortSignal` 先让本地 lifecycle 结算，并尽力发送 `cancel`。
 2. Broker/Offscreen 将取消传播到 Host；活动请求从并发表中移除，过期响应不会覆盖新请求。
-3. Host 将取消传给模型缓存、网络、IndexedDB 事务和推理 Worker；销毁路径还会终止所有活动模型意图。
+3. Host 将取消传给模型缓存、网络、IndexedDB 事务和推理 Worker；尚未开始的 detect 从可移除队列中直接删除并释放图片，不再保留到队头完成。运行中的 detect 仍等待 Worker 结束或取消宽限到期才放行下一项；销毁路径同时拒绝排队项并终止所有活动模型意图。
 
 Port 断开会拒绝该 Port 上所有未决内容请求并允许下一次请求重新连接。Chromium 后台重启后，新的 epoch 会使旧 Offscreen 请求失效，再由新请求重新 claim；空闲 Offscreen 关闭失败会用有限次数的指数退避重试。Firefox 页面卸载直接销毁 Host。有关超时层级的权威说明见 [`src/protocol/deadlines.ts`](../../apps/extension/src/protocol/deadlines.ts)。
 

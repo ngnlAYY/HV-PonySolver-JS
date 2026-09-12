@@ -63,25 +63,25 @@ export class IndexedDbStringStorage implements AsyncStringStorage {
     return typeof row?.value === 'string' ? row.value : null
   }
 
-  async set(key: string, value: string, signal?: AbortSignal): Promise<void> {
+  async set(key: string, value: string, signal?: AbortSignal, onCommitted?: () => void): Promise<void> {
     const generation = this.generation
     this.assertActive(generation, signal)
     const database = await this.open(generation, signal)
     this.assertActive(generation, signal)
     const transaction = database.transaction(STORE_NAME, 'readwrite')
     transaction.objectStore(STORE_NAME).put({ key, value } satisfies StoredValue)
-    await this.transactionComplete(transaction, generation, signal)
+    await this.transactionComplete(transaction, generation, signal, onCommitted)
     this.assertActive(generation, signal)
   }
 
-  async remove(key: string, signal?: AbortSignal): Promise<void> {
+  async remove(key: string, signal?: AbortSignal, onCommitted?: () => void): Promise<void> {
     const generation = this.generation
     this.assertActive(generation, signal)
     const database = await this.open(generation, signal)
     this.assertActive(generation, signal)
     const transaction = database.transaction(STORE_NAME, 'readwrite')
     transaction.objectStore(STORE_NAME).delete(key)
-    await this.transactionComplete(transaction, generation, signal)
+    await this.transactionComplete(transaction, generation, signal, onCommitted)
     this.assertActive(generation, signal)
   }
 
@@ -225,7 +225,12 @@ export class IndexedDbStringStorage implements AsyncStringStorage {
     })
   }
 
-  private transactionComplete(transaction: IDBTransaction, generation: number, signal?: AbortSignal): Promise<void> {
+  private transactionComplete(
+    transaction: IDBTransaction,
+    generation: number,
+    signal?: AbortSignal,
+    onCommitted?: () => void,
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false
       const cleanup = (): void => {
@@ -253,7 +258,18 @@ export class IndexedDbStringStorage implements AsyncStringStorage {
       const timeoutId = setTimeout(() => abort(new Error('IndexedDB 事务超时')), INDEXED_DB_TRANSACTION_TIMEOUT_MS)
       this.activeTransactionAborts.add(abort)
       signal?.addEventListener('abort', abortFromSignal, { once: true })
-      transaction.oncomplete = () =>
+      let commitReported = false
+      transaction.oncomplete = () => {
+        // A committing transaction cannot be aborted; observe its durable result even after local cancellation.
+        if (!commitReported && generation === this.generation) {
+          commitReported = true
+          try {
+            onCommitted?.()
+          } catch (error) {
+            finish(() => reject(error))
+            return
+          }
+        }
         finish(() => {
           try {
             this.assertActive(generation, signal)
@@ -262,6 +278,7 @@ export class IndexedDbStringStorage implements AsyncStringStorage {
             reject(error)
           }
         })
+      }
       transaction.onerror = () => finish(() => reject(transaction.error ?? new Error('IndexedDB 事务失败')))
       transaction.onabort = () =>
         finish(() => {

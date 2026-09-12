@@ -49,7 +49,12 @@ export function createRemoteKeyVerifier(
   }
 }
 
-export function createRemoteInferenceHost(emitStatus?: HostStatusEmitter): InferenceHost {
+export function createRemoteInferenceHost(
+  emitStatus?: HostStatusEmitter,
+  emitCredentialsChanged?: () => void,
+): InferenceHost {
+  let closed = false
+  let reconciliation: Promise<void> = Promise.resolve()
   const statusSink = emitStatus ? createForwardingStatusSink(emitStatus) : silentStatusSink
   const secretStorage = new IndexedDbStringStorage()
   const modelCache = new ModelCache(statusSink, (signal, options) =>
@@ -62,9 +67,16 @@ export function createRemoteInferenceHost(emitStatus?: HostStatusEmitter): Infer
     statusSink,
     () => new Worker(runtimeGetUrl('inference-worker.js'), { type: 'module' }),
   )
+  const onCredentialsCommitted = (): void => {
+    if (closed) return
+    reconciliation = detector.cancelPendingPreparation().then(() => {
+      if (!closed) emitCredentialsChanged?.()
+    })
+    void reconciliation.catch(() => undefined)
+  }
   const verifyKey = createRemoteKeyVerifier({
     probe: (signal, candidateKey) => probeModelAccessKey(signal, { accessKeyOverride: candidateKey }),
-    set: (key, value, signal) => secretStorage.set(key, value, signal),
+    set: (key, value, signal) => secretStorage.set(key, value, signal, onCredentialsCommitted),
   })
   return new InferenceHost({
     detector,
@@ -79,12 +91,12 @@ export function createRemoteInferenceHost(emitStatus?: HostStatusEmitter): Infer
     },
     verifyKey: async (candidateKey, signal) => {
       const notice = await verifyKey(candidateKey, signal)
-      await detector.cancelPendingPreparation()
+      await reconciliation
       return notice
     },
     clearKey: async (signal) => {
-      await secretStorage.remove(MODEL_ACCESS_KEY_STORAGE_KEY, signal)
-      await detector.cancelPendingPreparation()
+      await secretStorage.remove(MODEL_ACCESS_KEY_STORAGE_KEY, signal, onCredentialsCommitted)
+      await reconciliation
     },
     queryModelQuota: async (signal) => {
       const quota = await queryModelDownloadQuota(signal, {}, { getAccessKey: () => getModelAccessKey(secretStorage) })
@@ -94,6 +106,7 @@ export function createRemoteInferenceHost(emitStatus?: HostStatusEmitter): Infer
       return `本月模型下载额度：已用 ${quota.used}/${quota.limit} 次，剩余 ${quota.remaining ?? 0} 次`
     },
     close: async () => {
+      closed = true
       modelCache.close()
       await secretStorage.close()
     },

@@ -36,7 +36,9 @@ function contentType(response: Response): string {
   if (value === null || !SUPPORTED_IMAGE_CONTENT_TYPE.test(value)) {
     throw new Error('验证码图片 Content-Type 无效')
   }
-  return value
+  // HTTP 参数已完成校验；Blob 和跨上下文协议只携带规范化的基础图片类型。
+  const parameterStart = value.indexOf(';')
+  return (parameterStart === -1 ? value : value.slice(0, parameterStart)).trim().toLowerCase()
 }
 
 function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {

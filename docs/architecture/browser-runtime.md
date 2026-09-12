@@ -97,7 +97,7 @@ sequenceDiagram
 
 ## 推理 Worker 与 Runtime profile
 
-核心 [onnx-worker-client.ts](../../packages/browser-core/src/inference/onnx-worker-client.ts) 管理 Worker 的创建、初始化共享、检测串行队列、超时恢复、失败会话重建和销毁。它不决定 Worker 如何创建；`WorkerFactory` 由平台注入。
+核心 [onnx-worker-client.ts](../../packages/browser-core/src/inference/onnx-worker-client.ts) 管理 Worker 的创建、初始化共享、检测串行队列、超时恢复、失败会话重建和销毁。待处理检测使用可移除队列：取消时立即移除尚未开始的项并释放图片；已开始的任务仍完成或按取消宽限终止后才运行下一项。销毁会立即拒绝全部排队项。它不决定 Worker 如何创建；`WorkerFactory` 由平台注入。
 
 核心 [onnx-worker-entry.ts](../../packages/browser-core/src/inference/onnx-worker-entry.ts) 执行 Worker 内部协议：严格验证 `unknown` 请求、初始化 Runtime、创建可复用的 OffscreenCanvas/CHW 缓冲、执行 WASM 推理、解析输出并回传结构化消息。[worker-request-bridge.ts](../../packages/browser-core/src/inference/worker-request-bridge.ts) 在主线程验证响应、管理 request id 和超时。
 

@@ -156,6 +156,28 @@ test('creates one sorted target inventory while excluding its self-referential b
   }
 })
 
+for (const protectedKind of ['cwd', 'home']) {
+  test(`rejects build output ancestors of ${protectedKind} while allowing sibling output`, async (context) => {
+    const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-build-ancestor-'))
+    const protectedDirectory = path.join(temporaryRoot, 'protected', 'nested')
+    await mkdir(protectedDirectory, { recursive: true })
+    context.mock.method(
+      protectedKind === 'cwd' ? process : os,
+      protectedKind === 'cwd' ? 'cwd' : 'homedir',
+      () => protectedDirectory,
+    )
+    try {
+      for (const ancestor of [temporaryRoot, path.dirname(protectedDirectory)]) {
+        await assert.rejects(assertSafeBuildOutputRoot(ancestor), /Refusing to recursively remove protected path/u)
+      }
+      const siblingOutput = path.join(temporaryRoot, 'output')
+      assert.equal(await assertSafeBuildOutputRoot(siblingOutput), siblingOutput)
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true })
+    }
+  })
+}
+
 test('guards recursive build cleanup with canonical allowed roots', async () => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-output-guard-'))
   try {

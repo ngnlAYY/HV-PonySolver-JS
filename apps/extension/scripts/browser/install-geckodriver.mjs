@@ -80,7 +80,12 @@ export async function assertSafeGeckodriverOutputDirectory(requestedOutputDirect
     ...rootCandidates.map((candidate) => canonicalizePotentialPath(candidate)),
   ])
   const filesystemRoot = path.parse(canonicalOutputDirectory).root
-  if ([filesystemRoot, canonicalCwd, canonicalHome, canonicalRepository].includes(canonicalOutputDirectory)) {
+  if (
+    canonicalOutputDirectory === filesystemRoot ||
+    [canonicalCwd, canonicalHome, canonicalRepository].some((protectedPath) =>
+      isPathWithin(protectedPath, canonicalOutputDirectory),
+    )
+  ) {
     throw new Error(`Refusing to recursively remove protected path: ${canonicalOutputDirectory}`)
   }
   if (isPathWithin(canonicalOutputDirectory, canonicalRepository)) {
