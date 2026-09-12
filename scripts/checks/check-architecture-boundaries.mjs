@@ -199,6 +199,12 @@ function extractImportSpecifiers(source) {
       specifiers.push({ specifier: node.moduleSpecifier.text, typeOnly: isTypeOnlyExportDeclaration(node) })
     } else if (isStaticDynamicImport(node)) {
       specifiers.push({ specifier: node.arguments[0].text, typeOnly: false })
+    } else if (
+      ts.isImportTypeNode(node) &&
+      ts.isLiteralTypeNode(node.argument) &&
+      ts.isStringLiteral(node.argument.literal)
+    ) {
+      specifiers.push({ specifier: node.argument.literal.text, typeOnly: true })
     }
     ts.forEachChild(node, visit)
   }

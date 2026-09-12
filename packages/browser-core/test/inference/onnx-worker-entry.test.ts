@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { ModelIntegrityVerificationError } from '../../src/model/permanent-model-error'
+
 import { imagePreprocessConfig } from '../../src/inference/inference-config'
 import { startOnnxWorker } from '../../src/inference/onnx-worker-entry'
 
@@ -59,6 +61,24 @@ afterEach(() => {
 })
 
 describe('startOnnxWorker', () => {
+  it('preserves permanent runtime integrity failure across the Worker boundary', async () => {
+    const { runtime, create } = createRuntime(() => ({}))
+    const postMessage = vi.fn()
+    vi.stubGlobal('postMessage', postMessage)
+    startOnnxWorker(runtime, async () => {
+      throw new ModelIntegrityVerificationError('WASM 完整性校验失败')
+    })
+    sendWorkerRequest({ type: 'init', requestId: 1, modelBuffer: new ArrayBuffer(4) })
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1))
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'error',
+      requestId: 1,
+      message: 'WASM 完整性校验失败',
+      errorKind: 'permanent-model',
+    })
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('returns the initialized model buffer to the caller without copying it', async () => {
     const { runtime } = createRuntime(() => ({ run: vi.fn(), release: vi.fn(async () => undefined) }))
     const postMessage = vi.fn()

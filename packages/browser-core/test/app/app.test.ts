@@ -506,6 +506,22 @@ describe('App', () => {
     expect(harness.trigger).not.toHaveBeenCalled()
   })
 
+  it.each(['formaction', 'type'])('rescans after the submit control %s changes', async (attribute) => {
+    const captcha = appendCaptcha('/captcha.png')
+    const harness = createHarness()
+    harness.setBusy(true)
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).not.toHaveBeenCalled()
+
+    harness.setBusy(false)
+    captcha.submitButton.setAttribute(attribute, attribute === 'type' ? 'submit' : '/submit')
+    await settleDom()
+
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+  })
+
   it('starts solving when a form action recovers from cross-origin to same-origin', async () => {
     const captcha = appendCaptcha('/captcha.png')
     const form = captcha.querySelector<HTMLFormElement>('form')!

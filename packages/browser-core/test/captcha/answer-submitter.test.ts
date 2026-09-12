@@ -558,6 +558,86 @@ describe('AnswerSubmitter', () => {
       }
     })
 
+    it.each(['final delay', 'multi-click delay'] as const)(
+      'trims live automatic answers after manual additions during the %s',
+      async (stage) => {
+        const form = createForm(true)
+        const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+        for (const checkbox of checkboxes) checkbox.checked = false
+        const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+        button.click = vi.fn()
+        form.addEventListener('change', () => {
+          const count = checkboxes.filter((checkbox) => checkbox.checked).length
+          button.disabled = count === 0 || count >= 4
+        })
+        const onError = vi.fn()
+        const onSubmitted = vi.fn()
+        const submission = createSubmitter([1000, 1000], [100, 100]).submit(
+          form,
+          ['TS', 'RA', 'FS'],
+          onError,
+          onSubmitted,
+          { confidences: { TS: 0.1, RA: 0.2, FS: 0.9 } },
+        )
+        await flushMicrotasks()
+        if (stage === 'final delay') await vi.advanceTimersByTimeAsync(200)
+        checkboxes[3]!.click()
+        checkboxes[4]!.click()
+        await vi.runAllTimersAsync()
+        await submission
+        expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual([false, false, true, true, true, false])
+        expect(button.click).toHaveBeenCalledTimes(1)
+        expect(onSubmitted).toHaveBeenCalledTimes(1)
+        expect(onError).not.toHaveBeenCalled()
+      },
+    )
+
+    it.each(['removed answer', 'manual ownership', 'four selections', 'changed target', 'reentrant change'] as const)(
+      'respects %s while reconciling final selections',
+      async (scenario) => {
+        const form = createForm(true)
+        const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+        for (const checkbox of checkboxes) checkbox.checked = false
+        const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+        button.click = vi.fn()
+        let current = true
+        const submission = createSubmitter([1000, 1000], [0, 0]).submit(form, ['TS', 'RA', 'FS'], vi.fn(), vi.fn(), {
+          confidences: { TS: 0.1, RA: 0.2, FS: 0.9 },
+          isCurrent: () => current,
+        })
+        await vi.advanceTimersByTimeAsync(1)
+        checkboxes[3]!.click()
+        if (scenario !== 'four selections') checkboxes[4]!.click()
+        if (scenario === 'removed answer') checkboxes[0]!.click()
+        if (scenario === 'manual ownership') {
+          checkboxes[0]!.click()
+          checkboxes[0]!.click()
+        }
+        if (scenario === 'changed target') {
+          checkboxes[0]!.addEventListener('change', () => {
+            current = false
+          })
+        }
+        if (scenario === 'reentrant change') {
+          checkboxes[0]!.addEventListener('change', () => {
+            checkboxes[1]!.click()
+            checkboxes[1]!.click()
+          })
+        }
+        await vi.runAllTimersAsync()
+        await submission
+        const expected = {
+          'removed answer': [false, true, true, true, true, false],
+          'manual ownership': [true, false, false, true, true, false],
+          'four selections': [true, true, true, true, false, false],
+          'changed target': [false, true, true, true, true, false],
+          'reentrant change': [false, true, false, true, true, false],
+        }
+        expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual(expected[scenario])
+        expect(button.click).toHaveBeenCalledTimes(scenario === 'changed target' ? 0 : 1)
+      },
+    )
+
     it('updates confidence for an answer that was already automatic', async () => {
       const form = createForm(true)
       const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
@@ -763,4 +843,184 @@ describe('AnswerSubmitter', () => {
       expect(onSubmitted).not.toHaveBeenCalled()
     })
   })
+})
+
+describe('submission control contracts', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it.each(['all controls', 'submit only'] as const)('rejects inherited fieldset disabling of %s', async (scope) => {
+    const form = createForm(true)
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    const fieldset = document.createElement('fieldset')
+    fieldset.disabled = true
+    fieldset.append(...(scope === 'all controls' ? Array.from(form.children) : [button]))
+    form.appendChild(fieldset)
+    const onSubmitted = vi.fn()
+    const onError = vi.fn()
+    const clicked = vi.fn()
+    button.addEventListener('click', clicked)
+    const submission = createSubmitter([0, 0], [0, 0]).submit(form, ['TS'], onError, onSubmitted)
+    await vi.runAllTimersAsync()
+    await submission
+    expect(clicked).not.toHaveBeenCalled()
+    expect(onSubmitted).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalled()
+  })
+
+  it('keeps the first legend exemption of a disabled fieldset usable', async () => {
+    const form = createForm(true)
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.click = vi.fn()
+    const legend = document.createElement('legend')
+    legend.append(...Array.from(form.children))
+    const fieldset = document.createElement('fieldset')
+    fieldset.disabled = true
+    fieldset.appendChild(legend)
+    form.appendChild(fieldset)
+    const onSubmitted = vi.fn()
+    const submission = createSubmitter([0, 0], [0, 0]).submit(form, ['TS'], vi.fn(), onSubmitted)
+    await vi.runAllTimersAsync()
+    await submission
+    expect(button.click).toHaveBeenCalledTimes(1)
+    expect(onSubmitted).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops when a fieldset becomes disabled during the final delay', async () => {
+    const form = createForm(true)
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.click = vi.fn()
+    const fieldset = document.createElement('fieldset')
+    fieldset.append(...Array.from(form.children))
+    form.appendChild(fieldset)
+    const onSubmitted = vi.fn()
+    const submission = createSubmitter([100, 100], [0, 0]).submit(form, ['TS'], vi.fn(), onSubmitted)
+    await flushMicrotasks()
+    fieldset.disabled = true
+    await vi.runAllTimersAsync()
+    await submission
+    expect(button.click).not.toHaveBeenCalled()
+    expect(onSubmitted).not.toHaveBeenCalled()
+  })
+
+  it.each(['/changed', 'https://example.invalid/changed'])(
+    'stops a changed submitter action %s while timing loads',
+    async (action) => {
+      const form = createForm(true)
+      form.action = '/original'
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      const submitter = new AnswerSubmitter(
+        async () => {
+          button.setAttribute('formaction', action)
+          return [0, 0]
+        },
+        async () => [0, 0],
+      )
+      const onSubmitted = vi.fn()
+      const submission = submitter.submit(form, ['TS'], vi.fn(), onSubmitted)
+      await vi.runAllTimersAsync()
+      await submission
+      expect(button.click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
+    },
+  )
+
+  it('rejects an initially cross-origin submitter action', async () => {
+    const form = createForm(true)
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.setAttribute('formaction', 'https://example.invalid/submit')
+    button.click = vi.fn()
+    const onSubmitted = vi.fn()
+    const onError = vi.fn()
+    const submission = createSubmitter([0, 0], [0, 0]).submit(form, ['TS'], onError, onSubmitted)
+    await vi.runAllTimersAsync()
+    await submission
+    expect(button.click).not.toHaveBeenCalled()
+    expect(onSubmitted).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith('答案控件不可用')
+  })
+
+  it.each(['equivalent submit action', 'button action ignored'] as const)('allows %s', async (mode) => {
+    const form = createForm(true)
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.type = mode === 'button action ignored' ? 'button' : 'submit'
+    button.setAttribute('formaction', '/same')
+    button.click = vi.fn()
+    const submitter = new AnswerSubmitter(
+      async () => {
+        button.setAttribute(
+          'formaction',
+          mode === 'button action ignored' ? 'https://example.invalid/unused' : new URL('/same', location.href).href,
+        )
+        return [0, 0]
+      },
+      async () => [0, 0],
+    )
+    const onSubmitted = vi.fn()
+    const submission = submitter.submit(form, ['TS'], vi.fn(), onSubmitted)
+    await vi.runAllTimersAsync()
+    await submission
+    expect(button.click).toHaveBeenCalledTimes(1)
+    expect(onSubmitted).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['answer', 'submit'] as const)('stops a same-element %s type change while timing loads', async (control) => {
+    const form = createForm(true)
+    const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.click = vi.fn()
+    const submitter = new AnswerSubmitter(
+      async () => {
+        if (control === 'answer') form.querySelector<HTMLInputElement>('input[name="riddleanswer[]"]')!.type = 'radio'
+        else button.type = 'button'
+        return [0, 0]
+      },
+      async () => [0, 0],
+    )
+    const onSubmitted = vi.fn()
+    const submission = submitter.submit(form, ['TS'], vi.fn(), onSubmitted)
+    await vi.runAllTimersAsync()
+    await submission
+    expect(button.click).not.toHaveBeenCalled()
+    expect(onSubmitted).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('rechecks initial trim ownership with preservation %s', async (preserve) => {
+    const form = createForm(true)
+    const answers = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+    for (const answer of answers) answer.checked = false
+    form.querySelector<HTMLInputElement>('#riddlesubmit')!.click = vi.fn()
+    const submitter = createSubmitter([0, 0], [0, 0], preserve)
+    const first = submitter.submit(form, ['TS', 'RA'], vi.fn(), vi.fn(), { confidences: { TS: 0.1, RA: 0.2 } })
+    await vi.runAllTimersAsync()
+    await first
+    answers[0]!.addEventListener(
+      'change',
+      () => {
+        answers[1]!.click()
+        answers[1]!.click()
+      },
+      { once: true },
+    )
+    const second = submitter.submit(form, ['FS', 'RD', 'PP'], vi.fn(), vi.fn(), {
+      confidences: { FS: 0.9, RD: 0.8, PP: 0.7 },
+    })
+    await vi.runAllTimersAsync()
+    await second
+    expect(answers[1]!.checked).toBe(preserve)
+  })
+})
+
+it('rejects unsupported image submitters instead of clicking with ignored override semantics', async () => {
+  const form = createForm(true)
+  const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+  button.type = 'image'
+  button.setAttribute('formaction', '/image-submit')
+  button.click = vi.fn()
+  const onError = vi.fn()
+  const onSubmitted = vi.fn()
+  await createSubmitter([0, 0], [0, 0]).submit(form, ['TS'], onError, onSubmitted)
+  expect(button.click).not.toHaveBeenCalled()
+  expect(onSubmitted).not.toHaveBeenCalled()
+  expect(onError).toHaveBeenCalledWith('答案控件不可用')
 })

@@ -1,6 +1,8 @@
+import { PermanentModelError } from '../model/permanent-model-error'
 import { inferenceTimeoutConfig } from './inference-config'
 import { isYoloParseResult } from './inference-result-guard'
 import type {
+  WorkerErrorResponse,
   WorkerDetectRequestPayload,
   WorkerDetectResponse,
   WorkerInitRequestPayload,
@@ -32,15 +34,19 @@ function hasAllowedKeys(
   return required.every((key) => key in value) && Object.keys(value).every((key) => allowed.has(key))
 }
 
-function isWorkerErrorResponse(message: Record<string, unknown>, requestId: number): boolean {
+function isWorkerErrorResponse(
+  message: Record<string, unknown>,
+  requestId: number,
+): message is Record<string, unknown> & WorkerErrorResponse {
   return (
     message.type === 'error' &&
     message.requestId === requestId &&
-    hasAllowedKeys(message, ['type', 'requestId', 'message'], ['fatal']) &&
+    hasAllowedKeys(message, ['type', 'requestId', 'message'], ['fatal', 'errorKind']) &&
     typeof message.message === 'string' &&
     message.message.length > 0 &&
     message.message.length <= 1_000 &&
-    (message.fatal === undefined || typeof message.fatal === 'boolean')
+    (message.fatal === undefined || typeof message.fatal === 'boolean') &&
+    (message.errorKind === undefined || message.errorKind === 'permanent-model' || message.errorKind === 'transient')
   )
 }
 
@@ -135,9 +141,12 @@ export class WorkerRequestBridge {
     this.requests.delete(requestId)
     clearTimeout(pending.timeoutId)
     if (isWorkerErrorResponse(message, requestId)) {
-      const error = new WorkerResponseError(message.message as string, message.fatal === true)
+      const error =
+        message.errorKind === 'permanent-model'
+          ? new PermanentModelError(message.message)
+          : new WorkerResponseError(message.message, message.fatal === true)
       pending.reject(error)
-      if (error.fatal) {
+      if (message.fatal === true) {
         this.onFailure(error)
       }
       return

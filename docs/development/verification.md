@@ -26,7 +26,7 @@ mise exec -- pnpm install --frozen-lockfile
 | `apps/extension`        | MV3 入口、后台代理、推理 Host、设置页和打包 | `typecheck`、`test`、浏览器 E2E                          |
 | `apps/model-worker`     | Cloudflare Worker、Key 鉴权、R2 资产和额度  | `typecheck`、`test`；线上探测另行执行 `check:deployment` |
 
-依赖方向由 [`scripts/checks/check-architecture-boundaries.mjs`](../../scripts/checks/check-architecture-boundaries.mjs) 维护。新增跨包导入、移动目录或修改 package export 后必须运行 `architecture:check`。
+依赖方向由 [`scripts/checks/check-architecture-boundaries.mjs`](../../scripts/checks/check-architecture-boundaries.mjs) 维护。启用类型依赖检查的边界同时覆盖 `import type`、`import('…').Type` 与 `typeof import('…')`，不能用类型查询绕开依赖约束。新增跨包导入、移动目录或修改 package export 后必须运行 `architecture:check`。
 
 ## 2. 按修改区域选择验证
 
@@ -76,7 +76,7 @@ Vitest 主要覆盖 TypeScript/运行时逻辑；包内显式列出的 Node `tes
 - [`check-browser-sinks.mjs`](../../scripts/checks/check-browser-sinks.mjs)：浏览器危险 API 及登记例外。
 - [`check-bundle-budget.mjs`](../../scripts/checks/check-bundle-budget.mjs)：default 256 KiB 与 bundled 1 MiB 包体门禁。
 - [`check-docs-drift.mjs`](../../scripts/docs-drift/check-docs-drift.mjs) 与 `docs-drift/`：从源码、配置和工作流提取事实，检查文档漂移。
-- [`assert-pinned-actions.mjs`](../../scripts/ci/assert-pinned-actions.mjs) 与 `workflow-security-contract.test.mjs`：Action SHA、权限、条件和秘密门禁。
+- [`assert-pinned-actions.mjs`](../../scripts/ci/assert-pinned-actions.mjs) 与 `workflow-security-contract.test.mjs`：Action SHA、权限、条件和秘密门禁。同行 YAML flow 步骤中的每个 `uses` 均须检查，checkout 的 `persist-credentials: false` 必须属于该步骤自身；注释、引用文本和 shell block 不充当工作流配置。
 - [`model-manifest.mjs`](../../scripts/model/model-manifest.mjs)、[`model-release-notes.mjs`](../../scripts/model/model-release-notes.mjs)：共享模型身份读取和发布说明。
 - [`assert-clean-ort-source.mjs`](../../scripts/ort-runtime/assert-clean-ort-source.mjs)、[`build-minimal-ort-runtime.sh`](../../scripts/ort-runtime/build-minimal-ort-runtime.sh)、[`resolve-ort-build-root.mjs`](../../scripts/ort-runtime/resolve-ort-build-root.mjs)：独立 ORT 构建根保护。
 - [`run-userscript-e2e.mjs`](../../scripts/e2e/run-userscript-e2e.mjs)：只转发受限的 userscript Playwright 参数。
@@ -132,7 +132,7 @@ Chromium 与 Firefox、远程模型与内置模型、内容脚本 smoke 与实�
 | job                                | 本地对应                                                  | 证明内容                                                              |
 | ---------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------- |
 | guardrails                         | lint、typecheck、audit、docs、architecture、browser-sinks | 静态、文档、边界和依赖安全                                            |
-| codeql                             | 无本地等价物                                              | GitHub CodeQL 分析和告警连续性                                        |
+| codeql                             | 无本地等价物                                              | GitHub CodeQL 分析和告警连续性；扩展发布等待本次分析作业成功          |
 | dependency-review                  | 无本地等价物                                              | PR 依赖 high 严重度门禁                                               |
 | test                               | pnpm test                                                 | workspace 和根 Node 测试                                              |
 | coverage-build                     | test:coverage、build、两个 bundle:check                   | 覆盖率、构建和 userscript 包体                                        |

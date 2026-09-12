@@ -25,6 +25,7 @@ export class RemoteDetectorClient implements DetectorService {
   private port: ExtensionPort | null = null
   private removePortListeners: (() => void) | null = null
   private readonly pending = new Map<string, RequestLifecycle<HostResponse>>()
+  private readonly visibleRequests = new Set<string>()
   private requestSequence = 0
   private destroyed = false
 
@@ -49,6 +50,7 @@ export class RemoteDetectorClient implements DetectorService {
         },
         prepareDeadlineConfig.contentTimeoutMs,
         signal,
+        !silent,
       )
       this.assertNotAborted(signal)
       if (!this.destroyed && !silent) {
@@ -124,7 +126,12 @@ export class RemoteDetectorClient implements DetectorService {
     return port
   }
 
-  private request(request: HostRequest, timeoutMs: number, signal?: AbortSignal): Promise<HostSuccessResponse> {
+  private request(
+    request: HostRequest,
+    timeoutMs: number,
+    signal?: AbortSignal,
+    visible = true,
+  ): Promise<HostSuccessResponse> {
     if (signal?.aborted) {
       return Promise.reject(new Error('扩展推理请求已取消'))
     }
@@ -144,12 +151,14 @@ export class RemoteDetectorClient implements DetectorService {
         abortError: () => new Error('扩展推理请求已取消'),
         cleanup: () => {
           this.pending.delete(request.requestId)
+          this.visibleRequests.delete(request.requestId)
         },
         onAbandon: () => {
           if (posted) this.sendCancel(request.requestId)
         },
       })
       this.pending.set(request.requestId, lifecycle)
+      if (visible) this.visibleRequests.add(request.requestId)
       lifecycle.start()
       if (lifecycle.settled) return
       try {
@@ -179,7 +188,7 @@ export class RemoteDetectorClient implements DetectorService {
     if (isPortStatusMessage(message)) {
       // One-way Host stage update (model download, session build); it carries
       // no requestId and never settles a pending request.
-      this.statusSink.setStatus(message.status)
+      if (this.visibleRequests.size > 0) this.statusSink.setStatus(message.status)
       return
     }
     if (!isHostResponse(message)) {
@@ -199,7 +208,7 @@ export class RemoteDetectorClient implements DetectorService {
     this.port = null
     this.removePortListeners?.()
     this.removePortListeners = null
-    this.statusSink.setStatus({ session: '连接断开' })
+    if (this.visibleRequests.size > 0) this.statusSink.setStatus({ session: '连接断开' })
     this.rejectPending(new Error('扩展推理连接已断开'))
   }
 

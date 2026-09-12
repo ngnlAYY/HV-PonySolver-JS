@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { ModelIntegrityVerificationError } from '@hv-pony-solver/browser-core/model/permanent-model-error'
+
 import { loadPackagedAsset } from '../../src/host/packaged-asset'
 
 const exactBytes = Uint8Array.from([1, 2, 3])
@@ -25,6 +27,17 @@ function responseWithBody(
 }
 
 describe('loadPackagedAsset', () => {
+  it.each(['declared', 'short', 'hash'] as const)('classifies %s integrity failures as permanent', async (failure) => {
+    const bytes = failure === 'short' ? exactBytes.slice(0, 2) : Uint8Array.from([3, 2, 1])
+    const fetchImpl: typeof fetch = async () =>
+      new Response(bytes, {
+        headers: failure === 'declared' ? { 'content-length': '4' } : {},
+      })
+    await expect(
+      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
+    ).rejects.toBeInstanceOf(ModelIntegrityVerificationError)
+  })
+
   it('fetches the fixed extension URL and accepts only exact bytes', async () => {
     const fetchImpl = vi.fn(
       async () =>

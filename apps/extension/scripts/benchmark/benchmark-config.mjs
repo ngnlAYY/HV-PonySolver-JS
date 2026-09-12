@@ -71,7 +71,7 @@ export function validateBenchmarkConfig(config, options = {}) {
   const allowReducedSampling = options.allowReducedSampling === true
   const minimumInvocations = allowReducedSampling ? 1 : requiredBenchmarkDefaults.invocations
   const minimumWarmups = allowReducedSampling ? 0 : requiredBenchmarkDefaults.warmups
-  const minimumSamples = allowReducedSampling ? 1 : requiredBenchmarkDefaults.samples
+  const minimumSamples = allowReducedSampling ? 2 : requiredBenchmarkDefaults.samples
   if (!Number.isSafeInteger(config.invocations) || config.invocations < minimumInvocations)
     throw new Error(`Benchmark requires at least ${minimumInvocations} independent invocations`)
   if (!Number.isSafeInteger(config.warmups) || config.warmups < minimumWarmups)

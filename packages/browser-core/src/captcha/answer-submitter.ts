@@ -1,7 +1,7 @@
 import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
 import { randDelay, shuffle, sleep } from '../utils/delay'
 import { captchaSelectors } from './captcha-selectors'
-import { isSameOriginForm } from './captcha-target'
+import { getSubmissionAction, isSameOriginForm } from './captcha-target'
 import type { DelayRange } from './timing-settings'
 
 export type SubmitErrorHandler = (message: string) => void
@@ -55,7 +55,14 @@ function controlsAreUsable(form: HTMLFormElement, controls: SubmissionControls):
     form.isConnected &&
     controls.button.isConnected &&
     controls.button.form === form &&
-    controls.checkboxes.every((checkbox) => checkbox.isConnected && checkbox.form === form && !checkbox.disabled)
+    ['submit', 'button'].includes(controls.button.type) &&
+    controls.checkboxes.every(
+      (checkbox) =>
+        checkbox.isConnected &&
+        checkbox.form === form &&
+        checkbox.type === 'checkbox' &&
+        !checkbox.matches(':disabled'),
+    )
   )
 }
 
@@ -115,7 +122,7 @@ export class AnswerSubmitter implements AnswerSubmissionService {
 
   private readonly observedCheckboxes = new WeakSet<HTMLInputElement>()
 
-  private programmaticCheckboxClick = false
+  private programmaticCheckboxClick: HTMLInputElement | null = null
 
   constructor(
     private readonly getSubmitDelayRange: DelayRangeProvider,
@@ -129,18 +136,19 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     }
     this.observedCheckboxes.add(checkbox)
     checkbox.addEventListener('change', () => {
-      if (!this.programmaticCheckboxClick) {
+      if (this.programmaticCheckboxClick !== checkbox) {
         this.automaticConfidences.delete(checkbox)
       }
     })
   }
 
   private clickCheckbox(checkbox: HTMLInputElement): void {
-    this.programmaticCheckboxClick = true
+    const previousClick = this.programmaticCheckboxClick
+    this.programmaticCheckboxClick = checkbox
     try {
       checkbox.click()
     } finally {
-      this.programmaticCheckboxClick = false
+      this.programmaticCheckboxClick = previousClick
     }
   }
 
@@ -198,7 +206,9 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       button: initialControls.button,
     }
     const expectedFormAction = form.action
-    if (!isSameOriginForm(form) || !controlsAreUsable(form, expectedControls)) {
+    const expectedSubmitType = expectedControls.button.type
+    const expectedSubmitAction = getSubmissionAction(form, expectedControls.button)
+    if (!isSameOriginForm(form, expectedControls.button) || !controlsAreUsable(form, expectedControls)) {
       onError('答案控件不可用')
       return
     }
@@ -223,7 +233,9 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       if (
         !hasSameControls(expectedControls, controls) ||
         form.action !== expectedFormAction ||
-        !isSameOriginForm(form) ||
+        controls.button.type !== expectedSubmitType ||
+        getSubmissionAction(form, controls.button) !== expectedSubmitAction ||
+        !isSameOriginForm(form, controls.button) ||
         !controlsAreUsable(form, controls)
       ) {
         cleanStaleAutomaticConfidences()
@@ -289,6 +301,8 @@ export class AnswerSubmitter implements AnswerSubmissionService {
         return
       }
       const checkbox = controls.checkboxes[index]
+      // 前一项的 change 回调可能将待裁剪项转为手动勾选。
+      if (checkbox && preserveCheckedAnswers && !this.automaticConfidences.has(checkbox)) continue
       if (checkbox?.checked) {
         this.clickCheckbox(checkbox)
       }
@@ -328,11 +342,34 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     }
 
     await sleep(randDelay(submitDelay), signal)
-    const controls = currentControls()
+    let controls = currentControls()
     if (!controls) {
       return
     }
-    if (controls.button.disabled) {
+    if (preserveCheckedAnswers && controls.checkboxes.filter((checkbox) => checkbox.checked).length > 4) {
+      // 等待期间用户可能新增或撤销答案。只裁剪当前仍归程序所有的勾选，
+      // 每次 change 回调后重新读取，避免接管手动项或操作已替换的控件。
+      for (let attempt = 0; attempt < ANSWER_CODES.length; attempt += 1) {
+        controls = currentControls()
+        if (!controls) return
+        const checked = controls.checkboxes.filter((checkbox) => checkbox.checked)
+        if (checked.length <= 3) break
+        const automatic = checked.filter((checkbox) => this.automaticConfidences.has(checkbox))
+        automatic.sort((left, right) => {
+          const difference =
+            (this.automaticConfidences.get(left) ?? Number.NEGATIVE_INFINITY) -
+            (this.automaticConfidences.get(right) ?? Number.NEGATIVE_INFINITY)
+          return Number.isNaN(difference) ? 0 : difference
+        })
+        const checkbox = automatic[0]
+        if (!checkbox) break
+        this.clickCheckbox(checkbox)
+        this.automaticConfidences.delete(checkbox)
+      }
+      controls = currentControls()
+      if (!controls) return
+    }
+    if (controls.button.matches(':disabled')) {
       onError('提交按钮不可用')
       return
     }

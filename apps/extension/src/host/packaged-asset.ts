@@ -1,3 +1,4 @@
+import { ModelIntegrityVerificationError } from '@hv-pony-solver/browser-core/model/permanent-model-error'
 import { resolveFetchImplementation } from '@hv-pony-solver/browser-core/platform/fetch'
 import { cancelByteStream, readBoundedByteStream, sha256Hex } from '@hv-pony-solver/browser-core/platform/byte-stream'
 import { raceAbort } from '@hv-pony-solver/browser-core/utils/abort-race'
@@ -17,11 +18,11 @@ function declaredLength(response: Response, label: string): number | null {
     return null
   }
   if (!/^(?:0|[1-9]\d*)$/u.test(value)) {
-    throw new Error(`${label} Content-Length 无效`)
+    throw new ModelIntegrityVerificationError(`${label} Content-Length 无效`)
   }
   const parsed = Number(value)
   if (!Number.isSafeInteger(parsed)) {
-    throw new Error(`${label} Content-Length 无效`)
+    throw new ModelIntegrityVerificationError(`${label} Content-Length 无效`)
   }
   return parsed
 }
@@ -43,7 +44,7 @@ async function readExactBody(
   return readBoundedByteStream(body, {
     expectedByteLength,
     maxByteLength: expectedByteLength,
-    sizeError: () => new Error(`${label} 大小校验失败`),
+    sizeError: () => new ModelIntegrityVerificationError(`${label} 大小校验失败`),
     wait: (promise) => raceAbort(promise, signal, () => abortError(label)),
   })
 }
@@ -78,7 +79,7 @@ export async function loadPackagedAsset(
   }
   if (contentLength !== null && contentLength !== integrity.byteLength) {
     await cancelBody(response.body)
-    throw new Error(`${label} 大小校验失败`)
+    throw new ModelIntegrityVerificationError(`${label} 大小校验失败`)
   }
   if (!response.body) {
     throw new Error(`${label} 响应正文不可用`)
@@ -93,7 +94,7 @@ export async function loadPackagedAsset(
     throw abortError(label)
   }
   if (digest !== integrity.sha256) {
-    throw new Error(`${label} 完整性校验失败`)
+    throw new ModelIntegrityVerificationError(`${label} 完整性校验失败`)
   }
   return buffer
 }

@@ -877,6 +877,7 @@ jobs:
   extension-artifact:
     needs:
       - guardrails
+      - codeql
       - test
       - coverage-build
       - extension-e2e
@@ -885,7 +886,7 @@ jobs:
       - extension-minimum-versions-e2e
       - extension-remote-authenticated-e2e
       - firefox-android-142-release-gate
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_extension_artifact && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].outputs.enabled == 'true' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' && needs['firefox-android-142-release-gate'].result == 'success' }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_extension_artifact && needs.guardrails.result == 'success' && needs.codeql.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].result == 'success' && needs['extension-canonical-packaged-e2e'].outputs.enabled == 'true' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' && needs['firefox-android-142-release-gate'].result == 'success' }}
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -938,13 +939,14 @@ jobs:
   extension-release:
     needs:
       - guardrails
+      - codeql
       - test
       - coverage-build
       - extension-e2e
       - extension-packaged-e2e
       - extension-minimum-versions-e2e
       - extension-remote-authenticated-e2e
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_release && github.ref == 'refs/heads/main' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_extension_release && github.ref == 'refs/heads/main' && needs.guardrails.result == 'success' && needs.codeql.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && needs['extension-e2e'].result == 'success' && needs['extension-packaged-e2e'].result == 'success' && needs['extension-minimum-versions-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].result == 'success' && needs['extension-remote-authenticated-e2e'].outputs.enabled == 'true' }}
     timeout-minutes: 15
     permissions:
       contents: write

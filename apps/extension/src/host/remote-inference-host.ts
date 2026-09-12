@@ -62,6 +62,10 @@ export function createRemoteInferenceHost(emitStatus?: HostStatusEmitter): Infer
     statusSink,
     () => new Worker(runtimeGetUrl('inference-worker.js'), { type: 'module' }),
   )
+  const verifyKey = createRemoteKeyVerifier({
+    probe: (signal, candidateKey) => probeModelAccessKey(signal, { accessKeyOverride: candidateKey }),
+    set: (key, value, signal) => secretStorage.set(key, value, signal),
+  })
   return new InferenceHost({
     detector,
     downloadModel: async (signal) => {
@@ -73,11 +77,15 @@ export function createRemoteInferenceHost(emitStatus?: HostStatusEmitter): Infer
       await modelCache.putCached(buffer, true, true, signal)
       return '模型下载和校验成功，已缓存'
     },
-    verifyKey: createRemoteKeyVerifier({
-      probe: (signal, candidateKey) => probeModelAccessKey(signal, { accessKeyOverride: candidateKey }),
-      set: (key, value, signal) => secretStorage.set(key, value, signal),
-    }),
-    clearKey: (signal) => secretStorage.remove(MODEL_ACCESS_KEY_STORAGE_KEY, signal),
+    verifyKey: async (candidateKey, signal) => {
+      const notice = await verifyKey(candidateKey, signal)
+      await detector.cancelPendingPreparation()
+      return notice
+    },
+    clearKey: async (signal) => {
+      await secretStorage.remove(MODEL_ACCESS_KEY_STORAGE_KEY, signal)
+      await detector.cancelPendingPreparation()
+    },
     queryModelQuota: async (signal) => {
       const quota = await queryModelDownloadQuota(signal, {}, { getAccessKey: () => getModelAccessKey(secretStorage) })
       if (!quota.enabled) {

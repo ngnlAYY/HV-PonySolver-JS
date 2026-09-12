@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { findCaptchaTarget, isSameCaptchaTarget } from '../../src/captcha/captcha-target'
 
@@ -117,5 +117,87 @@ describe('findCaptchaTarget', () => {
     history.pushState(null, '', '/next')
 
     expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(false)
+  })
+})
+
+describe('effective control snapshots', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    history.replaceState(null, '', '/')
+  })
+
+  it('tracks inherited disabled state and recovers when a fieldset is enabled', () => {
+    const master = appendCandidate({ imageSrc: '/captcha.png' })
+    const form = master.querySelector('form')!
+    const fieldset = document.createElement('fieldset')
+    fieldset.append(...Array.from(form.children))
+    form.appendChild(fieldset)
+    fieldset.disabled = true
+    const disabled = findCaptchaTarget()
+    expect(disabled?.controls.answerDisabled).toEqual(Array(6).fill(true))
+    expect(disabled?.controls.submitDisabled).toBe(true)
+    fieldset.disabled = false
+    expect(isSameCaptchaTarget(disabled, findCaptchaTarget())).toBe(false)
+  })
+
+  it('tracks submitter action changes but normalizes equivalent URLs', () => {
+    const master = appendCandidate({ imageSrc: '/captcha.png', formAction: '/original' })
+    const button = master.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.setAttribute('formaction', '/override')
+    const first = findCaptchaTarget()
+    button.setAttribute('formaction', new URL('/override', location.href).href)
+    expect(isSameCaptchaTarget(first, findCaptchaTarget())).toBe(true)
+    button.setAttribute('formaction', '/changed')
+    expect(isSameCaptchaTarget(first, findCaptchaTarget())).toBe(false)
+    button.setAttribute('formaction', 'https://example.invalid/changed')
+    expect(findCaptchaTarget()).toBeNull()
+  })
+
+  it('ignores inactive button overrides while retaining control type identity', () => {
+    const master = appendCandidate({ imageSrc: '/captcha.png' })
+    const button = master.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.type = 'button'
+    const first = findCaptchaTarget()
+    button.setAttribute('formaction', 'https://example.invalid/ignored')
+    expect(isSameCaptchaTarget(first, findCaptchaTarget())).toBe(true)
+    button.removeAttribute('formaction')
+    button.type = 'submit'
+    expect(isSameCaptchaTarget(first, findCaptchaTarget())).toBe(false)
+    const beforeAnswerType = findCaptchaTarget()
+    master.querySelector<HTMLInputElement>('input[name="riddleanswer[]"]')!.type = 'radio'
+    expect(isSameCaptchaTarget(beforeAnswerType, findCaptchaTarget())).toBe(false)
+  })
+})
+
+describe('submitter override URL semantics', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    history.replaceState(null, '', '/')
+  })
+  afterEach(() => document.head.querySelectorAll('base').forEach((base) => base.remove()))
+
+  it('distinguishes a missing formaction from an explicit empty override, even with a base URL', () => {
+    const base = document.createElement('base')
+    base.href = new URL('/base/', location.href).href
+    document.head.appendChild(base)
+    const master = appendCandidate({ imageSrc: '/captcha.png', formAction: '/original' })
+    const button = master.querySelector<HTMLInputElement>('#riddlesubmit')!
+    const missing = findCaptchaTarget()
+    button.setAttribute('formaction', '')
+    const empty = findCaptchaTarget()
+    expect(empty?.controls.submitAction).toBe(document.URL)
+    expect(isSameCaptchaTarget(missing, empty)).toBe(false)
+    button.setAttribute('formaction', document.URL)
+    expect(isSameCaptchaTarget(empty, findCaptchaTarget())).toBe(true)
+  })
+
+  it('does not ignore the native override of an image submitter', () => {
+    const master = appendCandidate({ imageSrc: '/captcha.png', formAction: '/original' })
+    const button = master.querySelector<HTMLInputElement>('#riddlesubmit')!
+    button.type = 'image'
+    button.setAttribute('formaction', '/image-submit')
+    expect(findCaptchaTarget()?.controls.submitAction).toBe(new URL('/image-submit', location.href).href)
+    button.setAttribute('formaction', 'https://example.invalid/submit')
+    expect(findCaptchaTarget()).toBeNull()
   })
 })

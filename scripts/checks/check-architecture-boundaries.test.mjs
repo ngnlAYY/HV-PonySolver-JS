@@ -308,6 +308,47 @@ describe('checkArchitectureBoundaries', () => {
     })
   }
 
+  for (const source of [
+    "export type Sender = import('../../../apps/extension/src/platform/webextension-api').ExtensionSender",
+    "export type ExtensionApi = typeof import('../../../apps/extension/src/platform/webextension-api')",
+  ]) {
+    it(`rejects reverse dependencies expressed as ${source}`, async () => {
+      await withRepo(async (repoRoot) => {
+        for (const directory of new Set(BOUNDARY_RULES.map((rule) => rule.fromDir))) {
+          await mkdir(join(repoRoot, directory), { recursive: true })
+        }
+        await writeSource(
+          repoRoot,
+          'apps/extension/src/platform/webextension-api.ts',
+          'export type ExtensionSender = { id?: string }',
+        )
+        await writeSource(repoRoot, 'packages/shared/src/contract.ts', source)
+        await assert.rejects(
+          checkArchitectureBoundaries(repoRoot, { requireSourceDirs: true }),
+          /shared package must not import apps or browser core/,
+        )
+      })
+    })
+  }
+
+  it('preserves permitted type-query imports and ignores string/comment decoys', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/parser.ts',
+        "type Panel = import('../status-panel/status-panel-types').Panel",
+      )
+      await writeSource(
+        repoRoot,
+        'packages/shared/src/contract.ts',
+        `// type Bad = import('@hv-pony-solver/extension').Bad
+const text = "type Bad = import('@hv-pony-solver/extension').Bad"
+`,
+      )
+      await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
+    })
+  })
+
   it('rejects normalized runtime imports while preserving adjacent directory names', async () => {
     await withRepo(async (repoRoot) => {
       const file = 'apps/userscript/src/inference/client.ts'

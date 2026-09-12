@@ -1,3 +1,4 @@
+import { isPermanentModelError } from '../model/permanent-model-error'
 import type * as Ort from 'onnxruntime-web/wasm'
 
 import {
@@ -194,6 +195,7 @@ export function startOnnxWorker(
         type: 'error',
         requestId: request.requestId,
         message: error instanceof Error ? error.message : String(error),
+        ...(isPermanentModelError(error) ? { errorKind: 'permanent-model' as const } : {}),
         ...(error instanceof FatalInferenceError ? { fatal: true } : {}),
       })
     }

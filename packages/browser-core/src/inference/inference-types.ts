@@ -62,6 +62,7 @@ export type WorkerErrorResponse = Readonly<{
   requestId: number
   message: string
   fatal?: boolean
+  errorKind?: 'permanent-model' | 'transient'
 }>
 
 export type WorkerMessage = WorkerResponse | WorkerErrorResponse

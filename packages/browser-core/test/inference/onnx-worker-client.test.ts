@@ -4,6 +4,7 @@ import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
 
 import { inferenceRecoveryConfig, inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import { OnnxWorkerClient as CoreOnnxWorkerClient, type ModelRepository } from '../../src/inference/onnx-worker-client'
+import { PermanentModelError } from '../../src/model/permanent-model-error'
 import type { ModelCache } from '../../src/model/model-cache'
 import { downloadModel } from '../../src/model/model-downloader'
 import { getModelDownloadConfirmation } from '../../src/model/model-download-confirmation-store'
@@ -35,6 +36,70 @@ describe('OnnxWorkerClient', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+
+  it('preserves permanent Worker failures through repeated explicit preparation', async () => {
+    class IntegrityFailureWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      terminate = vi.fn()
+      postMessage(message: { requestId: number }): void {
+        queueMicrotask(() =>
+          this.onmessage?.({
+            data: {
+              type: 'error',
+              requestId: message.requestId,
+              message: 'WASM 完整性校验失败',
+              errorKind: 'permanent-model',
+            },
+          } as MessageEvent),
+        )
+      }
+    }
+    const modelCache: ModelRepository = {
+      getCached: vi.fn(async () => new ArrayBuffer(8)),
+      download: vi.fn(),
+      putCached: vi.fn(),
+    }
+    const client = new CoreOnnxWorkerClient(
+      modelCache,
+      createMockPanel(),
+      () => new IntegrityFailureWorker() as unknown as Worker,
+    )
+    try {
+      await expect(client.prepare()).rejects.toBeInstanceOf(PermanentModelError)
+      await expect(client.prepare()).rejects.toBeInstanceOf(PermanentModelError)
+      expect(modelCache.putCached).not.toHaveBeenCalled()
+    } finally {
+      client.destroy()
+    }
+  })
+
+  it('retires an initializing Worker for every preparation owner before allowing a replacement', async () => {
+    stubWorker(TimeoutThenSuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+    const modelCache: ModelRepository = {
+      getCached: vi.fn(async () => new ArrayBuffer(8)),
+      download: vi.fn(),
+      putCached: vi.fn(),
+    }
+    const client = new OnnxWorkerClient(modelCache, createMockPanel())
+    const first = client.prepare().catch((error: unknown) => error)
+    const second = client.prepare().catch((error: unknown) => error)
+    try {
+      await vi.waitFor(() => expect(TimeoutThenSuccessfulWorker.messages).toHaveLength(1))
+      const terminate = vi.spyOn(TimeoutThenSuccessfulWorker.instances[0]!, 'terminate')
+
+      await client.cancelPendingPreparation()
+
+      expect(await first).toBeInstanceOf(Error)
+      expect(await second).toBeInstanceOf(Error)
+      expect(terminate).toHaveBeenCalledTimes(1)
+      await expect(client.prepare()).resolves.toBeUndefined()
+      expect(TimeoutThenSuccessfulWorker.constructedCount).toBe(2)
+      expect(modelCache.download).not.toHaveBeenCalled()
+    } finally {
+      client.destroy()
+      await Promise.all([first, second])
+    }
   })
 
   it('does not cache a downloaded model when worker init fails', async () => {

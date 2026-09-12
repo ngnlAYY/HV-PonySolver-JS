@@ -65,6 +65,29 @@ describe('HistoryStore', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
   })
 
+  it.each([false, true])('skips destructive trim when committed enumeration fails (partial=%s)', async (partial) => {
+    const storage = new MemoryEnumerableStorage()
+    const invalidKey = `${HISTORY_ENTRY_PREFIX}main:invalid`
+    storage.values.set(invalidKey, 'not-json')
+    for (let index = 0; index < HISTORY_MAX; index += 1) {
+      storage.values.set(`${HISTORY_ENTRY_PREFIX}main:${index}`, JSON.stringify(validSuccessRecord))
+    }
+    const committedStorage = Object.assign(storage, {
+      getCommittedItemsByPrefix(): ReadonlyArray<readonly [string, string]> {
+        const entries: Array<readonly [string, string]> = []
+        entries[Symbol.iterator] = function* () {
+          if (partial) yield [invalidKey, 'not-json'] as const
+          throw new Error('snapshot unavailable')
+        }
+        return entries
+      },
+    })
+    const remove = vi.spyOn(storage, 'removeItem')
+    await new HistoryStore(committedStorage).add('main', validManualRecord).persisted
+    expect(remove).not.toHaveBeenCalled()
+    expect(storage.values.size).toBe(HISTORY_MAX + 2)
+  })
+
   it('filters invalid legacy records without throwing', () => {
     localStorage.setItem(
       HISTORY_KEY,

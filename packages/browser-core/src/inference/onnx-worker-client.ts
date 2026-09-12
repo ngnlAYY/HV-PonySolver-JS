@@ -72,6 +72,18 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     return this.joinPreparation(operation, signal)
   }
 
+  /** Retire an old credential generation for every caller, without discarding a ready session. */
+  async cancelPendingPreparation(): Promise<void> {
+    const operation = this.preparation
+    if (!operation) return
+    operation.controller.abort(new PreparationCancelledError())
+    try {
+      await operation.promise
+    } catch {
+      // Existing owners receive the cancellation; credential changes only wait for teardown.
+    }
+  }
+
   async prepareFromVerifiedModel(
     modelBuffer: ArrayBuffer,
     signal?: AbortSignal,

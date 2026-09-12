@@ -108,6 +108,19 @@ test('secret-bearing repository jobs and steps are main-only with narrow secret 
   )
 })
 
+for (const name of ['extension-artifact', 'extension-release']) {
+  test(`${name} publication requires successful CodeQL analysis execution`, async () => {
+    const workflow = await readFile(join(repoRoot, '.github', 'workflows', 'verify-monorepo.yml'), 'utf8')
+    const job = workflowJobBlock(workflow, name)
+    const needs = job.match(/^ {4}needs:\n(?<dependencies>(?: {6}- [A-Za-z0-9_-]+\n)+)/mu)?.groups?.dependencies
+    assert.ok(needs, 'publication dependencies must be declared')
+    assert.match(needs, /^ {6}- codeql$/mu)
+    const condition = job.match(/^ {4}if: (?<condition>[^\n]+)$/mu)?.groups?.condition
+    assert.ok(condition, 'publication condition must be declared')
+    assert.match(condition, /&& needs\.codeql\.result == 'success' &&/u)
+  })
+}
+
 test('repository jobs have bounded execution and superseded CI runs are cancelled', async () => {
   const workflow = await readFile(join(repoRoot, '.github', 'workflows', 'verify-monorepo.yml'), 'utf8')
   assert.match(

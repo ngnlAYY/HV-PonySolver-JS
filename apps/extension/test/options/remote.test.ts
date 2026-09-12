@@ -213,6 +213,27 @@ describe('default remote options entry', () => {
     expect(input.value).toBe('')
   })
 
+  it.each(['verify-key', 'clear-key'] as const)(
+    'preserves edits made while %s is pending, including retyping the same Key',
+    async (operation) => {
+      const port = controlledHostPort()
+      platformMocks.runtimeConnect.mockReset().mockReturnValue(port)
+      await import('../../src/options/main')
+      const input = optionsElement<HTMLInputElement>('model-key')
+      input.value = 'b'.repeat(64)
+      optionsElement<HTMLButtonElement>(operation).click()
+      await vi.waitFor(() => expect(port.postMessage).toHaveBeenCalledTimes(1))
+      input.value = ''
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.value = 'b'.repeat(64)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      const request = port.postMessage.mock.calls[0]![0] as { requestId: string }
+      port.emitMessage({ protocol: 'hv-pony-solver/2', type: 'result', requestId: request.requestId, ok: true })
+      await vi.waitFor(() => expect(optionsElement<HTMLButtonElement>('cancel-key-op').disabled).toBe(true))
+      expect(input.value).toBe('b'.repeat(64))
+    },
+  )
+
   it('makes verify then clear latest-operation-wins with no late page mutation', async () => {
     const verifyPort = controlledHostPort()
     const clearPort = successfulHostPort()

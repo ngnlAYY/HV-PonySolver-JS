@@ -130,6 +130,16 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
     return Array.from(index)
   }
 
+  getCommittedItemsByPrefix(prefix: string): ReadonlyArray<readonly [key: string, value: string]> {
+    const committed = new Map(this.getItemsByPrefix(prefix))
+    for (const [key, state] of this.mutationStates) {
+      if (!key.startsWith(prefix)) continue
+      if (state.committedValue === null) committed.delete(key)
+      else committed.set(key, state.committedValue)
+    }
+    return Array.from(committed)
+  }
+
   /**
    * 转发 storage.onChanged 的已提交变更，不为本地乐观写入制造通知。
    * 浏览器也会为本上下文的已提交写入发送 onChanged。

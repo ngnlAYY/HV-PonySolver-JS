@@ -274,12 +274,17 @@ export class HistoryStore {
     storage: EnumerableTextStorage,
     world: World,
     invalidKeys: string[] = [],
+    committedOnly = false,
   ): KeyedHistoryRecord[] {
     const records: KeyedHistoryRecord[] = []
     const prefix = `${HISTORY_ENTRY_PREFIX}${world}:`
     const presentKeys = new Set<string>()
     try {
-      for (const [key, value] of storage.getItemsByPrefix(prefix)) {
+      const entries =
+        committedOnly && storage.getCommittedItemsByPrefix
+          ? storage.getCommittedItemsByPrefix(prefix)
+          : storage.getItemsByPrefix(prefix)
+      for (const [key, value] of entries) {
         presentKeys.add(key)
         const record = this.readKeyedRecord(key, value, invalidKeys)
         if (record) {
@@ -288,6 +293,11 @@ export class HistoryStore {
       }
     } catch (error) {
       warn('读取单条记录列表失败:', formatErrorMessage(error))
+      if (committedOnly) {
+        // 不完整的已提交快照不能用于破坏性清理，也不能回退到乐观视图。
+        invalidKeys.length = 0
+        return []
+      }
     }
     for (const key of this.parsedEntries.keys()) {
       if (key.startsWith(prefix) && !presentKeys.has(key)) this.parsedEntries.delete(key)
@@ -318,7 +328,7 @@ export class HistoryStore {
 
   private async trimKeyedHistory(storage: EnumerableTextStorage, world: World): Promise<void> {
     const invalidKeys: string[] = []
-    const staleKeys = this.getKeyedRecords(storage, world, invalidKeys)
+    const staleKeys = this.getKeyedRecords(storage, world, invalidKeys, true)
       .slice(HISTORY_MAX)
       .map(({ key }) => key)
     for (const key of new Set([...invalidKeys, ...staleKeys])) {

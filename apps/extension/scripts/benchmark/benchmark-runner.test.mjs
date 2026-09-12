@@ -130,3 +130,9 @@ test('rejects artifact checksum and packaged model provenance drift', async () =
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('reduced benchmark sampling rejects one sample and accepts the bootstrap minimum', () => {
+  assert.throws(() => parseArguments(['--ci', '--samples', '1']), /at least 2 measured samples/u)
+  assert.throws(() => parseArguments(['--quick', '--samples', '1']), /at least 2 measured samples/u)
+  assert.equal(parseArguments(['--ci', '--samples', '2']).samples, 2)
+})

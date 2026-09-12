@@ -119,6 +119,29 @@ async function runAuthenticatedDetect(context, browserErrors) {
   return 'no-detection'
 }
 
+export async function verifyRemoteModelKey(page, browserErrors = []) {
+  // Discard the previous settings result before this operation can settle.
+  await page.evaluate(() => {
+    globalThis.document.querySelector('#status').textContent = ''
+  })
+  await page.locator('#verify-key').click()
+  await page.waitForFunction(
+    () => {
+      const text = globalThis.document.querySelector('#status')?.textContent ?? ''
+      const cancel = globalThis.document.querySelector('#cancel-key-op')
+      return text.length > 0 && cancel?.disabled === true
+    },
+    undefined,
+    { timeout: 120_000 },
+  )
+  const verificationStatus = await page.locator('#status').textContent()
+  assert.equal(
+    verificationStatus,
+    '模型 Key 验证成功并已安全保存',
+    `Production verification failed: ${verificationStatus || 'empty status'}${browserErrors.length > 0 ? `; browser errors: ${browserErrors.join(' | ')}` : ''}`,
+  )
+}
+
 export async function runRemoteChromiumSmoke(args = process.argv.slice(2), environment = process.env) {
   const policy = resolveRemoteSmokeMode(args, environment)
   const unpackedPath = path.join(extensionRoot, 'dist', 'chromium')
@@ -182,21 +205,7 @@ export async function runRemoteChromiumSmoke(args = process.argv.slice(2), envir
     }
 
     await page.locator('#model-key').fill(policy.key)
-    await page.locator('#verify-key').click()
-    await page.waitForFunction(
-      () => {
-        const text = globalThis.document.querySelector('#status')?.textContent ?? ''
-        return text.length > 0 && text !== '正在下载并校验模型…'
-      },
-      undefined,
-      { timeout: 120_000 },
-    )
-    const verificationStatus = await page.locator('#status').textContent()
-    assert.equal(
-      verificationStatus,
-      '模型 Key 验证成功并已安全保存',
-      `Production verification failed: ${verificationStatus || 'empty status'}${browserErrors.length > 0 ? `; browser errors: ${browserErrors.join(' | ')}` : ''}`,
-    )
+    await verifyRemoteModelKey(page, browserErrors)
     const contexts = await page.evaluate(() =>
       globalThis.chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] }),
     )

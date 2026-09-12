@@ -331,6 +331,87 @@ describe('ExtensionStorageMirror', () => {
     expect(mirror.getSync('setting')).toBeNull()
   })
 
+  it.each(['success', 'failure'] as const)(
+    'does not evict durable history for a pending append before its %s',
+    async (outcome) => {
+      const api = rawExtensionApi()
+      const prefix = `${HISTORY_ENTRY_PREFIX}main:`
+      const persisted = new Map<string, unknown>(
+        Array.from({ length: 50 }, (_, index) => [
+          `${prefix}old-${index + 1}`,
+          JSON.stringify({ type: 'success', answers: 'TS', elapsed: 1, sequence: index + 1 }),
+        ]),
+      )
+      const pending = deferred<void>()
+      vi.mocked(api.storage.local.get).mockImplementation(async () => Object.fromEntries(persisted))
+      vi.mocked(api.storage.local.set).mockImplementation(async (items) => {
+        if (Object.hasOwn(items, `${prefix}B`)) await pending.promise
+        for (const [key, newValue] of Object.entries(items)) {
+          const oldValue = persisted.get(key)
+          persisted.set(key, newValue)
+          emitStorageChanges(api, { [key]: { oldValue, newValue } })
+        }
+      })
+      vi.mocked(api.storage.local.remove).mockImplementation(async (keys) => {
+        for (const key of typeof keys === 'string' ? [keys] : keys) {
+          const oldValue = persisted.get(key)
+          persisted.delete(key)
+          emitStorageChanges(api, { [key]: { oldValue } })
+        }
+      })
+      vi.stubGlobal('browser', api)
+      const mirror = await ExtensionStorageMirror.create()
+      const ids = ['A', 'B']
+      const history = new HistoryStore(mirror, () => ids.shift()!)
+      const first = history.add('main', { type: 'success', answers: 'RA', elapsed: 1 })
+      const second = history.add('main', { type: 'success', answers: 'FS', elapsed: 1 })
+      const secondSettled = second.persisted.catch(() => undefined)
+      try {
+        await first.persisted
+        expect(history.get('main')[0]).toMatchObject({ answers: 'FS' })
+        expect(persisted.size).toBe(50)
+        expect(persisted.has(`${prefix}old-2`)).toBe(true)
+        expect(persisted.has(`${prefix}old-1`)).toBe(false)
+        if (outcome === 'success') pending.resolve(undefined)
+        else pending.reject(new Error('append failed'))
+        await secondSettled
+        expect(persisted.size).toBe(50)
+        expect(history.get('main')).toHaveLength(50)
+        expect(persisted.has(`${prefix}old-2`)).toBe(outcome === 'failure')
+        expect(persisted.has(`${prefix}B`)).toBe(outcome === 'success')
+      } finally {
+        pending.resolve(undefined)
+        await secondSettled
+        mirror.destroy()
+      }
+    },
+  )
+
+  it.each(['set', 'remove'] as const)(
+    'keeps committed prefix snapshots current during a pending %s',
+    async (operation) => {
+      const api = rawExtensionApi()
+      const persistence = deferred<void>()
+      vi.mocked(api.storage.local.get).mockResolvedValue({ 'history:key': 'old', unrelated: 'ignored' })
+      vi.mocked(api.storage.local.set).mockReturnValue(persistence.promise)
+      vi.mocked(api.storage.local.remove).mockReturnValue(persistence.promise)
+      vi.stubGlobal('browser', api)
+      const mirror = await ExtensionStorageMirror.create()
+      const write = operation === 'set' ? mirror.set('history:key', 'local') : mirror.remove('history:key')
+      await vi.waitFor(() => expect(api.storage.local[operation]).toHaveBeenCalledTimes(1))
+      expect(mirror.getItemsByPrefix('history:')).toEqual(operation === 'set' ? [['history:key', 'local']] : [])
+      expect(mirror.getCommittedItemsByPrefix('history:')).toEqual([['history:key', 'old']])
+      emitStorageChanges(api, { 'history:key': { oldValue: 'old', newValue: 'external' } })
+      expect(mirror.getCommittedItemsByPrefix('history:')).toEqual([['history:key', 'external']])
+      persistence.reject(new Error('write failed'))
+      await expect(write).rejects.toThrow('write failed')
+      expect(mirror.getItemsByPrefix('history:')).toEqual([['history:key', 'external']])
+      expect(mirror.getCommittedItemsByPrefix('history:')).toEqual([['history:key', 'external']])
+      mirror.destroy()
+      expect(mirror.getCommittedItemsByPrefix('history:')).toEqual([])
+    },
+  )
+
   it('preserves interleaved history writes from two extension contexts', async () => {
     const api = rawExtensionApi()
     const persisted = new Map<string, unknown>()

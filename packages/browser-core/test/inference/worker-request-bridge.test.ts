@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
+import { PermanentModelError } from '../../src/model/permanent-model-error'
 import { WorkerRequestBridge } from '../../src/inference/worker-request-bridge'
 
 const detectResult = { success: false, ponies: [], confidences: {}, detections: [], candidates: [] }
@@ -65,6 +66,48 @@ describe('WorkerRequestBridge', () => {
     worker.onmessage?.({ data: { type: 'error', requestId: 1, message: 'bad output' } } as MessageEvent)
 
     await expect(promise).rejects.toThrow('bad output')
+  })
+
+  it('restores permanent model errors without changing fatal recovery semantics', async () => {
+    const worker = new ManualWorker()
+    const onFailure = vi.fn()
+    const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
+    const promise = bridge.post({ type: 'init', modelBuffer: new ArrayBuffer(1) })
+    worker.onmessage?.({
+      data: { type: 'error', requestId: 1, message: 'WASM 完整性校验失败', errorKind: 'permanent-model', fatal: true },
+    } as MessageEvent)
+    await expect(promise).rejects.toBeInstanceOf(PermanentModelError)
+    expect(onFailure).toHaveBeenCalledWith(expect.any(PermanentModelError))
+  })
+
+  it.each(['unknown', null, true, 1, {}])('rejects invalid errorKind %j', async (errorKind) => {
+    const worker = new ManualWorker()
+    const onFailure = vi.fn()
+    const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
+    const promise = bridge.post({ type: 'init', modelBuffer: new ArrayBuffer(1) })
+    worker.onmessage?.({ data: { type: 'error', requestId: 1, message: 'failure', errorKind } } as MessageEvent)
+    await expect(promise).rejects.toMatchObject({ message: 'ONNX Worker 返回无效消息', fatal: true })
+    expect(onFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps explicit transient responses retryable', async () => {
+    const worker = new ManualWorker()
+    const bridge = new WorkerRequestBridge(worker as unknown as Worker, () => undefined)
+    const promise = bridge.post({ type: 'detect', imageBlob: new Blob() })
+    worker.onmessage?.({
+      data: { type: 'error', requestId: 1, message: '图片解码失败', errorKind: 'transient' },
+    } as MessageEvent)
+    await expect(promise).rejects.not.toBeInstanceOf(PermanentModelError)
+  })
+
+  it('rejects error classification attached to a success response', async () => {
+    const worker = new ManualWorker()
+    const bridge = new WorkerRequestBridge(worker as unknown as Worker, () => undefined)
+    const promise = bridge.post({ type: 'init', modelBuffer: new ArrayBuffer(1) })
+    worker.onmessage?.({
+      data: { type: 'response', requestId: 1, modelBuffer: new ArrayBuffer(1), errorKind: 'permanent-model' },
+    } as MessageEvent)
+    await expect(promise).rejects.toMatchObject({ message: 'ONNX Worker 返回无效消息', fatal: true })
   })
 
   it('marks fatal Worker responses and invokes recovery', async () => {

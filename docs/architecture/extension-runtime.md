@@ -20,7 +20,7 @@
   -> HostResponse -> 原路径返回
 ```
 
-内容客户端为每个请求保存 `RequestLifecycle`，监听响应、断开和超时，并在用户取消时发送同一 Port 上的 request-scoped `cancel`。实现位于 [`src/content/remote-detector-client.ts`](../../apps/extension/src/content/remote-detector-client.ts) 和 [`src/protocol/request-lifecycle.ts`](../../apps/extension/src/protocol/request-lifecycle.ts)。客户端收到 Host 的阶段状态时只更新模型/会话状态；推理状态保留在内容侧，因为只有内容侧能测量完整往返时间。
+内容客户端为每个请求保存 `RequestLifecycle`，监听响应、断开和超时，并在用户取消时发送同一 Port 上的 request-scoped `cancel`。实现位于 [`src/content/remote-detector-client.ts`](../../apps/extension/src/content/remote-detector-client.ts) 和 [`src/protocol/request-lifecycle.ts`](../../apps/extension/src/protocol/request-lifecycle.ts)。客户端仅在存在活跃的非静默准备或识别请求时，将 Host 阶段广播和断连状态写入面板；单独的静默预热以及请求结束后的晚到广播不会改变面板。广播只更新模型/会话状态；推理状态保留在内容侧，因为只有内容侧能测量完整往返时间。
 
 Broker 是受信边界：[`src/background/broker.ts`](../../apps/extension/src/background/broker.ts) 检查扩展 ID、内容页或设置页来源、端口名称、协议形状和请求 ID，再按端口及后台代际施加并发限制。它把每个 Host 调用绑定到 `AbortSignal`；端口断开、客户端取消或 Broker 超时都会终止对应请求。状态广播是单向的，不会结算请求。Broker 也广播凭证版本变化，并把持久化版本留给下一代内容脚本恢复。
 
@@ -34,7 +34,7 @@ Host 在 [`src/host/inference-host.ts`](../../apps/extension/src/host/inference-
 
 远程模式由 [`src/host/remote-inference-host.ts`](../../apps/extension/src/host/remote-inference-host.ts) 组装：Key 只持久化在扩展源 IndexedDB，候选 Key 会短暂经过设置页 Port、Broker 和 Host 内存；它不写入普通存储、内容脚本消息、URL 或日志。模型下载经过共享模型缓存和完整性校验，成功写入缓存后才确认额度。设置页的验证、查询、下载和清除操作通过独立的 options Port 进入 Broker，见 [`src/options/remote.ts`](../../apps/extension/src/options/remote.ts)。
 
-内置模式由 [`src/host/packaged-inference-host.ts`](../../apps/extension/src/host/packaged-inference-host.ts) 和包内模型/运行时资产组成。它不构造远程 Host 能力，不读取或修改旧 Key，也不声明模型服务 Host 权限；设置页只保留普通设置并禁用 Key 控件，见 [`src/options/packaged.ts`](../../apps/extension/src/options/packaged.ts)。包内模型由 [`src/host/packaged-asset.ts`](../../apps/extension/src/host/packaged-asset.ts) 执行状态、重定向、声明长度、实际长度和 SHA-256 校验。构建后的远程/内置能力隔离还由 [`scripts/build/inventory.mjs`](../../apps/extension/scripts/build/inventory.mjs) 审计。
+内置模式由 [`src/host/packaged-inference-host.ts`](../../apps/extension/src/host/packaged-inference-host.ts) 和包内模型/运行时资产组成。它不构造远程 Host 能力，不读取或修改旧 Key，也不声明模型服务 Host 权限；设置页只保留普通设置并禁用 Key 控件，见 [`src/options/packaged.ts`](../../apps/extension/src/options/packaged.ts)。包内模型由 [`src/host/packaged-asset.ts`](../../apps/extension/src/host/packaged-asset.ts) 执行状态、重定向、声明长度、实际长度和 SHA-256 校验。确定性的长度或哈希异常属于永久模型错误，模型及 WASM 的错误类别会通过严格校验的 Worker 响应保留，避免对同一损坏资产进行瞬时故障自动重试；网络和取消错误不归入完整性故障。构建后的远程/内置能力隔离还由 [`scripts/build/inventory.mjs`](../../apps/extension/scripts/build/inventory.mjs) 审计。
 
 两种模式共用内容脚本、Broker、消息协议、推理 Worker 和普通设置，但远程专属模块不能被内置产物引用。扩展包中的 ORT glue、WASM 和 Worker 都是本地资源；扩展不通过远程可执行脚本运行。
 
@@ -58,11 +58,11 @@ Host 在 [`src/host/inference-host.ts`](../../apps/extension/src/host/inference-
 
 ## 设置、存储与同步
 
-普通设置和历史存放在 `storage.local`，内容侧通过 [`src/content/storage-mirror.ts`](../../apps/extension/src/content/storage-mirror.ts) 建立同步内存镜像。镜像初始化期间先监听并合并变更，再读取全量快照；初始化有超时、取消和缓冲 Key 上限。写入按 Key 串行、以乐观值供当前页面读取，并在 `storage.onChanged` 提交后校正；前缀索引仅用于有限的历史扫描。
+普通设置和历史存放在 `storage.local`，内容侧通过 [`src/content/storage-mirror.ts`](../../apps/extension/src/content/storage-mirror.ts) 建立同步内存镜像。镜像初始化期间先监听并合并变更，再读取全量快照；初始化有超时、取消和缓冲 Key 上限。写入按 Key 串行、以乐观值供当前页面读取，并在 `storage.onChanged` 提交后校正；前缀索引仅用于有限的历史扫描。`getCommittedItemsByPrefix()` 在该索引基础上还原每个未决键的已提交值，供历史裁剪使用；普通读取仍显示乐观值，本地未决删除和外部已提交变更同样参与快照校正。
 
-远程模式的模型 Key 使用 [`src/host/indexeddb-string-storage.ts`](../../apps/extension/src/host/indexeddb-string-storage.ts) 的独立 IndexedDB。内容脚本不接收 Key，普通设置加载流程只读取 `storage.local`，已保存的 Key 不回显到控件。Broker 通过凭证版本消息和持久版本让已有内容页面在后台重启或 Key 修复后重新准备；Key 本身不进入内容脚本消息、URL、普通存储或日志。
+远程模式的模型 Key 使用 [`src/host/indexeddb-string-storage.ts`](../../apps/extension/src/host/indexeddb-string-storage.ts) 的独立 IndexedDB。内容脚本不接收 Key，普通设置加载流程只读取 `storage.local`，已保存的 Key 不回显到控件。Key 保存或清除后，远程 Host 先取消并等待共享 Detector 中尚未完成的旧初始化结束，覆盖静默预热及所有 Port 消费者；已经就绪的有效会话继续复用。Broker 随后通过凭证版本消息和持久版本让已有内容页面在后台重启或 Key 修复后重新准备；Key 本身不进入内容脚本消息、URL、普通存储或日志。
 
-设置页普通字段由 [`src/options/ordinary-settings.ts`](../../apps/extension/src/options/ordinary-settings.ts) 统一加载、解析、脏字段跟踪和串行保存。远程操作按代际取消旧请求；额度查询在后台 Port 瞬断时只进行一次有限重连，验证和下载不自动重放，以避免重复副作用。页面销毁会取消未完成的 Key 操作。
+设置页普通字段由 [`src/options/ordinary-settings.ts`](../../apps/extension/src/options/ordinary-settings.ts) 统一加载、解析、脏字段跟踪和串行保存。远程操作按代际取消旧请求；验证与清除还记录按钮点击时的输入修订号，成功返回只清空此后未编辑的输入，同样文字重新输入也会保留。额度查询在后台 Port 瞬断时只进行一次有限重连，验证和下载不自动重放，以避免重复副作用。页面销毁会取消未完成的 Key 操作。
 
 ## 取消、断连和恢复
 

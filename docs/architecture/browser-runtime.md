@@ -93,7 +93,7 @@ sequenceDiagram
 
 保留答案时，程序自动勾选和用户手动勾选通过 WeakMap 与 change 监听区分；超过上限时只按置信度移除自动项。手动模式只记录识别结果，不自动提交。随机兜底由 [CaptchaSolver](../../packages/browser-core/src/captcha/captcha-solver.ts) 的配置控制，修改时必须同时检查提交测试和 App 级取消测试。
 
-多选等待期间，用户可能先于程序勾选下一项。提交器只为本轮实际点击成功的项或原本带自动标记的项更新置信度，不能因为答案出现在识别候选中就接管手动项。后续同一表单的识别与合并仍须保留这项手动身份。
+多选等待期间，用户可能先于程序勾选下一项。提交器只为本轮实际点击成功的项或原本带自动标记的项更新置信度，不能因为答案出现在识别候选中就接管手动项。后续同一表单的识别与合并仍须保留这项手动身份。最终提交等待结束后，提交器会重新读取实际选中状态；总数超过 4 时只移除当前仍属自动的低置信度项，直到至多 3 项或已无自动项可移除。用户已取消的答案不会被重新勾选；初始裁剪与最终裁剪都须在每次点击前重查自动归属，避免页面 `change` 回调将下一项转为手动后仍被清除。每次点击后仍须复核目标。控件快照包括类型、有效禁用状态和原生提交控件的实际 action；`fieldset` 的继承禁用状态与 `formaction` 覆写均参与校验。
 
 ## 推理 Worker 与 Runtime profile
 
@@ -120,7 +120,7 @@ sequenceDiagram
 
 ## 状态面板与历史
 
-核心 [status-panel.ts](../../packages/browser-core/src/status-panel/status-panel.ts) 管理生命周期、状态、历史突变代次、异步设置回写和 CSP 可见性观察；[status-panel-renderer.ts](../../packages/browser-core/src/status-panel/status-panel-renderer.ts) 使用安全 DOM API 渲染，不应新增 `innerHTML` 或动态代码执行。历史条数由设置约束；持久化期间先显示乐观结果，保存失败后回滚到已保存历史并显示错误，未保存条目不会继续留在面板。
+核心 [status-panel.ts](../../packages/browser-core/src/status-panel/status-panel.ts) 管理生命周期、状态、历史突变代次、异步设置回写和 CSP 可见性观察；[status-panel-renderer.ts](../../packages/browser-core/src/status-panel/status-panel-renderer.ts) 使用安全 DOM API 渲染，不应新增 `innerHTML` 或动态代码执行。历史条数由设置约束；持久化期间先显示乐观结果，保存失败后回滚到已保存历史并显示错误，未保存条目不会继续留在面板。异步存储可通过 `getCommittedItemsByPrefix()` 提供已提交快照，HistoryStore 仅在破坏性裁剪时使用它；扩展镜像的未决写入不会挤掉旧记录，快照读取失败时跳过删除。用户脚本同步存储继续使用普通前缀枚举。
 
 [HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 为新记录分配每世界独立的 `sequence` 正安全整数，取本实例已分配序号与当前可见记录序号的最大值加一。分配发生在异步写入前，失败允许留下序号空洞；重建实例后从已保存记录恢复顺序。独立键历史按序号、时间戳和稳定 key 排序后裁剪；旧记录缺少序号时仍按原时间戳规则读取，非枚举存储的旧数组继续保持原顺序。显示用的 `timestamp`/`time` 不做单调化，也不重写旧数据。尚未互相观察到的并发写可使用同一序号，再按时间戳和 key 确定顺序；之后看到这些写入的新记录会取得更大序号。非法序号按损坏记录处理，安全整数上限耗尽则通过保存失败通道报告，不写入溢出值。
 

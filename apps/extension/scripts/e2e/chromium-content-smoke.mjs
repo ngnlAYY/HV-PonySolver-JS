@@ -19,7 +19,7 @@ const transparentPng = Buffer.from(
   'base64',
 )
 
-function captchaHtml({ precheckedIndex = -1 } = {}) {
+function captchaHtml({ precheckedIndex = -1, disabledFieldset = false, nativeSubmit = false } = {}) {
   const answers = Array.from(
     { length: 6 },
     (_, index) => `<input name="riddleanswer[]" type="checkbox"${index === precheckedIndex ? ' checked' : ''}>`,
@@ -30,8 +30,10 @@ function captchaHtml({ precheckedIndex = -1 } = {}) {
       <div id="csp">
         <div id="riddlemaster">
           <form name="riddleform">
-            ${answers}
-            <input id="riddlesubmit" type="button" data-submit-count="0"${submitDisabled}>
+            <fieldset${disabledFieldset ? ' disabled' : ''}>
+              ${answers}
+              <input id="riddlesubmit" type="${nativeSubmit ? 'submit' : 'button'}" data-submit-count="0"${submitDisabled}>
+            </fieldset>
           </form>
           <div id="riddleimage"><img src="/captcha.png"></div>
         </div>
@@ -39,6 +41,7 @@ function captchaHtml({ precheckedIndex = -1 } = {}) {
       <script>
         const answers = [...document.querySelectorAll('input[name="riddleanswer[]"]')]
         const submit = document.querySelector('#riddlesubmit')
+        document.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
         const updateSubmit = () => {
           const selectedCount = answers.filter((answer) => answer.checked).length
           submit.disabled = selectedCount === 0 || selectedCount >= 4
@@ -146,6 +149,9 @@ try {
     })
   })
 
+  await context.route('**/*', (route) =>
+    route.request().url().startsWith('chrome-extension://') ? route.continue() : route.abort(),
+  )
   let currentHtml = captchaHtml()
   await context.route('https://hentaiverse.org/**', async (route) => {
     const url = new globalThis.URL(route.request().url())
@@ -223,6 +229,69 @@ try {
         globalThis.chrome.storage.local.set({ hvPonySolverAnswerMode: 'auto' }, resolve)
       }),
   )
+  const countSuccessHistory = () =>
+    options.evaluate(
+      (entryPrefix) =>
+        new Promise((resolve) => {
+          globalThis.chrome.storage.local.get(null, (items) => {
+            resolve(
+              Object.entries(items).filter(
+                ([key, value]) =>
+                  key.startsWith(`${entryPrefix}main:`) &&
+                  typeof value === 'string' &&
+                  JSON.parse(value)?.type === 'success',
+              ).length,
+            )
+          })
+        }),
+      HISTORY_ENTRY_PREFIX,
+    )
+
+  const successesBeforeDisabled = await countSuccessHistory()
+  currentHtml = captchaHtml({ precheckedIndex: 2, disabledFieldset: true, nativeSubmit: true })
+  const disabledPage = await context.newPage()
+  await disabledPage.goto('https://hentaiverse.org/extension-disabled-fieldset-fixture')
+  await disabledPage.locator('.ponyLog').waitFor()
+  assert.equal(
+    await disabledPage.locator('fieldset input').evaluateAll((inputs) => inputs.every((input) => !input.disabled)),
+    true,
+  )
+  assert.equal(await disabledPage.locator('#riddlesubmit').isDisabled(), true)
+  await disabledPage.waitForTimeout(1_500)
+  assert.equal(await disabledPage.locator('#riddlesubmit').getAttribute('data-submit-count'), '0')
+  assert.equal(await disabledPage.locator('input[name="riddleanswer[]"]:checked').count(), 1)
+  assert.equal(await countSuccessHistory(), successesBeforeDisabled)
+  await disabledPage.locator('fieldset').evaluate((fieldset) => {
+    fieldset.disabled = false
+  })
+  await disabledPage.locator('#riddlesubmit[data-submit-count="1"]').waitFor({ timeout: 15_000 })
+  await disabledPage.waitForTimeout(300)
+  assert.equal(await disabledPage.locator('#riddlesubmit').getAttribute('data-submit-count'), '1')
+  assert.equal(await disabledPage.locator('input[name="riddleanswer[]"]').nth(2).isChecked(), true)
+  assert.equal(await countSuccessHistory(), successesBeforeDisabled + 1)
+  await disabledPage.close()
+
+  await options.evaluate(
+    () => new Promise((resolve) => globalThis.chrome.storage.local.set({ hvPonySolverSubmitDelay: '1500' }, resolve)),
+  )
+  currentHtml = captchaHtml({ nativeSubmit: true })
+  const actionPage = await context.newPage()
+  await actionPage.goto('https://hentaiverse.org/extension-submitter-action-fixture')
+  await actionPage.waitForFunction(() => globalThis.document.querySelector('input[name="riddleanswer[]"]').checked)
+  // The single checkbox is selected before the final submission delay begins.
+  await actionPage.waitForTimeout(100)
+  await actionPage.locator('#riddlesubmit').evaluate((submit) => {
+    submit.setAttribute('formaction', 'https://example.com/blocked-submitter-action')
+  })
+  await actionPage.waitForTimeout(1_500)
+  assert.equal(await actionPage.locator('#riddlesubmit').getAttribute('data-submit-count'), '0')
+  assert.equal(actionPage.url(), 'https://hentaiverse.org/extension-submitter-action-fixture')
+  assert.equal(await countSuccessHistory(), successesBeforeDisabled + 1)
+  await actionPage.close()
+  await options.evaluate(
+    () => new Promise((resolve) => globalThis.chrome.storage.local.set({ hvPonySolverSubmitDelay: '0' }, resolve)),
+  )
+
   const bfcachePage = await context.newPage()
   const cdp = await context.newCDPSession(bfcachePage)
   const bfcacheDiagnostics = []
@@ -256,7 +325,7 @@ try {
   assert.equal(await bfcachePage.locator('#riddlesubmit').getAttribute('data-submit-count'), '1')
 
   process.stdout.write(
-    'Chromium content fixture verified automatic/manual solve, one detect/submit, keyed history, excluded routes, and BFCache restore.\n',
+    'Chromium content fixture verified automatic/manual solve, one detect/submit, keyed history, disabled fieldset recovery, changed submitter action, excluded routes, and BFCache restore.\n',
   )
 } finally {
   await context.close()

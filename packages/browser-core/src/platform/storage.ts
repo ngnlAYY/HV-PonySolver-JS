@@ -22,4 +22,6 @@ export interface TextStorage {
 
 export interface EnumerableTextStorage extends TextStorage {
   getItemsByPrefix(prefix: string): ReadonlyArray<readonly [key: string, value: string]>
+  /** 乐观存储提供已提交视图，供历史裁剪等破坏性维护使用。 */
+  getCommittedItemsByPrefix?(prefix: string): ReadonlyArray<readonly [key: string, value: string]>
 }

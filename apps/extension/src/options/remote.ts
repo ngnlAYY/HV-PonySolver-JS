@@ -30,6 +30,11 @@ let keyGeneration = 0
 let keyOperationTail: Promise<void> = Promise.resolve()
 let activeKeyController: AbortController | null = null
 let activeOperationLabel = 'Key'
+let keyInputRevision = 0
+
+modelKey.addEventListener('input', () => {
+  keyInputRevision += 1
+})
 
 function nextRequestId(): string {
   requestSequence += 1
@@ -199,8 +204,10 @@ cancelKeyOperationButton.addEventListener('click', () => {
 })
 
 verifyKeyButton.addEventListener('click', () => {
+  const inputValue = modelKey.value
+  const inputRevision = keyInputRevision
   enqueueKeyOperation(async (signal, generation) => {
-    const candidateKey = modelKey.value.trim()
+    const candidateKey = inputValue.trim()
     if (!candidateKey) {
       throw new Error('请先输入模型 Key')
     }
@@ -220,12 +227,16 @@ verifyKeyButton.addEventListener('click', () => {
       { signal },
     )
     assertCurrentOperation(generation, signal)
-    modelKey.value = ''
+    if (keyInputRevision === inputRevision && modelKey.value === inputValue) {
+      modelKey.value = ''
+    }
     status.set(response.notice ?? '模型 Key 验证成功并已安全保存')
   })
 })
 
 clearKeyButton.addEventListener('click', () => {
+  const inputValue = modelKey.value
+  const inputRevision = keyInputRevision
   enqueueKeyOperation(async (signal, generation) => {
     await requestHost(
       {
@@ -236,7 +247,9 @@ clearKeyButton.addEventListener('click', () => {
       { signal },
     )
     assertCurrentOperation(generation, signal)
-    modelKey.value = ''
+    if (keyInputRevision === inputRevision && modelKey.value === inputValue) {
+      modelKey.value = ''
+    }
     status.set('模型 Key 已清除')
   }, '正在清除模型 Key…')
 })

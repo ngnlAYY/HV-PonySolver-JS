@@ -119,3 +119,84 @@ test('accepts checkout steps with credential persistence disabled', async () => 
 
   assert.equal(result.status, 0, result.stderr)
 })
+
+test('checks every action in a YAML flow sequence, including quoted keys and values', async () => {
+  for (const second of ['uses: actions/upload-artifact@v7', '"uses": "actions/upload-artifact@v7"']) {
+    const result = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps: [{ uses: owner/first@${'a'.repeat(40)} }, { ${second} }]
+`)
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /actions\/upload-artifact@v7/)
+  }
+})
+
+test('ignores action-like text in quoted strings, comments, and shell block scalars', async () => {
+  const result = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps:
+      - name: 'a description, uses: owner/decoy@main'
+        run: |
+          echo '{ uses: owner/shell@main }'
+          uses: owner/plain-shell@main
+      - name: "another description, uses: owner/quoted@main"
+        uses: owner/real@${'a'.repeat(40)} # { uses: owner/comment@main }
+`)
+  assert.equal(result.status, 0, result.stderr)
+})
+
+test('scopes inline checkout credentials to their own flow mapping', async () => {
+  const valid = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps: [{ uses: actions/checkout@${'a'.repeat(40)}, with: { persist-credentials: false } }, { uses: owner/second@${'b'.repeat(40)} }]
+`)
+  assert.equal(valid.status, 0, valid.stderr)
+  const invalid = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps: [{ uses: actions/checkout@${'a'.repeat(40)} }, { uses: owner/second@${'b'.repeat(40)}, with: { persist-credentials: false } }]
+`)
+  assert.notEqual(invalid.status, 0)
+  assert.match(invalid.stderr, /persist-credentials/)
+})
+
+test('plain scalar apostrophes do not hide later actions and escaped quoted decoys remain inert', async () => {
+  const result = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps:
+      - name: Check user's source
+        uses: owner/action@${'a'.repeat(40)}
+      - name: 'quoted ''text'', uses: owner/decoy@main'
+        uses: owner/action@main
+`)
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /owner\/action@main/)
+  assert.doesNotMatch(result.stderr, /owner\/decoy/)
+})
+
+test('checkout credential checks ignore quoted and block-scalar decoys', async () => {
+  for (const settings of [
+    `        with: { note: 'example, persist-credentials: false' }`,
+    `        with:
+          note: |
+            persist-credentials: false`,
+  ]) {
+    const result = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps:
+      - uses: actions/checkout@${'a'.repeat(40)}
+${settings}
+`)
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /persist-credentials/)
+  }
+})
+
+test('accepts genuine inline checkout credentials before a trailing comment', async () => {
+  const result = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps:
+      - uses: actions/checkout@${'a'.repeat(40)}
+        with: { persist-credentials: false } # checkout credential policy
+`)
+  assert.equal(result.status, 0, result.stderr)
+})

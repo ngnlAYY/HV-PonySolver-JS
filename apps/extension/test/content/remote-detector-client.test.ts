@@ -121,6 +121,76 @@ describe('RemoteDetectorClient', () => {
     expect(sink.setSessionReady).not.toHaveBeenCalled()
   })
 
+  it.each(['prepare', 'detect'] as const)(
+    'shows broadcasts only while visible %s is pending alongside silent preparation',
+    async (operation) => {
+      const sink = statusSink()
+      const client = new RemoteDetectorClient(sink)
+      const silent = client.prepare(undefined, { silent: true })
+      const port = platformMocks.ports[0]!
+      const broadcast = { protocol: PROTOCOL_VERSION, type: 'status', status: { model: '下载中' } }
+      port.emitMessage(broadcast)
+      expect(sink.setStatus).not.toHaveBeenCalled()
+
+      const visible =
+        operation === 'prepare'
+          ? client.prepare()
+          : client.detect(new Blob([new Uint8Array([1])], { type: 'image/png' }))
+      await vi.waitFor(() => expect(port.postMessage).toHaveBeenCalledTimes(2))
+      const visibleRequest = vi.mocked(port.postMessage).mock.lastCall?.[0] as { requestId: string }
+      sink.setStatus.mockClear()
+      port.emitMessage(broadcast)
+      expect(sink.setStatus).toHaveBeenCalledWith({ model: '下载中' })
+      port.emitMessage({
+        protocol: PROTOCOL_VERSION,
+        type: 'result',
+        requestId: visibleRequest.requestId,
+        ok: true,
+        result: {
+          success: true,
+          ponies: ['TS'],
+          confidences: { TS: 0.92 },
+          detections: [{ class_id: 0, confidence: 0.92 }],
+          candidates: [{ class_id: 0, confidence: 0.92 }],
+        },
+      })
+      await visible
+      sink.setStatus.mockClear()
+      port.emitMessage(broadcast)
+      expect(sink.setStatus).not.toHaveBeenCalled()
+
+      const silentRequest = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
+      port.emitMessage({ protocol: PROTOCOL_VERSION, type: 'result', requestId: silentRequest.requestId, ok: true })
+      await silent
+      port.emitMessage(broadcast)
+      expect(sink.setStatus).not.toHaveBeenCalled()
+      client.destroy()
+    },
+  )
+
+  it('ignores late stage broadcasts after the visible request is cancelled', async () => {
+    const sink = statusSink()
+    const client = new RemoteDetectorClient(sink)
+    const controller = new AbortController()
+    const pending = client.prepare(controller.signal)
+    const port = platformMocks.ports[0]!
+    controller.abort()
+    await expect(pending).rejects.toThrow('已取消')
+    sink.setStatus.mockClear()
+    port.emitMessage({ protocol: PROTOCOL_VERSION, type: 'status', status: { session: '初始化中' } })
+    expect(sink.setStatus).not.toHaveBeenCalled()
+    client.destroy()
+  })
+
+  it('keeps silent Port disconnects out of the status panel', async () => {
+    const sink = statusSink()
+    const client = new RemoteDetectorClient(sink)
+    const pending = client.prepare(undefined, { silent: true })
+    platformMocks.ports[0]!.emitDisconnect()
+    await expect(pending).rejects.toThrow('连接已断开')
+    expect(sink.setStatus).not.toHaveBeenCalled()
+  })
+
   it('keeps a silent failed prepare out of the status panel', async () => {
     const sink = statusSink()
     const client = new RemoteDetectorClient(sink)
