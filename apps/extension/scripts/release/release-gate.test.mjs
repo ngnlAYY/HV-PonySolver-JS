@@ -63,13 +63,16 @@ function artifact(target, overrides = {}) {
 async function writeTransferredArtifact(outputRoot, target, contentSecurityPolicy = packagedContentSecurityPolicy) {
   const manifestBytes = jsonBytes({
     manifest_version: 3,
-    background: target === 'chromium' ? { service_worker: 'background.js' } : { scripts: ['background.js'] },
+    background:
+      target === 'chromium'
+        ? { service_worker: 'background/background.js' }
+        : { scripts: ['background/background.js'] },
     content_security_policy: { extension_pages: contentSecurityPolicy },
   })
   const backgroundBytes = Buffer.from('globalThis.releaseFixture = true\n')
   const modelBytes = await readFile(new URL('../../../../model/yolo26n-640.ort', import.meta.url))
   const sourceFiles = {
-    'background.js': backgroundBytes,
+    'background/background.js': backgroundBytes,
     'manifest.json': manifestBytes,
     [`model/${model.filename}`]: modelBytes,
   }
@@ -105,12 +108,15 @@ async function rewriteTransferredArchive(outputRoot, record, contentSecurityPoli
   const archiveName = record.archive.archiveName
   const manifestBytes = jsonBytes({
     manifest_version: 3,
-    background: record.target === 'chromium' ? { service_worker: 'background.js' } : { scripts: ['background.js'] },
+    background:
+      record.target === 'chromium'
+        ? { service_worker: 'background/background.js' }
+        : { scripts: ['background/background.js'] },
     content_security_policy: { extension_pages: contentSecurityPolicy },
   })
   const modelBytes = await readFile(new URL('../../../../model/yolo26n-640.ort', import.meta.url))
   const sourceFiles = {
-    'background.js': Buffer.from('globalThis.releaseFixture = true\n'),
+    'background/background.js': Buffer.from('globalThis.releaseFixture = true\n'),
     'manifest.json': manifestBytes,
     [`model/${model.filename}`]: modelBytes,
   }

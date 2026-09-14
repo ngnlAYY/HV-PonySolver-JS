@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { chromium } from '@playwright/test'
+import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 
 import { assertBrowserVersionForRun } from '../browser/browser-support.mjs'
 
@@ -177,7 +178,7 @@ export async function runRemoteChromiumSmoke(args = process.argv.slice(2), envir
       }
     })
     page.on('pageerror', (error) => browserErrors.push(`options: ${error.message}`))
-    await page.goto(`chrome-extension://${extensionId}/options.html`)
+    await page.goto(`chrome-extension://${extensionId}/${EXTENSION_PATHS.optionsPage}`)
     assert.equal(await page.title(), 'HV Pony Solver 设置')
     await page.locator('#answer-mode').selectOption('auto')
     await page.locator('#submit-delay').fill('0')

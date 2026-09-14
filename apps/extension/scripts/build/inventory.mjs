@@ -1,6 +1,7 @@
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
+import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 import {
   version,
   extensionTargets,
@@ -112,13 +113,18 @@ function auditPackagedMetafiles(metafiles, target, fixture = false) {
   }
 }
 
-function auditHtmlSource(source, relativePath) {
+function auditHtmlSource(source, relativePath, relativeFiles) {
   const dom = new JSDOM(source)
   try {
     for (const element of dom.window.document.querySelectorAll('script[src], link[href]')) {
       const attribute = element.localName === 'script' ? 'src' : 'href'
       if (/^https?:/iu.test(element.getAttribute(attribute) ?? '')) {
         throw new Error(`${relativePath} references remote executable content`)
+      }
+      const reference = element.getAttribute(attribute) ?? ''
+      const resource = new globalThis.URL(reference, `https://extension.invalid/${relativePath}`)
+      if (resource.origin !== 'https://extension.invalid' || !relativeFiles.has(resource.pathname.slice(1))) {
+        throw new Error(`${relativePath} references a missing or non-local resource: ${reference}`)
       }
     }
     for (const script of dom.window.document.scripts) {
@@ -139,8 +145,17 @@ async function auditTargetInventory(target, options, files) {
   const manifest = JSON.parse(requireInventoryFile(files, 'manifest.json').bytes.toString('utf8'))
   const expectedBackground =
     target === 'chromium' ? manifest.background?.service_worker : manifest.background?.scripts?.[0]
-  if (expectedBackground !== 'background.js') {
+  if (expectedBackground !== EXTENSION_PATHS.backgroundScript) {
     throw new Error(`${target} background declaration is invalid`)
+  }
+  if (manifest.options_ui?.page !== EXTENSION_PATHS.optionsPage) {
+    throw new Error(`${target} options page declaration is invalid`)
+  }
+  if (
+    manifest.content_scripts?.length !== 1 ||
+    JSON.stringify(manifest.content_scripts[0].js) !== JSON.stringify([EXTENSION_PATHS.contentScript])
+  ) {
+    throw new Error(`${target} content script declaration is invalid`)
   }
   const expectedCsp = extensionContentSecurityPolicy(modelDelivery)
   if (manifest.content_security_policy?.extension_pages !== expectedCsp) {
@@ -173,22 +188,32 @@ async function auditTargetInventory(target, options, files) {
     throw new Error(`${target} package must not contain image resources`)
   }
   const relativeFiles = new Set(files.map((file) => file.relativePath))
+  if (files.some((file) => !file.relativePath.includes('/') && file.relativePath !== 'manifest.json')) {
+    throw new Error(`${target} package root must contain only manifest files`)
+  }
   for (const required of [
-    'background.js',
-    'content.js',
-    'inference-worker.js',
-    'options.html',
-    'options.js',
+    EXTENSION_PATHS.backgroundScript,
+    EXTENSION_PATHS.contentScript,
+    EXTENSION_PATHS.inferenceWorker,
+    EXTENSION_PATHS.optionsPage,
+    EXTENSION_PATHS.optionsScript,
+    EXTENSION_PATHS.optionsStyles,
     `runtime/${runtimeWasmFilename}`,
   ]) {
     if (!relativeFiles.has(required)) {
       throw new Error(`${target} package is missing ${required}`)
     }
   }
-  if (target === 'chromium' && (!relativeFiles.has('offscreen.html') || !relativeFiles.has('offscreen.js'))) {
+  if (
+    target === 'chromium' &&
+    (!relativeFiles.has(EXTENSION_PATHS.offscreenPage) || !relativeFiles.has(EXTENSION_PATHS.offscreenScript))
+  ) {
     throw new Error('Chromium package is missing its offscreen host')
   }
-  if (target === 'firefox' && (relativeFiles.has('offscreen.html') || relativeFiles.has('offscreen.js'))) {
+  if (
+    target === 'firefox' &&
+    (relativeFiles.has(EXTENSION_PATHS.offscreenPage) || relativeFiles.has(EXTENSION_PATHS.offscreenScript))
+  ) {
     throw new Error('Firefox package unexpectedly includes Chromium offscreen files')
   }
   const ortFiles = files.filter((candidate) => candidate.relativePath.endsWith('.ort'))
@@ -207,7 +232,7 @@ async function auditTargetInventory(target, options, files) {
   }
   for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.html'))) {
     const source = file.bytes.toString('utf8')
-    auditHtmlSource(source, file.relativePath)
+    auditHtmlSource(source, file.relativePath, relativeFiles)
   }
   const javascriptSources = []
   for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.js'))) {

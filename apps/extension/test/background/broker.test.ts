@@ -14,7 +14,7 @@ vi.mock('../../src/platform/webextension', async (importOriginal) => {
       return vi.fn()
     }),
     runtimeId: () => 'extension-id',
-    runtimeGetUrl: () => 'moz-extension://extension-id/options.html',
+    runtimeGetUrl: (path: string) => `moz-extension://extension-id/${path}`,
     storageSet: vi.fn(async () => undefined),
   }
 })
@@ -138,7 +138,7 @@ afterEach(() => {
 
 describe('broker sender validation', () => {
   const extensionId = 'extension-id'
-  const optionsUrl = 'moz-extension://extension-id/options.html'
+  const optionsUrl = 'moz-extension://extension-id/options/options.html'
 
   it('accepts only the declared HentaiVerse content origins', () => {
     expect(
@@ -356,7 +356,7 @@ describe('broker queue and privilege boundaries', () => {
     registerBroker(invokeHost)
     const client = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(client)
 
@@ -377,7 +377,7 @@ describe('broker queue and privilege boundaries', () => {
     registerBroker(invokeHost)
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
     platformMocks.connectListener?.(options)
@@ -418,7 +418,7 @@ describe('broker queue and privilege boundaries', () => {
     registerBroker(invokeHost)
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
     platformMocks.connectListener?.(options)
@@ -461,7 +461,7 @@ describe('broker queue and privilege boundaries', () => {
     const clients = Array.from({ length: MAX_GLOBAL_VERIFY_KEY_REQUESTS + 1 }, () =>
       port(OPTIONS_PORT_NAME, {
         id: 'extension-id',
-        url: 'moz-extension://extension-id/options.html',
+        url: 'moz-extension://extension-id/options/options.html',
       }),
     )
     for (const client of clients) {
@@ -515,7 +515,7 @@ describe('broker queue and privilege boundaries', () => {
     registerBroker(invokeHost)
     const client = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(client)
     client.emitMessage(verifyKeyRequest(300))
@@ -615,7 +615,7 @@ describe('broker queue and privilege boundaries', () => {
     const contentTwo = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://alt.hentaiverse.org/' })
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(content)
     platformMocks.connectListener?.(contentTwo)
@@ -657,7 +657,7 @@ describe('broker queue and privilege boundaries', () => {
     const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(content)
     platformMocks.connectListener?.(options)
@@ -718,7 +718,7 @@ describe('broker queue and privilege boundaries', () => {
     const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(content)
     platformMocks.connectListener?.(options)
@@ -760,7 +760,10 @@ describe('broker queue and privilege boundaries', () => {
         }),
     )
     const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
-    const options = port(OPTIONS_PORT_NAME, { id: 'extension-id', url: 'moz-extension://extension-id/options.html' })
+    const options = port(OPTIONS_PORT_NAME, {
+      id: 'extension-id',
+      url: 'moz-extension://extension-id/options/options.html',
+    })
     platformMocks.connectListener?.(content)
     platformMocks.connectListener?.(options)
     options.emitMessage(verifyKeyRequest(64))
@@ -786,7 +789,7 @@ describe('broker queue and privilege boundaries', () => {
     const handle = registerBroker(invokeHost)
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(options)
 
@@ -811,7 +814,7 @@ describe('broker queue and privilege boundaries', () => {
     registerBroker(invokeHost, { allowOptions: false })
     const client = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(client)
 
@@ -832,7 +835,7 @@ describe('broker queue and privilege boundaries', () => {
     platformMocks.connectListener?.(content)
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(options)
 
@@ -869,7 +872,7 @@ describe('broker queue and privilege boundaries', () => {
     const handle = registerBroker(invokeHost)
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(options)
 
@@ -911,7 +914,7 @@ describe('broker queue and privilege boundaries', () => {
     const handle = registerBroker(invokeHost)
     const options = port(OPTIONS_PORT_NAME, {
       id: 'extension-id',
-      url: 'moz-extension://extension-id/options.html',
+      url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(options)
 

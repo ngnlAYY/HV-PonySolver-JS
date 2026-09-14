@@ -26,7 +26,7 @@ vi.mock('../../src/platform/webextension', () => ({
 
 const serviceWorkerSender = {
   id: 'extension-id',
-  url: 'chrome-extension://extension-id/background.js',
+  url: 'chrome-extension://extension-id/background/background.js',
 } as const
 
 function idleNotifications(): Array<Record<string, unknown>> {

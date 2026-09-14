@@ -15,7 +15,7 @@
   -> Chromium：service worker -> Offscreen Document
      Firefox：background script 直接调用 Host
   -> InferenceHost
-  -> OnnxWorkerClient -> inference-worker.js
+  -> OnnxWorkerClient -> runtime/inference-worker.js
   -> ONNX Runtime Web + 包内 WASM
   -> HostResponse -> 原路径返回
 ```
@@ -26,7 +26,9 @@ Broker 是受信边界：[`src/background/broker.ts`](../../apps/extension/src/b
 
 Chromium 的 service worker 可随时重启，因此它不持有推理会话。[`src/background/chromium-bootstrap.ts`](../../apps/extension/src/background/chromium-bootstrap.ts) 为当前 worker 生成 epoch，接管并复用匹配的 Offscreen context，并将请求转为 Offscreen 消息；[`src/background/chromium-offscreen.ts`](../../apps/extension/src/background/chromium-offscreen.ts) 负责创建、并发准入和空闲关闭。Offscreen 页由 [`src/offscreen/offscreen-bootstrap.ts`](../../apps/extension/src/offscreen/offscreen-bootstrap.ts) 验证消息来源和 epoch，维护活动请求、取消历史、空闲通知退避，并在页面销毁时终止 Host。Firefox 不需要 Offscreen 转发，由 [`src/background/firefox-bootstrap.ts`](../../apps/extension/src/background/firefox-bootstrap.ts) 在 background script 中直接持有 Host。
 
-Host 在 [`src/host/inference-host.ts`](../../apps/extension/src/host/inference-host.ts) 统一处理 `prepare`、`detect` 以及模型管理意图。推理请求解码图片后交给 Detector；模型管理请求按串行尾链执行，并以新一代操作取消旧操作。Host 销毁时同时终止 Detector、活动模型操作和底层资源。真正的 ONNX Worker 入口是 [`src/host/inference-worker-entry.ts`](../../apps/extension/src/host/inference-worker-entry.ts)，构建后成为 `inference-worker.js`。
+Host 在 [`src/host/inference-host.ts`](../../apps/extension/src/host/inference-host.ts) 统一处理 `prepare`、`detect` 以及模型管理意图。推理请求解码图片后交给 Detector；模型管理请求按串行尾链执行，并以新一代操作取消旧操作。Host 销毁时同时终止 Detector、活动模型操作和底层资源。真正的 ONNX Worker 入口是 [`src/host/inference-worker-entry.ts`](../../apps/extension/src/host/inference-worker-entry.ts)，构建后成为 `runtime/inference-worker.js`。
+
+构建器与运行时共同使用 [`src/platform/extension-paths.ts`](../../apps/extension/src/platform/extension-paths.ts) 的 `EXTENSION_PATHS` 定义入口路径。修改路径时须同步检查清单引用、设置页来源校验、Offscreen 创建和 Worker URL；产物目录树见[扩展产物说明](../browser-extension.md#build-outputs-and-local-loading)。
 
 ## 远程模型与内置模型边界
 

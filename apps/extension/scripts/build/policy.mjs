@@ -2,6 +2,7 @@ import { lstat, realpath } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { browserSupport } from '../browser/browser-support.mjs'
+import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 import {
   extensionRoot,
   repositoryRoot,
@@ -161,7 +162,7 @@ function commonManifest(modelDelivery = 'remote') {
       {
         matches: contentMatches,
         exclude_matches: contentExcludes,
-        js: ['content.js'],
+        js: [EXTENSION_PATHS.contentScript],
         run_at: 'document_idle',
       },
     ],
@@ -169,7 +170,7 @@ function commonManifest(modelDelivery = 'remote') {
       default_title: 'HV Pony Solver 设置',
     },
     options_ui: {
-      page: 'options.html',
+      page: EXTENSION_PATHS.optionsPage,
       open_in_tab: true,
     },
     content_security_policy: {
@@ -187,7 +188,7 @@ export function createManifest(target, options = {}) {
       minimum_chrome_version: browserSupport.chromium.manifestMinimumVersion,
       permissions: [...common.permissions, 'offscreen'],
       background: {
-        service_worker: 'background.js',
+        service_worker: EXTENSION_PATHS.backgroundScript,
       },
     }
   }
@@ -195,7 +196,7 @@ export function createManifest(target, options = {}) {
     return {
       ...common,
       background: {
-        scripts: ['background.js'],
+        scripts: [EXTENSION_PATHS.backgroundScript],
       },
       browser_specific_settings: {
         gecko: {

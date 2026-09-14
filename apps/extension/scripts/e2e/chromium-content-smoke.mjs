@@ -7,6 +7,7 @@ import path from 'node:path'
 
 import { HISTORY_ENTRY_PREFIX, HISTORY_KEY } from '@hv-pony-solver/browser-core/persistence/answer-history-config'
 import { chromium } from '@playwright/test'
+import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 
 import { buildExtensions } from '../build/build-extension.mjs'
 
@@ -123,7 +124,7 @@ try {
   serviceWorker ??= await context.waitForEvent('serviceworker', { timeout: 15_000 })
   const extensionId = new globalThis.URL(serviceWorker.url()).host
   const options = await context.newPage()
-  await options.goto(`chrome-extension://${extensionId}/options.html`)
+  await options.goto(`chrome-extension://${extensionId}/${EXTENSION_PATHS.optionsPage}`)
   await options.evaluate(
     () =>
       new Promise((resolve) => {

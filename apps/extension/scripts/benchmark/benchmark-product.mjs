@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from '@playwright/test'
 import { build } from 'esbuild'
+import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 import { buildExtensions } from '../build/build-extension.mjs'
 import { packagedModelSource } from '../build/config.mjs'
 import { discoverPackagedArtifact, extractAndVerifyPackagedArchive } from '../e2e/packaged-smoke-artifact.mjs'
@@ -124,12 +125,14 @@ async function heapSnapshot(cdp, targetId) {
 async function memorySnapshot(cdp, extensionId) {
   try {
     const { targetInfos } = await cdp.send('Target.getTargets')
-    const offscreen = targetInfos.find((target) => target.url === `chrome-extension://${extensionId}/offscreen.html`)
+    const offscreen = targetInfos.find(
+      (target) => target.url === `chrome-extension://${extensionId}/${EXTENSION_PATHS.offscreenPage}`,
+    )
     assert.ok(offscreen, 'Offscreen host is absent')
     const attached = eventOnce(
       cdp,
       'Target.attachedToTarget',
-      (event) => event.targetInfo.url === `chrome-extension://${extensionId}/inference-worker.js`,
+      (event) => event.targetInfo.url === `chrome-extension://${extensionId}/${EXTENSION_PATHS.inferenceWorker}`,
     )
     await cdp.send('Target.autoAttachRelated', {
       targetId: offscreen.targetId,

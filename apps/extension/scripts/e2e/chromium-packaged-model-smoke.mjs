@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { chromium } from '@playwright/test'
+import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 
 import { assertBrowserVersionForRun, resolvePackagedChromiumHeadless } from '../browser/browser-support.mjs'
 import { validatePackagedInferenceObservation, writePackagedE2eEvidence } from './packaged-e2e-evidence.mjs'
@@ -111,7 +112,7 @@ async function discoverInferenceWorkerTarget(cdp, extensionId, offscreenTargetId
     'Target.attachedToTarget',
     (event) =>
       event.targetInfo.type === 'worker' &&
-      event.targetInfo.url === `chrome-extension://${extensionId}/inference-worker.js`,
+      event.targetInfo.url === `chrome-extension://${extensionId}/${EXTENSION_PATHS.inferenceWorker}`,
     15_000,
     'Inference Worker target not found through the Offscreen Host',
   )
@@ -243,7 +244,7 @@ try {
     }
   })
   options.on('pageerror', (error) => browserErrors.push(`options: ${error.message}`))
-  await options.goto(`chrome-extension://${extensionId}/options.html`)
+  await options.goto(`chrome-extension://${extensionId}/${EXTENSION_PATHS.optionsPage}`)
   const serviceWorkerCdp = await context.newCDPSession(options)
   assert.equal(await options.title(), 'HV Pony Solver 设置')
   assert.equal(await options.locator('#model-key-fieldset').evaluate((element) => element.disabled), true)
@@ -293,7 +294,7 @@ try {
   // they verify first inference, warm-idle close, and recreation only.
   if (fixtureArtifact) {
     const targetsBeforeRestart = await getExtensionTargets(cdp, extensionId)
-    const offscreenUrl = `chrome-extension://${extensionId}/offscreen.html`
+    const offscreenUrl = `chrome-extension://${extensionId}/${EXTENSION_PATHS.offscreenPage}`
     const isOffscreenTarget = (target) =>
       (target.type === 'background_page' || target.type === 'page') && target.url === offscreenUrl
     const offscreenBeforeRestart = targetsBeforeRestart.find(isOffscreenTarget)

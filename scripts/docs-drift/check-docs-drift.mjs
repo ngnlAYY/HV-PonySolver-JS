@@ -69,6 +69,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
     modelWorkerAccessSource,
     modelWorkerResponseSource,
     modelSource,
+    extensionPathsModule,
   ] = await Promise.all([
     readPackage('package.json'),
     readPackage('apps/userscript/package.json'),
@@ -89,6 +90,7 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
     readSource('apps/model-worker/src/model-access.ts'),
     readSource('apps/model-worker/src/model-response.ts'),
     readSource('packages/shared/src/model.ts'),
+    importExtensionPaths(repoRoot),
   ])
   const modelWorkerHttpFacts = readModelWorkerHttpFacts(
     modelWorkerRequestRouterSource,
@@ -114,7 +116,13 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
     ...checkModelCacheStrategyDocs(modelCacheStrategyDoc, modelWorkerHttpFacts),
     ...checkModelWorkerOpsDocs(modelWorkerOpsDoc, readme, modelWorkerDeploymentWorkflow),
     ...checkArchitectureGuardrails(readme),
-    ...checkExtensionDocs(extensionPackageJson, browserSupportModule.browserSupport, readme, extensionDoc),
+    ...checkExtensionDocs(
+      extensionPackageJson,
+      browserSupportModule.browserSupport,
+      readme,
+      extensionDoc,
+      extensionPathsModule.EXTENSION_PATHS,
+    ),
   ]
 }
 
@@ -124,6 +132,12 @@ async function readText(repoRoot, relativePath) {
 
 async function importBrowserSupport(repoRoot) {
   const url = pathToFileURL(resolve(repoRoot, 'apps/extension/scripts/browser/browser-support.mjs'))
+  url.searchParams.set('repoRoot', repoRoot)
+  return import(url.href)
+}
+
+async function importExtensionPaths(repoRoot) {
+  const url = pathToFileURL(resolve(repoRoot, 'apps/extension/src/platform/extension-paths.ts'))
   url.searchParams.set('repoRoot', repoRoot)
   return import(url.href)
 }

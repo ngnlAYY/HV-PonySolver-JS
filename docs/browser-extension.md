@@ -45,7 +45,7 @@ Offscreen Document                   |
                        |
                        | one transferred model ArrayBuffer
                        v
-              inference-worker.js + packaged ORT glue/WASM
+              runtime/inference-worker.js + packaged ORT glue/WASM
 ```
 
 The Base64 representation is retained only for captcha images crossing WebExtension JSON messaging. Firefox isolated worlds may reject `Blob.arrayBuffer()`, so the content script uses `FileReader.readAsDataURL()` and extracts the payload. Images are allowlisted by MIME type and bounded to 2 MiB. The HTTP Content-Type is strictly validated and normalized to its lowercase base MIME before Blob creation, so valid parameters do not conflict with the exact MIME allowlist on extension messages.
@@ -60,7 +60,7 @@ Chromium reuses a successful `claim` only within the same background epoch and O
 
 Every artifact contains:
 
-- `inference-worker.js`;
+- `runtime/inference-worker.js`;
 - tracked ONNX Runtime Web 1.27.0 minimal JavaScript glue;
 - `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`.
 
@@ -142,7 +142,33 @@ For the current release these placeholders resolve to `hv-pony-solver-chromium-0
 
 Every unpacked target contains a `build-manifest.json` with `modelDelivery` and per-file identities. Packaged metadata additionally records the canonical model identity. The deterministic test fixture records its committed `expected.classId` and `expected.confidence` oracle in both build and artifact metadata; smoke evidence must match that oracle. ZIP ordering and timestamps are deterministic. Generated `dist` files and the local model source are ignored and must not be staged.
 
-Load `apps/extension/dist/chromium` through Chrome's `chrome://extensions` or Edge's `edge://extensions` developer mode. For Firefox, use `about:debugging#/runtime/this-firefox` and select `apps/extension/dist/firefox/manifest.json`. The toolbar action opens `options.html`; it is not a popup.
+Each browser target and ZIP groups executable files by responsibility:
+
+```text
+<browser-target>/
+├── manifest.json
+├── build-manifest.json
+├── background/
+│   └── background.js
+├── content/
+│   └── content.js
+├── options/
+│   ├── options.html
+│   ├── options.js
+│   └── options.css
+├── offscreen/                 Chromium only
+│   ├── offscreen.html
+│   └── offscreen.js
+├── runtime/
+│   ├── inference-worker.js    includes bundled ORT JavaScript glue
+│   └── ort-wasm-simd-<sha256>.wasm
+└── model/                    packaged mode only
+    └── yolo26n-640.ort
+```
+
+[`EXTENSION_PATHS`](../apps/extension/src/platform/extension-paths.ts) is the authority for extension entry paths: `background/background.js`, `content/content.js`, `options/options.html`, `options/options.js`, `options/options.css`, `offscreen/offscreen.html`, `offscreen/offscreen.js` and `runtime/inference-worker.js`. Build manifests, runtime URLs and package checks use this contract. HTML scripts and styles resolve relative to their page directory; extension API URLs resolve from the package root. Runtime WASM and packaged model identities remain owned by the shared asset manifests. The output root, browser target directories and archive names remain unchanged.
+
+Load `apps/extension/dist/chromium` through Chrome's `chrome://extensions` or Edge's `edge://extensions` developer mode. For Firefox, use `about:debugging#/runtime/this-firefox` and select `apps/extension/dist/firefox/manifest.json`. The toolbar action opens `options/options.html`; it is not a popup.
 
 ## Script and test entry points
 
@@ -180,7 +206,7 @@ Packaged fixture evidence is schema 2 and binds the exact archive name, length, 
 
 `REQUIRE_EXACT_MINIMUM_BROWSER=true` changes the packaged smoke from a normal “supported version or newer” check into an exact-major execution gate. CI obtains and executes Chromium 116 and Firefox Desktop 140 separately. A run on the current browser cannot satisfy this job. Chromium 116 uses its headed extension implementation under Xvfb (`PACKAGED_E2E_HEADLESS=false`); the variable accepts only `true` or `false`, so a misspelled setting fails closed. The Firefox packaged gate requires `geckodriver` (or `GECKODRIVER_PATH`) and `openssl`; it creates and deletes its own temporary certificate, proxy and browser sessions. CI pins geckodriver `0.37.1` and its archive SHA-256. Its installer uses one 60-second deadline and at most three attempts, retrying only network failures and HTTP `408`, `429`, or `5xx`; permanent HTTP, archive, hash, path and extracted-version failures remain fail-closed.
 
-The ordinary production job is deliberately named **load-only**. It never reads `KvKey` and explicitly reports that remote inference was not tested. Its Firefox leg installs the generated ZIP, opens `options.html`, waits for storage initialization, and verifies the current remote-only and ordinary controls. The protected `production-model-smoke` CI environment supplies the `KV_KEY` secret to the authenticated job. Missing or blank secret material skips authenticated verification and keeps extension publication disabled; successful Key verification alone is insufficient because the job must settle a real `detect` request. The authenticated smoke clears stale status before starting verification and waits for that operation to finish before checking its result, preserving errors and the verification deadline. When `PACKAGED_MODEL_URL` is absent, the canonical packaged-model gate is likewise skipped and packaged artifact publication remains disabled. Never print the Key, pass it as a command-line argument, commit it, or include it in evidence.
+The ordinary production job is deliberately named **load-only**. It never reads `KvKey` and explicitly reports that remote inference was not tested. Its Firefox leg installs the generated ZIP, opens `options/options.html`, waits for storage initialization, and verifies the current remote-only and ordinary controls. The protected `production-model-smoke` CI environment supplies the `KV_KEY` secret to the authenticated job. Missing or blank secret material skips authenticated verification and keeps extension publication disabled; successful Key verification alone is insufficient because the job must settle a real `detect` request. The authenticated smoke clears stale status before starting verification and waits for that operation to finish before checking its result, preserving errors and the verification deadline. When `PACKAGED_MODEL_URL` is absent, the canonical packaged-model gate is likewise skipped and packaged artifact publication remains disabled. Never print the Key, pass it as a command-line argument, commit it, or include it in evidence.
 
 ### Firefox Android 142 external release gate
 

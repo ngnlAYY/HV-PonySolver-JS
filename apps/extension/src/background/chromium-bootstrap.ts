@@ -1,6 +1,7 @@
 import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 import { warn } from '@hv-pony-solver/browser-core/utils/logger'
 import { raceAbort } from '@hv-pony-solver/browser-core/utils/abort-race'
+import { EXTENSION_PATHS } from '../platform/extension-paths'
 
 import {
   addRuntimeMessageListener,
@@ -191,7 +192,7 @@ export async function invokeOffscreenHost(request: HostRequest, signal: AbortSig
 }
 
 function isTrustedOffscreenSender(sender: Readonly<{ id?: string; url?: string; tab?: unknown }>): boolean {
-  return sender.id === runtimeId() && !sender.tab && sender.url === runtimeGetUrl('offscreen.html')
+  return sender.id === runtimeId() && !sender.tab && sender.url === runtimeGetUrl(EXTENSION_PATHS.offscreenPage)
 }
 
 async function confirmAndCloseIdleGeneration(generation: number): Promise<void> {

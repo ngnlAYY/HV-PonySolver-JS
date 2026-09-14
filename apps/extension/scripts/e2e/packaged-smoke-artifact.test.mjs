@@ -99,12 +99,12 @@ async function createFixtureArtifact(
   }
   const manifestBytes = jsonBytes({
     manifest_version: 3,
-    background: { service_worker: 'background.js' },
+    background: { service_worker: 'background/background.js' },
     host_permissions: ['https://hentaiverse.org/*'],
   })
   const backgroundBytes = Buffer.from('globalThis.fixture = true\n')
   const sourceFiles = {
-    'background.js': backgroundBytes,
+    'background/background.js': backgroundBytes,
     'manifest.json': manifestBytes,
     [`model/${model.filename}`]: modelBytes,
   }
@@ -233,8 +233,9 @@ test('archive verification rejects duplicate entries before extraction', async (
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-packaged-duplicate-entry-'))
   context.after(() => rm(outputRoot, { recursive: true, force: true }))
   await createFixtureArtifact(outputRoot, {
-    archiveEntries: { 'aaaaaaaaaa.js': Buffer.from('duplicate') },
-    transformArchiveBytes: (bytes) => replaceArchiveEntryName(bytes, 'aaaaaaaaaa.js', 'background.js'),
+    archiveEntries: { 'background/aaaaaaaaaa.js': Buffer.from('duplicate') },
+    transformArchiveBytes: (bytes) =>
+      replaceArchiveEntryName(bytes, 'background/aaaaaaaaaa.js', 'background/background.js'),
   })
   const packagedArtifact = await discoverPackagedArtifact(outputRoot, 'chromium')
 
@@ -258,7 +259,7 @@ test('extracted tree verification rejects post-extraction tampering', async (con
   const packagedArtifact = await discoverPackagedArtifact(temporaryRoot, 'chromium')
   const extractedRoot = path.join(temporaryRoot, 'extracted')
   const verification = await extractAndVerifyPackagedArchive(packagedArtifact, extractedRoot)
-  await writeFile(path.join(extractedRoot, 'background.js'), 'tampered tree')
+  await writeFile(path.join(extractedRoot, 'background/background.js'), 'tampered tree')
   await assert.rejects(verifyExtractedPackagedTree(extractedRoot, verification), /does not match the tested archive/u)
 })
 

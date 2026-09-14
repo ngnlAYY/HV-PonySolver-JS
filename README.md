@@ -338,6 +338,8 @@ hv-pony-solver-firefox-packaged-0.1.1.zip      内置模型 Firefox 安装包
 
 ZIP 使用固定时间戳与稳定文件顺序；相同源码和工具链应产生相同字节。`build-manifest.json` 和顶层 artifact 清单记录 `modelDelivery`；内置版本还记录模型文件名、`9,914,448` 字节长度和 SHA-256。构建器同时审计清单引用、权限、CSP、远程可执行代码、动态导入以及模型/ORT glue/WASM 哈希。
 
+每个浏览器目录与 ZIP 内按职责组织为 `background/`、`content/`、`options/`、`runtime/`，Chromium 另有 `offscreen/`，内置模型版另有 `model/`；`manifest.json` 与 `build-manifest.json` 保留在根目录。设置页路径为 `options/options.html`；完整目录树和路径维护来源见[扩展产物说明](docs/browser-extension.md#build-outputs-and-local-loading)。
+
 支持范围：
 
 | 产物                       | 浏览器          | 最低版本            | 后台模型                                               | 执行门禁                                     |

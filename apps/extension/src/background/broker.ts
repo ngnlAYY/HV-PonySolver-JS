@@ -3,6 +3,7 @@ import { warn } from '@hv-pony-solver/browser-core/utils/logger'
 import { prepareDeadlineConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
 
 import { pickForwardedHostFields } from '../host/status-fields'
+import { EXTENSION_PATHS } from '../platform/extension-paths'
 import {
   addRuntimeConnectListener,
   runtimeGetUrl,
@@ -187,7 +188,7 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
   }
 
   const dispose = addRuntimeConnectListener((port) => {
-    if (!isTrustedPort(port, runtimeId(), runtimeGetUrl('options.html'))) {
+    if (!isTrustedPort(port, runtimeId(), runtimeGetUrl(EXTENSION_PATHS.optionsPage))) {
       port.disconnect()
       return
     }

@@ -1,4 +1,4 @@
-export function checkExtensionDocs(extensionPackageJson, browserSupport, readme, extensionDoc) {
+export function checkExtensionDocs(extensionPackageJson, browserSupport, readme, extensionDoc, extensionPaths) {
   const errors = []
   const chromeMinimum = browserSupport?.chromium?.manifestMinimumVersion ?? null
   const firefoxMinimum = browserSupport?.firefox?.manifestMinimumVersion ?? null
@@ -65,6 +65,16 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
   for (const fact of requiredFacts) {
     if (!combinedDocs.includes(fact)) {
       errors.push(`extension documentation omits ${fact}`)
+    }
+  }
+
+  if (!extensionPaths || typeof extensionPaths !== 'object' || Object.keys(extensionPaths).length === 0) {
+    errors.push('extension entry paths are unreadable')
+  } else {
+    for (const path of Object.values(extensionPaths)) {
+      if (typeof path !== 'string' || !extensionDoc.includes(`\`${path}\``)) {
+        errors.push(`extension documentation omits entry path ${path}`)
+      }
     }
   }
 

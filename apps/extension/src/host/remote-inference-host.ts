@@ -11,6 +11,7 @@ import {
 import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared'
 
 import { runtimeGetUrl } from '../platform/webextension'
+import { EXTENSION_PATHS } from '../platform/extension-paths'
 import { IndexedDbStringStorage } from './indexeddb-string-storage'
 import { InferenceHost } from './inference-host'
 import { createForwardingStatusSink, silentStatusSink, type HostStatusEmitter } from './status-sink'
@@ -65,7 +66,7 @@ export function createRemoteInferenceHost(
   const detector = new OnnxWorkerClient(
     modelCache,
     statusSink,
-    () => new Worker(runtimeGetUrl('inference-worker.js'), { type: 'module' }),
+    () => new Worker(runtimeGetUrl(EXTENSION_PATHS.inferenceWorker), { type: 'module' }),
   )
   const onCredentialsCommitted = (): void => {
     if (closed) return

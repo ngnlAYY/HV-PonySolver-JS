@@ -31,6 +31,8 @@ scripts/
 
 根配置保持按工具职责分开：`package.json` 提供 workspace 脚本、Prettier 规则和包管理器声明，`mise.toml` 固定 Node.js/pnpm，`eslint.config.mjs` 提供全仓库 flat config，`tsconfig.base.json` 提供共享 TypeScript 选项，`.prettierignore` 定义生成物和第三方资产的格式忽略边界。已删除的独立 Prettier 配置和 Vitest workspace 不应重新引入。
 
+扩展的生成目录和 ZIP 按 `background/`、`content/`、`options/`、`offscreen/`、`runtime/`、`model/` 组织，其中 `offscreen/` 仅用于 Chromium，`model/` 仅用于内置模型版；完整结构见[扩展产物说明](../browser-extension.md#build-outputs-and-local-loading)。入口路径由 [`EXTENSION_PATHS`](../../apps/extension/src/platform/extension-paths.ts) 统一维护；输出根、`chromium/`、`firefox/` 和 ZIP 名称保持原约定。
+
 ## 扩展脚本迁移映射
 
 下表是已完成的“迁移前名称 → 当前路径”。同名测试随被测模块移动；应用包的 scripts 字段继续提供稳定命令名。

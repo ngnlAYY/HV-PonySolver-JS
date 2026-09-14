@@ -11,6 +11,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
 import { firefox } from '@playwright/test'
+import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 import { findExecutable, startWebDriver, createWebDriverClient } from '../browser/webdriver.mjs'
 
 import {
@@ -165,8 +166,8 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
     await request('POST', `${sessionPath}/execute/async`, {
       script: `
         const done = arguments[arguments.length - 1]
+        const uri = arguments[0]
         ;(async () => {
-          const uri = 'moz-extension://${extensionUuid}/options.html'
           const window = Services.wm.getMostRecentWindow('navigator:browser')
           const tab = window.gBrowser.addTab(uri, {
             triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
@@ -176,7 +177,7 @@ async function runInstalledArtifact(request, proxyPort, runIndex) {
           done()
         })().catch((error) => done({ error: String(error) }))
       `,
-      args: [],
+      args: [`moz-extension://${extensionUuid}/${EXTENSION_PATHS.optionsPage}`],
     })
     await request('POST', `${sessionPath}/moz/context`, { context: 'content' })
     const handles = await request('GET', `${sessionPath}/window/handles`)

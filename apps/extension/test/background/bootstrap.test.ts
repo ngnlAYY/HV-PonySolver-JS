@@ -48,11 +48,11 @@ import {
 
 const serviceWorkerSender = {
   id: 'extension-id',
-  url: 'chrome-extension://extension-id/background.js',
+  url: 'chrome-extension://extension-id/background/background.js',
 } as const
 const offscreenSender = {
   id: 'extension-id',
-  url: 'chrome-extension://extension-id/offscreen.html',
+  url: 'chrome-extension://extension-id/offscreen/offscreen.html',
 } as const
 
 function claim(listener: RuntimeMessageListener, epoch: string): unknown {
@@ -751,7 +751,7 @@ describe('target-specific extension bootstraps', () => {
     for (const sender of [
       { ...offscreenSender, id: 'other-extension' },
       { ...offscreenSender, tab: { url: offscreenSender.url } },
-      { ...offscreenSender, url: 'chrome-extension://extension-id/options.html' },
+      { ...offscreenSender, url: 'chrome-extension://extension-id/options/options.html' },
     ])
       relay(message, sender, vi.fn())
     relay({ ...message, extra: true }, offscreenSender, vi.fn())

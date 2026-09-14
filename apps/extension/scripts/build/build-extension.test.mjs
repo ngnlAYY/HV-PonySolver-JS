@@ -47,6 +47,25 @@ function sha256(bytes) {
 }
 
 function assertArchiveIntegrity({ archive, archiveBytes, archiveName, artifact, buildManifest, checksum }) {
+  assert.deepEqual(
+    Object.keys(archive)
+      .filter((name) => !name.includes('/'))
+      .sort(),
+    ['build-manifest.json', 'manifest.json'],
+  )
+  for (const required of [
+    'background/background.js',
+    'content/content.js',
+    'options/options.html',
+    'options/options.js',
+    'options/options.css',
+    'runtime/inference-worker.js',
+  ]) {
+    assert.ok(archive[required], `Missing archive entry: ${required}`)
+  }
+  const manifest = JSON.parse(new TextDecoder().decode(archive['manifest.json']))
+  assert.equal(manifest.options_ui.page, 'options/options.html')
+  assert.deepEqual(manifest.content_scripts[0].js, ['content/content.js'])
   const checksumMatch = checksum.match(/^([a-f0-9]{64}) {2}([^\n]+)\n$/u)
   assert.ok(checksumMatch)
   assert.equal(checksumMatch[2], archiveName)
@@ -76,11 +95,11 @@ test('creates the exact remote and packaged manifest matrix without a WAR', () =
   const packagedFirefox = createManifest('firefox', { modelDelivery: 'packaged' })
 
   assert.equal(remoteChromium.minimum_chrome_version, '116')
-  assert.equal(remoteChromium.background.service_worker, 'background.js')
+  assert.equal(remoteChromium.background.service_worker, 'background/background.js')
   assert.deepEqual(remoteChromium.permissions, ['storage', 'offscreen'])
   assert.deepEqual(remoteChromium.host_permissions, [...contentHosts, 'https://models.ngnl.host/*'])
   assert.equal(remoteChromium.content_security_policy.extension_pages, remoteCsp)
-  assert.deepEqual(remoteFirefox.background.scripts, ['background.js'])
+  assert.deepEqual(remoteFirefox.background.scripts, ['background/background.js'])
   assert.deepEqual(remoteFirefox.permissions, ['storage'])
   assert.deepEqual(remoteFirefox.host_permissions, [...contentHosts, 'https://models.ngnl.host/*'])
   assert.equal(remoteFirefox.content_security_policy.extension_pages, remoteCsp)
@@ -293,9 +312,9 @@ test('keeps default and explicit remote builds deterministic and model-free', as
       assert.deepEqual(archiveBytes, await readFile(path.join(comparisonRoot, archiveName)))
       const archive = unzipSync(new Uint8Array(archiveBytes))
       assert.ok(archive['manifest.json'])
-      assert.ok(archive['inference-worker.js'])
+      assert.ok(archive['runtime/inference-worker.js'])
       assert.equal(
-        new TextDecoder().decode(archive['inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
+        new TextDecoder().decode(archive['runtime/inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
         false,
       )
       assert.ok(Object.keys(archive).some((name) => name.startsWith('runtime/') && name.endsWith('.wasm')))
@@ -303,8 +322,8 @@ test('keeps default and explicit remote builds deterministic and model-free', as
         Object.keys(archive).some((name) => name.endsWith('.ort')),
         false,
       )
-      assert.equal('offscreen.html' in archive, target === 'chromium')
-      assert.equal('offscreen.js' in archive, target === 'chromium')
+      assert.equal('offscreen/offscreen.html' in archive, target === 'chromium')
+      assert.equal('offscreen/offscreen.js' in archive, target === 'chromium')
 
       const manifest = JSON.parse(new TextDecoder().decode(archive['manifest.json']))
       assert.ok(manifest.host_permissions.includes('https://models.ngnl.host/*'))
@@ -357,11 +376,11 @@ test('builds deterministic packaged-model fixtures with distinct names and graph
       const archive = unzipSync(new Uint8Array(archiveBytes))
       assert.deepEqual(archive[`model/${fixtureModelFilename}`], bytes)
       assert.equal(Object.keys(archive).filter((name) => name.endsWith('.ort')).length, 1)
-      assert.equal('offscreen.html' in archive, target === 'chromium')
-      assert.equal('offscreen.js' in archive, target === 'chromium')
+      assert.equal('offscreen/offscreen.html' in archive, target === 'chromium')
+      assert.equal('offscreen/offscreen.js' in archive, target === 'chromium')
       // Only the Chromium fixture bundle carries the lifecycle-smoke detect delay.
       assert.equal(
-        new TextDecoder().decode(archive['inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
+        new TextDecoder().decode(archive['runtime/inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
         target === 'chromium',
       )
 
@@ -380,7 +399,7 @@ test('builds deterministic packaged-model fixtures with distinct names and graph
         bundledJavaScript,
         /https:\/\/models\.ngnl\.host|hvPonySolverExtensionSecrets|hvPonySolverModelAccessKey|Bearer /u,
       )
-      assert.match(new TextDecoder().decode(archive['options.js']), /当前版本已内置模型，无需配置模型 Key。/u)
+      assert.match(new TextDecoder().decode(archive['options/options.js']), /当前版本已内置模型，无需配置模型 Key。/u)
 
       assert.deepEqual(buildManifest, JSON.parse(new TextDecoder().decode(archive['build-manifest.json'])))
       assert.equal(buildManifest.modelDelivery, 'packaged')
@@ -428,7 +447,7 @@ test(
       )
       const archive = unzipSync(new Uint8Array(await readFile(path.join(temporaryRoot, archiveName))))
       assert.equal(
-        new TextDecoder().decode(archive['inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
+        new TextDecoder().decode(archive['runtime/inference-worker.js']).includes('hv-pony-fixture-detect-delay'),
         false,
       )
       const artifact = JSON.parse(
@@ -442,11 +461,11 @@ test(
 
       const chromiumDirectory = path.join(temporaryRoot, 'chromium')
       await auditBuiltExtension(chromiumDirectory, 'chromium', { modelDelivery: 'packaged' })
-      const optionsPath = path.join(chromiumDirectory, 'options.js')
+      const optionsPath = path.join(chromiumDirectory, 'options/options.js')
       await writeFile(optionsPath, `${await readFile(optionsPath, 'utf8')};;//hv-pony-fixture-detect-delay\n`)
       await assert.rejects(
         auditBuiltExtension(chromiumDirectory, 'chromium', { modelDelivery: 'packaged' }),
-        /chromium options\.js contains the fixture detect-delay marker/u,
+        /chromium options\/options\.js contains the fixture detect-delay marker/u,
       )
     } finally {
       await rm(temporaryRoot, { recursive: true, force: true })
@@ -487,6 +506,59 @@ test('rejects image resources in extension packages', async () => {
       auditBuiltExtension(path.join(temporaryRoot, 'chromium'), 'chromium'),
       /chromium package must not contain image resources/u,
     )
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
+})
+
+test('rejects stale entry paths, loose root files and broken nested HTML resources', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-layout-'))
+  try {
+    await buildExtensions({ outputRoot: temporaryRoot, targets: ['chromium'] })
+    const targetDirectory = path.join(temporaryRoot, 'chromium')
+    const manifestPath = path.join(targetDirectory, 'manifest.json')
+    const originalManifest = await readFile(manifestPath, 'utf8')
+    for (const [mutate, expected] of [
+      [
+        (manifest) => {
+          manifest.background.service_worker = 'background.js'
+        },
+        /background declaration is invalid/u,
+      ],
+      [
+        (manifest) => {
+          manifest.options_ui.page = 'options.html'
+        },
+        /options page declaration is invalid/u,
+      ],
+      [
+        (manifest) => {
+          manifest.content_scripts[0].js = ['content.js']
+        },
+        /content script declaration is invalid/u,
+      ],
+    ]) {
+      const manifest = JSON.parse(originalManifest)
+      mutate(manifest)
+      await writeFile(manifestPath, JSON.stringify(manifest))
+      await assert.rejects(auditBuiltExtension(targetDirectory, 'chromium'), expected)
+    }
+    await writeFile(manifestPath, originalManifest)
+
+    const looseFile = path.join(targetDirectory, 'background.js')
+    await writeFile(looseFile, '')
+    await assert.rejects(auditBuiltExtension(targetDirectory, 'chromium'), /root must contain only manifest files/u)
+    await rm(looseFile)
+
+    const optionsPath = path.join(targetDirectory, 'options/options.html')
+    const optionsSource = await readFile(optionsPath, 'utf8')
+    for (const reference of ['../options.js', '../options.css', '//external.invalid/options.js']) {
+      await writeFile(optionsPath, optionsSource.replace('src="options.js"', `src="${reference}"`))
+      await assert.rejects(auditBuiltExtension(targetDirectory, 'chromium'), /missing or non-local resource/u)
+    }
+    await writeFile(optionsPath, optionsSource)
+    await rm(path.join(targetDirectory, 'options/options.css'))
+    await assert.rejects(auditBuiltExtension(targetDirectory, 'chromium'), /missing options\/options\.css/u)
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true })
   }

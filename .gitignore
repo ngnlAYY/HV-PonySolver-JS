@@ -9,6 +9,7 @@ node_modules/
 .claude/
 .trellis
 .omc/
+.omx/
 .tmp/
 .pi/
 /model/
@@ -30,3 +31,4 @@ graphify-out/
 docs/claude
 .codegraph
 openspec/
+.pi-lens.json

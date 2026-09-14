@@ -2,6 +2,7 @@ import { cp, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { build } from 'esbuild'
 import { browserSupport } from '../browser/browser-support.mjs'
+import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 import { extensionRoot, version, runtimeGlueSource, runtimeWasmSource, runtimeWasmFilename } from './config.mjs'
 import { createManifest, normalizeModelDelivery } from './policy.mjs'
 import { extensionRuntimeGluePlugin, packagedModelIdentityPlugin, fixtureDetectHookPlugin } from './assets.mjs'
@@ -26,7 +27,7 @@ export async function buildTarget(outputRoot, target, options = {}) {
   const targetDirectory = path.join(outputRoot, target)
   await mkdir(targetDirectory, { recursive: true })
   const entryPoints = {
-    background: path.join(
+    [EXTENSION_PATHS.backgroundScript.slice(0, -3)]: path.join(
       extensionRoot,
       'src',
       'background',
@@ -40,11 +41,16 @@ export async function buildTarget(outputRoot, target, options = {}) {
             ? 'chromium.ts'
             : 'firefox.ts',
     ),
-    content: path.join(extensionRoot, 'src', 'content', 'main.ts'),
-    options: path.join(extensionRoot, 'src', 'options', modelDelivery === 'packaged' ? 'packaged.ts' : 'main.ts'),
+    [EXTENSION_PATHS.contentScript.slice(0, -3)]: path.join(extensionRoot, 'src', 'content', 'main.ts'),
+    [EXTENSION_PATHS.optionsScript.slice(0, -3)]: path.join(
+      extensionRoot,
+      'src',
+      'options',
+      modelDelivery === 'packaged' ? 'packaged.ts' : 'main.ts',
+    ),
   }
   if (target === 'chromium') {
-    entryPoints.offscreen = path.join(
+    entryPoints[EXTENSION_PATHS.offscreenScript.slice(0, -3)] = path.join(
       extensionRoot,
       'src',
       'offscreen',
@@ -71,7 +77,7 @@ export async function buildTarget(outputRoot, target, options = {}) {
   })
   const workerBuild = await build({
     entryPoints: [path.join(extensionRoot, 'src', 'host', 'inference-worker-entry.ts')],
-    outfile: path.join(targetDirectory, 'inference-worker.js'),
+    outfile: path.join(targetDirectory, EXTENSION_PATHS.inferenceWorker),
     bundle: true,
     format: 'esm',
     platform: 'browser',
@@ -91,10 +97,13 @@ export async function buildTarget(outputRoot, target, options = {}) {
         : []),
     ],
   })
-  await cp(path.join(extensionRoot, 'public', 'options.html'), path.join(targetDirectory, 'options.html'))
-  await cp(path.join(extensionRoot, 'public', 'options.css'), path.join(targetDirectory, 'options.css'))
+  await cp(path.join(extensionRoot, 'public', 'options.html'), path.join(targetDirectory, EXTENSION_PATHS.optionsPage))
+  await cp(path.join(extensionRoot, 'public', 'options.css'), path.join(targetDirectory, EXTENSION_PATHS.optionsStyles))
   if (target === 'chromium') {
-    await cp(path.join(extensionRoot, 'public', 'offscreen.html'), path.join(targetDirectory, 'offscreen.html'))
+    await cp(
+      path.join(extensionRoot, 'public', 'offscreen.html'),
+      path.join(targetDirectory, EXTENSION_PATHS.offscreenPage),
+    )
   }
   await mkdir(path.join(targetDirectory, 'runtime'), { recursive: true })
   await cp(runtimeWasmSource, path.join(targetDirectory, 'runtime', runtimeWasmFilename))

@@ -3,6 +3,7 @@ import type { HostStatusEmitter } from '../host/status-sink'
 import { warn } from '@hv-pony-solver/browser-core/utils/logger'
 
 import { addRuntimeMessageListener, runtimeGetUrl, runtimeId, sendRuntimeMessage } from '../platform/webextension'
+import { EXTENSION_PATHS } from '../platform/extension-paths'
 import {
   OFFSCREEN_MESSAGE_TYPE,
   errorResponse,
@@ -236,7 +237,7 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
     if (
       sender.id !== runtimeId() ||
       sender.tab ||
-      sender.url !== runtimeGetUrl('background.js') ||
+      sender.url !== runtimeGetUrl(EXTENSION_PATHS.backgroundScript) ||
       !isOffscreenMessage(message)
     ) {
       return false

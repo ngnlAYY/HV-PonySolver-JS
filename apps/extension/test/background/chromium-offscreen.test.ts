@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   closeDocument: vi.fn<() => Promise<void>>(),
   createDocument: vi.fn<() => Promise<void>>(),
   getContexts: vi.fn<() => Promise<unknown[]>>(),
-  runtimeGetUrl: vi.fn(() => 'chrome-extension://extension-id/offscreen.html'),
+  runtimeGetUrl: vi.fn((path: string) => `chrome-extension://extension-id/${path}`),
 }))
 
 vi.mock('../../src/platform/webextension', () => ({
@@ -46,6 +46,11 @@ describe('Chromium offscreen lifecycle', () => {
 
     expect(mocks.getContexts).toHaveBeenCalledTimes(2)
     expect(mocks.createDocument).toHaveBeenCalledTimes(1)
+    expect(mocks.getContexts).toHaveBeenCalledWith({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: ['chrome-extension://extension-id/offscreen/offscreen.html'],
+    })
+    expect(mocks.createDocument).toHaveBeenCalledWith(expect.objectContaining({ url: 'offscreen/offscreen.html' }))
     expect(offscreenDocumentIdentity()).toBe('created')
   })
 

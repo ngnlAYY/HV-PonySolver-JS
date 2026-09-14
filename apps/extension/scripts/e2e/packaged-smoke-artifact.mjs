@@ -5,6 +5,7 @@ import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 
 import { unzipSync } from 'fflate'
+import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 
 const packagedTargets = new Set(['chromium', 'firefox'])
 const answerCount = 6
@@ -253,10 +254,10 @@ function verifyArchiveEntries(packagedArtifact, entries, actualArchive) {
   if (manifest.manifest_version !== 3) {
     throw new Error(`${label} manifest is not MV3`)
   }
-  if (target === 'chromium' && manifest.background?.service_worker !== 'background.js') {
+  if (target === 'chromium' && manifest.background?.service_worker !== EXTENSION_PATHS.backgroundScript) {
     throw new Error(`${label} manifest does not declare the Chromium service worker`)
   }
-  if (target === 'firefox' && !isDeepStrictEqual(manifest.background?.scripts, ['background.js'])) {
+  if (target === 'firefox' && !isDeepStrictEqual(manifest.background?.scripts, [EXTENSION_PATHS.backgroundScript])) {
     throw new Error(`${label} manifest does not declare the Firefox background script`)
   }
   if (manifest.host_permissions?.includes('https://models.ngnl.host/*')) {

@@ -2,6 +2,7 @@ import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 import { warn } from '@hv-pony-solver/browser-core/utils/logger'
 
 import { getChromiumOffscreenApi, runtimeGetUrl } from '../platform/webextension'
+import { EXTENSION_PATHS } from '../platform/extension-paths'
 
 let creatingDocument: Promise<void> | null = null
 let closingDocument: Promise<void> | null = null
@@ -26,7 +27,7 @@ export function offscreenDocumentIdentity(): string | null {
 function documentFilter(): Readonly<{ contextTypes: string[]; documentUrls: string[] }> {
   return {
     contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [runtimeGetUrl('offscreen.html')],
+    documentUrls: [runtimeGetUrl(EXTENSION_PATHS.offscreenPage)],
   }
 }
 
@@ -57,7 +58,7 @@ export async function ensureOffscreenDocument(): Promise<void> {
       return
     }
     await offscreen.createDocument({
-      url: 'offscreen.html',
+      url: EXTENSION_PATHS.offscreenPage,
       reasons: ['WORKERS'],
       justification: 'Run the packaged ONNX inference worker outside the restartable service worker.',
     })

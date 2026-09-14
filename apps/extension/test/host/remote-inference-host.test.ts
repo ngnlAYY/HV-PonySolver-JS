@@ -140,7 +140,7 @@ describe('createRemoteInferenceHost', () => {
       expect(storageGet).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY)
 
       expect(detectorInternals.workerFactory()).toBeInstanceOf(TestWorker)
-      expect(workerArguments).toEqual([['moz-extension://test/inference-worker.js', { type: 'module' }]])
+      expect(workerArguments).toEqual([['moz-extension://test/runtime/inference-worker.js', { type: 'module' }]])
 
       const cacheGet = vi.spyOn(modelCache, 'getCached').mockResolvedValue(null)
       const cacheDownload = vi.spyOn(modelCache, 'download').mockResolvedValue(modelBuffer)

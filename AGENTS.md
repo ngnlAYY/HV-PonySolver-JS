@@ -102,6 +102,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 - 远程扩展产物不得包含 `.ort`；内置扩展产物必须且只能包含清单声明的一个 `.ort`。
 - 扩展不得声明 `web_accessible_resources` 或图片资源；如产品需求确需改变，必须同时更新威胁模型、构建审计、测试和文档。
 - 构建输出目录、覆盖率、生成的 Wrangler 配置和下载模型属于生成物，不应作为普通源码提交。
+- 扩展包按 `background/`、`content/`、`options/`、Chromium 专属 `offscreen/` 和 `runtime/` 分组，内置模型保留 `model/`；两份 JSON 清单保留在浏览器目标根目录。入口路径由 `apps/extension/src/platform/extension-paths.ts` 的 `EXTENSION_PATHS` 统一维护，修改时同步清单、运行时 URL、来源校验、构建审计、浏览器脚本和文档；完整目录树见 `docs/browser-extension.md`。
 
 ## Model Worker 与额度规则
 

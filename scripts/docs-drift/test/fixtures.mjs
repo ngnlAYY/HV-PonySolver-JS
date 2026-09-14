@@ -82,6 +82,7 @@ async function createFixture(options = {}) {
     'packages/shared/package.json',
     'apps/extension/scripts/build/build-extension.mjs',
     'apps/extension/scripts/browser/browser-support.mjs',
+    'apps/extension/src/platform/extension-paths.ts',
     'docs/browser-extension.md',
     'docs/model-cache-strategy.md',
     'docs/model-worker-ops.md',
@@ -96,7 +97,10 @@ async function createFixture(options = {}) {
   ]
 
   await Promise.all(
-    (options.materialize ? files : ['apps/extension/scripts/browser/browser-support.mjs']).map(async (file) => {
+    (options.materialize
+      ? files
+      : ['apps/extension/scripts/browser/browser-support.mjs', 'apps/extension/src/platform/extension-paths.ts']
+    ).map(async (file) => {
       await mkdir(join(fixtureRoot, dirname(file)), { recursive: true })
       await copyFile(join(repoRoot, file), join(fixtureRoot, file))
     }),
