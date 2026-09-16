@@ -1,219 +1,213 @@
-# Browser extension edition
+# 浏览器扩展
+
+本页覆盖扩展的构建、安装、权限、存储和发布证据。共享答题规则见[设置与行为](usage/settings.md)，内部时序见[扩展运行时](architecture/extension-runtime.md)。扩展版本来自 [apps/extension/package.json](../apps/extension/package.json)，当前为 `0.1.1`；清单、ZIP、artifact 与 Release 标签都从该值派生。
 
 ## Scope
 
-The current extension release version is `0.1.1`, sourced only from `apps/extension/package.json`. Both manifests, `build-manifest.json`, artifact metadata, ZIP names and the optional GitHub Release tag are derived from that value; root and internal workspace versions are unrelated.
+| 目标             | 浏览器          | 最低版本            | 模型交付          | 验证边界                                    |
+| ---------------- | --------------- | ------------------- | ----------------- | ------------------------------------------- |
+| Chromium MV3     | Chrome、Edge    | Chromium 116        | remote / packaged | 独立执行精确最低桌面 major                  |
+| Firefox MV3      | Firefox Desktop | Firefox 140         | remote / packaged | 独立执行精确最低桌面 major                  |
+| 同一 Firefox ZIP | Firefox Android | Firefox Android 142 | remote / packaged | 内置模型 artifact 发布要求外部 Android 证据 |
 
-`apps/extension` builds two model-delivery products for Chromium and Firefox:
-
-| Artifact     | Browsers            | Minimum             | Model delivery         | Automated gate                                |
-| ------------ | ------------------- | ------------------- | ---------------------- | --------------------------------------------- |
-| Chromium MV3 | Chrome and Edge     | Chromium 116        | `remote` or `packaged` | Exact Chromium 116 desktop execution          |
-| Firefox MV3  | Firefox Desktop     | Firefox 140         | `remote` or `packaged` | Exact Firefox 140 desktop execution           |
-| Firefox MV3  | Firefox for Android | Firefox Android 142 | `remote` or `packaged` | External Android evidence required at release |
-
-Safari, other mobile browsers, Manifest V2, store signing and listing assets are outside this build. Current GitHub-hosted runners do **not** automate Firefox Android: a current desktop Firefox result, even one newer than 142, is not Android coverage. Publication therefore fails closed unless external Firefox Android 142 evidence for the exact Firefox ZIP is supplied. The userscript remains independently buildable. Do not enable both editions in one browser profile: they observe the same captcha DOM and could submit the same form.
+Safari、其他移动浏览器、Manifest V2、商店签名和商店资料不在当前构建范围内。桌面 Firefox 版本高于 142 也不能证明 Android 兼容；远程桌面 Release 不声称 Android 已验证。不要在同一浏览器配置中同时启用用户脚本版和扩展版。
 
 ## Build modes
 
-The mode is a build-time choice, never runtime detection or fallback:
+从仓库根目录执行，先按[验证手册](development/verification.md)准备依赖。
 
-| Mode               | Command                                                  | Model source                               | Key                         |
-| ------------------ | -------------------------------------------------------- | ------------------------------------------ | --------------------------- |
-| `remote` (default) | `pnpm --filter @hv-pony-solver/extension build`          | `https://models.ngnl.host/yolo26n-640.ort` | Required for the real model |
-| `packaged`         | `pnpm --filter @hv-pony-solver/extension build:packaged` | bundled `model/yolo26n-640.ort`            | Not used                    |
+| 模式           | 命令                                                                  | 模型来源                                   | Key        |
+| -------------- | --------------------------------------------------------------------- | ------------------------------------------ | ---------- |
+| `remote`，默认 | `mise exec -- pnpm --filter @hv-pony-solver/extension build`          | `https://models.ngnl.host/yolo26n-640.ort` | 运行时需要 |
+| `packaged`     | `mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged` | 固定本地输入 `model/yolo26n-640.ort`       | 不使用     |
 
-The direct CLI form is `node scripts/build/build-extension.mjs --model-mode remote|packaged`. Production packaged builds accept no model-path or integrity override. Before replacing `apps/extension/dist`, the builder requires the fixed input to be a regular non-symlink file with exactly 9,914,448 bytes and the canonical SHA-256 from `@hv-pony-solver/shared/ort-model`. The archive provides integrity checks, not encryption or confidentiality; installed package contents can be inspected.
+工作区内的直接 CLI 为 `node scripts/build/build-extension.mjs --model-mode remote` 或 `--model-mode packaged`。模式在构建时确定，运行时不自动探测或回退。**两种模式共用并重建 `apps/extension/dist/`**；单次构建只留下所选模式的 ZIP。
 
-The public build entry delegates configuration, policy, asset verification, inventory/auditing, archive writing and target orchestration to `scripts/build/`. ZIP compression streams bounded chunks to disk with an incremental archive hash; fixed timestamps and sorted entries preserve reproducibility. Before recursive cleanup, both the extension builder and geckodriver installer reject output paths equal to or containing the working directory, home directory or repository, including canonicalized ancestor paths. Allowed sibling temporary outputs and the normal extension dist remain subject to these checks. Firefox smoke scripts share only WebDriver process/request/cleanup mechanics; their product assertions remain separate. The remaining maintenance scripts are grouped by responsibility: `scripts/benchmark/`, `scripts/browser/`, `scripts/e2e/`, `scripts/fixtures/`, `scripts/model/` and `scripts/release/`. The package commands are the supported entry points; direct script paths should follow these directories.
+生产内置构建只接受固定输入，不接受路径或完整性覆盖。清理旧 dist 前先拒绝缺失、非普通文件、符号链接、长度不是 9,914,448 或 SHA-256 不符的模型。构建不通过 Key 临时下载模型。模型可从安装包提取，完整性保护不提供加密或保密性。
 
-## Runtime architecture
-
-The page-facing content script is identical in both modes. It owns bounded DOM observation, same-origin image loading, status/history rendering, answer clicks and the native submit-button click. Once answer history exists, it also prefetches the inference session at page load, so the first captcha of a browsing session does not pay the cold-start cost; fresh installs stay lazy and never spend a monthly download slot before their first captcha. This prefetch stays silent: Host stage and disconnect notifications update the panel only while that content client has an active non-silent prepare or detect request.
-
-```text
-Hentaiverse content script
-  |  bounded JSON-safe Base64 captcha request
-  v
-named runtime Port -> sender-validating broker
-  | Chromium                          | Firefox
-  v                                   v
-MV3 service worker              MV3 background script
-  v                                   |
-Offscreen Document                   |
-  +---------------- Host <------------+
-                       |
-                       | one transferred model ArrayBuffer
-                       v
-              runtime/inference-worker.js + packaged ORT glue/WASM
-```
-
-The Base64 representation is retained only for captcha images crossing WebExtension JSON messaging. Firefox isolated worlds may reject `Blob.arrayBuffer()`, so the content script uses `FileReader.readAsDataURL()` and extracts the payload. Images are allowlisted by MIME type and bounded to 2 MiB. The HTTP Content-Type is strictly validated and normalized to its lowercase base MIME before Blob creation, so valid parameters do not conflict with the exact MIME allowlist on extension messages.
-
-Model bytes do not use Base64 or chunks. The privileged Host verifies one binary model and `OnnxWorkerClient` transfers its `ArrayBuffer` once in the Worker `init` message. The Worker creates a WASM Execution Provider session and serializes inference.
-
-The broker validates extension ID, Hentaiverse/options origins, exact protocol shape, and request IDs. A content Port may retain at most two detect and two concurrent prepare requests; the broker accepts at most six detect and four prepare requests globally. These global counters live in the background context, so an MV3 service-worker restart resets them — they bound load per background generation, not per browser session. A content client can also send a request-scoped `cancel`, which aborts exactly one queued or running request and frees its capacity without disturbing sibling requests on the same Port. Cancelling a queued detect removes its queue entry and image immediately; it does not retain the image behind a slow running request. Running requests still settle or terminate before the next detect starts. The Host pushes one-way `status` notifications (model and session stages) through the broker to every connected content Port — relayed from the Offscreen document through the service worker on Chromium — while the content client keeps inference-row reporting with full round-trip timing. Chromium's service worker stays stateless and creates one Offscreen Host; every service-worker start schedules an idle reconciliation, so a restart that abandoned an in-flight retention lease cannot strand the Offscreen document and its warm session. Firefox owns the same mode-specific Host directly; its MV3 manifest deliberately omits the unsupported `background.persistent` field.
-
-## Model and runtime ownership
-
-Chromium reuses a successful `claim` only within the same background epoch and Offscreen `contextId`. Concurrent waiters share the handshake with independent cancellation; a failed or timed-out claim, replacement document, or background restart requires a new handshake. Content and options requests share timeout/cancellation settlement mechanics while retaining their respective shared-Port and per-request-Port policies.
-
-Every artifact contains:
-
-- `runtime/inference-worker.js`;
-- tracked ONNX Runtime Web 1.27.0 minimal JavaScript glue;
-- `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm`.
-
-Build-time and runtime checks pin the glue/WASM identities. Dynamic imports and remote executable `.js`, `.mjs`, or `.wasm` references fail the package audit.
-
-Remote mode constructs model download, model IndexedDB cache, secret IndexedDB and Key-verification capabilities. It sends a Key only as `Authorization: Bearer`, enforces the existing timeout/quota/length/SHA-256 rules and caches only verified bytes.
-
-Packaged mode constructs none of those remote capabilities. It fetches the extension-internal URL `model/yolo26n-640.ort` with `cache: force-cache` and `redirect: error`, then validates HTTP status, decimal safe `Content-Length`, bounded streamed length, exact final length and SHA-256. The model is not a Web Accessible Resource, but it remains inspectable in the installed archive; corrupt package data never falls back to the model service. Deterministic length and SHA-256 failures retain their permanent-model classification across the inference Worker and Host, so automatic preparation does not retry an unchanged corrupt model or WASM asset as a transient failure.
-
-## Storage and options
-
-| Data                      | Remote mode      | Packaged mode         | Visible to content          |
-| ------------------------- | ---------------- | --------------------- | --------------------------- |
-| Model bytes               | model IndexedDB  | bundled package asset | No                          |
-| Model access Key          | secret IndexedDB | not read or changed   | No                          |
-| Ordinary settings/history | `storage.local`  | `storage.local`       | Through an in-memory mirror |
-
-The content mirror retains only the application's settings/history namespaces, including both worlds so experienced-user prefetch remains compatible. Initialization merges changes by key (first old value, latest new value), stops after five seconds or cancellation, and fails closed above 1,024 distinct buffered keys. Page teardown also cancels initialization. Up to four prefix indices avoid repeated full scans. History reuses parsed values only while their serialized strings match; returned records are copied and the final reconciliation after a write is retained. Destructive trimming uses the mirror's committed prefix snapshot, excluding uncommitted optimistic entries. A failed or incomplete committed read skips deletion, so a pending write that later fails cannot evict an extra saved record.
-
-A ready synchronous mirror supplies panel settings directly. The panel discards only its own synchronous render mutations, preserving pending page mutations and visibility changes when externally inserted `div#csp` elements disappear.
-
-The remote options page enables the initially disabled Key fieldset after its handlers exist. It never echoes the stored Key. Verify and clear operations only clear an input that has not been edited since the button click; input revisions preserve even the same text deleted and re-entered while a request is pending. “Verify and save” settles Key validity with an unmetered HEAD probe and persists the Key without spending a monthly download. “Query download count” reads the saved Key's current monthly status without spending a download; when enforcement is disabled it reports `无次数限制（模型下载次数限制未开启）`. “Download model” uses the saved Key to download, verify and cache the model; if a valid local cache already exists, it reports the cache hit without spending another download. A real-model GET only reserves a ten-minute receipt. The Host confirms that receipt with `POST /quota` after byte-length/SHA-256 verification and a completed model IndexedDB transaction, so an interrupted or uncached response is not counted. A hanging Key, quota, or model operation can be cancelled from the page, which aborts the in-flight request on both sides. The native IndexedDB commit event drives credential reconciliation independently of the caller's result. After an actual Key save or removal, the shared Host cancels and awaits pending initialization, then notifies the broker to broadcast and persist a new credential revision. Cancellation still reports cancellation and cannot undo an already committed change; it no longer suppresses the required reconciliation. A rolled-back transaction or a late callback after Host closure emits no notification. This includes silent prefetch and other Port consumers; a ready model session is retained without another download.
-
-The options transport preserves user-diagnostic errors from the Host instead of replacing every failure with a generic disconnect. A quota query alone retries one transient background Port disconnect after a bounded delay; if the second attempt fails, the actual browser/Host message is shown. Key verification and model download are not automatically replayed because doing so could duplicate a state-changing operation.
-
-The packaged entry does not open Key storage or a Key Port. Its Key controls remain disabled and it shows exactly:
-
-```text
-当前版本已内置模型，无需配置模型 Key。
-```
-
-Ordinary settings remain editable. An existing remote-build Key is neither read nor deleted.
-
-## Answer selection and panel behavior
-
-`auto` is the default answer mode. It checks answers and clicks the page's native submit control after the configured delays. `manual` still runs inference and records the detected answers, but it neither changes checkboxes nor submits. Random selection after an empty detection is enabled by default and can be disabled.
-
-“Preserve checked answers” is enabled by default. User and automatic checkbox changes are tracked separately:
-
-- a manual checkbox is never unchecked by the extension;
-- previous automatic selections may be merged with the new detection;
-- when the combined count is at most four, no trimming occurs;
-- when it exceeds four, only automatic selections are removed from lowest confidence upward, targeting at most three total answers;
-- if manual answers alone exceed that target, they all remain;
-- disabling preservation clears the current checked state before the automatic result is applied;
-- after the final submit delay, the extension rechecks current selections and ownership, trims only automatic items if the total exceeds four, and never reselects an answer the user has unchecked.
-
-Before and between clicks, the content script revalidates the exact form, six checkboxes, submit control, control types, DOM connection and effective disabled state captured for the current captcha. Inherited fieldset disabling is checked with the first-legend exception preserved. Native submit controls also capture their effective `formaction`: cross-origin overrides are rejected, equivalent relative/absolute URLs remain the same target, and `type=button` does not apply a native override. Initial and final trimming both recheck automatic ownership before every click, including ownership changes caused by page change handlers. Initial failures are reported distinctly: an unexpected checkbox count, a missing submit control, unusable answer controls, or a disabled final submit control. If the page replaces the captcha or any captured control while delays are running, the stale task is cancelled without clicking the replacement. Failures for the same unchanged captcha target are suppressed for 30 seconds, so rapid MutationObserver activity does not add another record during the cooldown; a changed target, credential recovery or expiry of that cooldown permits a fresh attempt. Persisted history is independently capped at 50 records. Each persisted text field is truncated to 1,024 UTF-16 code units; oversized, malformed or non-finite stored records are ignored, and invalid keyed entries are removed during the next successful write.
-
-The default panel position is `top=155, left=1240`. By default the panel is visible only while a `div#csp` exists; this requirement can be disabled. Hiding the panel does not stop observation or inference. The default visible history count is five and the accepted range is 1–50.
-
-## Permission matrix
-
-| Target/mode       | API permissions        | Host permissions         | Firefox data collection |
-| ----------------- | ---------------------- | ------------------------ | ----------------------- |
-| Chromium remote   | `storage`, `offscreen` | Hentaiverse + model host | N/A                     |
-| Chromium packaged | `storage`, `offscreen` | Hentaiverse only         | N/A                     |
-| Firefox remote    | `storage`              | Hentaiverse + model host | `authenticationInfo`    |
-| Firefox packaged  | `storage`              | Hentaiverse only         | `none`                  |
-
-No mode requests `<all_urls>`, tabs, scripting, cookies, debugger or unlimited storage. No mode exposes the model through `web_accessible_resources`. Extension pages use `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'`, external script files only, and no remote executable resources.
+构建入口把配置、权限策略、资产验证、产物审计、归档和目标编排委托给 `scripts/build/`。ZIP 以有界分块流式压缩并增量计算哈希，固定时间戳与排序支持相同输入的可重复产物。构建器和 geckodriver 安装器在递归清理前，拒绝仓库、cwd、home 本身及其祖先路径，临时目录与符号链接解析后的路径同样受检查。
 
 ## Build outputs and local loading
 
-Remote names remain backward compatible; packaged names are distinct:
-
 ```text
-apps/extension/dist/chromium/
-apps/extension/dist/firefox/
-hv-pony-solver-chromium-<version>.zip
-hv-pony-solver-firefox-<version>.zip
-hv-pony-solver-chromium-packaged-<version>.zip
-hv-pony-solver-firefox-packaged-<version>.zip
-*.zip.sha256
-*.artifact.json
+apps/extension/dist/
+├── chromium/
+├── firefox/
+├── hv-pony-solver-chromium-<version>.zip           remote
+├── hv-pony-solver-firefox-<version>.zip            remote
+├── hv-pony-solver-chromium-packaged-<version>.zip  packaged
+├── hv-pony-solver-firefox-packaged-<version>.zip   packaged
+├── *.zip.sha256
+└── *.artifact.json
 ```
 
-For the current release these placeholders resolve to `hv-pony-solver-chromium-0.1.1.zip`, `hv-pony-solver-firefox-0.1.1.zip`, `hv-pony-solver-chromium-packaged-0.1.1.zip` and `hv-pony-solver-firefox-packaged-0.1.1.zip`.
-
-Every unpacked target contains a `build-manifest.json` with `modelDelivery` and per-file identities. Packaged metadata additionally records the canonical model identity. The deterministic test fixture records its committed `expected.classId` and `expected.confidence` oracle in both build and artifact metadata; smoke evidence must match that oracle. ZIP ordering and timestamps are deterministic. Generated `dist` files and the local model source are ignored and must not be staged.
-
-Each browser target and ZIP groups executable files by responsibility:
+上表是两种构建的产物并集，不表示一次构建同时生成四个 ZIP。当前版本把 `<version>` 替换为 `0.1.1`。每个目标目录和 ZIP 内部结构如下：
 
 ```text
 <browser-target>/
 ├── manifest.json
 ├── build-manifest.json
-├── background/
-│   └── background.js
-├── content/
-│   └── content.js
+├── background/background.js
+├── content/content.js
 ├── options/
 │   ├── options.html
 │   ├── options.js
 │   └── options.css
-├── offscreen/                 Chromium only
+├── offscreen/                       仅 Chromium
 │   ├── offscreen.html
 │   └── offscreen.js
 ├── runtime/
-│   ├── inference-worker.js    includes bundled ORT JavaScript glue
+│   ├── inference-worker.js          含精简 ORT glue
 │   └── ort-wasm-simd-<sha256>.wasm
-└── model/                    packaged mode only
-    └── yolo26n-640.ort
+└── model/yolo26n-640.ort             仅 packaged
 ```
 
-[`EXTENSION_PATHS`](../apps/extension/src/platform/extension-paths.ts) is the authority for extension entry paths: `background/background.js`, `content/content.js`, `options/options.html`, `options/options.js`, `options/options.css`, `offscreen/offscreen.html`, `offscreen/offscreen.js` and `runtime/inference-worker.js`. Build manifests, runtime URLs and package checks use this contract. HTML scripts and styles resolve relative to their page directory; extension API URLs resolve from the package root. Runtime WASM and packaged model identities remain owned by the shared asset manifests. The output root, browser target directories and archive names remain unchanged.
+[`EXTENSION_PATHS`](../apps/extension/src/platform/extension-paths.ts) 统一维护 `background/background.js`、`content/content.js`、`options/options.html`、`options/options.js`、`options/options.css`、`offscreen/offscreen.html`、`offscreen/offscreen.js` 和 `runtime/inference-worker.js`。HTML 资源相对于页面目录解析，扩展 API URL 相对于包根解析。模型和 WASM 路径身份继续由 shared 清单维护。
 
-Load `apps/extension/dist/chromium` through Chrome's `chrome://extensions` or Edge's `edge://extensions` developer mode. For Firefox, use `about:debugging#/runtime/this-firefox` and select `apps/extension/dist/firefox/manifest.json`. The toolbar action opens `options/options.html`; it is not a popup.
+`build-manifest.json` 记录 `modelDelivery` 和逐文件身份；packaged 还记录模型长度与哈希。artifact 元数据绑定 ZIP。fixture 构建额外记录 `expected.classId` 和 `expected.confidence`，E2E 必须与该 oracle 一致。生成目录、ZIP、证据和本地模型不作为普通源码提交。
+
+本地加载：
+
+1. Chrome 打开 `chrome://extensions`，Edge 打开 `edge://extensions`，启用开发者模式，加载 `apps/extension/dist/chromium`。
+2. Firefox 打开 `about:debugging#/runtime/this-firefox`，临时加载 `apps/extension/dist/firefox/manifest.json`。
+3. 点击工具栏按钮进入 `options/options.html`；它是设置页，不是 popup。
+4. remote 验证并保存 Key；packaged 直接使用包内模型。更新时完整替换构建目录并重新加载，避免混用旧文件。
+
+## Permission matrix
+
+| 目标/模式         | API 权限               | Host 权限              | Firefox 数据声明     |
+| ----------------- | ---------------------- | ---------------------- | -------------------- |
+| Chromium remote   | `storage`、`offscreen` | Hentaiverse 与模型服务 | 不适用               |
+| Chromium packaged | `storage`、`offscreen` | Hentaiverse            | 不适用               |
+| Firefox remote    | `storage`              | Hentaiverse 与模型服务 | `authenticationInfo` |
+| Firefox packaged  | `storage`              | Hentaiverse            | `none`               |
+
+remote 的 Key 作为 Bearer 凭据发送至模型服务，因此 Firefox 声明 `authenticationInfo`。任何模式都不请求 `<all_urls>`、tabs、scripting、cookies、debugger 或 unlimited storage，也不声明 `web_accessible_resources` 或图片资源。
+
+扩展页面 CSP 为 `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'`。所有可执行 JS、module Worker、精简 ORT glue 和 WASM 随包分发。动态导入、远程可执行 `.js`/`.mjs`/`.wasm` 引用或资产哈希漂移会使构建审计失败。remote 包不能含 `.ort`；packaged 必须且只能含清单指定的一个模型。
+
+## Runtime architecture
+
+```mermaid
+flowchart TD
+    Content[内容脚本：DOM、图片、面板、答案] -->|有上限的 Base64 图片| Broker[具名 Port 与来源校验 Broker]
+    Broker --> Chrome[Chromium service worker]
+    Chrome --> Offscreen[Offscreen Document]
+    Broker --> Firefox[Firefox background script]
+    Offscreen --> Host[推理 Host]
+    Firefox --> Host
+    Host -->|转移模型 ArrayBuffer| Worker[包内 module Worker + ORT]
+```
+
+内容脚本不接收 Key 或模型字节。验证码图片仅在浏览器上下文间传递，使用 JSON-safe Base64，最大 2 MiB，并严格限制 MIME。HTTP Content-Type 先验证再规范化为小写基础 MIME；跨上下文协议仍使用精确白名单。Firefox 隔离世界使用 `FileReader.readAsDataURL()` 读取 Blob，避免依赖可能被拒绝的 `Blob.arrayBuffer()`。
+
+模型用可转移 `ArrayBuffer`，不用 Base64 或分片。Worker 创建 WASM Execution Provider 会话并串行推理。两个模式的内容脚本相同：观察 DOM、同源读取图片、呈现历史、点击答案和原生提交。
+
+已有答题历史时内容端会静默预热会话；首次安装保持按需加载，不在首个验证码前消耗下载槽位。只有非静默的 prepare/detect 活动期间，Host 阶段与断连消息才更新该内容页的推理状态。
+
+每个内容 Port 最多保留两个 detect 和两个并行 prepare；后台全局最多六个 detect、四个 prepare。这些计数随后台代际重置，不是整个浏览器会话的永久限额。取消只影响指定请求；尚未开始的 detect 立即从队列移除并释放图片，运行中的请求结算或终止后才执行下一项。
+
+Chromium 的 Offscreen claim 仅在同一后台 epoch 与 `contextId` 内复用，并发等待者共享握手但独立取消。超时、失败、文档替换或后台重启要求重新 claim；每次后台启动都安排空闲协调，避免遗留会话无人回收。Firefox 直接持有 Host，清单不写不受支持的 `background.persistent`。细节见[扩展运行时](architecture/extension-runtime.md)。
+
+## Model and runtime ownership
+
+remote Host 组装下载器、模型 IndexedDB、独立 Key IndexedDB 和 Key 验证能力。模型有界下载后校验长度及 SHA-256，缓存成功后才确认回执；完整状态机见[缓存专题](model-cache-strategy.md)。
+
+packaged Host 不构造这些远程能力，不打开或修改原 Key 存储，不声明模型 Host 权限。它用 `force-cache`、`redirect: error` 读取扩展内部模型 URL，检查状态、十进制安全 Content-Length、流上限、精确长度与 SHA-256。确定性模型/WASM 完整性错误跨 Worker 保留永久错误分类，不对不变的损坏资产自动重试，也不回退远程下载。
+
+## Storage and options
+
+| 数据           | remote             | packaged        | 内容页可见性     |
+| -------------- | ------------------ | --------------- | ---------------- |
+| 模型字节       | 模型 IndexedDB     | 包内文件        | 不可见           |
+| 模型 Key       | 独立秘密 IndexedDB | 不读、不改      | 不可见           |
+| 普通设置与历史 | `storage.local`    | `storage.local` | 通过内存镜像读取 |
+
+内容存储镜像只保留应用命名空间，包含两个世界的历史以支持预热。初始化先监听再读快照，按 key 保留最早旧值和最新新值；5 秒超时、取消、超过 1024 个不同缓冲 key 或快照读取失败都会清理监听器并失败。最多维护四个前缀索引。
+
+历史解析缓存只在序列化值相同时复用，返回副本，并保留写入后的最终校对。破坏性裁剪读取已提交快照，不让乐观未决写入挤掉旧记录；读取失败或不完整时跳过删除。面板会恢复挂载到当前 body，并在清除自身 mutation 前处理外部移除；完整历史与可见性规则见[设置说明](usage/settings.md)。
+
+remote 设置页在绑定处理器后才启用 Key 控件，已保存 Key 不回显：
+
+| 操作         | 行为                                                                        |
+| ------------ | --------------------------------------------------------------------------- |
+| 验证并保存   | HEAD 验证，不计下载；事务完成后保存                                         |
+| 查询下载次数 | 用已保存 Key 只读查询；关闭限制时显示“无次数限制（模型下载次数限制未开启）” |
+| 下载模型     | 用已保存 Key 下载、验证、缓存和确认；有效缓存命中不重复计次                 |
+| 清除 Key     | 删除 Key；不宣称撤销已经提交的事务或服务端确认                              |
+
+验证/清除完成时只清空点击后未编辑的输入；相同文字重新输入也视为编辑。Key 的原生事务提交独立触发 Host 取消并等待旧的未完成初始化，再通知 Broker 更新凭证修订号，包括静默预热与其他 Port 消费者。调用方取消仍报告取消，但不能撤销已提交的变更；事务回滚不通知，Host 关闭后的迟到回调不重启同步，已就绪会话可复用。
+
+页面销毁取消待处理操作。错误保留 Host、HTTP、超时或浏览器的实际原因；只有额度查询会对瞬时 Port 断开重连一次，验证和下载不自动重放。
+
+packaged 设置页不打开 Key Port，Key 控件禁用并显示“当前版本已内置模型，无需配置模型 Key。”，普通设置仍可修改。
 
 ## Script and test entry points
 
-The extension package discovers Node tests recursively with `node --test "scripts/**/*.test.mjs"`; this includes build, benchmark, browser, E2E, fixture and release contract tests. The benchmark contract is an explicit compatibility facade: parameter/matrix rules live in `scripts/benchmark/benchmark-config.mjs`, sample statistics in `benchmark-statistics.mjs`, result schema checks in `benchmark-result.mjs`, comparison rules in `benchmark-comparison.mjs`, and CSV rendering in `benchmark-csv.mjs`. `benchmark-runner.mjs` owns browser process and sampling orchestration and should not become a second source of contract rules. Reduced CI/quick sampling still requires at least two measured samples per invocation for the bootstrap interval; `--samples 1` is rejected before launching a browser.
+包内 Node 测试使用 `node --test "scripts/**/*.test.mjs"`，覆盖 build、benchmark、browser、E2E、fixture 与 release 契约。脚本按这七个职责目录组织，日常使用包命令。
 
-Browser support checks compare a browser's complete version string where a boundary requires it. `normalizeBrowserVersionForComparison()` only removes trailing zero components, so `140.15.0` and `140.15` are equivalent while `140.15.1` remains different. Minimum support and exact minimum execution still use the major version policy in `scripts/browser/browser-support.mjs`.
+benchmark 的聚合入口只显式转发契约：参数在 `benchmark-config.mjs`，统计在 `benchmark-statistics.mjs`，结果 schema 在 `benchmark-result.mjs`，比较在 `benchmark-comparison.mjs`，CSV 在 `benchmark-csv.mjs`；runner 只编排浏览器与采样。每次 invocation 至少两个测量样本，`--samples 1` 在启动浏览器前拒绝。完整成本和产品基准限制见[命令参考](development/commands.md)。
 
-The main smoke paths are `scripts/e2e/chromium-content-smoke.mjs` for the deterministic content fixture, `chromium-load-smoke.mjs` and `firefox-load-smoke.mjs` for production remote load-only checks, and the two `*-packaged-model-smoke.mjs` scripts for packaged inference. Load-only success proves loading and ordinary controls only; it never proves Key authentication, model download or inference. Packaged smoke evidence is archive-bound and must not be reused as remote authentication evidence.
+浏览器完整版本比较只删除末尾零：`140.15.0` 等同 `140.15`，不等同 `140.15.1`。最低支持和精确最低执行使用 [browser-support.mjs](../apps/extension/scripts/browser/browser-support.mjs) 的 major 策略。
 
 ## Validation and release evidence
 
+先运行类型、单元测试和内容 fixture：
+
 ```bash
-pnpm --filter @hv-pony-solver/extension typecheck
-pnpm --filter @hv-pony-solver/extension test
-pnpm --filter @hv-pony-solver/extension build
-pnpm --filter @hv-pony-solver/extension build:packaged
-pnpm --filter @hv-pony-solver/extension test:e2e:content
-pnpm --filter @hv-pony-solver/extension test:e2e:chromium:load-only
-KvKey='<protected secret>' pnpm --filter @hv-pony-solver/extension test:e2e:chromium:authenticated
-pnpm --filter @hv-pony-solver/extension test:e2e:firefox:load-only
-pnpm --filter @hv-pony-solver/extension test:e2e:packaged
+mise exec -- pnpm --filter @hv-pony-solver/extension typecheck
+mise exec -- pnpm --filter @hv-pony-solver/extension test
+mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:content
 ```
 
-| Check                             | Establishes                                                                                                                                                                      | Does not establish                                    |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Unit/build tests                  | Protocol, policy, lifecycle, asset integrity, graph isolation, permission matrix and deterministic artifacts                                                                     | A browser executed the extension                      |
-| `test:e2e:content`                | Deterministic Chromium page behavior and one native submit                                                                                                                       | Real model or ORT session                             |
-| `test:e2e:chromium:load-only`     | Production remote extension loads and ordinary settings persist                                                                                                                  | Authenticated model download, `prepare`, or inference |
-| `test:e2e:chromium:authenticated` | A protected Key downloads and verifies the production model and then executes at least one `detect` with random fallback disabled                                                | Packaged model or store publication                   |
-| `test:e2e:firefox:load-only`      | Production remote ZIP installs and exposes the current Key/download/quota and ordinary settings controls                                                                         | Authenticated model download or inference             |
-| `test:e2e:packaged:chromium`      | The actual release ZIP is hashed, checked against artifact/build metadata, extracted to a temporary tree, loaded, and successfully inferred twice without Key or random fallback | Edge/store acceptance                                 |
-| `test:e2e:packaged:firefox`       | The verified release ZIP installs through standard WebDriver and successfully infers in two fresh sessions without Key or random fallback                                        | AMO signing or Firefox Android execution              |
+远程产物先构建，再执行 load-only；`test:e2e:chromium` 是 Chromium load-only 的别名：
 
-Packaged fixture evidence is schema 2 and binds the exact archive name, length, SHA-256, verified tree hash, model identity, browser version, result type, checkbox index and displayed confidence. Both packaged smokes write only successful, confidence-bearing observations and reject `识别失败，随机选择`; fixture results must exactly match the committed oracle. Chromium never substitutes `dist/chromium` for the tested archive: it loads only the temporary tree extracted from that ZIP. Firefox continues to install the ZIP itself.
+```bash
+mise exec -- pnpm --filter @hv-pony-solver/extension build
+mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:chromium:load-only
+mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:firefox:load-only
+```
 
-`REQUIRE_EXACT_MINIMUM_BROWSER=true` changes the packaged smoke from a normal “supported version or newer” check into an exact-major execution gate. CI obtains and executes Chromium 116 and Firefox Desktop 140 separately. A run on the current browser cannot satisfy this job. Chromium 116 uses its headed extension implementation under Xvfb (`PACKAGED_E2E_HEADLESS=false`); the variable accepts only `true` or `false`, so a misspelled setting fails closed. The Firefox packaged gate requires `geckodriver` (or `GECKODRIVER_PATH`) and `openssl`; it creates and deletes its own temporary certificate, proxy and browser sessions. CI pins geckodriver `0.37.1` and its archive SHA-256. Its installer uses one 60-second deadline and at most three attempts, retrying only network failures and HTTP `408`, `429`, or `5xx`; permanent HTTP, archive, hash, path and extracted-version failures remain fail-closed.
+受保护环境已经注入 `KvKey`，且明确启用真实鉴权验收时，针对同一远程构建运行：
 
-The ordinary production job is deliberately named **load-only**. It never reads `KvKey` and explicitly reports that remote inference was not tested. Its Firefox leg installs the generated ZIP, opens `options/options.html`, waits for storage initialization, and verifies the current remote-only and ordinary controls. The protected `production-model-smoke` CI environment supplies the `KV_KEY` secret to the authenticated job. Missing or blank secret material skips authenticated verification and keeps extension publication disabled; successful Key verification alone is insufficient because the job must settle a real `detect` request. The authenticated smoke clears stale status before starting verification and waits for that operation to finish before checking its result, preserving errors and the verification deadline. When `PACKAGED_MODEL_URL` is absent, the canonical packaged-model gate is likewise skipped and packaged artifact publication remains disabled. Never print the Key, pass it as a command-line argument, commit it, or include it in evidence.
+```bash
+mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:chromium:authenticated
+```
+
+缺少 Key 必须失败。不要把 Key 写入命令行、日志或证据。
+
+内置模型是另一组产物，重新构建后再验收：
+
+```bash
+mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
+mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:packaged
+```
+
+没有 canonical 模型时可运行根 `mise exec -- pnpm test:e2e:extension:packaged`，它构建确定性 fixture 并执行双浏览器验收。fixture 不证明 canonical 模型准确率，且会覆盖 dist。
+
+| 检查                       | 证明内容                                                 | 不证明             |
+| -------------------------- | -------------------------------------------------------- | ------------------ |
+| 单元/构建测试              | 协议、权限、取消、资产、可重复归档                       | 浏览器实际执行     |
+| content fixture            | 页面答题、消息、一次原生提交                             | 真实 ORT/模型      |
+| Chromium/Firefox load-only | 远程包加载、普通设置；Firefox 核对当前 Key/额度/下载控件 | 鉴权下载与推理     |
+| authenticated Chromium     | 有效 Key 下载校验后至少一次真实 detect，关闭随机回退     | 内置模型、商店发布 |
+| packaged Chromium          | 校验 ZIP 与元数据，解压并只加载该临时树，两次成功推理    | Edge/商店验收      |
+| packaged Firefox           | WebDriver 安装已校验的实际 ZIP，两个新会话成功推理       | AMO 签名、Android  |
+
+内置证据 schema 2 绑定 archive 名称/长度/SHA-256、解压树哈希、模型身份、浏览器版本、成功结果类型、checkbox index 和 confidence。fixture 必须匹配 oracle，随机兜底结果被拒绝。Chromium 不用工作区 dist 替代受测 ZIP，Firefox 直接安装 ZIP。
+
+`REQUIRE_EXACT_MINIMUM_BROWSER=true` 要求真正运行 Chromium 116 或 Firefox Desktop 140，高版本不能替代。Chromium 116 在 Xvfb 下使用 `PACKAGED_E2E_HEADLESS=false`，该变量只接受 true/false。Firefox 需要 geckodriver（或 `GECKODRIVER_PATH`）及 openssl，并清理自建证书、代理和会话。CI 固定 geckodriver `0.37.1` 与压缩包 SHA-256；安装器在 60 秒总期限内最多尝试三次，仅重试网络和 HTTP 408/429/5xx，归档、哈希、路径或版本错误直接失败。
 
 ### Firefox Android 142 external release gate
 
-GitHub-hosted runners currently provide no supported Firefox Android WebExtension automation, so CI does not claim that coverage. An independent Android harness must install the canonical Firefox ZIP in Firefox Android major 142, disable random fallback, execute at least one successful inference, and upload an artifact named `hv-pony-solver-firefox-android-142-evidence` containing `firefox-android-142-evidence.json`. The record uses `kind: "firefox-android-142-packaged-e2e"`, identifies the device and Android version, records browser version 142, canonical model identity, exact Firefox archive name/length/SHA-256, and successful inference observation(s).
+仓库 CI 不自动运行 Android。独立 harness 必须在 Android major 142 安装同一 canonical Firefox ZIP，关闭随机回退并至少成功推理一次。外部 run 上传命名 artifact `hv-pony-solver-firefox-android-142-evidence`，包含 `firefox-android-142-evidence.json`，其 `kind` 为 `firefox-android-142-packaged-e2e`，记录设备、Android 版本、浏览器、模型身份、精确 ZIP 身份和成功推理观察。
 
-For canonical packaged artifact publication, dispatch `Repository CI` with `publish_extension_artifact=true` and set `firefox_android_e2e_run_id` to the completed external run. The release gate downloads only a successful run's named evidence artifact and compares all archive identity fields with the freshly built Firefox release ZIP. Missing evidence, a newer desktop/Android version, random fallback, failed/non-success results, or any archive mismatch blocks publication. Desktop Chromium/Firefox evidence, exact-minimum desktop jobs, authenticated remote inference, and Android evidence are independent mandatory gates. Both extension publication jobs also require the current CodeQL analysis job to complete successfully; this execution gate does not establish that no security alerts exist.
+发布内置 artifact 时设置 `publish_extension_artifact=true` 与 `firefox_android_e2e_run_id`。门禁校验成功的外部 run、可信 workflow/事件/commit 和同一 ZIP 身份。缺证据、版本不符、随机回退或 archive 不一致均阻止发布。缺 `PACKAGED_MODEL_URL` 时 canonical 门禁跳过，不能发布内置 artifact。
 
 ### GitHub desktop Release
 
-Dispatch `Repository CI` from `main` with `publish_extension_release=true` to create `extension-v<version>`; for the current package this is `extension-v0.1.1`. The Release contains the remote-model Chromium and Firefox ZIPs, checksum sidecars and artifact metadata generated from the extension package version. The input defaults to false. The job refuses non-`main` refs and existing tags, validates both archives against their metadata, and has `contents: write` only in the final publication job. It requires the repository, CodeQL analysis, extension, packaged-fixture, exact desktop minimum-version and protected authenticated remote-model gates to pass. This GitHub Release is a desktop sideload distribution; it is not Chrome Web Store/AMO publication and makes no Firefox Android execution claim. Normal pushes and pull requests never create this Release.
+从 main 手动设置 `publish_extension_release=true`，创建 `extension-v<version>`，当前为 `extension-v0.1.1`，附远程 Chromium/Firefox ZIP、SHA-256 和 artifact 元数据。已存在标签或非 main 被拒绝，只有最终发布 job 拥有写权限；它复用已经测试的远程产物。
+
+两类扩展发布均要求本次 CodeQL job 成功、仓库检查、桌面 smoke、内置 fixture、最低桌面版本与受保护远程推理门禁。`production-model-smoke` 环境提供 `KV_KEY`；缺少凭据或未启用会跳过鉴权并阻止发布，不能以 HEAD 验证替代 detect。CodeQL 执行成功不代表没有安全告警。
+
+普通 push/PR 不发布；GitHub Release 不等同商店签名或 Android 验收。全部输入、工作流与交付边界见[CI 与发布](development/releases.md)。

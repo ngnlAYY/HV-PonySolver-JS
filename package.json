@@ -20,7 +20,7 @@
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "audit:high": "pnpm audit --audit-level high",
-    "docs:check": "node scripts/docs-drift/check-docs-drift.mjs && node scripts/docs-drift/document-links.mjs",
+    "docs:check": "node scripts/docs-drift/check-docs-drift.mjs && node scripts/docs-drift/document-links.mjs && node scripts/docs-drift/verify-notes.mjs",
     "architecture:check": "node scripts/checks/check-architecture-boundaries.mjs",
     "browser-sinks:check": "node scripts/checks/check-browser-sinks.mjs",
     "bundle:check:default": "node scripts/checks/check-bundle-budget.mjs --profile default",

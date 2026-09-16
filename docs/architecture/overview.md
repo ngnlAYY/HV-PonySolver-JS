@@ -2,6 +2,16 @@
 
 项目由三个应用和两个内部包组成。浏览器负责验证码图片预处理、模型推理、答案选择和提交；Cloudflare 服务负责模型授权与分发。图片和识别结果不进入模型服务。
 
+## 名称与责任
+
+| 名称          | 所在环境                          | 职责                                              |
+| ------------- | --------------------------------- | ------------------------------------------------- |
+| 推理 Worker   | 浏览器 Web Worker                 | 图像预处理、ONNX 会话、推理和输出解析             |
+| 扩展推理 Host | Chromium Offscreen / Firefox 后台 | 模型与会话管理、Worker 生命周期、远程模式秘密存储 |
+| Model Worker  | Cloudflare                        | KV 鉴权、R2 分发、Durable Object 额度             |
+
+`bundled` 指用户脚本的 Runtime 构建，`packaged` 指扩展的模型交付；两者不是同一种离线能力。安装选择见[产品入口](../../README.md)，开发命令见[命令参考](../development/commands.md)。
+
 ## 依赖关系
 
 ```mermaid
@@ -74,3 +84,9 @@ Chromium Host 在 Offscreen Document 中运行，Firefox Host 由 background scr
 公共设置变更通常横跨核心默认值、用户脚本菜单、扩展设置页和内容存储镜像。模型变更横跨共享清单、下载校验、打包、服务端配置和发布证据。以表格列出的维护入口追踪影响，比按应用逐个复制逻辑更容易保持一致。
 
 详细流程见[浏览器运行时](browser-runtime.md)、[扩展运行时](extension-runtime.md)、[Model Worker](model-service.md)，验证命令见[开发与验证](../development/verification.md)。
+
+## 自动约束与评审边界
+
+`architecture:check` 保护显式 package exports、禁止方向和反向类型依赖；`inferenceTimeoutConfig` 集中维护异步期限，`StatusPanel` 负责 UI 状态输出，Model Worker Core 与浏览器应用隔离。缺失受保护目录时失败关闭，深层相对路径或 `typeof import()` 不构成例外。
+
+静态导入检查不能证明跨上下文时序或运行环境。改动评审还要确认数据所有权、取消传播、事务完成点和实际浏览器证据；选择相应的[验证矩阵](../development/verification.md)。HTTP 头与资产值分别在[接口参考](../reference/model-worker-http.md)和[Runtime 专题](../onnx-runtime.md)维护，避免在每篇架构页复制。

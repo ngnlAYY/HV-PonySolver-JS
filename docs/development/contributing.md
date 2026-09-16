@@ -28,7 +28,7 @@ mise exec -- pnpm exec prettier --check docs/README.md docs/development/contribu
 
 需要修正格式时，对明确列出的文件使用 `--write`。`pnpm format:check` 已纳入 `check:quick` 和 CI，只读检查第一方文件；`.gitignore` 与 [`.prettierignore`](../../.prettierignore) 排除生成目录、第三方压缩资产和 pnpm 锁文件。根 `pnpm format` 仍是全仓写操作，日常修改优先明确列出文件，避免带入无关 diff。Prettier 与 ESLint 检查的是不同规则；不支持的格式（如当前未配置解析器的 TOML）由相应配置校验负责。
 
-根配置使用工具的原生发现方式：Prettier 从 `package.json#prettier` 读取静态规则，ESLint 保留独立 flat config；不在命令中重复传入这些规则。各工作区通过自己的 `vitest.config.ts` 运行测试，由根 `pnpm -r test` 调度，无需额外根 Vitest workspace 配置。工具链与共享编译选项分别保留在 `mise.toml` 和 `tsconfig.base.json`。配置位置参考 [Prettier 官方说明](https://prettier.io/docs/configuration.html)和 [ESLint flat config 说明](https://eslint.org/docs/latest/use/configure/configuration-files)。
+根配置使用工具的原生发现方式：Prettier 从 `package.json#prettier` 读取静态规则，ESLint 保留独立 flat config；不在命令中重复传入这些规则。各工作区通过自己的 `vitest.config.ts` 运行测试，由根 `pnpm -r test` 调度，无需额外根 Vitest workspace 配置。工具链与共享编译选项分别保留在 `mise.toml` 和 `tsconfig.base.json`。本仓库的生效配置与测试入口以根配置和包清单为准。
 
 ## 注释应该解释什么
 
@@ -59,6 +59,10 @@ HTTP 拒绝、超时、完整性失败、额度不足和浏览器断连应保留
 行为变化先增加或调整能观察结果的定向测试。目录移动或纯职责拆分先保留已有回归行为，再逐组迁移；对于取消、幂等、事务和来源校验，不能用只检查新函数被调用的测试替代行为证据。
 
 类型与单元测试不能证明实际浏览器生命周期、用户脚本管理器或远程鉴权。修改这些边界时按[验证手册](verification.md)补充对应 E2E，并准确记录环境和未覆盖项。纯文档补全不需要新增业务测试，但应执行格式、链接、漂移和 diff 检查。
+
+## 决策记录
+
+重要改动必带一篇笔记或同步已有决定。行为、架构、跨文件契约、流程工具、测试策略和数据格式变化写入 `docs/decisions/<lifecycle>/<class>/`，只修改事实时原地更新；理由翻转另开新篇并互链。格式和纯机械修改不立 Note。先检索活跃记录再落笔，说明真实备选、收益、代价和验证；具体格式与校验见[文档维护](documentation.md#决策笔记)。
 
 ## 交付
 

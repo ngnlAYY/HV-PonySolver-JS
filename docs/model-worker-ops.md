@@ -1,8 +1,90 @@
 # Model Worker 运维手册
 
-最后复核：2026-09-07。
+适用范围：配置生成、资产准备、发布后验收和保留持久状态的回滚。HTTP 响应以[接口契约](reference/model-worker-http.md)为准，客户端确认时序见[缓存策略](model-cache-strategy.md)。
 
 运行时配置的权威来源是 [`apps/model-worker/wrangler.template.toml`](../apps/model-worker/wrangler.template.toml)，模型、ORT 模型和 WASM 的文件名、对象键、长度及 SHA-256 以 [`packages/shared/src/`](../packages/shared/src/) 为准。`apps/model-worker/wrangler.toml` 和 `.wrangler/` 是生成物，不手工维护。
+
+## 配置与绑定
+
+Model Worker 使用 Wrangler 模板生成部署配置：
+
+```text
+apps/model-worker/wrangler.template.toml
+```
+
+生成的 `apps/model-worker/wrangler.toml` 是本地或 CI 产物，不应手工维护为权威来源。
+
+### 绑定
+
+| 绑定                    | 类型                         | 作用                                                            |
+| ----------------------- | ---------------------------- | --------------------------------------------------------------- |
+| `MODEL_KEYS`            | Cloudflare KV                | 保存允许访问真实模型的 token 标记                               |
+| `MODEL_BUCKET`          | Cloudflare R2                | 保存真实模型、诱饵模型和精简 WASM                               |
+| `MODEL_DOWNLOAD_QUOTAS` | SQLite-backed Durable Object | 按规范化 Key 的 SHA-256 标识保存 UTC 月度确认次数与临时下载回执 |
+
+### 运行时变量
+
+| 变量                           | 作用                                         |
+| ------------------------------ | -------------------------------------------- |
+| `PUBLIC_MODEL_PATH`            | 旧版 ONNX 公开路径，默认 `/yolo26n-640.onnx` |
+| `REAL_MODEL_OBJECT_KEY`        | 旧版真实 ONNX 的 R2 对象键，必填             |
+| `DECOY_MODEL_OBJECT_KEY`       | 鉴权失败时使用的诱饵对象键，必填             |
+| `PUBLIC_ORT_MODEL_PATH`        | 新版 ORT 公开路径，默认 `/yolo26n-640.ort`   |
+| `REAL_ORT_MODEL_OBJECT_KEY`    | 新版真实 ORT 的 R2 对象键，默认来自共享契约  |
+| `PUBLIC_RUNTIME_WASM_PATH`     | 精简 WASM 公开路径，默认来自共享契约         |
+| `RUNTIME_WASM_OBJECT_KEY`      | 精简 WASM 的 R2 对象键，默认来自共享契约     |
+| `PUBLIC_QUOTA_PATH`            | Key 月度下载次数查询路径，默认 `/quota`      |
+| `INVALID_KEY_MODE`             | 无效 token 策略，只允许 `decoy` 或 `error`   |
+| `MODEL_DOWNLOAD_QUOTA_ENABLED` | 是否启用每 Key 月度下载次数限制，默认 `true` |
+
+### 生成 Wrangler 配置
+
+```bash
+MODEL_KEYS_KV_NAMESPACE_ID='<kv-namespace-id>' \
+MODEL_BUCKET_NAME='<r2-bucket-name>' \
+INVALID_KEY_MODE=decoy \
+MODEL_DOWNLOAD_QUOTA_ENABLED=true \
+pnpm --filter @hv-pony-solver/model-worker render-config
+
+pnpm --filter @hv-pony-solver/model-worker exec node scripts/validate-wrangler-config.mjs
+```
+
+部署模式会拒绝测试占位值。`INVALID_KEY_MODE` 和 `MODEL_DOWNLOAD_QUOTA_ENABLED` 省略时使用项目默认策略。
+
+## R2 上传清单
+
+部署前至少确认以下对象存在：
+
+| 对象          | R2 对象键                                                                                     | 是否公开 |
+| ------------- | --------------------------------------------------------------------------------------------- | -------- |
+| 旧版真实 ONNX | `REAL_MODEL_OBJECT_KEY` 配置值                                                                | 否       |
+| 诱饵模型      | `DECOY_MODEL_OBJECT_KEY` 配置值                                                               | 否       |
+| 新版真实 ORT  | `real/yolo26n-640.ort`                                                                        | 否       |
+| 精简 WASM     | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 是       |
+
+上传精简 WASM 的示例：
+
+```bash
+pnpm --filter @hv-pony-solver/model-worker exec wrangler r2 object put \
+  "<bucket-name>/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm" \
+  --file "other/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm"
+```
+
+Worker 总是检查 R2 对象的精确长度。Cloudflare R2 只有在上传时记录了 SHA-256 才会通过对象元数据暴露该值；为兼容既有对象，缺少该元数据不会单独拒绝响应，但只要存在就必须匹配共享清单。客户端仍会对实际下载字节执行精确长度和 SHA-256 校验，因此上传新对象时应保留 SHA-256 元数据，并在发布前用 canonical 文件复核实际内容。
+
+## 本地发布入口
+
+以下命令会实际部署，只有明确要求发布且 Cloudflare 身份已由受保护环境配置时执行。`run deploy` 会重新渲染配置，因此绑定与策略变量必须传给该命令本身；不要只在先前 render-config 的临时环境中设置。
+
+```bash
+MODEL_KEYS_KV_NAMESPACE_ID='<kv-namespace-id>' \
+MODEL_BUCKET_NAME='<r2-bucket-name>' \
+INVALID_KEY_MODE=decoy \
+MODEL_DOWNLOAD_QUOTA_ENABLED=true \
+mise exec -- pnpm --filter @hv-pony-solver/model-worker run deploy
+```
+
+必须保留 `run`，以调用工作区的部署脚本。部署模式拒绝测试占位值；`test-kv` 与 `test-bucket` 只用于离线验证。
 
 ## 无效 Key 模式
 
@@ -83,7 +165,7 @@ Key 验证使用不计额度的 `HEAD` 探测，不消耗下载次数。客户�
 1. `OPTIONS 405`、`Allow: GET, HEAD` 或旧 public cache header：先检查部署 ref、Cloudflare route 和边缘传播；此时 Key 尚未到达 KV，不应先排查 Key 内容。
 2. `OPTIONS` 正确但无效/有效 Key收到 `403`：核对 deployed `INVALID_KEY_MODE`、Worker 的 KV binding target 与相应 entry；不得输出 entry 的 key/value。
 3. Worker 返回通用 `500`：先核对目标 R2 object 是否存在、对象长度是否匹配共享清单，以及已记录的 SHA-256 元数据是否漂移；真实模型在此阶段不会预留额度。
-4. HTTP `200` 后出现 byteLength 或 SHA-256 错误：对象可能没有可供 Worker 预检的 SHA-256 元数据；核对 real/decoy R2 object 选择，并在受控环境中用 `packages/shared/src/model.ts` 的 canonical manifest 校验真实 artifact。
+4. HTTP `200` 后出现 byteLength 或 SHA-256 错误：对象可能没有可供 Worker 预检的 SHA-256 元数据；核对 real/decoy R2 object 选择，并在受控环境中用 `packages/shared/src/model.ts`（旧版 ONNX）或 `packages/shared/src/ort-model.ts`（当前 ORT）的 canonical manifest 校验真实 artifact。
 5. 有效 Key 收到 `429`：确认 `Retry-After`、UTC 月边界和 Durable Object 绑定；不要把它改成 decoy 或放宽为 KV 非原子计数。
 6. 有效 Key 收到 `503`：先区分额度存储不可用与待确认槽位占满；后者等待响应给出的 `Retry-After`，不要手工增加已用次数。
 7. 仍为 `Failed to fetch`：收集浏览器 Network 面板中不含 secret 的 CORS、DNS、TLS、status 与 CF-Ray 信息。
@@ -107,7 +189,7 @@ Worker code rollback 不会自动恢复或改变 KV token、R2 object、Durable 
 
 ## 待办运维项
 
-以下为已记录、尚未执行的运维事项，均与「安全边界」中接受的探测面权衡相关：
+`HEAD` 用于客户端验证 Key，不计额度，但真实模型和诱饵响应的长度、元数据与耗时可能不同；`decoy` 只避免用 HTTP 状态直接区分授权结果，不能保证无法探测 Key 是否有效。以下事项用于缩小该探测面，尚未执行：
 
 - 生成与真实模型相同字节长度的诱饵对象并上传 R2，拉平 decoy 响应的 `Content-Length`，缩小通过 `HEAD` 元数据区分有效/无效 Key 的空间。
 - 将 KV 中历史保留的大写/混合大小写 token 变体迁移为单一 canonical 小写键，迁移完成前 Worker 需要继续按大小写变体回退查询。

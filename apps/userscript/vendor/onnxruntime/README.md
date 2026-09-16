@@ -1,6 +1,6 @@
 # 定制 ONNX Runtime Web bundle
 
-最后复核：2026-09-07。
+本目录保存项目定制的 JS API 与 glue。完整资产清单、profile 差异和构建约束见[Runtime 专题](../../../../docs/onnx-runtime.md)，本文用于核对随附文件及其配对。
 
 `ort.wasm.bundle.min.mjs` 内置 ONNX Runtime Web `1.27.0` 的 JavaScript API 与 Emscripten glue，不包含 WebAssembly 二进制。用户脚本的 `build:bundled-runtime` 会内置本文件；扩展构建器也会复制并审计它，但为扩展同时打包匹配的 WASM。
 
@@ -29,4 +29,8 @@ mise exec -- pnpm docs:check
 mise exec -- pnpm --filter @hv-pony-solver/extension test
 ```
 
-更完整的构建目录、R2 对象和原子更新要求见仓库根目录的 `docs/onnx-runtime.md`。
+## 维护边界
+
+本文件是项目说明，压缩 glue 与第三方许可按供应链身份维护，不作手工格式化或局部修补。修改 glue/WASM 必须同步 Runtime 清单、shared 清单、Worker 模板、两种客户端构建审计和相关测试；不能只替换其中一个文件。用户脚本 bundled 的 WASM 仍需网络下载，扩展则读取包内 WASM。
+
+默认格式门禁跳过 vendor。本 README 需单独执行 `mise exec -- pnpm exec prettier --check --ignore-path /dev/null apps/userscript/vendor/onnxruntime/README.md`，并人工核对相对链接。构建与验证不会自动上传 R2、部署服务或发布客户端。

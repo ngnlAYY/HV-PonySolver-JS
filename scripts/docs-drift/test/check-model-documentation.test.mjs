@@ -19,33 +19,33 @@ test('fails clearly when the Model Worker probe example uses a shell placeholder
   })
 })
 
-test('fails clearly when README omits a core userscript inference config name', async () => {
+test('fails clearly when browser architecture omits a core userscript inference config name', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/architecture/browser-runtime.md')
     const readme = await readFile(readmePath, 'utf8')
     await writeFile(readmePath, readme.replaceAll('workerDetectTimeoutMs', 'workerDetectTimeout'))
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*workerDetectTimeoutMs/s)
+    assert.match(result.stderr, /docs\/architecture\/browser-runtime.md.*workerDetectTimeoutMs/s)
   })
 })
 
-test('fails clearly when README omits a focused userscript inference config export', async () => {
+test('fails clearly when browser architecture omits a focused userscript inference config export', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/architecture/browser-runtime.md')
     const readme = await readFile(readmePath, 'utf8')
     await writeFile(readmePath, readme.replaceAll('imagePreprocessConfig', 'image preprocess config'))
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*imagePreprocessConfig/s)
+    assert.match(result.stderr, /docs\/architecture\/browser-runtime.md.*imagePreprocessConfig/s)
   })
 })
 
-test('fails clearly when README omits model manifest field names', async () => {
+test('fails clearly when runtime reference omits model manifest field names', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/onnx-runtime.md')
     const readme = await readFile(readmePath, 'utf8')
     await writeFile(
       readmePath,
@@ -56,14 +56,14 @@ test('fails clearly when README omits model manifest field names', async () => {
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*MODEL_INTEGRITY\.byteLength/s)
-    assert.match(result.stderr, /README.md.*MODEL_INTEGRITY\.sha256/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*MODEL_INTEGRITY\.byteLength/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*MODEL_INTEGRITY\.sha256/s)
   })
 })
 
-test('fails clearly when README omits verify-model-integrity and MODEL_FILE', async () => {
+test('fails clearly when runtime reference omits verify-model-integrity and MODEL_FILE', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/onnx-runtime.md')
     const readme = await readFile(readmePath, 'utf8')
     await writeFile(
       readmePath,
@@ -72,14 +72,14 @@ test('fails clearly when README omits verify-model-integrity and MODEL_FILE', as
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*verify-model-integrity/s)
-    assert.match(result.stderr, /README.md.*MODEL_FILE/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*verify-model-integrity/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*MODEL_FILE/s)
   })
 })
 
-test('fails clearly when README omits ONNX Runtime asset manifest field names', async () => {
+test('fails clearly when runtime reference omits ONNX Runtime asset manifest field names', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/onnx-runtime.md')
     const readme = await readFile(readmePath, 'utf8')
     await writeFile(
       readmePath,
@@ -101,25 +101,25 @@ test('fails clearly when README omits ONNX Runtime asset manifest field names', 
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*ONNX_RUNTIME_ASSETS/s)
-    assert.match(result.stderr, /README.md.*externalFullRuntime\.byteLength/s)
-    assert.match(result.stderr, /README.md.*externalFullRuntime\.sha256/s)
-    assert.match(result.stderr, /README.md.*externalFullRuntime\.maxByteLength/s)
-    assert.match(result.stderr, /README.md.*externalFullRuntime\.mjsByteLength/s)
-    assert.match(result.stderr, /README.md.*externalFullRuntime\.mjsSha256/s)
-    assert.match(result.stderr, /README.md.*externalFullRuntime\.mjsMaxByteLength/s)
-    assert.match(result.stderr, /README.md.*bundleAsset\.byteLength/s)
-    assert.match(result.stderr, /README.md.*bundleAsset\.sha256/s)
-    assert.match(result.stderr, /README.md.*bundleAsset\.maxByteLength/s)
-    assert.match(result.stderr, /README.md.*wasmAsset\.byteLength/s)
-    assert.match(result.stderr, /README.md.*wasmAsset\.sha256/s)
-    assert.match(result.stderr, /README.md.*wasmAsset\.maxByteLength/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*ONNX_RUNTIME_ASSETS/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*externalFullRuntime\.byteLength/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*externalFullRuntime\.sha256/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*externalFullRuntime\.maxByteLength/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*externalFullRuntime\.mjsByteLength/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*externalFullRuntime\.mjsSha256/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*externalFullRuntime\.mjsMaxByteLength/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*bundleAsset\.byteLength/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*bundleAsset\.sha256/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*bundleAsset\.maxByteLength/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*wasmAsset\.byteLength/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*wasmAsset\.sha256/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*wasmAsset\.maxByteLength/s)
   })
 })
 
-test('fails clearly when README omits ONNX Runtime asset package facts', async () => {
+test('fails clearly when runtime reference omits ONNX Runtime asset package facts', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/onnx-runtime.md')
     const readme = await readFile(readmePath, 'utf8')
     await writeFile(
       readmePath,
@@ -132,16 +132,16 @@ test('fails clearly when README omits ONNX Runtime asset package facts', async (
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*onnxruntime-web/s)
-    assert.match(result.stderr, /README.md.*1\.27\.0/s)
-    assert.match(result.stderr, /README.md.*8f0278c77bf44b0cc83c098c6c722b92a36ac4b5/s)
-    assert.match(result.stderr, /README.md.*4\.0\.23/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*onnxruntime-web/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*1\.27\.0/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*8f0278c77bf44b0cc83c098c6c722b92a36ac4b5/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*4\.0\.23/s)
   })
 })
 
-test('fails clearly when README omits ONNX Runtime asset verification command and behavior', async () => {
+test('fails clearly when runtime reference omits ONNX Runtime asset verification command and behavior', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/onnx-runtime.md')
     const readme = await readFile(readmePath, 'utf8')
     await writeFile(
       readmePath,
@@ -155,11 +155,11 @@ test('fails clearly when README omits ONNX Runtime asset verification command an
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*verify:onnx-runtime/s)
-    assert.match(result.stderr, /README.md.*build:onnx-runtime/s)
-    assert.match(result.stderr, /README.md.*wasmAsset\.url/s)
-    assert.match(result.stderr, /README.md.*externalFullRuntime/s)
-    assert.match(result.stderr, /README.md.*bundledMinimalRuntime/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*verify:onnx-runtime/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*build:onnx-runtime/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*wasmAsset\.url/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*externalFullRuntime/s)
+    assert.match(result.stderr, /docs\/onnx-runtime.md.*bundledMinimalRuntime/s)
   })
 })
 
@@ -188,9 +188,9 @@ test('fails clearly when ONNX Runtime docs omit the external JSEP MJS contract a
   })
 })
 
-test('fails clearly when README authorized model row omits Bearer auth', async () => {
+test('fails clearly when HTTP reference authorized model row omits Bearer auth', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(readme.includes('携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中'))
     await writeFile(
@@ -203,13 +203,16 @@ test('fails clearly when README authorized model row omits Bearer auth', async (
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*authorized real-model row must mention Authorization: Bearer/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*authorized real-model row must mention Authorization: Bearer/s,
+    )
   })
 })
 
-test('fails clearly when README authorized model row omits cache-control', async () => {
+test('fails clearly when HTTP reference authorized model row omits cache-control', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(readme.includes('`200` 真实模型，模型响应使用 `Cache-Control: no-store`'))
     await writeFile(
@@ -222,13 +225,16 @@ test('fails clearly when README authorized model row omits cache-control', async
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*authorized real-model row must mention Cache-Control: no-store/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*authorized real-model row must mention Cache-Control: no-store/s,
+    )
   })
 })
 
-test('fails clearly when README authorized HEAD row omits Bearer auth', async () => {
+test('fails clearly when HTTP reference authorized HEAD row omits Bearer auth', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(readme.includes('| `HEAD /yolo26n-640.onnx` 携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中'))
     await writeFile(
@@ -241,13 +247,16 @@ test('fails clearly when README authorized HEAD row omits Bearer auth', async ()
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*authorized HEAD row must mention Authorization: Bearer/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*authorized HEAD row must mention Authorization: Bearer/s,
+    )
   })
 })
 
-test('fails clearly when README authorized GET row cache-control is masked by explanatory text', async () => {
+test('fails clearly when HTTP reference authorized GET row cache-control is masked by explanatory text', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(readme.includes('`200` 真实模型，模型响应使用 `Cache-Control: no-store`'))
     await writeFile(
@@ -260,13 +269,16 @@ test('fails clearly when README authorized GET row cache-control is masked by ex
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*authorized real-model row must mention Cache-Control: no-store/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*authorized real-model row must mention Cache-Control: no-store/s,
+    )
   })
 })
 
-test('fails clearly when README authorized GET row Bearer auth is masked by explanatory text', async () => {
+test('fails clearly when HTTP reference authorized GET row Bearer auth is masked by explanatory text', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(readme.includes('携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中'))
     await writeFile(
@@ -279,13 +291,16 @@ test('fails clearly when README authorized GET row Bearer auth is masked by expl
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*authorized real-model row must mention Authorization: Bearer/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*authorized real-model row must mention Authorization: Bearer/s,
+    )
   })
 })
 
-test('fails clearly when README quota OPTIONS row headers are masked by explanatory text', async () => {
+test('fails clearly when HTTP reference quota OPTIONS row headers are masked by explanatory text', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(
       readme.includes(
@@ -302,14 +317,20 @@ test('fails clearly when README quota OPTIONS row headers are masked by explanat
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*quota OPTIONS docs must mention Access-Control-Allow-Methods/s)
-    assert.match(result.stderr, /README.md.*quota OPTIONS docs must mention Access-Control-Allow-Headers/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*quota OPTIONS docs must mention Access-Control-Allow-Methods/s,
+    )
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*quota OPTIONS docs must mention Access-Control-Allow-Headers/s,
+    )
   })
 })
 
-test('fails clearly when README 405 row Allow header is masked by explanatory text', async () => {
+test('fails clearly when HTTP reference 405 row Allow header is masked by explanatory text', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(readme.includes('`405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`'))
     await writeFile(
@@ -327,13 +348,16 @@ test('fails clearly when README 405 row Allow header is masked by explanatory te
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*405 docs must mention Allow: GET, HEAD, OPTIONS/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*405 docs must mention Allow: GET, HEAD, OPTIONS/s,
+    )
   })
 })
 
-test('fails clearly when README selected R2 missing row is masked by explanatory text', async () => {
+test('fails clearly when HTTP reference selected R2 missing row is masked by explanatory text', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.match(readme, /\| 选中的 R2 object 缺失\s+\| `500 Internal Server Error`/)
     await writeFile(
@@ -351,6 +375,9 @@ test('fails clearly when README selected R2 missing row is masked by explanatory
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 500 Internal Server Error/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*selected R2 object missing docs must mention 500 Internal Server Error/s,
+    )
   })
 })

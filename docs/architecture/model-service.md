@@ -1,8 +1,6 @@
-# Model Worker 服务架构
+# Model Worker 与共享契约
 
-最后复核：2026-09-07。
-
-本文描述 `apps/model-worker` 的请求边界、依赖方向和持久状态协议。它是开发与评审导航，不替代运行时清单、Wrangler 模板或运维手册中的权威配置。模型、ORT 模型和公开 WASM 的文件名、对象键、长度与 SHA-256 以 [`packages/shared/src/`](../../packages/shared/src/) 下的契约为准；部署、探测、回滚和 Cloudflare 操作以 [`docs/model-worker-ops.md`](../model-worker-ops.md) 为准。
+Model Worker 只承担 Key 鉴权、模型/运行时分发与每 Key 下载额度，不接收验证码或答案。本文解释内部顺序和持久状态；精确方法、响应矩阵与 CORS 见[HTTP 契约](../reference/model-worker-http.md)，配置与部署见[运维手册](../model-worker-ops.md)。
 
 ## 组件边界与目录
 
@@ -46,17 +44,9 @@ canonical token 的用途分开处理：KV 查询需要短期兼容历史大小�
 
 额度接口始终要求真实 Bearer Key，不复用模型路由的诱饵响应。扩展远程模型下载在完整读取、校验并成功写入缓存后，才使用响应中暴露的回执调用 `POST /quota`；这条客户端时序由浏览器核心实现，Worker 只负责服务端预留和确认。
 
-## CORS 与 HTTP 分支
+## 响应职责
 
-`src/model-response.ts` 集中创建响应，避免调用方复制协议头：
-
-- 模型和额度响应对无 Origin 请求允许 `*`；对 `https://hentaiverse.org` 和 `https://alt.hentaiverse.org` 精确回显 Origin；未知 Origin 不设置 ACAO，但仍保留 `Vary: Origin`。
-- 模型 OPTIONS 声明 `GET, HEAD, OPTIONS` 与 `Authorization`；额度 OPTIONS 声明 `GET, POST, OPTIONS` 与 `Authorization, X-HV-Model-Download-Receipt`。
-- 公开 WASM 的 OPTIONS/响应使用 `Access-Control-Allow-Origin: *`，不声明 Authorization header，并设置长期 immutable 缓存。
-- 模型响应发送 `Content-Disposition`、R2 `size` 对应的 `Content-Length`、可选 ETag、`no-store` 与 `nosniff`。额度回执通过 `X-HV-Model-Download-Receipt` 返回，并显式加入 `Access-Control-Expose-Headers`。
-- 429 表示已确认额度耗尽；503 表示额度存储暂时不可用或待确认预留占满。两者都发送 `Retry-After`，客户端应按语义区分。
-
-HEAD 只读取 R2 元数据，不读取 body，也不消耗额度；OPTIONS、诱饵对象和公开 WASM 同样不计入额度。模型/额度的私有 CORS 策略和公开 WASM 策略必须保持分离，新增路由时应按此矩阵扩展，而不是合并成一个宽泛的全局策略。
+[model-response.ts](../../apps/model-worker/src/model-response.ts) 集中生成响应。模型、额度和公开 WASM 分别使用自己的 CORS 方法、允许头与来源策略；新路由不得合并成过宽的全局策略。模型及错误 no-store，公开内容寻址 WASM 可长期 immutable；HEAD/OPTIONS 不计额度。完整头字段与 400/403/405/409/429/500/503 含义由 [HTTP 矩阵](../reference/model-worker-http.md#响应矩阵)维护。
 
 ## R2 对象完整性与响应顺序
 
@@ -92,6 +82,17 @@ HEAD 只读取 R2 元数据，不读取 body，也不消耗额度；OPTIONS、�
 ```
 
 状态只接受当前契约：月份格式有效，`used` 不超过 shared 的月上限，`confirmed.length === used`，回执必须是 32 位小写十六进制且不得重复，`pending + used` 不超过月上限。发现损坏状态会失败关闭并保留原始值，不自动修复或静默清零。
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: reserve 原子占用槽位
+    Pending --> Confirmed: confirm 有效回执
+    Pending --> Expired: 十分钟 TTL 或 UTC 月变化
+    Confirmed --> Confirmed: 重复确认，不重复计数
+    Confirmed --> [*]: UTC 新月使用空状态
+```
+
+上图没有客户端 cancel 状态；本地取消不撤销已经处理的确认。
 
 ### Reserve
 

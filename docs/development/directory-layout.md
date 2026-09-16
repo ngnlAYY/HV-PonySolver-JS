@@ -1,6 +1,6 @@
-# 当前目录组织与迁移记录
+# 目录组织与新增文件规则
 
-本页描述 2026-09-07 审计后的实际目录。两级 `scripts` 已按职责完成迁移，应用命令仍保持原有 npm/pnpm 名称；旧路径只作为迁移记录保留在下表，不是当前可用入口。
+本页回答文件应放在哪里、哪些边界需要保持、移动文件后要联动什么。具体命令见[命令参考](commands.md)，模块时序见[架构导航](../architecture/overview.md)。
 
 ## 当前组织
 
@@ -25,7 +25,7 @@ scripts/
 └── ort-runtime/ ORT 构建、构建根保护和锁定依赖
 ```
 
-扩展脚本迁移后共有 7 个职责目录，根脚本迁移后共有 7 个职责目录；两级合计 54 个脚本/测试文件完成迁移。`apps/extension/scripts/benchmark/` 进一步把参数契约、统计、比较、CSV 输出和产品/runner 分开；这几个文件共同定义基准证据格式，不应重新合并成单一脚本。
+根与扩展脚本各按七个职责目录组织。`apps/extension/scripts/benchmark/` 进一步把参数契约、统计、比较、CSV 输出和产品/runner 分开；这几个文件共同定义基准证据格式，不应重新合并成单一脚本。
 
 核心业务目录已经按领域分组。`browser-core/src` 的 `app`、`captcha`、`inference`、`model`、`persistence`、`platform`、`status-panel`、`utils` 与对应测试目录保持镜像；用户脚本的薄适配器继续按 `app`、`captcha`、`inference`、`model`、`persistence`、`status-panel`、`userscript` 分组。大协调模块是否继续拆分，要以状态所有权和测试边界为准，不按文件数量机械拆分。
 
@@ -33,33 +33,9 @@ scripts/
 
 扩展的生成目录和 ZIP 按 `background/`、`content/`、`options/`、`offscreen/`、`runtime/`、`model/` 组织，其中 `offscreen/` 仅用于 Chromium，`model/` 仅用于内置模型版；完整结构见[扩展产物说明](../browser-extension.md#build-outputs-and-local-loading)。入口路径由 [`EXTENSION_PATHS`](../../apps/extension/src/platform/extension-paths.ts) 统一维护；输出根、`chromium/`、`firefox/` 和 ZIP 名称保持原约定。
 
-## 扩展脚本迁移映射
+## 迁移历史
 
-下表是已完成的“迁移前名称 → 当前路径”。同名测试随被测模块移动；应用包的 scripts 字段继续提供稳定命令名。
-
-| 迁移前                                                                             | 当前路径                            | 保留的边界                                          |
-| ---------------------------------------------------------------------------------- | ----------------------------------- | --------------------------------------------------- |
-| `scripts/build-extension*`、`build-packaged-fixture`                               | `apps/extension/scripts/build/`     | 构建目标、资产、策略、清理和 fixture 身份           |
-| `benchmark-compare`、`benchmark-contract`、`benchmark-product`、`benchmark-runner` | `apps/extension/scripts/benchmark/` | 参数契约、统计、比较、CSV、CI/full/product 成本含义 |
-| `browser-support`、`install-geckodriver`、`webdriver`、`product-cache/client`      | `apps/extension/scripts/browser/`   | 浏览器版本、驱动完整性和浏览器辅助客户端            |
-| `chromium-*`、`firefox-*`、`packaged-smoke-artifact`、`packaged-e2e-evidence`      | `apps/extension/scripts/e2e/`       | load-only、内容、内置模型、artifact 证据的不同门禁  |
-| `generate-packaged-fixture`、fixture identity、requirements lock                   | `apps/extension/scripts/fixtures/`  | 固定依赖、fixture 身份和生成物目录                  |
-| `download-canonical-model`                                                         | `apps/extension/scripts/model/`     | 受保护模型下载与完整性                              |
-| `release-gate`                                                                     | `apps/extension/scripts/release/`   | 发布对象、commit、浏览器和 Android 证据绑定         |
-
-## 根脚本迁移映射
-
-| 迁移前                                                                        | 当前路径               | 备注                                                    |
-| ----------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------- |
-| `check-architecture-boundaries`、`check-browser-sinks`、`check-bundle-budget` | `scripts/checks/`      | 测试同目录；包命令保持不变                              |
-| `assert-pinned-actions`、workflow/版本契约测试                                | `scripts/ci/`          | 只保留 CI/版本门禁职责                                  |
-| `check-docs-drift`、事实提取器、文档链接检查                                  | `scripts/docs-drift/`  | 大型领域测试拆至同目录，链接测试位于 `docs-drift/test/` |
-| `model-manifest`、`model-release-notes`                                       | `scripts/model/`       | 模型发布辅助                                            |
-| ORT 构建、清理、构建根和依赖锁定                                              | `scripts/ort-runtime/` | 保留构建根安全边界                                      |
-| `run-userscript-e2e`                                                          | `scripts/e2e/`         | 仓库级用户脚本 E2E                                      |
-| `cli`、`direct-run`、`source-files`、字符串工具                               | `scripts/lib/`         | 仅放跨脚本小型共享工具                                  |
-
-迁移没有留下永久旧路径转发壳。需要查命令时以根/应用 `package.json` 为准；需要查实现时以当前路径为准。
+旧路径与逐文件迁移表保留在[2026-09-07 实施记录](../audits/2026-09-07-implementation-record.md)，不作为当前可执行入口。包命令提供稳定入口，源码不保留永久旧路径转发壳。
 
 ## 协议和测试目录
 
@@ -85,7 +61,7 @@ Model Worker 的集成测试也已按行为拆分：
 
 `packages/browser-core/package.json` 与 `packages/shared/package.json` 已从 `./*` 通配导出改为显式公开根入口和经过调用者盘点的稳定子路径。新增模块不能因为文件存在就自动成为公共接口；先确认消费者、补测试，再在 exports 中列出稳定入口。详情见[整体架构的导出边界](../architecture/overview.md#依赖关系)和[浏览器运行时维护指南](../architecture/browser-runtime.md#目录导航)。
 
-## 仍保留的未来评估项
+## 拆分模块的边界
 
 协议拆分已经完成，benchmark 和 Worker 测试也已经按职责拆分。Broker、Offscreen、核心模型缓存和 Worker 客户端仍保留当前组合结构：它们拥有跨阶段状态、取消和资源所有权，尚未具备足够清晰的独立边界。未来如能先锁定状态所有权和回归测试，再评估细分；不要为了目录对称性机械拆分。
 
@@ -100,3 +76,9 @@ Model Worker 的集成测试也已按行为拆分：
 - 文档相对链接、文档漂移读取路径和生成文件引用。
 
 先运行受影响的定向测试和类型检查，再运行架构、文档和构建门禁。完整验收、浏览器多引擎和受保护鉴权证据仍按各自文档矩阵执行。
+
+## 文档与决策目录
+
+`docs/usage` 放用户流程，`architecture` 放实现时序，`reference` 放精确协议，`development` 放开发与发布，`audits` 放带日期证据，`decisions` 按生命周期/类别放决定。四篇既有专题保留路径，导航在 [docs/README.md](../README.md)。维护规则见[文档说明](documentation.md)。
+
+笔记校验位于 `scripts/docs-drift/notes/`，测试仍归 `scripts/docs-drift/test/`。不要为新脚本在两级 scripts 根平铺入口，也不要把下载模型、config、dist 或浏览器证据当作源码。

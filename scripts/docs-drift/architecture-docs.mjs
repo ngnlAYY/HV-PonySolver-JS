@@ -21,7 +21,7 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
       continue
     }
     if (!readme.includes(configName)) {
-      errors.push(`README.md must mention ${configName}`)
+      errors.push(`docs/architecture/browser-runtime.md must mention ${configName}`)
     }
   }
   for (const configName of requiredConfigNames) {
@@ -30,7 +30,7 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
       continue
     }
     if (!readme.includes(configName)) {
-      errors.push(`README.md must mention ${configName}`)
+      errors.push(`docs/architecture/browser-runtime.md must mention ${configName}`)
     }
   }
   return errors
@@ -41,7 +41,7 @@ function checkArchitectureGuardrails(readme) {
   const errors = []
   for (const term of requiredTerms) {
     if (!readme.includes(term)) {
-      errors.push(`README.md graph guardrails section must mention ${term}`)
+      errors.push(`docs/architecture/overview.md graph guardrails section must mention ${term}`)
     }
   }
   return errors

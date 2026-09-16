@@ -2,7 +2,7 @@
 
 本文档适用于仓库根目录及其全部子目录，用于约束自动化代理和人工维护者的开发、验证与交付方式。若后续某个子目录增加更具体的 `AGENTS.md`，则该文件只覆盖其所在目录及下级目录；未覆盖部分仍遵循本文档。
 
-最后复核：2026-09-12。
+最后复核：2026-09-16。
 
 ## 项目定位
 
@@ -21,7 +21,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 ## 开始工作前
 
 1. 先阅读本文件、`README.md` 以及与任务直接相关的 `docs/` 文档。
-   维护者导航见 `docs/README.md`；架构、开发规范与验证分别位于 `docs/architecture/` 和 `docs/development/`，历史审计快照位于 `docs/audits/`。
+   文档导航见 `docs/README.md`；使用说明在 `docs/usage/`，架构在 `docs/architecture/`，HTTP 契约在 `docs/reference/`，开发、命令和发布在 `docs/development/`，历史审计在 `docs/audits/`，决定记录在 `docs/decisions/`。
 2. 检查 `git status --short --branch`，保留用户已有改动，不得擅自覆盖、清理或重置。
 3. 仓库根目录存在 `.codegraph/` 时，定位符号、调用链或架构关系应先使用 `codegraph explore`，再按需读取具体文件。
 4. 优先做范围最小、可验证的修改；不要借当前任务进行无关重构、依赖升级或格式化全仓库。
@@ -29,19 +29,19 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 
 ## 仓库结构与职责
 
-| 路径                    | 职责                                                                                          |
-| ----------------------- | --------------------------------------------------------------------------------------------- |
-| `apps/userscript`       | 用户脚本入口、GM 平台桥接、用户脚本构建与浏览器测试                                           |
-| `apps/extension`        | Chromium/Firefox 扩展入口、后台代理、推理 Host、设置页、打包与浏览器测试                      |
-| `apps/model-worker`     | Cloudflare Worker、Key 鉴权、R2 资产响应、Durable Object 下载额度及 Wrangler 配置             |
-| `packages/browser-core` | 用户脚本和扩展共用的 DOM、验证码、答题、推理、模型下载、状态面板与平台接口                    |
-| `packages/shared`       | 浏览器端和 Model Worker 共用的模型、答案、令牌及 ORT 资产契约                                 |
-| `scripts`               | 仓库级校验、文档漂移、架构门禁、包体预算、E2E 和发布辅助脚本                                  |
-| `docs`                  | 文档导航；`architecture/` 架构、`development/` 开发、`audits/` 审计及现有运行时/缓存/运维专题 |
-| `model`                 | 内置扩展构建使用的本地固定模型输入；大体积模型不应随意纳入 Git                                |
-| `other`                 | 可供人工上传或归档的运行时生成物，不是默认源码入口                                            |
-| `config`                | 本地生成配置；已被 Git 忽略，不得重新跟踪                                                     |
-| `.github/workflows`     | 仓库 CI 与 Model Worker 手动部署流程                                                          |
+| 路径                    | 职责                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `apps/userscript`       | 用户脚本入口、GM 平台桥接、用户脚本构建与浏览器测试                               |
+| `apps/extension`        | Chromium/Firefox 扩展入口、后台代理、推理 Host、设置页、打包与浏览器测试          |
+| `apps/model-worker`     | Cloudflare Worker、Key 鉴权、R2 资产响应、Durable Object 下载额度及 Wrangler 配置 |
+| `packages/browser-core` | 用户脚本和扩展共用的 DOM、验证码、答题、推理、模型下载、状态面板与平台接口        |
+| `packages/shared`       | 浏览器端和 Model Worker 共用的模型、答案、令牌及 ORT 资产契约                     |
+| `scripts`               | 仓库级校验、文档漂移、架构门禁、包体预算、E2E 和发布辅助脚本                      |
+| `docs`                  | 按任务组织的使用、架构、接口、开发、决策、审计及扩展/运行时/缓存/运维专题         |
+| `model`                 | 内置扩展构建使用的本地固定模型输入；大体积模型不应随意纳入 Git                    |
+| `other`                 | 可供人工上传或归档的运行时生成物，不是默认源码入口                                |
+| `config`                | 本地生成配置；已被 Git 忽略，不得重新跟踪                                         |
+| `.github/workflows`     | 仓库 CI 与 Model Worker 手动部署流程                                              |
 
 ## 依赖方向与模块边界
 
@@ -74,6 +74,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 - 默认位置为 `top=155, left=1240`。
 - “仅在页面存在 `div#csp` 时显示面板”默认开启，并允许用户显式关闭。
 - 面板隐藏不等于停止识别；修改可见性逻辑时要分别验证面板状态和答题流程。
+- 局部切页移除面板或替换 body 后，共用 StatusPanel 重新挂载原节点，保留状态、历史及异步写入身份；挂载恢复不能依赖 csp 显示限制开关。渲染缓存命中或清理自身 mutation 记录前也须复核挂载，destroy 必须断开观察并阻止迟到回调复活面板。
 - 新答题历史耗时从本轮模型准备前起算，自动模式截至提交点击，手动模式截至结果记录；识别阶段耗时单独统计。持续时间使用同一页面的单调时钟，记录时刻使用本地时间；取消或过期目标不得写入完成状态。
 - 状态与历史记录必须有数量上限。高频重复错误应聚合，不得无限扩张 DOM、内存或持久化记录。
 - 新历史的排序与裁剪使用每世界独立的追加序号，不能再由系统时间回拨决定新旧；显示时刻保持真实本地时间，旧记录不强制迁移。保存失败时回滚到已保存历史并显示错误。异步存储的破坏性历史裁剪只依据已提交快照，不能让未决乐观写入挤掉已保存记录；快照读取不完整时跳过删除。
@@ -128,6 +129,8 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 - 网络断开、HTTP 错误、解析失败、完整性失败和额度拒绝应尽量区分；不要用统一的“连接已断开”掩盖后端真实错误。
 - 修改公开行为、命令、默认值、路由、响应头、资产或构建方式时，同步更新 `README.md`、相关 `docs/`、测试以及 `scripts/docs-drift/` 中对应的事实提取器和测试。
 - `apps/model-worker/wrangler.template.toml` 是 Wrangler 配置权威来源；生成的 `wrangler.toml` 不应手工维护。
+- 非平凡行为、架构、跨文件契约、流程工具、测试策略或数据格式变化，必须同步已有决定或写入 `docs/decisions/<lifecycle>/<class>/日期-主题.md`；纯机械修改不立 Note。遵循 `write-notes-like-deepseek` 的状态、备选和后果格式，理由翻转另写并互链；`docs:check` 校验结构和归档封印。
+- 精确命令、HTTP、模型/Runtime 身份分别归 `docs/development/commands.md`、`docs/reference/model-worker-http.md`、`docs/onnx-runtime.md`；README 保留用户入口，移动契约时同步漂移读取目标与负向回归，不能通过拼接全部正文掩盖缺项。
 - 新增维护文档按 `docs/README.md` 的主题目录归档，并遵循 `docs/development/documentation.md` 的联动与链接规则；当前目录与迁移记录见 `docs/development/directory-layout.md`，后续实施也应同步包命令、测试发现、CI 和文档引用。
 
 ## 配置与秘密

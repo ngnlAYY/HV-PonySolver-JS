@@ -16,9 +16,9 @@ test('fails clearly when pnpm check references a missing check:quick script', as
   })
 })
 
-test('fails clearly when README omits format:check from pnpm check:quick', async () => {
+test('fails clearly when command reference omits format:check from pnpm check:quick', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/development/commands.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(readme.includes('`pnpm check:quick`'))
     assert.ok(readme.includes('format:check'))
@@ -26,26 +26,29 @@ test('fails clearly when README omits format:check from pnpm check:quick', async
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README\.md pnpm check:quick description must mention format:check/s)
+    assert.match(
+      result.stderr,
+      /docs\/development\/commands\.md pnpm check:quick description must mention format:check/s,
+    )
   })
 })
 
-test('fails clearly when README documents a root pnpm command that does not exist', async () => {
+test('fails clearly when command reference documents a root pnpm command that does not exist', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/development/commands.md')
     const readme = await readFile(readmePath, 'utf8')
     assert.ok(readme.includes('`pnpm test:e2e:userscript`'))
     await writeFile(readmePath, readme.replace('`pnpm test:e2e:userscript`', '`pnpm command-that-does-not-exist`'))
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README\.md.*command-that-does-not-exist.*package\.json/s)
+    assert.match(result.stderr, /docs\/development\/commands\.md.*command-that-does-not-exist.*package\.json/s)
   })
 })
 
-test('fails clearly when README documents a filtered workspace command that does not exist', async () => {
+test('fails clearly when command reference documents a filtered workspace command that does not exist', async () => {
   await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'README.md')
+    const readmePath = join(fixtureRoot, 'docs/development/commands.md')
     const readme = await readFile(readmePath, 'utf8')
     const documentedCommand = 'pnpm --filter @hv-pony-solver/extension test:e2e:packaged'
     assert.ok(readme.includes(documentedCommand))
@@ -53,7 +56,10 @@ test('fails clearly when README documents a filtered workspace command that does
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README\.md.*@hv-pony-solver\/extension.*test:e2e:packaged-missing/s)
+    assert.match(
+      result.stderr,
+      /docs\/development\/commands\.md.*@hv-pony-solver\/extension.*test:e2e:packaged-missing/s,
+    )
   })
 })
 

@@ -3,7 +3,7 @@ import test from 'node:test'
 import { join } from 'node:path'
 import { readFile, runCheck, withFixture, writeFile } from './fixtures.mjs'
 
-test('fails clearly when Model Worker source allowed methods drift from README', async () => {
+test('fails clearly when Model Worker source allowed methods drift from HTTP reference', async () => {
   await withFixture(async (fixtureRoot) => {
     const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
     const routerSource = await readFile(routerPath, 'utf8')
@@ -18,17 +18,23 @@ test('fails clearly when Model Worker source allowed methods drift from README',
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*405 docs must mention Allow: GET, HEAD/s)
-    assert.match(result.stderr, /README.md.*model OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
+    assert.match(result.stderr, /docs\/reference\/model-worker-http.md.*405 docs must mention Allow: GET, HEAD/s)
     assert.match(
       result.stderr,
-      /README.md.*quota OPTIONS docs must mention Access-Control-Allow-Methods: GET, OPTIONS/s,
+      /docs\/reference\/model-worker-http.md.*model OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s,
     )
-    assert.match(result.stderr, /README.md.*runtime OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*quota OPTIONS docs must mention Access-Control-Allow-Methods: GET, OPTIONS/s,
+    )
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*runtime OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s,
+    )
   })
 })
 
-test('fails clearly when Model Worker source auth and response facts drift from README', async () => {
+test('fails clearly when Model Worker source auth and response facts drift from HTTP reference', async () => {
   await withFixture(async (fixtureRoot) => {
     const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
     const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
@@ -57,8 +63,14 @@ test('fails clearly when Model Worker source auth and response facts drift from 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
     assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
-    assert.match(result.stderr, /README.md.*authorized real-model row must mention Cache-Control: private, no-cache/s)
-    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 404 Internal Server Error/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*authorized real-model row must mention Cache-Control: private, no-cache/s,
+    )
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*selected R2 object missing docs must mention 404 Internal Server Error/s,
+    )
   })
 })
 
@@ -87,14 +99,23 @@ ${responseSource
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*405 docs must mention Allow: GET, HEAD/s)
-    assert.match(result.stderr, /README.md.*model OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s)
+    assert.match(result.stderr, /docs\/reference\/model-worker-http.md.*405 docs must mention Allow: GET, HEAD/s)
     assert.match(
       result.stderr,
-      /README.md.*quota OPTIONS docs must mention Access-Control-Allow-Methods: GET, OPTIONS/s,
+      /docs\/reference\/model-worker-http.md.*model OPTIONS docs must mention Access-Control-Allow-Methods: GET, HEAD/s,
     )
-    assert.match(result.stderr, /README.md.*authorized real-model row must mention Cache-Control: private, no-cache/s)
-    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 404 Internal Server Error/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*quota OPTIONS docs must mention Access-Control-Allow-Methods: GET, OPTIONS/s,
+    )
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*authorized real-model row must mention Cache-Control: private, no-cache/s,
+    )
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*selected R2 object missing docs must mention 404 Internal Server Error/s,
+    )
   })
 })
 
@@ -296,7 +317,10 @@ export async function createModelResponse`,
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 404 Internal Server Error/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*selected R2 object missing docs must mention 404 Internal Server Error/s,
+    )
   })
 })
 
@@ -343,7 +367,10 @@ test('fails clearly when selected R2 miss status is masked by nested dead decoy 
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /README.md.*selected R2 object missing docs must mention 404 Internal Server Error/s)
+    assert.match(
+      result.stderr,
+      /docs\/reference\/model-worker-http.md.*selected R2 object missing docs must mention 404 Internal Server Error/s,
+    )
   })
 })
 

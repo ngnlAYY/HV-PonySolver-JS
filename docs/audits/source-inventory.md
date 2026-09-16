@@ -1,5 +1,7 @@
 # 源码与目录盘点
 
+> 历史快照：数字、发现和通过结果仅代表原记录日期。当前目录与文档入口见[文档导航](../README.md)，文档重建依据见[决策记录](../decisions/implemented/process/2026-09-16-documentation-rebuild.md)。
+
 本页是 [2026-09-07 审计](2026-09-07-repository-audit.md)的范围明细。前半部分保留新增审计文档之前的目录和数字；[实施后盘点](#实施后盘点)记录提交 `ef5efc9` 的结构变化。长期维护说明不依赖这些快照数字。
 
 ## 统计口径
@@ -126,7 +128,7 @@
 | 扩展 `src/protocol/` 文件                                 | 8              |
 | 扩展 `scripts/benchmark/` 文件                            | 11             |
 
-脚本移动到 `e2e/` 后，按路径统计时会归入测试辅助代码；目录分类变化不代表新增了对应业务或覆盖率。当前分组及维护规则见[目录组织与维护](../development/directory-layout.md)，具体迁移与验证见[实施记录](../development/implementation-plan.md)。
+脚本移动到 `e2e/` 后，按路径统计时会归入测试辅助代码；目录分类变化不代表新增了对应业务或覆盖率。当前分组及维护规则见[目录组织与维护](../development/directory-layout.md)，具体迁移与验证见[实施记录](2026-09-07-implementation-record.md)。
 
 ## 复查文件列表
 

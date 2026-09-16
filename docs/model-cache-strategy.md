@@ -1,10 +1,10 @@
 # 模型缓存与计次策略
 
-最后复核：2026-09-08。
+本文面向修改模型加载、IndexedDB 或下载确认的维护者。服务端状态机见[Model Worker 架构](architecture/model-service.md)，HTTP 字段见[接口参考](reference/model-worker-http.md)。
 
 实现导航：浏览器核心的编排入口是 [`ModelCache`](../packages/browser-core/src/model/model-cache.ts)，IndexedDB 事务由 [`IndexedDbModelStore`](../packages/browser-core/src/model/indexeddb-model-store.ts) 管理，记录校验由 [`model-cache-record.ts`](../packages/browser-core/src/model/model-cache-record.ts) 负责，共享下载由 [`shared-model-downloads.ts`](../packages/browser-core/src/model/shared-model-downloads.ts) 负责。用户脚本和扩展只注入各自的 Key、Fetch、Worker 或包内模型来源，不应在适配层复制缓存状态机。
 
-## 当前决策
+## 缓存分层
 
 模型响应继续使用 `Cache-Control: no-store`。浏览器在完整性验证后自行维护私有本地缓存；Model Worker 不允许共享边缘缓存真实模型、诱饵模型或额度错误。
 
@@ -56,11 +56,25 @@ HEAD 验证 Key（不计次）
 - `HEAD`、`OPTIONS`、诱饵模型和 Runtime 不计次。
 - `MODEL_DOWNLOAD_QUOTA_ENABLED=false` 时不预留、不确认也不递增次数；查询明确显示“无次数限制”，而不是伪造有限的剩余次数；格式正确的意外确认请求返回 `409`，缺失或畸形回执返回 `400`，不得伪造确认成功。
 
+## 缓存可用性的三个阶段
+
+| 阶段                       | 当前调用可用模型 | 后续实例可命中       |
+| -------------------------- | ---------------- | -------------------- |
+| 下载并通过实际字节校验     | 是               | 否                   |
+| 二进制与待确认元数据提交   | 是               | 否，仍须确认         |
+| 服务端确认并更新匹配元数据 | 是               | 是，读取时仍校验记录 |
+
+无回执的路径不额外确认；上表描述启用额度的远程下载。
+
 缓存事务先把远程模型记录标记为“待确认”；只有 `POST /quota` 成功后才写回可命中状态。确认失败不会阻止当前调用继续使用已经验证的内存字节，但该 IndexedDB 记录在后续实例或重启后必须视为未命中并重新下载，不能因内存回执丢失而永久绕过计次。升级前缺少确认状态字段的旧缓存也会一次性失效。失败日志不得包含 Key 或回执。
+
+## 事务身份与迟到确认
 
 数据库继续使用版本 1 的 `models` store。首次写入在同一事务内保存模型行与 `${cacheKey}:confirmation` 元数据行，以随机 `cacheWriteId`、版本、长度和 SHA-256 绑定；确认成功后只更新元数据，不再次写入模型二进制。更新前必须比较写入身份，较晚完成的旧确认不能覆盖新下载的状态。带 `cacheWriteId` 的模型行只有匹配的元数据明确完成确认时才能命中；旧格式中明确 `confirmationPending=false` 的记录仍可读取，缺失或待确认记录仍失效。
 
 `ModelCache` 保留原有调用接口，IndexedDB 生命周期、记录校验和共享下载分别由 `indexeddb-model-store`、`model-cache-record`、`shared-model-downloads` 管理。关闭缓存或收到 `versionchange` 时同时取消数据库操作和共享下载。
+
+## 取消与缓冲区所有权
 
 下载确认请求也受同一缓存操作约束：调用方取消、独立关闭缓存、`versionchange` 或操作超时都会取消底层确认请求。被取消的请求即使晚到成功，也不能清除内存回执或写入本地已确认状态；新缓存生命周期可以独立继续处理。取消不能撤销服务端已经处理的 `POST /quota`，因此这项保护不承诺回退已计入的次数。
 
@@ -68,7 +82,7 @@ HEAD 验证 Key（不计次）
 
 维护时先区分三种结果：缓存命中表示记录和确认元数据均通过校验；下载成功表示内存中的模型可供当前推理使用；缓存确认失败表示当前调用仍可继续，但后续实例必须重新下载。涉及取消、`versionchange`、并发下载或确认代次时，至少检查核心 `test/model` 中的缓存、下载和完整性测试，并同步检查用户脚本与扩展的模型来源测试。
 
-## 未来可选方案
+## 重新评估 HTTP 缓存的条件
 
 只有同时满足以下条件，才评估调整模型 HTTP 缓存：
 
@@ -80,7 +94,7 @@ HEAD 验证 Key（不计次）
 
 ## 变更前验证
 
-修改缓存、下载或额度确认逻辑时至少运行：
+先按[验证手册](development/verification.md#model-worker-测试配置)准备 Worker 测试绑定并备份已有生成配置，再按受影响范围运行：
 
 ```bash
 mise exec -- pnpm --filter @hv-pony-solver/browser-core test

@@ -1,47 +1,16 @@
-# 浏览器运行时架构维护指南
+# 浏览器核心与用户脚本架构
 
-本文是 `packages/browser-core` 与 `apps/userscript` 的维护者导航。它说明共享核心、用户脚本平台适配、验证码生命周期、模型缓存、推理 Worker、状态面板和测试之间的边界。行为契约以源码、测试和共享包为准；本文只描述关系和维护入口，不复制模型、Runtime 或依赖的版本、长度和哈希等易漂移数据。
+本文面向修改 DOM、答案、Worker、模型或面板的维护者。安装与设置见[用户脚本指南](../usage/userscript.md)和[共享行为](../usage/settings.md)，扩展上下文差异见[扩展运行时](extension-runtime.md)。共享核心不直接调用 GM 或 WebExtension API，平台在入口注入能力。
 
-相关专题：
+## 状态所有权
 
-- [模型缓存与计次策略](../model-cache-strategy.md)：模型来源、缓存确认、额度和失败关闭规则。
-- [精简 ONNX Runtime Web](../onnx-runtime.md)：用户脚本的外置/内置 Runtime profile 与资产校验流程。
-- [扩展架构](../browser-extension.md)：扩展如何复用本页描述的核心接口，并在另一种平台上提供实现。
-- [共享契约](../../packages/shared/src/index.ts)：答案码、模型和协议类型的权威入口。
-
-## 维护范围与分层
-
-浏览器运行时分成两层：
-
-1. `packages/browser-core/src` 保存与宿主平台无关的浏览器业务核心。它可以使用 DOM、Worker、IndexedDB 和 Fetch 的标准接口，但不读取 GM API、扩展 API 或用户脚本全局变量。外部能力通过接口、构造函数参数或 Worker 工厂注入。
-2. `apps/userscript/src` 保存用户脚本入口和平台实现。它把 GM 存储、菜单、用户脚本构建产物和 Blob Worker 接到核心接口上，并为外置/内置 Runtime 提供不同 Worker 入口。
-
-包边界由 [browser-core/package.json](../../packages/browser-core/package.json) 的显式 exports 和根级架构检查共同约束。共享核心只能依赖 [shared](../../packages/shared/src/index.ts) 的纯契约；用户脚本依赖核心和 shared，不应把用户脚本实现反向导入核心。新增跨包导入、移动模块或改变导出时，运行 `architecture:check` 并检查对应测试。
-
-核心包的根入口适合跨领域应用组装；领域子路径只公开已盘点的稳定模块。修改导出表时，同时用真实 workspace 消费者执行 TypeScript 类型检查和 Node 的 `import.meta.resolve` 解析验证，避免 TypeScript `paths` 或 bundler alias 掩盖缺失的 package export。
-
-## 目录导航
-
-目录已经按领域分组，新增源码应继续放入已有领域目录，避免把大量文件堆在 `src` 根目录。`index.ts` 是公开聚合入口，不是新业务代码的放置位置。
-
-| 目录                                               | 所有者        | 主要职责                                                      | 首要测试目录                              |
-| -------------------------------------------------- | ------------- | ------------------------------------------------------------- | ----------------------------------------- |
-| `packages/browser-core/src/app`                    | 核心          | 页面观察、调度、生命周期、取消                                | `packages/browser-core/test/app`          |
-| `packages/browser-core/src/captcha`                | 核心          | 目标定位、图片读取、答案选择、提交和设置契约                  | `packages/browser-core/test/captcha`      |
-| `packages/browser-core/src/inference`              | 核心          | 图像预处理、Worker 协议、推理客户端和输出解析                 | `packages/browser-core/test/inference`    |
-| `packages/browser-core/src/model`                  | 核心          | 模型下载、完整性、IndexedDB 缓存和下载确认                    | `packages/browser-core/test/model`        |
-| `packages/browser-core/src/persistence`            | 核心          | 历史校验、限额、排序、旧根键与 keyed 记录兼容读取及损坏值清理 | `packages/browser-core/test/persistence`  |
-| `packages/browser-core/src/platform`               | 核心接口/原语 | 存储、Fetch、字节流等可注入平台能力                           | `packages/browser-core/test/platform`     |
-| `packages/browser-core/src/status-panel`           | 核心          | 状态、历史和安全 DOM 渲染                                     | `packages/browser-core/test/status-panel` |
-| `packages/browser-core/src/utils`                  | 核心          | 取消竞态、延迟、错误格式化、日志和类型守卫                    | `packages/browser-core/test/utils`        |
-| `apps/userscript/src/app`                          | 用户脚本适配  | 组装核心服务和入口 App                                        | `apps/userscript/test/app`                |
-| `apps/userscript/src/userscript`                   | 用户脚本平台  | GM 桥接、敏感存储、菜单和 metadata                            | `apps/userscript/test/userscript`         |
-| `apps/userscript/src/inference`                    | 用户脚本适配  | Blob Worker、Runtime profile 和核心 Worker 的装配             | `apps/userscript/test/inference`          |
-| `apps/userscript/src/model`                        | 用户脚本适配  | 用 GM Key 和用户脚本 Fetch 组装核心模型服务                   | `apps/userscript/test/model`              |
-| `apps/userscript/src/status-panel` / `persistence` | 用户脚本适配  | 注入 GM 设置存储和历史存储                                    | 对应同名测试目录                          |
-| `apps/userscript/scripts`                          | 构建/资产门禁 | esbuild 构建、metadata 注入、Runtime/模型验证                 | 脚本旁的 `*.test.mjs`                     |
-
-公开聚合导出见 [browser-core/src/index.ts](../../packages/browser-core/src/index.ts)，深层入口以 [browser-core/package.json](../../packages/browser-core/package.json) 的显式 exports 为准。需要平台专用实现时，应优先新增用户脚本目录中的薄适配器，避免在聚合入口加入宿主判断。
+| 对象                       | 拥有的状态                                     | 结束条件                                 |
+| -------------------------- | ---------------------------------------------- | ---------------------------------------- |
+| App                        | 当前/准备中/失败目标、页面取消信号、凭证修订号 | 新目标、切页、Key 变化或销毁使旧任务失效 |
+| CaptchaSolver              | 一轮图片获取、识别、结果与耗时                 | 仅当前目标可记录完成或进入提交           |
+| AnswerSubmitter            | 控件快照、自动勾选归属                         | 每次点击及最终提交前重查目标与归属       |
+| OnnxWorkerClient           | 会话、初始化、串行检测队列                     | 取消、超时恢复或销毁释放请求与 Worker    |
+| StatusPanel / HistoryStore | 面板节点、渲染代际、历史追加及持久化           | 迟到写入不得复活销毁节点或覆盖新状态     |
 
 ## 组装路径
 
@@ -79,7 +48,7 @@ sequenceDiagram
     DOM->>App: 验证码出现或变化
     App->>Detector: prepare(signal)
     Detector-->>App: Worker 会话就绪
-    App->>Solver: trigger(target)
+    App->>Solver: trigger(target, startedAt)
     Solver->>Image: get(captchaKey, signal)
     Image-->>Solver: Blob
     Solver->>Detector: detect(blob, signal)
@@ -89,7 +58,7 @@ sequenceDiagram
     Solver->>Panel: 状态与历史
 ```
 
-`CaptchaTarget` 在捕获时保存解析后的 `form.action`，`App` 与 `CaptchaSolver` 在准备、图片、推理和提交阶段通过 `isSameCaptchaTarget` 复核该地址及控件身份。地址变化会使旧任务失效；相对与绝对写法解析到同一 URL 时仍是同一目标。取消、超时或新目标到达后，旧任务不能继续点击或提交。答案提交器在开始和等待后再次确认表单 action、checkbox 数量、节点身份、所属表单、连接状态和禁用状态；相关约束集中在 [answer-submitter.ts](../../packages/browser-core/src/captcha/answer-submitter.ts)。
+`CaptchaTarget` 在模型准备前捕获解析后的 `form.action`、原生提交控件的实际 action 和控件类型，`App` 与 `CaptchaSolver` 在准备、图片、推理和提交阶段通过 `isSameCaptchaTarget` 复核该地址及控件身份。地址变化会使旧任务失效；相对与绝对写法解析到同一 URL 时仍是同一目标。取消、超时或新目标到达后，旧任务不能继续点击或提交。答案提交器在开始和等待后再次确认表单 action、checkbox 数量、节点身份、所属表单、连接状态和禁用状态；相关约束集中在 [answer-submitter.ts](../../packages/browser-core/src/captcha/answer-submitter.ts)。
 
 保留答案时，程序自动勾选和用户手动勾选通过 WeakMap 与 change 监听区分；超过上限时只按置信度移除自动项。手动模式只记录识别结果，不自动提交。随机兜底由 [CaptchaSolver](../../packages/browser-core/src/captcha/captcha-solver.ts) 的配置控制，修改时必须同时检查提交测试和 App 级取消测试。
 
@@ -120,13 +89,38 @@ sequenceDiagram
 
 ## 状态面板与历史
 
-核心 [status-panel.ts](../../packages/browser-core/src/status-panel/status-panel.ts) 管理生命周期、状态、历史突变代次、异步设置回写和 CSP 可见性观察；[status-panel-renderer.ts](../../packages/browser-core/src/status-panel/status-panel-renderer.ts) 使用安全 DOM API 渲染，不应新增 `innerHTML` 或动态代码执行。历史条数由设置约束；持久化期间先显示乐观结果，保存失败后回滚到已保存历史并显示错误，未保存条目不会继续留在面板。异步存储可通过 `getCommittedItemsByPrefix()` 提供已提交快照，HistoryStore 仅在破坏性裁剪时使用它；扩展镜像的未决写入不会挤掉旧记录，快照读取失败时跳过删除。用户脚本同步存储继续使用普通前缀枚举。
+核心 [status-panel.ts](../../packages/browser-core/src/status-panel/status-panel.ts) 管理生命周期、状态、历史突变代次、异步设置回写和 `div#csp` 可见性观察；[status-panel-renderer.ts](../../packages/browser-core/src/status-panel/status-panel-renderer.ts) 使用安全 DOM API 渲染，不应新增 `innerHTML` 或动态代码执行。历史条数由设置约束；持久化期间先显示乐观结果，保存失败后回滚到已保存历史并显示错误，未保存条目不会继续留在面板。异步存储可通过 `getCommittedItemsByPrefix()` 提供已提交快照，HistoryStore 仅在破坏性裁剪时使用它；扩展镜像的未决写入不会挤掉旧记录，快照读取失败时跳过删除。用户脚本同步存储继续使用普通前缀枚举。
+
+面板的 DOM 观察器独立于 csp 可见性开关，观察 documentElement 中的 body 及其子节点变化。AADB 等脚本移除 `.ponyLog` 时，将原面板重新挂到当前 body，不重新创建应用或加载历史；body 暂时缺失时等待后续变化。渲染也先核对挂载，再判断内容缓存并消费自身 mutation，避免跳过待处理的外部移除。destroy 断开观察并清空节点引用，后续 mutation、渲染或异步设置回调不能重建已销毁面板。
 
 [HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 为新记录分配每世界独立的 `sequence` 正安全整数，取本实例已分配序号与当前可见记录序号的最大值加一。分配发生在异步写入前，失败允许留下序号空洞；重建实例后从已保存记录恢复顺序。独立键历史按序号、时间戳和稳定 key 排序后裁剪；旧记录缺少序号时仍按原时间戳规则读取，非枚举存储的旧数组继续保持原顺序。显示用的 `timestamp`/`time` 不做单调化，也不重写旧数据。尚未互相观察到的并发写可使用同一序号，再按时间戳和 key 确定顺序；之后看到这些写入的新记录会取得更大序号。非法序号按损坏记录处理，安全整数上限耗尽则通过保存失败通道报告，不写入溢出值。
 
 App 每轮在 `prepareTarget()` 前捕获当前页面的 `performance.now()`，经 `SolverService.trigger(target, startedAt)` 传给 Solver。新历史的 `elapsed` 计入准备与重试，自动模式截至原生提交点击，手动模式截至记录结果；开始扫描前的加载、防抖和提交后的网络响应不计入。Solver 独立统计图片获取和识别请求耗时，并在目标仍有效时统一写入“完成 Nms”，供用户脚本与扩展共用。持续时间按整数毫秒记录，历史时刻仍由 `Date.now()` 生成；旧历史不重新计算。修改时应覆盖准备重试、系统校时、新目标重置、取消和 DOM 替换。
 
 用户脚本 [status-panel.ts](../../apps/userscript/src/status-panel/status-panel.ts) 只把 HistoryStore 和 GM 设置存储传给核心。修改面板默认位置、显示条件、紧凑模式或历史上限时，同时检查 [panel-settings.ts](../../packages/browser-core/src/status-panel/panel-settings.ts)、用户脚本对应设置文件、核心/用户脚本面板测试和 README/专题文档。
+
+## 目录导航
+
+目录已经按领域分组，新增源码应继续放入已有领域目录，避免把大量文件堆在 `src` 根目录。`index.ts` 是公开聚合入口，不是新业务代码的放置位置。
+
+| 目录                                               | 所有者        | 主要职责                                                      | 首要测试目录                              |
+| -------------------------------------------------- | ------------- | ------------------------------------------------------------- | ----------------------------------------- |
+| `packages/browser-core/src/app`                    | 核心          | 页面观察、调度、生命周期、取消                                | `packages/browser-core/test/app`          |
+| `packages/browser-core/src/captcha`                | 核心          | 目标定位、图片读取、答案选择、提交和设置契约                  | `packages/browser-core/test/captcha`      |
+| `packages/browser-core/src/inference`              | 核心          | 图像预处理、Worker 协议、推理客户端和输出解析                 | `packages/browser-core/test/inference`    |
+| `packages/browser-core/src/model`                  | 核心          | 模型下载、完整性、IndexedDB 缓存和下载确认                    | `packages/browser-core/test/model`        |
+| `packages/browser-core/src/persistence`            | 核心          | 历史校验、限额、排序、旧根键与 keyed 记录兼容读取及损坏值清理 | `packages/browser-core/test/persistence`  |
+| `packages/browser-core/src/platform`               | 核心接口/原语 | 存储、Fetch、字节流等可注入平台能力                           | `packages/browser-core/test/platform`     |
+| `packages/browser-core/src/status-panel`           | 核心          | 状态、历史和安全 DOM 渲染                                     | `packages/browser-core/test/status-panel` |
+| `packages/browser-core/src/utils`                  | 核心          | 取消竞态、延迟、错误格式化、日志和类型守卫                    | `packages/browser-core/test/utils`        |
+| `apps/userscript/src/app`                          | 用户脚本适配  | 组装核心服务和入口 App                                        | `apps/userscript/test/app`                |
+| `apps/userscript/src/userscript`                   | 用户脚本平台  | GM 桥接、敏感存储、菜单和 metadata                            | `apps/userscript/test/userscript`         |
+| `apps/userscript/src/inference`                    | 用户脚本适配  | Blob Worker、Runtime profile 和核心 Worker 的装配             | `apps/userscript/test/inference`          |
+| `apps/userscript/src/model`                        | 用户脚本适配  | 用 GM Key 和用户脚本 Fetch 组装核心模型服务                   | `apps/userscript/test/model`              |
+| `apps/userscript/src/status-panel` / `persistence` | 用户脚本适配  | 注入 GM 设置存储和历史存储                                    | 对应同名测试目录                          |
+| `apps/userscript/scripts`                          | 构建/资产门禁 | esbuild 构建、metadata 注入、Runtime/模型验证                 | 脚本旁的 `*.test.mjs`                     |
+
+公开聚合导出见 [browser-core/src/index.ts](../../packages/browser-core/src/index.ts)，深层入口以 [browser-core/package.json](../../packages/browser-core/package.json) 的显式 exports 为准。需要平台专用实现时，应优先新增用户脚本目录中的薄适配器，避免在聚合入口加入宿主判断。
 
 ## 测试地图与验证边界
 
@@ -139,7 +133,7 @@ App 每轮在 `prepareTarget()` 前捕获当前页面的 `performance.now()`，�
 | Worker 协议、超时、恢复  | 两个包的 `test/inference`                                                                  | 用户脚本 Blob Worker 与两个 Runtime 入口          |
 | 下载、完整性、缓存事务   | `browser-core/test/model`、`userscript/test/model`                                         | `docs/model-cache-strategy.md`、Model Worker 契约 |
 | GM 存储和设置菜单        | `userscript/test/userscript`                                                               | 敏感 Key 不落到 page-readable storage             |
-| 面板和历史               | 两个包的 `test/status-panel` 与 `test/persistence`                                         | CSP 可见性、异步设置和持久化失败                  |
+| 面板和历史               | 两个包的 `test/status-panel` 与 `test/persistence`                                         | csp 可见性、重新挂载、异步设置和持久化失败        |
 | 构建/metadata/资产       | `apps/userscript/scripts/*test.mjs`、`apps/userscript/test/userscript-build-smoke.test.ts` | 构建产物审计和包体预算                            |
 
 常用验证命令：
@@ -154,14 +148,19 @@ mise exec -- pnpm docs:check
 
 上述测试主要证明模拟 DOM、Worker、Fetch、存储和构建门禁；它们不自动证明真实页面、真实 GM 管理器、真实远程模型鉴权或浏览器多引擎兼容性。涉及这些边界时，在报告中单独列出已运行的 E2E 和未覆盖项。
 
-## 风格、注释和模块化维护规则
+## 推理参数权威入口
 
-- TypeScript 使用严格类型、ESM 和 `unknown` 入站校验。跨 Worker、Fetch、存储和设置边界先做结构检查，再转换为领域类型。
-- 注释解释生命周期、取消、完整性、事务和安全边界等“为什么”；不要给显而易见的逐行代码添加注释。已有关键注释主要位于缓存事务、Worker 恢复、取消竞态和敏感 GM 存储处，修改这些代码时应同步更新原因说明。
-- 中文用户提示与错误保留在面向用户的适配层或领域模块；协议字段、HTTP 头和标准 API 名称保留英文。
-- 目录继续按 `app`、`captcha`、`inference`、`model`、`persistence`、`platform`、`status-panel`、`utils` 分组。若一个领域出现多个独立子流程，优先在该领域下增加语义子目录并同步测试目录；不要为了减少文件数量把无关职责合并进大文件。
-- 当前较大的协调模块包括核心 `inference/onnx-worker-client.ts`、`model/model-downloader.ts`、`captcha/answer-submitter.ts`、`app/app.ts` 和 `status-panel/status-panel.ts`。拆分前先为公共行为保留测试，再按边界提取纯函数或状态对象；不要把平台判断散落到核心。
-- 用户脚本中的薄包装器是有意的依赖注入边界。只有当包装器重复了业务逻辑，或核心接口无法表达平台差异时，才考虑调整；不要仅为减少文件数删除它们。
-- 修改公开默认值、协议、构建 profile、资产路径或存储键时，检查 README、相关专题、测试和文档漂移门禁。易漂移常量应继续由权威模块导出，文档链接到该模块或专题，不要复制第二份数值。
+[inference-config.ts](../../packages/browser-core/src/inference/inference-config.ts) 是以下参数的唯一源码来源，调用者不得另设隐式常量：
 
-带日期的现状评估与优化优先级见[仓库审计](../audits/2026-09-07-repository-audit.md)，后续目录迁移按[目录方案](../development/directory-layout.md)分批验证。
+| 配置                     | 字段与当前行为                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `imagePreprocessConfig`  | `imageSize=640`；图片编码最多 2 MiB，边长最多 4096，像素最多 16000000                                                                |
+| `yoloOutputConfig`       | `rowSize=6`、`confidenceIndex=4`、`classIndex=5`；`confidenceThreshold=0.3`、`maxDetections=16`、`maxKinds=3`；输出最多 100000 行    |
+| `inferenceTimeoutConfig` | `workerInitTimeoutMs=60000`、`workerDetectTimeoutMs=30000`、`modelDownloadTimeoutMs=30000`；取消宽限、探测和缓存超时同样由该对象维护 |
+| `prepareDeadlineConfig`  | Worker、内容端与 Broker 的期限逐层留出结算余量；扩展协议不能复制另一份期限                                                           |
+
+输入在浏览器内转换为 640×640 CHW Float32，YOLO 输出映射到 shared 的答案码。修改参数后同时核对预处理、输出 guard、两平台 Worker 和截止时间测试。
+
+## 维护入口
+
+新增平台能力先调整核心接口，再在平台入口组装；薄适配器不是仅凭行数即可删除的重导出。涉及取消或并发时先锁定状态所有者，补行为回归，再拆分模块。注释、类型、格式和导出规范统一见[贡献指南](../development/contributing.md)，避免各架构页维护不同规则。

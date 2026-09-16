@@ -9,6 +9,7 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { checkDocsDrift } from '../check-docs-drift.mjs'
+import { COMMAND_DOCUMENTS } from '../documentation-paths.mjs'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -74,6 +75,11 @@ async function createFixture(options = {}) {
   fixtureRoots.add(fixtureRoot)
   const files = [
     'README.md',
+    'docs/development/commands.md',
+    'docs/architecture/browser-runtime.md',
+    'docs/architecture/overview.md',
+    'docs/reference/model-worker-http.md',
+    'docs/development/releases.md',
     'package.json',
     'apps/userscript/package.json',
     'apps/extension/package.json',
@@ -98,7 +104,7 @@ async function createFixture(options = {}) {
 
   await Promise.all(
     (options.materialize
-      ? files
+      ? [...new Set([...files, ...COMMAND_DOCUMENTS])]
       : ['apps/extension/scripts/browser/browser-support.mjs', 'apps/extension/src/platform/extension-paths.ts']
     ).map(async (file) => {
       await mkdir(join(fixtureRoot, dirname(file)), { recursive: true })

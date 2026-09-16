@@ -13,7 +13,8 @@ import {
   readModelWorkerHttpFacts,
 } from './model-worker-docs.mjs'
 import { checkOnnxRuntimeAssetsDocs, checkOnnxRuntimeSupplementalDocs } from './onnx-runtime-docs.mjs'
-import { checkRootCheckCommand } from './readme-commands.mjs'
+import { checkRootCheckCommand, checkCommandExamples } from './readme-commands.mjs'
+import { COMMAND_DOCUMENTS } from './documentation-paths.mjs'
 import { checkExtensionDocs } from './extension-docs.mjs'
 import { parseModelManifest } from '../model/model-manifest.mjs'
 
@@ -57,6 +58,11 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
     browserCorePackageJson,
     sharedPackageJson,
     readme,
+    commandsDoc,
+    browserRuntimeDoc,
+    architectureDoc,
+    httpDoc,
+    releaseDoc,
     extensionDoc,
     modelCacheStrategyDoc,
     modelWorkerOpsDoc,
@@ -78,6 +84,11 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
     readPackage('packages/browser-core/package.json'),
     readPackage('packages/shared/package.json'),
     readSource('README.md'),
+    readSource('docs/development/commands.md'),
+    readSource('docs/architecture/browser-runtime.md'),
+    readSource('docs/architecture/overview.md'),
+    readSource('docs/reference/model-worker-http.md'),
+    readSource('docs/development/releases.md'),
     readSource('docs/browser-extension.md'),
     readSource('docs/model-cache-strategy.md'),
     readSource('docs/model-worker-ops.md'),
@@ -100,22 +111,35 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
   )
 
   const runtimeAssets = parseOnnxRuntimeAssetsManifest(onnxRuntimeAssetsSource)
+  const workspacePackages = [
+    userscriptPackageJson,
+    extensionPackageJson,
+    modelWorkerPackageJson,
+    browserCorePackageJson,
+    sharedPackageJson,
+  ]
+  const commandErrors = await Promise.all(
+    COMMAND_DOCUMENTS.map(async (path) =>
+      checkCommandExamples(rootPackageJson, workspacePackages, await readSource(path), path),
+    ),
+  )
 
   return [
+    ...commandErrors.flat(),
     ...checkRootCheckCommand(
       rootPackageJson,
       [userscriptPackageJson, extensionPackageJson, modelWorkerPackageJson, browserCorePackageJson, sharedPackageJson],
-      readme,
+      commandsDoc,
     ),
-    ...checkUserscriptConfigDocs(inferenceConfigSource, readme),
+    ...checkUserscriptConfigDocs(inferenceConfigSource, browserRuntimeDoc),
     ...modelWorkerHttpFacts.errors,
-    ...checkModelManifestDocs(modelSource, readme),
-    ...checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJson, readme, runtimeAssets),
+    ...checkModelManifestDocs(modelSource, onnxRuntimeDoc),
+    ...checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJson, onnxRuntimeDoc, runtimeAssets),
     ...checkOnnxRuntimeSupplementalDocs(onnxRuntimeAssetsSource, onnxRuntimeDoc, runtimeAssets),
-    ...checkModelWorkerDocs(readme, modelWorkerHttpFacts),
+    ...checkModelWorkerDocs(httpDoc, modelWorkerHttpFacts),
     ...checkModelCacheStrategyDocs(modelCacheStrategyDoc, modelWorkerHttpFacts),
-    ...checkModelWorkerOpsDocs(modelWorkerOpsDoc, readme, modelWorkerDeploymentWorkflow),
-    ...checkArchitectureGuardrails(readme),
+    ...checkModelWorkerOpsDocs(modelWorkerOpsDoc, releaseDoc, modelWorkerDeploymentWorkflow),
+    ...checkArchitectureGuardrails(architectureDoc),
     ...checkExtensionDocs(
       extensionPackageJson,
       browserSupportModule.browserSupport,

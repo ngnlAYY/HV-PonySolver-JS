@@ -60,7 +60,7 @@ function checkOnnxRuntimeAssetsDocs(
   ]
   for (const term of requiredTerms) {
     if (!readme.includes(term)) {
-      errors.push(`README.md ONNX Runtime asset docs must mention ${term}`)
+      errors.push(`docs/onnx-runtime.md ONNX Runtime asset docs must mention ${term}`)
     }
   }
 

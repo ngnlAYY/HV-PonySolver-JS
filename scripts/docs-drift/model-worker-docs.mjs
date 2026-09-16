@@ -5,15 +5,21 @@ function checkModelWorkerDocs(readme, facts) {
   const lines = readme.split(/\r?\n/)
   const authorizedGetLine = findModelWorkerHttpRow(lines, 'GET')
   if (!authorizedGetLine.includes('Authorization: Bearer')) {
-    errors.push('README.md Model Worker authorized real-model row must mention Authorization: Bearer')
+    errors.push(
+      'docs/reference/model-worker-http.md Model Worker authorized real-model row must mention Authorization: Bearer',
+    )
   }
   if (facts.cacheControl && !lineMentionsHeaderValue(authorizedGetLine, 'Cache-Control', facts.cacheControl)) {
-    errors.push(`README.md Model Worker authorized real-model row must mention Cache-Control: ${facts.cacheControl}`)
+    errors.push(
+      `docs/reference/model-worker-http.md Model Worker authorized real-model row must mention Cache-Control: ${facts.cacheControl}`,
+    )
   }
 
   const authorizedHeadLine = findModelWorkerHttpRow(lines, 'HEAD')
   if (!authorizedHeadLine.includes('Authorization: Bearer')) {
-    errors.push('README.md Model Worker authorized HEAD row must mention Authorization: Bearer')
+    errors.push(
+      'docs/reference/model-worker-http.md Model Worker authorized HEAD row must mention Authorization: Bearer',
+    )
   }
 
   checkPreflightDocs(
@@ -41,19 +47,25 @@ function checkModelWorkerDocs(readme, facts) {
   const methodNotAllowedLine = findMethodNotAllowedDocsLine(lines)
   if (facts.allowedMethods && !lineMentionsHeaderValue(methodNotAllowedLine, 'Allow', facts.allowedMethods)) {
     errors.push(
-      `README.md Model Worker HTTP 405 docs must mention Allow: ${facts.allowedMethods} on the method-not-allowed row`,
+      `docs/reference/model-worker-http.md Model Worker HTTP 405 docs must mention Allow: ${facts.allowedMethods} on the method-not-allowed row`,
     )
   }
   if (lines.some(hasStaleMethodAllowHeader)) {
-    errors.push('README.md Model Worker HTTP 405 docs must not document stale Allow: GET, HEAD semantics')
+    errors.push(
+      'docs/reference/model-worker-http.md Model Worker HTTP 405 docs must not document stale Allow: GET, HEAD semantics',
+    )
   }
 
   const queryStringLines = lines.filter(isQueryStringKeyDocsLine)
   if (!queryStringLines.some(statesQueryStringDoesNotAuthorizeRealModel)) {
-    errors.push('README.md Model Worker HTTP docs must state query-string key does not authorize the real model')
+    errors.push(
+      'docs/reference/model-worker-http.md Model Worker HTTP docs must state query-string key does not authorize the real model',
+    )
   }
   if (queryStringLines.some(impliesQueryStringAuthorizesRealModel)) {
-    errors.push('README.md Model Worker HTTP docs must not imply query-string key authorization or real model access')
+    errors.push(
+      'docs/reference/model-worker-http.md Model Worker HTTP docs must not imply query-string key authorization or real model access',
+    )
   }
 
   const selectedObjectMissingLine = lines.find(isSelectedObjectMissingDocsLine) ?? ''
@@ -63,13 +75,13 @@ function checkModelWorkerDocs(readme, facts) {
     !selectedObjectMissingLine.includes(`${facts.selectedObjectMissingStatus} ${facts.selectedObjectMissingMessage}`)
   ) {
     errors.push(
-      `README.md Model Worker selected R2 object missing docs must mention ${facts.selectedObjectMissingStatus} ${facts.selectedObjectMissingMessage}`,
+      `docs/reference/model-worker-http.md Model Worker selected R2 object missing docs must mention ${facts.selectedObjectMissingStatus} ${facts.selectedObjectMissingMessage}`,
     )
   }
 
   if (lines.some((line) => line.includes('Cache-Control: public, max-age=86400'))) {
     errors.push(
-      'README.md Model Worker HTTP docs must not document stale Cache-Control: public, max-age=86400 semantics',
+      'docs/reference/model-worker-http.md Model Worker HTTP docs must not document stale Cache-Control: public, max-age=86400 semantics',
     )
   }
 
@@ -134,7 +146,7 @@ function checkModelWorkerOpsDocs(opsDoc, readme, deploymentWorkflowSource) {
     errors.push('docs/model-worker-ops.md MODEL_WORKER_PROBE_ID example must be directly executable')
   }
   checkSecretGateDocs(errors, opsDoc, 'docs/model-worker-ops.md', true)
-  checkSecretGateDocs(errors, readme, 'README.md', false)
+  checkSecretGateDocs(errors, readme, 'docs/development/releases.md', false)
   return errors
 }
 
@@ -243,16 +255,18 @@ function findUniqueWorkflowJob(source, name, workflowPath, errors) {
 function checkPreflightDocs(errors, line, routeName, allowMethods, allowHeaders) {
   if (allowMethods && !lineMentionsHeaderValue(line, 'Access-Control-Allow-Methods', allowMethods)) {
     errors.push(
-      `README.md Model Worker ${routeName} OPTIONS docs must mention Access-Control-Allow-Methods: ${allowMethods}`,
+      `docs/reference/model-worker-http.md Model Worker ${routeName} OPTIONS docs must mention Access-Control-Allow-Methods: ${allowMethods}`,
     )
   }
   if (allowHeaders && !lineMentionsHeaderValue(line, 'Access-Control-Allow-Headers', allowHeaders)) {
     errors.push(
-      `README.md Model Worker ${routeName} OPTIONS docs must mention Access-Control-Allow-Headers: ${allowHeaders}`,
+      `docs/reference/model-worker-http.md Model Worker ${routeName} OPTIONS docs must mention Access-Control-Allow-Headers: ${allowHeaders}`,
     )
   }
   if (!allowHeaders && line.includes('Access-Control-Allow-Headers')) {
-    errors.push(`README.md Model Worker ${routeName} OPTIONS docs must not document request headers`)
+    errors.push(
+      `docs/reference/model-worker-http.md Model Worker ${routeName} OPTIONS docs must not document request headers`,
+    )
   }
 }
 

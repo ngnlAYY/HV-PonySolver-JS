@@ -136,25 +136,25 @@ for (const command of [
   'mise exec -- pnpm install --frozen-lockfile',
   'mise exec -- pnpm check',
 ]) {
-  test(`fails clearly when README omits mise setup entry ${command}`, async () => {
+  test(`fails clearly when command reference omits mise setup entry ${command}`, async () => {
     await withFixture(async (fixtureRoot) => {
-      const readmePath = join(fixtureRoot, 'README.md')
+      const readmePath = join(fixtureRoot, 'docs/development/commands.md')
       await writeFile(readmePath, (await readFile(readmePath, 'utf8')).replaceAll(command, 'missing-toolchain-entry'))
 
       const result = await runCheck(fixtureRoot)
       assert.notEqual(result.exitCode, 0)
-      assert.match(result.stderr, /README\.md mise setup must document/u)
+      assert.match(result.stderr, /docs\/development\/commands\.md mise setup must document/u)
     })
   })
 }
 
 for (const [documentedVersion, replacement, errorPattern] of [
-  ['24.15.0', '24.14.0', /README\.md.*Node.*24\.15\.0/s],
-  [packageManagerVersion, '0.0.0', /README\.md.*pnpm/s],
+  ['24.15.0', '24.14.0', /docs\/development\/commands\.md.*Node.*24\.15\.0/s],
+  [packageManagerVersion, '0.0.0', /docs\/development\/commands\.md.*pnpm/s],
 ]) {
-  test(`fails clearly when README drifts from runtime requirement ${documentedVersion}`, async () => {
+  test(`fails clearly when command reference drifts from runtime requirement ${documentedVersion}`, async () => {
     await withFixture(async (fixtureRoot) => {
-      const readmePath = join(fixtureRoot, 'README.md')
+      const readmePath = join(fixtureRoot, 'docs/development/commands.md')
       await writeFile(readmePath, (await readFile(readmePath, 'utf8')).replaceAll(documentedVersion, replacement))
 
       const result = await runCheck(fixtureRoot)
@@ -229,7 +229,7 @@ for (const [directive, replacement] of [
   })
 }
 
-// README 文档契约：这些测试验证 README 是否准确描述脚本、模型、ONNX Runtime 和 Model Worker 的当前事实。
+// command reference 文档契约：这些测试验证 command reference 是否准确描述脚本、模型、ONNX Runtime 和 Model Worker 的当前事实。
 // 运行时 HTTP 行为应由 apps/model-worker 的 Worker tests 覆盖；这里关注文档是否漂移。
 const rootCheckCommandNames = [
   'check:quick',
@@ -242,9 +242,9 @@ const rootCheckCommandNames = [
 ]
 
 for (const commandName of rootCheckCommandNames) {
-  test(`fails clearly when README omits ${commandName} from pnpm check description`, async () => {
+  test(`fails clearly when command reference omits ${commandName} from pnpm check description`, async () => {
     await withFixture(async (fixtureRoot) => {
-      const readmePath = join(fixtureRoot, 'README.md')
+      const readmePath = join(fixtureRoot, 'docs/development/commands.md')
       const readme = await readFile(readmePath, 'utf8')
       assert.ok(readme.includes(commandName), `fixture should mention ${commandName}`)
       await writeFile(readmePath, readme.replaceAll(commandName, 'omitted check command'))
@@ -252,7 +252,7 @@ for (const commandName of rootCheckCommandNames) {
       const escapedCommandName = commandName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       const result = await runCheck(fixtureRoot)
       assert.notEqual(result.exitCode, 0)
-      assert.match(result.stderr, new RegExp(`README\\.md.*pnpm check.*${escapedCommandName}`, 's'))
+      assert.match(result.stderr, new RegExp(`docs/development/commands\\.md.*pnpm check.*${escapedCommandName}`, 's'))
     })
   })
 }
