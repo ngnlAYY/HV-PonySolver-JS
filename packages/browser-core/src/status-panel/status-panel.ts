@@ -30,7 +30,7 @@ function initialPanelStatus(): PanelStatus {
 
 export class StatusPanel implements StatusPanelContract {
   private el: HTMLDivElement | null = null
-  private cspVisibilityObserver: MutationObserver | null = null
+  private domObserver: MutationObserver | null = null
   private cspVisibilityRequired = true
   private readonly world: World = getWorld()
   private compactMode = false
@@ -53,6 +53,7 @@ export class StatusPanel implements StatusPanelContract {
 
   create(): void {
     if (this.el) {
+      this.syncDom()
       return
     }
     this.lifecycleGeneration += 1
@@ -93,7 +94,7 @@ export class StatusPanel implements StatusPanelContract {
           return
         }
         this.cspVisibilityRequired = required
-        this.configureCspVisibility()
+        this.configureDomObserver()
       })
       getPanelHistoryLimit(this.settingsStorage).then((historyLimit) => {
         if (lifecycleGeneration !== this.lifecycleGeneration || !this.el || historyLimit === this.historyLimit) {
@@ -104,7 +105,7 @@ export class StatusPanel implements StatusPanelContract {
       })
     }
     document.body.appendChild(this.el)
-    this.configureCspVisibility()
+    this.configureDomObserver()
     this.render()
   }
 
@@ -154,8 +155,8 @@ export class StatusPanel implements StatusPanelContract {
     this.lifecycleGeneration += 1
     this.renderQueued = false
     this.lastRenderKey = ''
-    this.cspVisibilityObserver?.disconnect()
-    this.cspVisibilityObserver = null
+    this.domObserver?.disconnect()
+    this.domObserver = null
     this.el?.remove()
     this.el = null
   }
@@ -203,28 +204,26 @@ export class StatusPanel implements StatusPanelContract {
     queueMicrotask(() => this.flushRender())
   }
 
-  private configureCspVisibility(): void {
-    this.cspVisibilityObserver?.disconnect()
-    this.cspVisibilityObserver = null
+  private configureDomObserver(): void {
+    this.domObserver?.disconnect()
+    this.domObserver = null
     if (!this.el) {
       return
     }
-    if (!this.cspVisibilityRequired) {
-      this.el.hidden = false
-      return
-    }
-
-    this.syncCspVisibility()
+    this.syncDom()
     const root = document.documentElement
     if (!root || typeof MutationObserver === 'undefined') {
       return
     }
-    this.cspVisibilityObserver = new MutationObserver((mutations) => {
-      if (mutations.some((mutation) => this.mutationMayChangeCspVisibility(mutation))) {
-        this.syncCspVisibility()
+    this.domObserver = new MutationObserver((mutations) => {
+      if (
+        !this.el?.isConnected ||
+        (this.cspVisibilityRequired && mutations.some((mutation) => this.mutationMayChangeCspVisibility(mutation)))
+      ) {
+        this.syncDom()
       }
     })
-    this.cspVisibilityObserver.observe(root, {
+    this.domObserver.observe(root, {
       attributeFilter: ['id'],
       attributeOldValue: true,
       attributes: true,
@@ -249,9 +248,11 @@ export class StatusPanel implements StatusPanelContract {
     return Array.from(mutation.addedNodes).some(isCspNode) || Array.from(mutation.removedNodes).some(isCspNode)
   }
 
-  private syncCspVisibility(): void {
+  private syncDom(): void {
     if (this.el) {
-      this.el.hidden = document.querySelector('div#csp') === null
+      // AADB 等局部切页会移除 body 子节点；重挂同一面板，不重置状态或历史。
+      if (!this.el.isConnected && document.body) document.body.appendChild(this.el)
+      this.el.hidden = this.cspVisibilityRequired && document.querySelector('div#csp') === null
     }
   }
 
@@ -264,6 +265,8 @@ export class StatusPanel implements StatusPanelContract {
     if (!this.el) {
       return
     }
+    // 渲染可能先于 observer 回调，并消费待处理记录；先修复挂载再检查缓存。
+    this.syncDom()
     const renderKey = JSON.stringify([
       this.world,
       this.status,
@@ -277,8 +280,8 @@ export class StatusPanel implements StatusPanelContract {
     }
     this.lastRenderKey = renderKey
     // 先保留外部变更，随后只丢弃这次同步渲染生成的观察记录。
-    const externalMutations = this.cspVisibilityObserver?.takeRecords() ?? []
-    const removedCsp = this.cspVisibilityObserver !== null && this.el.querySelector('div#csp') !== null
+    const externalMutations = this.domObserver?.takeRecords() ?? []
+    const removedCsp = this.domObserver !== null && this.el.querySelector('div#csp') !== null
     renderStatusPanelInto(
       this.el,
       this.world,
@@ -288,8 +291,8 @@ export class StatusPanel implements StatusPanelContract {
       this.historyLimit,
       this.persistenceError,
     )
-    this.cspVisibilityObserver?.takeRecords()
+    this.domObserver?.takeRecords()
     if (removedCsp || externalMutations.some((mutation) => this.mutationMayChangeCspVisibility(mutation)))
-      this.syncCspVisibility()
+      this.syncDom()
   }
 }

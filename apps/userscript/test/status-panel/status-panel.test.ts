@@ -1,8 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { HistoryRecord, World } from '@hv-pony-solver/browser-core'
 import type { HistoryStore } from '../../src/persistence/answer-history-store'
 import { StatusPanel } from '../../src/status-panel/status-panel'
+
+const panels: StatusPanel[] = []
+
+function createPanel(history: HistoryStore): StatusPanel {
+  const panel = new StatusPanel(history)
+  panels.push(panel)
+  return panel
+}
 
 function createHistoryStore(records: HistoryRecord[] = []): HistoryStore {
   return {
@@ -24,6 +32,10 @@ function createSuccessRecords(count: number): HistoryRecord[] {
 }
 
 describe('StatusPanel', () => {
+  afterEach(() => {
+    for (const panel of panels.splice(0)) panel.destroy()
+  })
+
   beforeEach(() => {
     document.body.innerHTML = ''
     history.pushState(null, '', '/')
@@ -33,7 +45,7 @@ describe('StatusPanel', () => {
 
   it('queues status-only updates without rereading history', async () => {
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
     panel.setStatus({ model: '确认中' })
@@ -47,7 +59,7 @@ describe('StatusPanel', () => {
 
   it('uses the records returned by add when appending success history', async () => {
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
     panel.addSuccess(['TS'], { TS: 0.99 }, 12)
@@ -62,7 +74,7 @@ describe('StatusPanel', () => {
   it('records and shows manual results with confidences in compact mode', async () => {
     localStorage.setItem('hvPonySolverPanelCompact', '1')
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
     panel.addManualResult(['RA'], { RA: 0.975 }, 18)
@@ -77,7 +89,7 @@ describe('StatusPanel', () => {
   })
 
   it('escapes manual answers before rendering them', () => {
-    const panel = new StatusPanel(
+    const panel = createPanel(
       createHistoryStore([
         {
           type: 'manual',
@@ -97,7 +109,7 @@ describe('StatusPanel', () => {
   it('hides model, session, and inference rows in compact mode', () => {
     localStorage.setItem('hvPonySolverPanelCompact', '1')
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
 
@@ -114,7 +126,7 @@ describe('StatusPanel', () => {
       vi.fn(async (key: string) => (key === 'hvPonySolverPanelCompact' ? '1' : '')),
     )
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
 
@@ -133,7 +145,7 @@ describe('StatusPanel', () => {
         return ''
       }),
     )
-    const panel = new StatusPanel(createHistoryStore())
+    const panel = createPanel(createHistoryStore())
 
     panel.create()
     const element = document.querySelector('.ponyLog') as HTMLDivElement
@@ -154,7 +166,7 @@ describe('StatusPanel', () => {
         return ''
       }),
     )
-    const panel = new StatusPanel(createHistoryStore(createSuccessRecords(6)))
+    const panel = createPanel(createHistoryStore(createSuccessRecords(6)))
 
     panel.create()
 
@@ -168,7 +180,7 @@ describe('StatusPanel', () => {
 
   it('shows only five answer records by default', () => {
     const store = createHistoryStore(createSuccessRecords(6))
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
 
@@ -180,7 +192,7 @@ describe('StatusPanel', () => {
   it('uses the configured answer record display limit', () => {
     localStorage.setItem('hvPonySolverHistoryLimit', '3')
     const store = createHistoryStore(createSuccessRecords(5))
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
 
@@ -191,7 +203,7 @@ describe('StatusPanel', () => {
 
   it('shows that there is no recent error when history has no errors', () => {
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
 
@@ -200,7 +212,7 @@ describe('StatusPanel', () => {
 
   it('shows the latest error message and elapsed time', async () => {
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
     panel.addError('模型加载失败', 34)
@@ -211,7 +223,7 @@ describe('StatusPanel', () => {
 
   it('escapes error messages before rendering them', async () => {
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
     panel.addError('<img src=x onerror=alert(1)>', 12)
@@ -222,7 +234,7 @@ describe('StatusPanel', () => {
 
   it('coalesces repeated status changes into one rendered update', async () => {
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
     const element = document.querySelector('.ponyLog') as HTMLDivElement
@@ -239,7 +251,7 @@ describe('StatusPanel', () => {
 
   it('ignores queued renders after destroy', async () => {
     const store = createHistoryStore()
-    const panel = new StatusPanel(store)
+    const panel = createPanel(store)
 
     panel.create()
     panel.setStatus({ model: '下载中' })

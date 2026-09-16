@@ -1,9 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { HistoryStore } from '../../src/persistence/answer-history-store'
 import type { HistoryRecord, World } from '../../src/persistence/answer-history-types'
 import type { SettingsStorage } from '../../src/platform/storage'
 import { StatusPanel } from '../../src/status-panel/status-panel'
+
+const panels: StatusPanel[] = []
+
+function createPanel(history: HistoryStore, storage: SettingsStorage): StatusPanel {
+  const panel = new StatusPanel(history, storage)
+  panels.push(panel)
+  return panel
+}
 
 function deferred<T>(): Readonly<{
   promise: Promise<T>
@@ -70,6 +78,10 @@ function deferredSettingsStorage(): Readonly<{
 }
 
 describe('StatusPanel history persistence', () => {
+  afterEach(() => {
+    for (const panel of panels.splice(0)) panel.destroy()
+  })
+
   beforeEach(() => {
     document.body.innerHTML = ''
     history.pushState(null, '', '/')
@@ -78,7 +90,7 @@ describe('StatusPanel history persistence', () => {
   it('renders optimistically, then rolls back and exposes a save failure in compact mode', async () => {
     const persistence = deferred<HistoryRecord[]>()
     const store = historyStore(persistence.promise)
-    const panel = new StatusPanel(store, settingsStorage(true))
+    const panel = createPanel(store, settingsStorage(true))
 
     panel.create()
     panel.addSuccess(['TS'], { TS: 0.99 }, 12)
@@ -94,7 +106,7 @@ describe('StatusPanel history persistence', () => {
 
   it('ignores a late persistence failure after the panel is destroyed', async () => {
     const persistence = deferred<HistoryRecord[]>()
-    const panel = new StatusPanel(historyStore(persistence.promise), settingsStorage())
+    const panel = createPanel(historyStore(persistence.promise), settingsStorage())
 
     panel.create()
     panel.addSuccess(['TS'], {}, 12)
@@ -109,7 +121,7 @@ describe('StatusPanel history persistence', () => {
 
   it('reconciles optimistic history with the durable records returned by persistence', async () => {
     const persistence = deferred<HistoryRecord[]>()
-    const panel = new StatusPanel(historyStore(persistence.promise), settingsStorage())
+    const panel = createPanel(historyStore(persistence.promise), settingsStorage())
 
     panel.create()
     panel.addSuccess(['TS'], {}, 12)
@@ -132,7 +144,7 @@ describe('StatusPanel history persistence', () => {
         persisted: addCount++ === 0 ? firstPersistence.promise : secondPersistence.promise,
       })),
     } as unknown as HistoryStore
-    const panel = new StatusPanel(store, settingsStorage())
+    const panel = createPanel(store, settingsStorage())
 
     panel.create()
     panel.addSuccess(['TS'], {}, 12)
@@ -162,7 +174,7 @@ describe('StatusPanel history persistence', () => {
         persisted: addCount++ === 0 ? firstPersistence.promise : secondPersistence.promise,
       })),
     } as unknown as HistoryStore
-    const panel = new StatusPanel(store, settingsStorage())
+    const panel = createPanel(store, settingsStorage())
 
     panel.create()
     panel.addSuccess(['TS'], {}, 12)
@@ -180,7 +192,7 @@ describe('StatusPanel history persistence', () => {
 
   it('drops stale async settings writes after a fast destroy and re-create', async () => {
     const { storage, resolveGet } = deferredSettingsStorage()
-    const panel = new StatusPanel(historyStore(Promise.resolve([])), storage)
+    const panel = createPanel(historyStore(Promise.resolve([])), storage)
 
     panel.create()
     panel.destroy()
@@ -200,7 +212,7 @@ describe('StatusPanel history persistence', () => {
   })
 
   it('starts a fresh status snapshot after destroy and re-create', async () => {
-    const panel = new StatusPanel(historyStore(Promise.resolve([])), settingsStorage(false, false))
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage(false, false))
 
     panel.create()
     panel.setStatus({ model: '旧模型状态', session: '旧会话状态', inference: '旧推理状态' })
@@ -217,7 +229,7 @@ describe('StatusPanel history persistence', () => {
   })
 
   it('shows only while a div#csp exists when the default visibility limit is enabled', async () => {
-    const panel = new StatusPanel(historyStore(Promise.resolve([])), settingsStorage())
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage())
     panel.create()
     const element = document.querySelector<HTMLDivElement>('.ponyLog')!
 
@@ -242,14 +254,14 @@ describe('StatusPanel history persistence', () => {
   it('does not reread an initialized synchronous snapshot asynchronously', () => {
     const storage = { ...settingsStorage(), synchronousSnapshot: true }
     const get = vi.spyOn(storage, 'get')
-    const panel = new StatusPanel(historyStore(Promise.resolve([])), storage)
+    const panel = createPanel(historyStore(Promise.resolve([])), storage)
     panel.create()
     expect(get).not.toHaveBeenCalled()
     panel.destroy()
   })
 
   it('preserves external visibility changes while draining its own render mutations', async () => {
-    const panel = new StatusPanel(historyStore(Promise.resolve([])), settingsStorage())
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage())
     panel.create()
     const element = document.querySelector<HTMLDivElement>('.ponyLog')!
     const csp = document.createElement('div')
@@ -265,10 +277,94 @@ describe('StatusPanel history persistence', () => {
   })
 
   it('keeps the panel visible without div#csp when the visibility limit is disabled', () => {
-    const panel = new StatusPanel(historyStore(Promise.resolve([])), settingsStorage(false, false))
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage(false, false))
     panel.create()
 
     expect(document.querySelector<HTMLDivElement>('.ponyLog')?.hidden).toBe(false)
     panel.destroy()
+  })
+
+  it.each([true, false])(
+    'reattaches the same history and status panel after body contents change (requireCsp=%s)',
+    async (requireCsp) => {
+      const persistence = deferred<HistoryRecord[]>()
+      const store = historyStore(persistence.promise)
+      const panel = createPanel(store, settingsStorage(false, requireCsp))
+      panel.create()
+      panel.setStatus({ model: '模型已加载', inference: '识别完成' })
+      panel.addSuccess(['TS'], { TS: 0.99 }, 12)
+      await vi.waitFor(() => expect(document.body.textContent).toContain('TS(99.0)'))
+      const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+      const content = element.textContent
+      const riddle = document.createElement('div')
+      riddle.id = 'csp'
+
+      document.body.replaceChildren(riddle)
+
+      await vi.waitFor(() => expect(document.querySelector('.ponyLog')).toBe(element))
+      expect(element.textContent).toBe(content)
+      expect(element.hidden).toBe(false)
+      expect(document.querySelectorAll('.ponyLog')).toHaveLength(1)
+      expect(store.get).toHaveBeenCalledTimes(1)
+      expect(store.add).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('reattaches hidden without csp and becomes visible when csp arrives later', async () => {
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage())
+    panel.create()
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+
+    document.body.replaceChildren(document.createElement('main'))
+
+    await vi.waitFor(() => expect(document.querySelector('.ponyLog')).toBe(element))
+    expect(element.hidden).toBe(true)
+    const riddle = document.createElement('div')
+    riddle.id = 'csp'
+    document.body.appendChild(riddle)
+    await vi.waitFor(() => expect(element.hidden).toBe(false))
+  })
+
+  it('moves the original panel into a replacement body', async () => {
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage(false, false))
+    panel.create()
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+    const body = document.createElement('body')
+
+    document.body.replaceWith(body)
+
+    await vi.waitFor(() => expect(element.parentElement).toBe(body))
+    expect(element.hidden).toBe(false)
+  })
+
+  it('reattaches when a previously queued render drains the external removal record', async () => {
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage())
+    panel.create()
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Queue render before removal so render runs before the mutation observer.
+    panel.setStatus({ inference: '新的识别状态' })
+    const riddle = document.createElement('div')
+    riddle.id = 'csp'
+    document.body.replaceChildren(riddle)
+
+    await vi.waitFor(() => expect(document.querySelector('.ponyLog')).toBe(element))
+    expect(element.textContent).toContain('新的识别状态')
+    expect(element.hidden).toBe(false)
+  })
+
+  it('does not resurrect a destroyed panel from queued render, removal or persistence callbacks', async () => {
+    const persistence = deferred<HistoryRecord[]>()
+    const panel = createPanel(historyStore(persistence.promise), settingsStorage(false, false))
+    panel.create()
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+    panel.addSuccess(['TS'], {}, 12)
+    document.body.replaceChildren(document.createElement('main'))
+    panel.destroy()
+    persistence.resolve([{ type: 'success', answers: 'TS', elapsed: 12 }])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(element.isConnected).toBe(false)
+    expect(document.querySelector('.ponyLog')).toBeNull()
   })
 })
