@@ -6,6 +6,7 @@ import { pickForwardedHostFields } from '../host/status-fields'
 import { EXTENSION_PATHS } from '../platform/extension-paths'
 import {
   addRuntimeConnectListener,
+  readPortDisconnectError,
   runtimeGetUrl,
   runtimeId,
   storageSet,
@@ -272,7 +273,11 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       }
     }
 
-    port.onDisconnect.addListener(markDisconnected)
+    port.onDisconnect.addListener(() => {
+      // BFCache 等页面离开也会携带 lastError；先读取，再按断连取消所有未决请求。
+      readPortDisconnectError(port)
+      markDisconnected()
+    })
     port.onMessage.addListener((message) => {
       if (!connected) {
         return

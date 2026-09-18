@@ -82,6 +82,10 @@ Host 在 [`src/host/inference-host.ts`](../../apps/extension/src/host/inference-
 
 Port 断开会拒绝该 Port 上所有未决内容请求并允许下一次请求重新连接。Chromium 后台重启后，新的 epoch 会使旧 Offscreen 请求失效，再由新请求重新 claim；空闲 Offscreen 关闭失败会用有限次数的指数退避重试。Firefox 页面卸载直接销毁 Host。有关超时层级的权威说明见 [`src/protocol/deadlines.ts`](../../apps/extension/src/protocol/deadlines.ts)。
 
+后台 Broker、内容客户端和设置页的 `onDisconnect` 回调都通过 [`readPortDisconnectError`](../../apps/extension/src/platform/webextension-runtime.ts) 同步读取 Chromium 的 `runtime.lastError`，兼容 Firefox 的 `port.error`。即使回调来自已失效的 Port，也先读取再判断身份，避免浏览器报告 `Unchecked runtime.lastError`；错误只在该回调期间可读，不能推迟到 Promise continuation。内容和设置页保留浏览器原因并拒绝未决请求，Broker 继续取消该 Port 的 Host 工作，不额外输出预期页面离开的日志。
+
+页面进入 BFCache 时，既有 `pagehide.persisted` 路径销毁当前应用并取消工作；`pageshow.persisted` 重建存储镜像与应用，再按需建立新 Port。读取断连原因不触发自动重放，额度查询仍是唯一允许一次有限重连的设置操作。处理依据和回归范围见[断连错误决定](../decisions/implemented/bug-fix/2026-09-18-extension-port-disconnect-errors.md)。
+
 ## 测试与证据对应关系
 
 | 目标                                 | 对应测试/脚本                                                                                                                     | 能证明什么                                                                |

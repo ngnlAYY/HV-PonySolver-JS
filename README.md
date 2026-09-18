@@ -58,7 +58,7 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 - 面板默认 `top=155, left=1240`，显示最近 5 条记录，默认仅在存在 `div#csp` 时可见。隐藏面板不停止识别。
 - AADB 等局部切页脚本移除面板或替换 body 后，会重新挂载原节点，保留状态与历史；可见性仍由设置决定，应用销毁后不会自行恢复。
 
-设置范围、提交复核、历史保存失败与耗时含义见[答题和面板说明](docs/usage/settings.md)。遇到加载、Key、额度、面板或提交问题时先查[故障排查](docs/usage/troubleshooting.md)。
+设置范围、提交复核、历史保存失败与耗时含义见[答题和面板说明](docs/usage/settings.md)。遇到加载、Key、额度、面板、页面前进／后退时的扩展断连或提交问题时先查[故障排查](docs/usage/troubleshooting.md)。
 
 ## 模型与隐私
 

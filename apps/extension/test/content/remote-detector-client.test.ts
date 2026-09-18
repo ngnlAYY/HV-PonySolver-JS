@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CachedImageLoader } from '@hv-pony-solver/browser-core/captcha/captcha-image-loader'
 import { prepareDeadlineConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
 import { isPermanentModelError } from '@hv-pony-solver/browser-core/model/permanent-model-error'
 import type { ExtensionPort } from '../../src/platform/webextension'
 import type * as WebExtensionModule from '../../src/platform/webextension'
+import { rawExtensionApi } from '../platform/webextension-api-fixture'
 
 type TestPort = ExtensionPort &
   Readonly<{
@@ -58,6 +59,7 @@ function statusSink() {
 }
 
 beforeEach(() => {
+  vi.stubGlobal('chrome', rawExtensionApi())
   vi.useRealTimers()
   vi.clearAllMocks()
   platformMocks.ports.length = 0
@@ -66,6 +68,10 @@ beforeEach(() => {
     platformMocks.ports.push(port)
     return port
   })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('RemoteDetectorClient', () => {
@@ -394,6 +400,33 @@ describe('RemoteDetectorClient', () => {
 
     await expect(nextPrepare).resolves.toBeUndefined()
     expect(panel.setSessionReady).toHaveBeenCalledTimes(1)
+  })
+
+  it('consumes callback-scoped Chrome errors and leaves a new Port usable after a stale disconnect', async () => {
+    const api = rawExtensionApi()
+    vi.stubGlobal('chrome', api)
+    const readLastError = vi.fn(() => ({ message: 'The message channel is closed.' }))
+    const client = new RemoteDetectorClient(statusSink())
+    const firstPrepare = client.prepare()
+    const oldPort = platformMocks.ports[0]!
+    Object.defineProperty(api.runtime, 'lastError', { configurable: true, get: readLastError })
+    oldPort.emitDisconnect()
+    Reflect.deleteProperty(api.runtime, 'lastError')
+
+    await expect(firstPrepare).rejects.toThrow('The message channel is closed.')
+    expect(readLastError).toHaveBeenCalledTimes(1)
+    expect(platformMocks.ports).toHaveLength(1)
+
+    const nextPrepare = client.prepare()
+    const newPort = platformMocks.ports[1]!
+    Object.defineProperty(api.runtime, 'lastError', { configurable: true, get: readLastError })
+    oldPort.emitDisconnect()
+    Reflect.deleteProperty(api.runtime, 'lastError')
+    expect(readLastError).toHaveBeenCalledTimes(2)
+    const request = vi.mocked(newPort.postMessage).mock.calls[0]![0] as { requestId: string }
+    newPort.emitMessage({ protocol: PROTOCOL_VERSION, type: 'result', requestId: request.requestId, ok: true })
+    await expect(nextPrepare).resolves.toBeUndefined()
+    client.destroy()
   })
 
   it('cancels only the aborted request and keeps the Port for later work', async () => {

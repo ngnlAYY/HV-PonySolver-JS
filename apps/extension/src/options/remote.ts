@@ -1,6 +1,6 @@
 import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 
-import { runtimeConnect } from '../platform/webextension'
+import { readPortDisconnectError, runtimeConnect } from '../platform/webextension'
 import { createRequestLifecycle } from '../protocol/request-lifecycle'
 import {
   OPTIONS_PORT_NAME,
@@ -81,7 +81,7 @@ function requestHostAttempt(
     }
     const onDisconnect = (): void => {
       disconnected = true
-      const disconnectMessage = port.error?.message?.trim()
+      const disconnectMessage = readPortDisconnectError(port)?.message
       lifecycle.reject(new HostConnectionDisconnectedError(disconnectMessage || `${operationName}连接已断开`))
     }
     const lifecycle = createRequestLifecycle(resolve, reject, {

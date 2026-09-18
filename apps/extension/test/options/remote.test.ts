@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { installOptionsPageMarkup, optionsElement } from './options-page-fixture'
+import type * as WebExtensionModule from '../../src/platform/webextension'
+import { rawExtensionApi } from '../platform/webextension-api-fixture'
 
 type MessageListener = (message: unknown) => void
 
@@ -11,7 +13,10 @@ const platformMocks = vi.hoisted(() => ({
   storageSet: vi.fn(),
 }))
 
-vi.mock('../../src/platform/webextension', () => platformMocks)
+vi.mock('../../src/platform/webextension', async (importOriginal) => {
+  const actual = await importOriginal<typeof WebExtensionModule>()
+  return { ...actual, ...platformMocks }
+})
 
 function successfulHostPort(): Readonly<{
   postMessage: ReturnType<typeof vi.fn>
@@ -85,6 +90,7 @@ function controlledHostPort(disconnectError?: string): Readonly<{
 }
 
 beforeEach(() => {
+  vi.stubGlobal('chrome', rawExtensionApi())
   vi.useRealTimers()
   vi.resetModules()
   platformMocks.runtimeConnect.mockReset().mockImplementation(() => successfulHostPort())
@@ -96,6 +102,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.dispatchEvent(new Event('pagehide'))
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 
@@ -368,6 +375,27 @@ describe('default remote options entry', () => {
     downloadPort.emitDisconnect()
 
     await expect(downloadPromise).rejects.toThrow('模型下载失败: HTTP 429')
+  })
+
+  it('consumes Chrome lastError during disconnect without replaying a model download', async () => {
+    const api = rawExtensionApi()
+    vi.stubGlobal('chrome', api)
+    const readLastError = vi.fn(() => ({ message: 'Receiving end does not exist.' }))
+    const downloadPort = controlledHostPort()
+    platformMocks.runtimeConnect.mockReset().mockReturnValue(downloadPort)
+    const { requestHost } = await import('../../src/options/remote')
+    const downloadPromise = requestHost({
+      protocol: 'hv-pony-solver/2',
+      type: 'download-model',
+      requestId: 'chrome-download-disconnect',
+    })
+    Object.defineProperty(api.runtime, 'lastError', { configurable: true, get: readLastError })
+    downloadPort.emitDisconnect()
+    Reflect.deleteProperty(api.runtime, 'lastError')
+
+    await expect(downloadPromise).rejects.toThrow('Receiving end does not exist.')
+    expect(readLastError).toHaveBeenCalledTimes(1)
+    expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(1)
   })
 
   it('reconnects once when a quota query Port is interrupted', async () => {

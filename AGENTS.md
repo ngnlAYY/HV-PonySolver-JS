@@ -88,6 +88,7 @@ HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm �
 - 内容脚本镜像初始化按 key 合并变更，并受超时、取消和不同 key 数量上限约束；读取快照失败时必须清理监听器。历史解析缓存必须观察外部写入，不能省略写入后的最终校对。
 - 调用原生 `fetch` 时必须保留正确接收者，使用项目已有的 fetch 解析辅助函数，避免 `Illegal invocation`。
 - 跨上下文消息必须执行严格 schema、来源、大小、超时和取消校验。不要把 `unknown` 消息直接断言为可信类型。
+- Port 的 `onDisconnect` 回调须通过平台辅助函数同步读取 Chromium `runtime.lastError`，并兼容 Firefox `port.error`；BFCache 断连仍须取消未决请求，页面恢复后按需重连，不能自动重放模型下载或 Key 操作。
 - 验证码图片消息保持明确的大小上限；HTTP Content-Type 严格校验后规范化为基础 MIME，扩展消息继续使用精确白名单。取消尚未开始的 detect 必须移除队列项并释放图片，不能等慢队头结束再释放。模型字节使用可转移 `ArrayBuffer`，不得改为无界 Base64 或重复拷贝。
 - 异步识别遵循 latest-wins：旧请求完成得更晚时也不能覆盖新请求状态。
 

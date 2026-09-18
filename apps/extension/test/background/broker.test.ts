@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as WebExtensionModule from '../../src/platform/webextension'
+import { rawExtensionApi } from '../platform/webextension-api-fixture'
 
 const platformMocks = vi.hoisted(() => ({
   connectListener: undefined as ((port: ExtensionPort) => void) | undefined,
@@ -128,11 +129,13 @@ function cancelMessage(cancelRequestId: string, index: number): Record<string, u
 }
 
 beforeEach(() => {
+  vi.stubGlobal('chrome', rawExtensionApi())
   vi.useRealTimers()
   platformMocks.connectListener = undefined
 })
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 
@@ -226,6 +229,12 @@ describe('broker queue and privilege boundaries', () => {
   })
 
   it('keeps disconnected running work admitted until Host settlement and releases exactly once', async () => {
+    const api = rawExtensionApi()
+    vi.stubGlobal('chrome', api)
+    const readLastError = vi.fn(() => ({
+      message:
+        'The page keeping the extension port is moved into back/forward cache, so the message channel is closed.',
+    }))
     const pending = new Map<string, Readonly<{ resolve: (response: HostResponse) => void; signal: AbortSignal }>>()
     const invokeHost = vi.fn(
       (request: { requestId: string }, signal: AbortSignal) =>
@@ -245,7 +254,10 @@ describe('broker queue and privilege boundaries', () => {
     }
     expect(invokeHost).toHaveBeenCalledTimes(MAX_GLOBAL_DETECT_REQUESTS)
 
+    Object.defineProperty(api.runtime, 'lastError', { configurable: true, get: readLastError })
     clients[0]!.emitDisconnect()
+    Reflect.deleteProperty(api.runtime, 'lastError')
+    expect(readLastError).toHaveBeenCalledTimes(1)
     expect(pending.get('detect-0')?.signal.aborted).toBe(true)
     expect(pending.get('detect-1')?.signal.aborted).toBe(true)
 

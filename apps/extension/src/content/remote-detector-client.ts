@@ -4,7 +4,7 @@ import { PermanentModelError } from '@hv-pony-solver/browser-core/model/permanen
 import type { InferenceStatusSink } from '@hv-pony-solver/browser-core/status-panel/status-panel-types'
 import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 
-import { runtimeConnect, type ExtensionPort } from '../platform/webextension'
+import { readPortDisconnectError, runtimeConnect, type ExtensionPort } from '../platform/webextension'
 import {
   CONTENT_PORT_NAME,
   PROTOCOL_VERSION,
@@ -202,6 +202,7 @@ export class RemoteDetectorClient implements DetectorService {
   }
 
   private handleDisconnect(port: ExtensionPort): void {
+    const error = readPortDisconnectError(port)
     if (port !== this.port) {
       return
     }
@@ -209,7 +210,7 @@ export class RemoteDetectorClient implements DetectorService {
     this.removePortListeners?.()
     this.removePortListeners = null
     if (this.visibleRequests.size > 0) this.statusSink.setStatus({ session: '连接断开' })
-    this.rejectPending(new Error('扩展推理连接已断开'))
+    this.rejectPending(error ?? new Error('扩展推理连接已断开'))
   }
 
   private rejectPending(error: Error): void {

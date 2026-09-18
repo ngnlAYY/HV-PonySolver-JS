@@ -17,6 +17,13 @@ export function runtimeConnect(name: string): ExtensionPort {
   return resolveRawExtensionApi().api.runtime.connect({ name })
 }
 
+/** 必须在 onDisconnect 回调内同步读取，Chrome 在回调返回后清除 lastError。 */
+export function readPortDisconnectError(port: ExtensionPort): Error | null {
+  const runtimeError = callbackError(resolveRawExtensionApi().api.runtime)
+  const message = runtimeError?.message.trim() || port.error?.message?.trim()
+  return message ? new Error(message) : null
+}
+
 export function addRuntimeConnectListener(listener: (port: ExtensionPort) => void): () => void {
   const event = resolveRawExtensionApi().api.runtime.onConnect
   event.addListener(listener)

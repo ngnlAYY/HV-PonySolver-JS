@@ -83,6 +83,14 @@ pnpm --filter @hv-pony-solver/extension build:packaged
 - “连接已断开”是扩展后台 Port 未返回结果，不等同于 Worker 返回额度耗尽。额度查询会自动重连一次，仍失败时保留第二次的真实浏览器错误。
 - `TypeError: Failed to execute 'fetch' on 'Window': Illegal invocation` 通常表示仍在运行旧版或混合构建文件；重新构建并完整替换解压目录后重新加载扩展，不要只覆盖单个 JavaScript 文件。
 
+## 页面导航时报 `Unchecked runtime.lastError` 与 back/forward cache
+
+Chrome 在页面进入前进／后退缓存（BFCache）时会关闭扩展消息 Port。报错中的 `The page keeping the extension port is moved into back/forward cache` 指向这次页面生命周期变化；`Unchecked` 表示断连回调没有读取浏览器提供的错误，不代表模型、Key 或额度校验失败。
+
+当前实现会在后台、内容脚本和设置页同步读取断连原因、取消未决请求，并在缓存页面恢复后重新初始化、按需连接。已有安装需要重新构建并完整重新加载扩展，然后刷新游戏页；只修改磁盘上的源码不会更新已运行的内容脚本。无需禁用浏览器的 BFCache。
+
+如果更新后仍持续出现，核对报错的扩展 ID／脚本来源、实际加载目录及发生时是否正在前进／后退；如果停留在页面也无法识别，保留面板中具体的连接原因，按下方要求附带浏览器版本和重现步骤。
+
 ## 模型请求返回诱饵内容或 `403`
 
 确认：

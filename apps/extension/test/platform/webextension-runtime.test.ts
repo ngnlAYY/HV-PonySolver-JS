@@ -2,18 +2,46 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   addRuntimeConnectListener,
+  readPortDisconnectError,
   runtimeGetUrl,
   runtimeId,
   sendRuntimeMessage,
 } from '../../src/platform/webextension-runtime'
-import type { RawExtensionApi } from '../../src/platform/webextension-api'
-import { rawExtensionApi } from './webextension-api-fixture'
+import type { ExtensionPort, RawExtensionApi } from '../../src/platform/webextension-api'
+import { extensionEvent, rawExtensionApi } from './webextension-api-fixture'
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe('webextension runtime adapter', () => {
+  it.each([
+    { runtimeMessage: ' Chrome port closed ', portMessage: undefined, expected: 'Chrome port closed' },
+    { runtimeMessage: undefined, portMessage: ' Firefox port closed ', expected: 'Firefox port closed' },
+    { runtimeMessage: ' ', portMessage: 'Firefox port closed', expected: 'Firefox port closed' },
+    { runtimeMessage: undefined, portMessage: undefined, expected: undefined },
+    { runtimeMessage: '', portMessage: ' ', expected: undefined },
+  ])('reads Port disconnect errors across browser APIs: $expected', ({ runtimeMessage, portMessage, expected }) => {
+    const api = rawExtensionApi()
+    const readLastError = vi.fn(() => (runtimeMessage === undefined ? undefined : { message: runtimeMessage }))
+    Object.defineProperty(api.runtime, 'lastError', { get: readLastError })
+    vi.stubGlobal(runtimeMessage === undefined ? 'browser' : 'chrome', api)
+    const port: ExtensionPort = {
+      name: 'test',
+      ...(portMessage === undefined ? {} : { error: { message: portMessage } }),
+      onMessage: extensionEvent(),
+      onDisconnect: extensionEvent(),
+      postMessage: vi.fn(),
+      disconnect: vi.fn(),
+    }
+
+    const error = readPortDisconnectError(port)
+
+    expect(readLastError).toHaveBeenCalledTimes(1)
+    if (expected === undefined) expect(error).toBeNull()
+    else expect(error?.message).toBe(expected)
+  })
+
   it('uses Firefox Promise APIs and unregisters listeners', async () => {
     const api = rawExtensionApi()
     vi.mocked(api.runtime.sendMessage).mockResolvedValue({ ok: true })
