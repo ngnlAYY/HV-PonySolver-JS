@@ -177,6 +177,213 @@ describe('App', () => {
     expect(panel.addSuccess).toHaveBeenCalledTimes(1)
   })
 
+  it('preserves a manual cancellation when an enabled submit button retries previous automatic answers', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.99)
+    const captcha = appendCaptcha('/retry-selection.png')
+    const answers = Array.from(captcha.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]'))
+    const button = captcha.submitButton
+    button.disabled = true
+    const buttonClick = vi.spyOn(button, 'click')
+    const panel = createPanel()
+    const detector = createDetector()
+    vi.mocked(detector.detect).mockResolvedValue({
+      success: true,
+      ponies: ['TS', 'RA'],
+      confidences: { TS: 0.9, RA: 0.8 },
+      detections: [],
+      candidates: [],
+    })
+    const solver = new CaptchaSolver(
+      panel,
+      detector,
+      { get: async () => new Blob(['captcha']) },
+      new AnswerSubmitter(
+        async () => [0, 0],
+        async () => [100, 100],
+      ),
+      async () => 'auto',
+    )
+    const { app } = createHarness({ panel, detector, solver })
+    apps.push(app)
+    app.init()
+    await settleDom()
+
+    expect(detector.detect).toHaveBeenCalledTimes(1)
+    expect(panel.addError).toHaveBeenCalledWith('提交按钮不可用', expect.any(Number))
+    expect(buttonClick).not.toHaveBeenCalled()
+    expect(answers[1]?.checked).toBe(true)
+
+    button.disabled = false
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(detector.detect).toHaveBeenCalledTimes(2)
+    answers[1]?.click()
+    expect(answers[1]?.checked).toBe(false)
+    await settleDom()
+
+    expect(answers[1]?.checked).toBe(false)
+    expect(buttonClick).toHaveBeenCalledTimes(1)
+    expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+    expect(detector.detect).toHaveBeenCalledTimes(2)
+    expect(buttonClick).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['model preparation', 'image loading', 'inference'] as const)(
+    'preserves a manual cancellation during %s and resets that protection for the next captcha',
+    async (stage) => {
+      vi.spyOn(Math, 'random').mockReturnValue(0.99)
+      const captcha = appendCaptcha('/retry-recognition.png')
+      const answers = Array.from(captcha.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]'))
+      const button = captcha.submitButton
+      button.disabled = true
+      const buttonClick = vi.spyOn(button, 'click')
+      const panel = createPanel()
+      const detector = createDetector()
+      const detection: YoloParseResult = {
+        success: true,
+        ponies: ['TS', 'RA'],
+        confidences: { TS: 0.9, RA: 0.8 },
+        detections: [],
+        candidates: [],
+      }
+      let pauseNextRound = false
+      let releaseStage: (() => void) | undefined
+      const pauseStage = (): Promise<void> =>
+        new Promise((resolve) => {
+          releaseStage = resolve
+        })
+      vi.mocked(detector.prepare).mockImplementation(async () => {
+        if (pauseNextRound && stage === 'model preparation') await pauseStage()
+      })
+      vi.mocked(detector.detect).mockImplementation(async () => {
+        if (pauseNextRound && stage === 'inference') await pauseStage()
+        return detection
+      })
+      const solver = new CaptchaSolver(
+        panel,
+        detector,
+        {
+          get: async () => {
+            if (pauseNextRound && stage === 'image loading') await pauseStage()
+            return new Blob(['captcha'])
+          },
+        },
+        new AnswerSubmitter(
+          async () => [0, 0],
+          async () => [0, 0],
+        ),
+        async () => 'auto',
+      )
+      const { app } = createHarness({ panel, detector, solver })
+      apps.push(app)
+      app.init()
+      await settleDom()
+      expect(panel.addError).toHaveBeenCalledWith('提交按钮不可用', expect.any(Number))
+      expect(answers[1]?.checked).toBe(true)
+      expect(buttonClick).not.toHaveBeenCalled()
+
+      pauseNextRound = true
+      button.disabled = false
+      await settleDom()
+      expect(releaseStage).toBeTypeOf('function')
+      answers[1]?.click()
+      expect(answers[1]?.checked).toBe(false)
+      pauseNextRound = false
+      releaseStage?.()
+      await settleDom()
+
+      expect(answers[1]?.checked).toBe(false)
+      expect(buttonClick).toHaveBeenCalledTimes(1)
+      expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+      expect(detector.detect).toHaveBeenCalledTimes(2)
+
+      captcha.querySelector('img')!.src = '/next-recognition.png'
+      await settleDom()
+      expect(answers[1]?.checked).toBe(true)
+      expect(buttonClick).toHaveBeenCalledTimes(2)
+      expect(detector.detect).toHaveBeenCalledTimes(3)
+    },
+  )
+
+  it.each(['before replacement', 'after replacement'] as const)(
+    'observes a new body whose captcha is inserted %s without repeating a handled target',
+    async (insertion) => {
+      const original = appendCaptcha('/before-body.png')
+      const next = original.cloneNode(true) as HTMLDivElement
+      const nextImage = next.querySelector('img')!
+      nextImage.src = '/after-body.png'
+      const harness = createHarness()
+      apps.push(harness.app)
+      harness.app.init()
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+      const body = document.createElement('body')
+      if (insertion === 'before replacement') body.appendChild(next)
+      document.body.replaceWith(body)
+      await settleDom()
+      if (insertion === 'after replacement') body.appendChild(next)
+      await settleDom()
+
+      expect(harness.trigger).toHaveBeenCalledTimes(2)
+      expect(harness.trigger.mock.calls[1]?.[0]?.master).toBe(next)
+      next.appendChild(document.createElement('span'))
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(2)
+
+      nextImage.src = '/next-body-captcha.png'
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(3)
+    },
+  )
+
+  it('abandons pending work when body is removed and resumes in the replacement body', async () => {
+    appendCaptcha('/old-body.png')
+    const harness = createHarness()
+    let resolvePrepare: (() => void) | undefined
+    vi.mocked(harness.detector.prepare).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolvePrepare = resolve
+      }),
+    )
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+
+    document.body.remove()
+    await settleDom()
+    document.documentElement.appendChild(document.createElement('body'))
+    const next = appendCaptcha('/replacement-body.png')
+    await settleDom()
+    resolvePrepare?.()
+    await settleDom()
+
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+    expect(harness.trigger.mock.calls[0]?.[0]?.master).toBe(next)
+  })
+
+  it('cancels a queued replacement-body scan and ignores further body changes after destroy', async () => {
+    const harness = createHarness()
+    apps.push(harness.app)
+    harness.app.init()
+    document.body.replaceWith(document.createElement('body'))
+    appendCaptcha('/queued-body.png')
+    await Promise.resolve()
+    harness.app.destroy()
+    await settleDom()
+
+    document.body.replaceWith(document.createElement('body'))
+    appendCaptcha('/destroyed-body.png')
+    await settleDom()
+    expect(harness.detector.prepare).not.toHaveBeenCalled()
+    expect(harness.trigger).not.toHaveBeenCalled()
+  })
+
   it.each(['auto', 'manual'] as const)(
     'includes preparation and retries in %s history without counting clock changes or previous targets',
     async (answerMode) => {

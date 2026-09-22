@@ -32,7 +32,7 @@ App
 
 ## 验证码生命周期与取消
 
-[core App](../../packages/browser-core/src/app/app.ts) 观察页面上验证码目标相关的 DOM 变化，使用启动延迟和 MutationObserver 防抖调度扫描。它保存当前、失败和准备中的目标，并在销毁、页面切换、Key 变化时推进取消信号或凭据修订号。
+[core App](../../packages/browser-core/src/app/app.ts) 在稳定的 documentElement 上观察验证码目标相关的 DOM 变化，使用启动延迟和 MutationObserver 防抖调度扫描。整体替换 body 或暂时移除后重新插入，不会丢失新目标通知；面板恢复与识别调度各自维护观察器。它保存当前、失败和准备中的目标，并在销毁、页面切换、Key 变化时推进取消信号或凭据修订号。
 
 一次自动处理的主链路是：
 
@@ -62,7 +62,7 @@ sequenceDiagram
 
 保留答案时，程序自动勾选和用户手动勾选通过 WeakMap 与 change 监听区分；超过上限时只按置信度移除自动项。手动模式只记录识别结果，不自动提交。随机兜底由 [CaptchaSolver](../../packages/browser-core/src/captcha/captcha-solver.ts) 的配置控制，修改时必须同时检查提交测试和 App 级取消测试。
 
-多选等待期间，用户可能先于程序勾选下一项。提交器只为本轮实际点击成功的项或原本带自动标记的项更新置信度，不能因为答案出现在识别候选中就接管手动项。后续同一表单的识别与合并仍须保留这项手动身份。最终提交等待结束后，提交器会重新读取实际选中状态；总数超过 4 时只移除当前仍属自动的低置信度项，直到至多 3 项或已无自动项可移除。用户已取消的答案不会被重新勾选；初始裁剪与最终裁剪都须在每次点击前重查自动归属，避免页面 `change` 回调将下一项转为手动后仍被清除。每次点击后仍须复核目标。控件快照包括类型、有效禁用状态和原生提交控件的实际 action；`fieldset` 的继承禁用状态与 `formaction` 覆写均参与校验。
+多选等待期间，用户可能先于程序勾选下一项。提交器只为本轮实际点击成功的项或原本带自动标记的项更新置信度，不能因为答案出现在识别候选中就接管手动项。后续同一表单的识别与合并仍须保留这项手动身份。每轮在模型准备前捕获每个 checkbox 的手动变更身份，并贯穿图片读取、推理与提交；保留模式下，本轮已手动取消的候选在初始数量裁剪前排除，后续每次自动勾选前再次复核，避免旧自动项在重试时被勾回。下一轮重新捕获身份，关闭保留模式仍由程序接管。最终提交等待结束后，提交器会重新读取实际选中状态；总数超过 4 时只移除当前仍属自动的低置信度项，直到至多 3 项或已无自动项可移除。初始裁剪与最终裁剪都须在每次点击前重查自动归属，避免页面 `change` 回调将下一项转为手动后仍被清除。每次点击后仍须复核目标。控件快照包括类型、有效禁用状态和原生提交控件的实际 action；`fieldset` 的继承禁用状态与 `formaction` 覆写均参与校验。
 
 ## 推理 Worker 与 Runtime profile
 
@@ -83,7 +83,7 @@ sequenceDiagram
 
 [ModelCache](../../packages/browser-core/src/model/model-cache.ts) 编排缓存读取、共享下载、写入和确认；[indexeddb-model-store.ts](../../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务和生命周期；[model-cache-record.ts](../../packages/browser-core/src/model/model-cache-record.ts) 校验记录；[shared-model-downloads.ts](../../packages/browser-core/src/model/shared-model-downloads.ts) 合并同一时刻的网络下载。对带下载确认回执的远程模型，内容与待确认元数据先在同一事务落盘；确认成功并将匹配元数据改为已确认后，后续读取才允许命中。没有确认回执的路径不会额外发送确认请求。关闭或 `versionchange` 必须取消数据库操作和共享下载。
 
-用户脚本模型 Key 走 [model-settings.ts](../../apps/userscript/src/model/model-settings.ts) 与 [sensitiveGmSettingsStorage](../../apps/userscript/src/userscript/gm-storage.ts)。普通设置使用 `gmSettingsStorage`；Key 使用敏感存储，GM API 不可用时拒绝写入页面可读的 localStorage。历史由 [answer-history-store.ts](../../apps/userscript/src/persistence/answer-history-store.ts) 注入 `userscriptHistoryStorage`，按前缀无缓存枚举同源 localStorage，复用核心 HistoryStore 的独立键追加、校验与排序。枚举先取得 key 快照，再跳过已被其他标签删除的值；有效旧根键只读保留，不再用整份 JSON 读改写新增历史。读取最多返回每世界 50 条，独立键在稳定追加后裁剪到 50；并发期间可暂时多存，旧根兼容数据也可能继续保留在底层。
+用户脚本模型 Key 走 [model-settings.ts](../../apps/userscript/src/model/model-settings.ts) 与 [sensitiveGmSettingsStorage](../../apps/userscript/src/userscript/gm-storage.ts)。普通设置使用 `gmSettingsStorage`；Key 使用敏感存储，GM API 不可用时拒绝写入页面可读的 localStorage。菜单仅在 GM 存储实际提交后通知依赖组装层，先取消并等待旧的未完成 prepare，再调用 App 的凭证恢复入口；已就绪会话继续复用。并发提交按修订号取最新，销毁后忽略迟到恢复，取消输入、验证或存储失败不通知。历史由 [answer-history-store.ts](../../apps/userscript/src/persistence/answer-history-store.ts) 注入 `userscriptHistoryStorage`，按前缀无缓存枚举同源 localStorage，复用核心 HistoryStore 的独立键追加、校验与排序。枚举先取得 key 快照，再跳过已被其他标签删除的值；有效旧根键只读保留，不再用整份 JSON 读改写新增历史。读取最多返回每世界 50 条，独立键在稳定追加后裁剪到 50；并发期间可暂时多存，旧根兼容数据也可能继续保留在底层。
 
 缓存策略、`GET /quota`、`POST /quota`、确认时机和 `no-store` 约束请只在[模型缓存专题](../model-cache-strategy.md)维护。不要在平台适配器中复制额度或缓存状态机。
 
@@ -95,7 +95,7 @@ sequenceDiagram
 
 [HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 为新记录分配每世界独立的 `sequence` 正安全整数，取本实例已分配序号与当前可见记录序号的最大值加一。分配发生在异步写入前，失败允许留下序号空洞；重建实例后从已保存记录恢复顺序。独立键历史按序号、时间戳和稳定 key 排序后裁剪；旧记录缺少序号时仍按原时间戳规则读取，非枚举存储的旧数组继续保持原顺序。显示用的 `timestamp`/`time` 不做单调化，也不重写旧数据。尚未互相观察到的并发写可使用同一序号，再按时间戳和 key 确定顺序；之后看到这些写入的新记录会取得更大序号。非法序号按损坏记录处理，安全整数上限耗尽则通过保存失败通道报告，不写入溢出值。
 
-App 每轮在 `prepareTarget()` 前捕获当前页面的 `performance.now()`，经 `SolverService.trigger(target, startedAt)` 传给 Solver。新历史的 `elapsed` 计入准备与重试，自动模式截至原生提交点击，手动模式截至记录结果；开始扫描前的加载、防抖和提交后的网络响应不计入。Solver 独立统计图片获取和识别请求耗时，并在目标仍有效时统一写入“完成 Nms”，供用户脚本与扩展共用。持续时间按整数毫秒记录，历史时刻仍由 `Date.now()` 生成；旧历史不重新计算。修改时应覆盖准备重试、系统校时、新目标重置、取消和 DOM 替换。
+App 每轮在 `prepareTarget()` 前捕获当前页面的 `performance.now()`，与本轮手动变更快照一起经 `SolverService.trigger(target, startedAt, signal, answerSelection)` 传给 Solver。新历史的 `elapsed` 计入准备与重试，自动模式截至原生提交点击，手动模式截至记录结果；开始扫描前的加载、防抖和提交后的网络响应不计入。Solver 独立统计图片获取和识别请求耗时，并在目标仍有效时统一写入“完成 Nms”，供用户脚本与扩展共用。持续时间按整数毫秒记录，历史时刻仍由 `Date.now()` 生成；旧历史不重新计算。修改时应覆盖准备重试、系统校时、新目标重置、取消和 DOM 替换。
 
 用户脚本 [status-panel.ts](../../apps/userscript/src/status-panel/status-panel.ts) 只把 HistoryStore 和 GM 设置存储传给核心。修改面板默认位置、显示条件、紧凑模式或历史上限时，同时检查 [panel-settings.ts](../../packages/browser-core/src/status-panel/panel-settings.ts)、用户脚本对应设置文件、核心/用户脚本面板测试和 README/专题文档。
 

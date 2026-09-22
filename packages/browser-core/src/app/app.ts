@@ -165,7 +165,8 @@ export class App {
         this.scheduleSolve()
       }, MUTATION_SCAN_DEBOUNCE_MS)
     })
-    const target = document.body || document.documentElement
+    // 局部切页可替换整个 body；观察稳定的父节点才能继续发现新验证码。
+    const target = document.documentElement
     if (target) {
       this.observer.observe(target, {
         attributes: true,
@@ -291,6 +292,7 @@ export class App {
       }
       this.solverFailureSuppressionAt = null
       const startedAt = performance.now()
+      const answerSelection = this.solver.captureAnswerSelection?.(target)
       const prepareResult = await this.prepareTarget(target, credentialsRevision, signal)
       if (prepareResult !== 'prepared') {
         const failedTarget =
@@ -307,7 +309,7 @@ export class App {
       this.failedCaptchaTarget = null
       this.transientSuppressionAt = null
       this.solverFailureSuppressionAt = null
-      const result = await this.solver.trigger(target, startedAt, signal)
+      const result = await this.solver.trigger(target, startedAt, signal, answerSelection)
       const currentTarget = this.currentTargetSnapshot(target, signal)
       if (result.handled && currentTarget) {
         this.lastCaptchaTarget = currentTarget

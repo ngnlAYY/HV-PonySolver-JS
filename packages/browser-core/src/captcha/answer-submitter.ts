@@ -7,14 +7,17 @@ import type { DelayRange } from './timing-settings'
 export type SubmitErrorHandler = (message: string) => void
 
 export type AnswerConfidenceMap = Partial<Record<AnswerCode, number>>
+export type AnswerSelectionSnapshot = ReadonlyMap<HTMLInputElement, symbol>
 
 export type SubmitOptions = {
   signal?: AbortSignal
   isCurrent?: () => boolean
   confidences?: AnswerConfidenceMap
+  answerSelection?: AnswerSelectionSnapshot
 }
 
 export interface AnswerSubmissionService {
+  captureManualChanges?(form: HTMLFormElement): AnswerSelectionSnapshot
   submit(
     form: HTMLFormElement,
     ponies: AnswerCode[],
@@ -120,7 +123,7 @@ function selectAutomaticIndices(
 export class AnswerSubmitter implements AnswerSubmissionService {
   private readonly automaticConfidences = new WeakMap<HTMLInputElement, number>()
 
-  private readonly observedCheckboxes = new WeakSet<HTMLInputElement>()
+  private readonly manualChangeTokens = new WeakMap<HTMLInputElement, symbol>()
 
   private programmaticCheckboxClick: HTMLInputElement | null = null
 
@@ -130,16 +133,25 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     private readonly getPreserveCheckedAnswers: PreserveCheckedAnswersProvider = () => true,
   ) {}
 
-  private observeCheckbox(checkbox: HTMLInputElement): void {
-    if (this.observedCheckboxes.has(checkbox)) {
-      return
+  private observeCheckbox(checkbox: HTMLInputElement): symbol {
+    const observedToken = this.manualChangeTokens.get(checkbox)
+    if (observedToken !== undefined) {
+      return observedToken
     }
-    this.observedCheckboxes.add(checkbox)
+    const token = Symbol()
+    this.manualChangeTokens.set(checkbox, token)
     checkbox.addEventListener('change', () => {
       if (this.programmaticCheckboxClick !== checkbox) {
         this.automaticConfidences.delete(checkbox)
+        this.manualChangeTokens.set(checkbox, Symbol())
       }
     })
+    return token
+  }
+
+  /** 快照仅用于本轮；复用相同控件处理新验证码时必须重新捕获。 */
+  captureManualChanges(form: HTMLFormElement): AnswerSelectionSnapshot {
+    return new Map(readControls(form).checkboxes.map((checkbox) => [checkbox, this.observeCheckbox(checkbox)]))
   }
 
   private clickCheckbox(checkbox: HTMLInputElement): void {
@@ -212,8 +224,12 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       onError('答案控件不可用')
       return
     }
-    for (const checkbox of expectedControls.checkboxes) {
-      this.observeCheckbox(checkbox)
+    const initialManualChangeTokens = options?.answerSelection ?? this.captureManualChanges(form)
+    const wasManuallyCleared = (index: number): boolean => {
+      const checkbox = expectedControls.checkboxes[index]
+      return (
+        checkbox?.checked === false && this.manualChangeTokens.get(checkbox) !== initialManualChangeTokens.get(checkbox)
+      )
     }
 
     const currentControls = (): SubmissionControls | null => {
@@ -274,7 +290,7 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     }
     const preserveCheckedAnswers = this.getPreserveCheckedAnswers()
     const automaticIndices = selectAutomaticIndices(
-      indices,
+      preserveCheckedAnswers ? indices.filter((index) => !wasManuallyCleared(index)) : indices,
       manuallyChecked,
       previouslyAutomatic,
       preserveCheckedAnswers,
@@ -325,6 +341,8 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       if (!checkbox) {
         continue
       }
+      // 本轮模型准备、识别或提交等待中的手动撤销优先于旧候选；下一轮重新捕获身份。
+      if (preserveCheckedAnswers && wasManuallyCleared(index)) continue
       const wasChecked = checkbox.checked
       const wasAutomatic = this.automaticConfidences.has(checkbox)
       if (!checkbox.checked) {

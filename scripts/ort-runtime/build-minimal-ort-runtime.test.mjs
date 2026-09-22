@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -71,4 +71,48 @@ test('serializes destructive work and revalidates the dedicated build root', asy
   assert.match(source, /remove_build_paths "\$ARTIFACT_DIR"/u)
   assert.doesNotMatch(source, /rm -rf "\$MODEL_INPUT" "\$MODEL_OUTPUT"/u)
   assert.doesNotMatch(source, /rm -rf "\$ARTIFACT_DIR"/u)
+})
+
+test('rejects an initial cwd below a temporary build root before creating build state', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'ort-build-cwd-entry-'))
+  t.after(() => rm(parent, { recursive: true, force: true }))
+  const root = join(parent, 'hv-pony-ort-work')
+  const cwd = join(root, 'model-output')
+  await mkdir(cwd, { recursive: true })
+  const marker = join(cwd, 'source-must-survive.ts')
+  await writeFile(marker, 'user source')
+
+  const result = spawnSync('bash', [fileURLToPath(scriptUrl)], {
+    cwd,
+    env: { ...process.env, ORT_BUILD_ROOT: root },
+    encoding: 'utf8',
+  })
+  assert.equal(result.status, 1, result.stderr)
+  assert.match(result.stderr, /protected directory/)
+  assert.equal(await readFile(marker, 'utf8'), 'user source')
+  await assert.rejects(access(join(root, '.build.lock')), { code: 'ENOENT' })
+})
+
+test('rejects a build root containing the repository when launched from an unrelated cwd', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'ort-build-repo-entry-'))
+  t.after(() => rm(parent, { recursive: true, force: true }))
+  const root = join(parent, 'hv-pony-ort-work')
+  const repository = join(root, 'js-build', 'project-checkout')
+  const scripts = join(repository, 'scripts', 'ort-runtime')
+  await mkdir(scripts, { recursive: true })
+  for (const file of ['build-minimal-ort-runtime.sh', 'resolve-ort-build-root.mjs']) {
+    await copyFile(join(import.meta.dirname, file), join(scripts, file))
+  }
+  const marker = join(repository, 'source-must-survive.ts')
+  await writeFile(marker, 'user source')
+
+  const result = spawnSync('bash', [join(scripts, 'build-minimal-ort-runtime.sh')], {
+    cwd: parent,
+    env: { ...process.env, ORT_BUILD_ROOT: root },
+    encoding: 'utf8',
+  })
+  assert.equal(result.status, 1, result.stderr)
+  assert.match(result.stderr, /protected directory/)
+  assert.equal(await readFile(marker, 'utf8'), 'user source')
+  await assert.rejects(access(join(root, '.build.lock')), { code: 'ENOENT' })
 })

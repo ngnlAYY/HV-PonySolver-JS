@@ -209,6 +209,48 @@ describe('CaptchaSolver', () => {
     expect(panel.addSuccess).toHaveBeenCalledTimes(1)
   })
 
+  it.each([true, false])(
+    'captures manual changes before standalone recognition with preservation %s',
+    async (preserve) => {
+      const form = appendSubmittableCaptcha()
+      const answer = form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')[1]!
+      answer.checked = true
+      const submit = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      const submitClick = vi.spyOn(submit, 'click')
+      const detector = createDetector(
+        vi.fn(async () => {
+          answer.click()
+          return {
+            success: true,
+            ponies: ['TS', 'RA'],
+            confidences: { TS: 0.9, RA: 0.8 },
+            detections: [],
+            candidates: [],
+          }
+        }),
+      )
+      const panel = createPanel()
+      const solver = new CaptchaSolver(
+        panel,
+        detector,
+        { get: async () => new Blob(['captcha']) },
+        new AnswerSubmitter(
+          async () => [0, 0],
+          async () => [0, 0],
+          () => preserve,
+        ),
+        async () => 'auto',
+      )
+
+      const result = await solver.trigger()
+
+      expect(result.handled).toBe(true)
+      expect(answer.checked).toBe(!preserve)
+      expect(submitClick).toHaveBeenCalledTimes(1)
+      expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+    },
+  )
+
   it('records detected ponies without submitting in manual mode', async () => {
     appendCaptcha()
     const detector = createDetector(

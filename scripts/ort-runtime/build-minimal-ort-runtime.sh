@@ -4,9 +4,11 @@ set -euo pipefail
 ORT_TAG=v1.27.0
 ORT_COMMIT=8f0278c77bf44b0cc83c098c6c722b92a36ac4b5
 PIP_VERSION=26.1.1
-ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
+# 构建稍后会进入 ORT 源码目录，清理保护仍以启动时的工作目录为准。
+INITIAL_CWD="$(pwd -P)"
+ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)"
 PYTHON_REQUIREMENTS="$ROOT_DIR/scripts/ort-runtime/requirements.txt"
-BUILD_ROOT="$(node "$ROOT_DIR/scripts/ort-runtime/resolve-ort-build-root.mjs" "${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}")"
+BUILD_ROOT="$(node "$ROOT_DIR/scripts/ort-runtime/resolve-ort-build-root.mjs" "${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}" --initial-cwd "$INITIAL_CWD")"
 ORT_SOURCE="$BUILD_ROOT/onnxruntime"
 MODEL_INPUT="$BUILD_ROOT/model-input"
 MODEL_OUTPUT="$BUILD_ROOT/model-output"
@@ -19,7 +21,7 @@ BUILD_ROOT_ID=
 
 assert_build_root_identity() {
   local current_root current_id
-  current_root="$(node "$ROOT_DIR/scripts/ort-runtime/resolve-ort-build-root.mjs" "$BUILD_ROOT")" || return 1
+  current_root="$(node "$ROOT_DIR/scripts/ort-runtime/resolve-ort-build-root.mjs" "$BUILD_ROOT" --initial-cwd "$INITIAL_CWD")" || return 1
   current_id="$(stat -Lc '%d:%i' -- "$BUILD_ROOT")" || return 1
   if [[ "$current_root" != "$BUILD_ROOT" || "$current_id" != "$BUILD_ROOT_ID" ]]; then
     printf 'Refusing to mutate replaced ORT build root: %s\n' "$BUILD_ROOT" >&2
@@ -36,6 +38,8 @@ remove_build_paths() {
       return 1
     fi
   done
+  node "$ROOT_DIR/scripts/ort-runtime/resolve-ort-build-root.mjs" "$BUILD_ROOT" \
+    --initial-cwd "$INITIAL_CWD" --check-removal "$@" || return 1
   rm -rf -- "$@"
 }
 
@@ -55,7 +59,7 @@ if ! command -v flock >/dev/null 2>&1; then
   exit 1
 fi
 mkdir -p -- "$BUILD_ROOT"
-created_build_root="$(node "$ROOT_DIR/scripts/ort-runtime/resolve-ort-build-root.mjs" "$BUILD_ROOT")"
+created_build_root="$(node "$ROOT_DIR/scripts/ort-runtime/resolve-ort-build-root.mjs" "$BUILD_ROOT" --initial-cwd "$INITIAL_CWD")"
 if [[ "$created_build_root" != "$BUILD_ROOT" ]]; then
   printf 'Refusing replaced ORT build root: expected=%s actual=%s\n' "$BUILD_ROOT" "$created_build_root" >&2
   exit 1

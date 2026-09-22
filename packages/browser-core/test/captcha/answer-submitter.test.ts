@@ -558,6 +558,62 @@ describe('AnswerSubmitter', () => {
       }
     })
 
+    it.each([true, false])(
+      'respects a manual cancellation during a multi-click delay with preservation %s',
+      async (preserve) => {
+        const form = createForm(true)
+        const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+        for (const checkbox of checkboxes) checkbox.checked = false
+        const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+        button.click = vi.fn()
+        const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99)
+        try {
+          const submission = createSubmitter([0, 0], [100, 100], preserve).submit(form, ['TS', 'RA'], vi.fn(), vi.fn())
+          await flushMicrotasks()
+          expect(checkboxes[0]?.checked).toBe(true)
+          checkboxes[1]?.click()
+          checkboxes[1]?.click()
+          expect(checkboxes[1]?.checked).toBe(false)
+          await vi.runAllTimersAsync()
+          await submission
+
+          expect(checkboxes[1]?.checked).toBe(!preserve)
+          expect(button.click).toHaveBeenCalledTimes(1)
+        } finally {
+          randomSpy.mockRestore()
+        }
+      },
+    )
+
+    it('excludes answers cancelled while timing loads before choosing which automatic answers to trim', async () => {
+      const form = createForm(true)
+      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+      for (const checkbox of checkboxes) checkbox.checked = false
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+      button.click = vi.fn()
+      let resolveDelay: ((range: readonly [number, number]) => void) | undefined
+      const submitter = new AnswerSubmitter(
+        () =>
+          new Promise((resolve) => {
+            resolveDelay = resolve
+          }),
+        async () => [0, 0],
+      )
+      const submission = submitter.submit(form, ['TS', 'RA', 'FS'], vi.fn(), vi.fn(), {
+        confidences: { TS: 0.1, RA: 0.9, FS: 0.8 },
+      })
+      checkboxes[1]?.click()
+      checkboxes[1]?.click()
+      checkboxes[3]?.click()
+      checkboxes[4]?.click()
+      resolveDelay?.([0, 0])
+      await vi.runAllTimersAsync()
+      await submission
+
+      expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual([true, false, true, true, true, false])
+      expect(button.click).toHaveBeenCalledTimes(1)
+    })
+
     it.each(['final delay', 'multi-click delay'] as const)(
       'trims live automatic answers after manual additions during the %s',
       async (stage) => {

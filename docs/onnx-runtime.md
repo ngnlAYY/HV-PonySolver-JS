@@ -139,7 +139,7 @@ apps/userscript/src/inference/onnx-runtime-assets.ts
 pnpm build:onnx-runtime
 ```
 
-脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`，并把内容寻址 WASM 复制到 `${ORT_RUNTIME_OUTPUT_DIR:-other}`。`ORT_BUILD_ROOT` 会先解析现存祖先目录和符号链接，规范化后的最终目录名必须匹配 `hv-pony-ort-*`，且不得指向文件系统根目录或用户主目录；清理旧构建前会先执行这项门禁并复核目录身份。上游 checkout 必须在开始时完全干净；JS 依赖安装、临时 `build.ts` 补丁和 bundle 生成都发生在 `${ORT_BUILD_ROOT}/js-build` 的一次性副本中，退出或中断后由下一次运行安全重建，并再次验证上游 checkout。专用构建根可复用，但同一时刻只允许一个构建进程持有互斥锁；并发启动会立即失败，未知 untracked 或 tracked 改动仍会阻断：
+脚本从固定 ONNX Runtime 提交和 emsdk 版本构建只包含所需算子的 SIMD 运行时。完整中间产物写入 `${ORT_BUILD_ROOT:-$HOME/.cache/hv-pony-ort-v1.27.0}/artifacts`，并把内容寻址 WASM 复制到 `${ORT_RUNTIME_OUTPUT_DIR:-other}`。`ORT_BUILD_ROOT` 会先解析现存祖先目录和符号链接，规范化后的最终目录名必须匹配 `hv-pony-ort-*`，并拒绝文件系统根目录、仓库内目录，以及等于或包含仓库、启动时 cwd、home 的目录。初始 cwd 在构建开始时固定，后续进入 ORT 源码目录不会改变保护对象。每次递归清理前还会复核构建根身份与各个目标的规范化路径，确认它们位于专用根内且不覆盖受保护目录。上游 checkout 必须在开始时完全干净；JS 依赖安装、临时 `build.ts` 补丁和 bundle 生成都发生在 `${ORT_BUILD_ROOT}/js-build` 的一次性副本中，退出或中断后由下一次运行安全重建，并再次验证上游 checkout。专用构建根可复用，但同一时刻只允许一个构建进程持有互斥锁；并发启动会立即失败，未知 untracked 或 tracked 改动仍会阻断：
 
 ```text
 other/ort-wasm-simd-<sha256>.wasm

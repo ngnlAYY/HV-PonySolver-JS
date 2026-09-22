@@ -21,7 +21,8 @@ const runtimeGlueSource = path.join(
   'ort.wasm.bundle.min.mjs',
 )
 const runtimeGlueSha256 = 'a63d4f08e70220c0f721fabfd4e4b958aa127334a19038b2732d07e919f32554'
-const deterministicZipTimestamp = new Date('1980-01-01T00:00:00.000Z')
+// fflate 按本地日历字段编码 ZIP 时间；固定这些字段可避免时区影响归档字节或越过 1980 年下限。
+const deterministicZipTimestamp = new Date(1980, 0, 1, 0, 0, 0)
 const dynamicRuntimeImport = 'import(/*webpackIgnore:true*/ /*@vite-ignore*/t)'
 const disabledDynamicRuntimeImport =
   'Promise.reject(new Error("Dynamic ONNX runtime modules are disabled in the extension build"))'

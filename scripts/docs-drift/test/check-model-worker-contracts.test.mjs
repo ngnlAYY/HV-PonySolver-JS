@@ -17,6 +17,66 @@ test('current repository README is in sync with source facts through the CLI', a
   assert.match(result.stdout, /Docs drift check passed/)
 })
 
+for (const [label, mutate, errorPattern] of [
+  ['missing remote flag', (source) => source.replace(/ {2}--remote \\\n/u, ''), /R2 upload command.*--remote/u],
+  [
+    'local override',
+    (source) => source.replace('  --remote \\', '  --remote --local \\'),
+    /R2 upload command.*--remote/u,
+  ],
+  [
+    'remote disabled',
+    (source) => source.replace('  --remote \\', '  --remote=false \\'),
+    /R2 upload command.*--remote/u,
+  ],
+  ...['--remote false', '--remote --no-remote', '--remote --', '--remote --remote=false'].map((replacement) => [
+    replacement,
+    (source) => source.replace('  --remote \\', `  ${replacement} \\`),
+    /R2 upload command.*--remote/u,
+  ]),
+  [
+    'wrong execution directory',
+    (source) => source.replace('--file "../../other/', '--file "other/'),
+    /R2 upload --file.*apps\/model-worker/u,
+  ],
+  [
+    'wrong asset',
+    (source) => source.replace('--file "../../other/ort-wasm-simd-', '--file "../../other/stale-'),
+    /R2 upload --file.*matching asset/u,
+  ],
+]) {
+  test(`rejects R2 upload example with ${label} even when surrounding prose is correct`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const opsDocPath = join(fixtureRoot, 'docs/model-worker-ops.md')
+      const document = await readFile(opsDocPath, 'utf8')
+      const changed = mutate(document)
+      assert.notEqual(changed, document)
+      await writeFile(opsDocPath, changed)
+
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      assert.match(result.stderr, errorPattern)
+    })
+  })
+}
+
+test('requires the R2 upload example itself, not only its explanatory prose', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const opsDocPath = join(fixtureRoot, 'docs/model-worker-ops.md')
+    const document = await readFile(opsDocPath, 'utf8')
+    const changed = document.replace(
+      /```bash\npnpm --filter @hv-pony-solver\/model-worker exec wrangler r2 object put[^]*?```/u,
+      '',
+    )
+    assert.notEqual(changed, document)
+    await writeFile(opsDocPath, changed)
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /must provide a remote R2 upload command/u)
+  })
+})
+
 test('fails clearly when Model Worker ops docs omit the secretless dry-run skip contract', async () => {
   await withFixture(async (fixtureRoot) => {
     const opsDocPath = join(fixtureRoot, 'docs/model-worker-ops.md')

@@ -6,7 +6,7 @@ import { sleep } from '../utils/delay'
 import { formatErrorMessage } from '../utils/errors'
 import { logError } from '../utils/logger'
 import type { AnswerMode } from './answer-mode-settings'
-import type { AnswerSubmissionService, SubmitOptions } from './answer-submitter'
+import type { AnswerSelectionSnapshot, AnswerSubmissionService, SubmitOptions } from './answer-submitter'
 import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from './captcha-target'
 import type { ImageLoader } from './captcha-types'
 import { solverConfig } from './solver-config'
@@ -71,21 +71,32 @@ export class CaptchaSolver {
     return this.busy
   }
 
+  captureAnswerSelection(target: CaptchaTarget): AnswerSelectionSnapshot | undefined {
+    return this.answerSubmitter.captureManualChanges?.(target.form)
+  }
+
   trigger(
     target: CaptchaTarget | null = findCaptchaTarget(),
     startedAt = performance.now(),
     signal: AbortSignal | undefined = this.getAbortSignal?.(),
+    answerSelection?: AnswerSelectionSnapshot,
   ): Promise<SolveResult> {
     if (this.busy) {
       return Promise.resolve({ handled: false, captchaKey: null })
     }
     this.busy = true
-    return this.solve(target, startedAt, signal).finally(() => {
+    return this.solve(target, startedAt, signal, answerSelection).finally(() => {
       this.busy = false
     })
   }
 
-  private async solve(target: CaptchaTarget | null, startedAt: number, signal?: AbortSignal): Promise<SolveResult> {
+  private async solve(
+    target: CaptchaTarget | null,
+    startedAt: number,
+    signal?: AbortSignal,
+    answerSelection?: AnswerSelectionSnapshot,
+  ): Promise<SolveResult> {
+    const selectionSnapshot = answerSelection ?? (target ? this.captureAnswerSelection(target) : undefined)
     const elapsed = (): number => Math.round(performance.now() - startedAt)
     let captchaKey: string | null = null
     const result = (handled: boolean): SolveResult => ({ handled, captchaKey })
@@ -104,6 +115,7 @@ export class CaptchaSolver {
       ...(signal ? { signal } : {}),
       isCurrent,
       ...(confidences ? { confidences } : {}),
+      ...(selectionSnapshot ? { answerSelection: selectionSnapshot } : {}),
     })
 
     if (signal?.aborted) {

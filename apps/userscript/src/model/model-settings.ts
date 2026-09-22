@@ -11,6 +11,7 @@ import { alertUser, promptUser } from '../userscript/gm-bridge'
 import { sensitiveGmSettingsStorage } from '../userscript/gm-storage'
 
 export type VerifyModelAccessKey = (candidateKey: string) => Promise<void>
+export type ModelAccessKeyCommitted = () => void | Promise<void>
 
 // The model access key is a credential: it is stored only through GM storage,
 // never through the page-readable localStorage fallback.
@@ -20,12 +21,14 @@ export function getModelAccessKey(): Promise<string> {
   return getCoreModelAccessKey(modelAccessKeyStorage)
 }
 
-export function setModelAccessKey(value: string): Promise<void> {
-  return setCoreModelAccessKey(modelAccessKeyStorage, value)
+export async function setModelAccessKey(value: string, onCommitted?: ModelAccessKeyCommitted): Promise<void> {
+  await setCoreModelAccessKey(modelAccessKeyStorage, value)
+  await onCommitted?.()
 }
 
-export function clearModelAccessKey(): Promise<void> {
-  return clearCoreModelAccessKey(modelAccessKeyStorage)
+export async function clearModelAccessKey(onCommitted?: ModelAccessKeyCommitted): Promise<void> {
+  await clearCoreModelAccessKey(modelAccessKeyStorage)
+  await onCommitted?.()
 }
 
 export async function querySavedModelDownloadQuota(): Promise<void> {
@@ -37,19 +40,22 @@ export async function querySavedModelDownloadQuota(): Promise<void> {
   alertUser(`本月模型下载额度：已用 ${quota.used}/${quota.limit} 次，剩余 ${quota.remaining ?? 0} 次`)
 }
 
-export async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKey): Promise<void> {
+export async function setModelAccessKeyFromPrompt(
+  onVerify?: VerifyModelAccessKey,
+  onCommitted?: ModelAccessKeyCommitted,
+): Promise<void> {
   const input = promptUser('请输入模型下载 Key（已设置时不会回填原值；留空会清除）', '')
   if (input === null) {
     return
   }
   const accessKey = input.trim()
   if (!accessKey) {
-    await clearModelAccessKey()
+    await clearModelAccessKey(onCommitted)
     alertUser('模型下载 Key 已清除')
     return
   }
   if (!onVerify) {
-    await setModelAccessKey(accessKey)
+    await setModelAccessKey(accessKey, onCommitted)
     alertUser('模型下载 Key 已保存')
     return
   }
@@ -58,18 +64,18 @@ export async function setModelAccessKeyFromPrompt(onVerify?: VerifyModelAccessKe
     await onVerify(accessKey)
   } catch (error) {
     if (error instanceof ModelDownloadQuotaExceededError) {
-      await setModelAccessKey(accessKey)
+      await setModelAccessKey(accessKey, onCommitted)
       alertUser(error.message)
       return
     }
     alertUser(`模型下载 Key 验证失败: ${formatErrorMessage(error)}`)
     return
   }
-  await setModelAccessKey(accessKey)
-  alertUser('模型下载和校验成功，Key 可用')
+  await setModelAccessKey(accessKey, onCommitted)
+  alertUser('模型下载 Key 已验证并保存')
 }
 
-export async function clearSavedModelAccessKey(): Promise<void> {
-  await clearModelAccessKey()
+export async function clearSavedModelAccessKey(onCommitted?: ModelAccessKeyCommitted): Promise<void> {
+  await clearModelAccessKey(onCommitted)
   alertUser('模型下载 Key 已清除')
 }

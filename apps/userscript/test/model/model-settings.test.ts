@@ -105,6 +105,24 @@ describe('model settings', () => {
     expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
   })
 
+  it('reports verification and storage completion without claiming a model download', async () => {
+    const alert = vi.fn()
+    const setValue = vi.fn(async () => undefined)
+    const onCommitted = vi.fn(async () => undefined)
+    const verify = vi.fn(async () => undefined)
+    vi.stubGlobal('prompt', () => VALID_TOKEN)
+    vi.stubGlobal('alert', alert)
+    vi.stubGlobal('GM_setValue', setValue)
+    const { setModelAccessKeyFromPrompt } = await import('../../src/model/model-settings')
+
+    await setModelAccessKeyFromPrompt(verify, onCommitted)
+
+    expect(verify).toHaveBeenCalledWith(VALID_TOKEN)
+    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN_LOWER)
+    expect(onCommitted).toHaveBeenCalledExactlyOnceWith()
+    expect(alert).toHaveBeenLastCalledWith('模型下载 Key 已验证并保存')
+  })
+
   it('uses GM storage when available', async () => {
     const getValue = vi.fn(async () => 'gm-key')
     const setValue = vi.fn(async () => undefined)

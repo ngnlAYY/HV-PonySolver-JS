@@ -4,6 +4,7 @@ import {
   clearSavedModelAccessKey,
   querySavedModelDownloadQuota,
   setModelAccessKeyFromPrompt,
+  type ModelAccessKeyCommitted,
   type VerifyModelAccessKey,
 } from '../model/model-settings'
 import {
@@ -19,6 +20,7 @@ import { promptUser, registerGmMenu, runMenuAction } from './gm-bridge'
 
 export type SettingsMenuOptions = Readonly<{
   onVerifyModelAccessKey?: VerifyModelAccessKey
+  onModelAccessKeyCommitted?: ModelAccessKeyCommitted
 }>
 
 type SettingsAction = Readonly<{
@@ -36,9 +38,13 @@ async function chooseSettingsAction(options: SettingsMenuOptions): Promise<void>
     {
       label: '设置模型下载 Key',
       errorPrefix: '模型下载 Key 设置失败',
-      run: () => setModelAccessKeyFromPrompt(options.onVerifyModelAccessKey),
+      run: () => setModelAccessKeyFromPrompt(options.onVerifyModelAccessKey, options.onModelAccessKeyCommitted),
     },
-    { label: '清除模型下载 Key', errorPrefix: '模型下载 Key 设置失败', run: clearSavedModelAccessKey },
+    {
+      label: '清除模型下载 Key',
+      errorPrefix: '模型下载 Key 设置失败',
+      run: () => clearSavedModelAccessKey(options.onModelAccessKeyCommitted),
+    },
     { label: '设置答题模式', errorPrefix: '答题模式设置失败', run: setAnswerModeFromPrompt },
     { label: '设置答题记录显示条数', errorPrefix: '答题记录显示条数设置失败', run: setPanelHistoryLimitFromPrompt },
     { label: '设置提交前等待时间', errorPrefix: '提交前等待时间设置失败', run: setSubmitDelayRangeFromPrompt },

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { TextDecoder } from 'node:util'
+import { promisify, TextDecoder } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
@@ -27,6 +28,7 @@ const extensionRoot = path.resolve(scriptDirectory, '../..')
 const repositoryRoot = path.resolve(extensionRoot, '../..')
 const extensionPackage = JSON.parse(await readFile(path.join(extensionRoot, 'package.json'), 'utf8'))
 const extensionVersion = extensionPackage.version
+const execFileAsync = promisify(execFile)
 const modelFilename = 'yolo26n-640.ort'
 const contentHosts = ['https://hentaiverse.org/*', 'https://alt.hentaiverse.org/*']
 const remoteCsp =
@@ -40,6 +42,39 @@ test('derives the packaged runtime WASM identity from the shared contract', asyn
   assert.match(source, /ORT_RUNTIME_WASM_INTEGRITY/u)
   assert.doesNotMatch(source, /const runtimeWasmFilename = ['"]/u)
   assert.doesNotMatch(source, /const runtimeWasmSha256 = ['"]/u)
+})
+
+test('creates byte-identical archives across positive and negative time zones', async (context) => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-archive-timezone-'))
+  context.after(() => rm(temporaryRoot, { recursive: true, force: true }))
+  const source = `
+    import { Buffer } from 'node:buffer'
+    import { createArchive } from ${JSON.stringify(new globalThis.URL('./archive.mjs', import.meta.url).href)}
+    const directory = process.argv[1]
+    const archive = await createArchive(directory, directory, 'chromium', 'remote', false, [
+      { relativePath: 'background/background.js', bytes: Buffer.from('globalThis.archiveFixture = true') },
+    ])
+    process.stdout.write(JSON.stringify(archive))
+  `
+  const timeZones = ['UTC', 'Asia/Shanghai', 'America/New_York', 'Pacific/Honolulu']
+  const archives = await Promise.all(
+    timeZones.map(async (timeZone, index) => {
+      const directory = path.join(temporaryRoot, String(index))
+      await mkdir(directory)
+      await writeFile(path.join(directory, 'build-manifest.json'), '{}\n')
+      const { stdout } = await execFileAsync(process.execPath, ['--input-type=module', '--eval', source, directory], {
+        env: { ...process.env, TZ: timeZone },
+        timeout: 10_000,
+      })
+      const archive = JSON.parse(stdout)
+      const bytes = await readFile(path.join(directory, archive.archiveName))
+      assert.equal(archive.sha256, sha256(bytes))
+      return { archive, bytes }
+    }),
+  )
+  for (let index = 1; index < archives.length; index += 1) {
+    assert.deepEqual(archives[index], archives[0], `Archive changed under ${timeZones[index]}`)
+  }
 })
 
 function sha256(bytes) {

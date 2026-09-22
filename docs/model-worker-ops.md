@@ -62,13 +62,16 @@ pnpm --filter @hv-pony-solver/model-worker exec node scripts/validate-wrangler-c
 | 新版真实 ORT  | `real/yolo26n-640.ort`                                                                        | 否       |
 | 精简 WASM     | `runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm` | 是       |
 
-上传精简 WASM 的示例：
+在仓库根目录上传精简 WASM 的示例。该命令会写入远程 R2，需要已有 Cloudflare 身份与明确的上传授权：
 
 ```bash
 pnpm --filter @hv-pony-solver/model-worker exec wrangler r2 object put \
   "<bucket-name>/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm" \
-  --file "other/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm"
+  --remote \
+  --file "../../other/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da2aaa.wasm"
 ```
+
+`pnpm --filter @hv-pony-solver/model-worker exec` 在 `apps/model-worker` 执行，因此本地文件路径从该目录解析。`--remote` 必须显式保留；省略它会使用本地 R2，不能更新线上资产。
 
 Worker 总是检查 R2 对象的精确长度。Cloudflare R2 只有在上传时记录了 SHA-256 才会通过对象元数据暴露该值；为兼容既有对象，缺少该元数据不会单独拒绝响应，但只要存在就必须匹配共享清单。客户端仍会对实际下载字节执行精确长度和 SHA-256 校验，因此上传新对象时应保留 SHA-256 元数据，并在发布前用 canonical 文件复核实际内容。
 

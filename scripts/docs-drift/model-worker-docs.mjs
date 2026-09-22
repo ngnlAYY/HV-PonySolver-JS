@@ -145,9 +145,42 @@ function checkModelWorkerOpsDocs(opsDoc, readme, deploymentWorkflowSource) {
   if (/^MODEL_WORKER_PROBE_ID=<[^>\n]+>\s*\\?$/mu.test(opsDoc)) {
     errors.push('docs/model-worker-ops.md MODEL_WORKER_PROBE_ID example must be directly executable')
   }
+  checkR2UploadDocs(errors, opsDoc)
   checkSecretGateDocs(errors, opsDoc, 'docs/model-worker-ops.md', true)
   checkSecretGateDocs(errors, readme, 'docs/development/releases.md', false)
   return errors
+}
+
+function checkR2UploadDocs(errors, document) {
+  // 只检查可复制的 shell 命令；旁边的说明不能掩盖上传命令遗漏参数。
+  const uploads = [...document.matchAll(/^```(?:bash|sh|shell|zsh)\r?\n([\s\S]*?)^```\s*$/gmu)]
+    .flatMap((match) => match[1].replace(/\\\r?\n/gu, ' ').split(/\r?\n/u))
+    .map((line) => line.trim())
+    .filter((line) =>
+      /^(?:mise exec -- )?pnpm --filter @hv-pony-solver\/model-worker exec wrangler r2 object put\s/u.test(line),
+    )
+  if (uploads.length === 0) {
+    errors.push('docs/model-worker-ops.md must provide a remote R2 upload command')
+  }
+  for (const command of uploads) {
+    // 维护的是这一条固定上传示例，不解析任意 shell；拒绝额外参数覆盖远程模式或截断 --file。
+    const argumentsSource = command.split(/\s+#/u)[0].trim()
+    const upload =
+      /^(?:mise exec -- )?pnpm --filter @hv-pony-solver\/model-worker exec wrangler r2 object put\s+"<bucket-name>\/runtime\/(?<filename>ort-wasm-simd-[a-f0-9]{64}\.wasm)"\s+--remote\s+--file\s+"(?<path>[^"\n]+)"$/u.exec(
+        argumentsSource,
+      )?.groups
+    if (!upload) {
+      errors.push(
+        'docs/model-worker-ops.md R2 upload command must use the documented object, --remote and --file without overrides',
+      )
+      continue
+    }
+    if (upload.path !== `../../other/${upload.filename}`) {
+      errors.push(
+        'docs/model-worker-ops.md R2 upload --file must resolve the matching asset from apps/model-worker using ../../other/',
+      )
+    }
+  }
 }
 
 function checkModelCacheStrategyDocs(cacheDoc, facts) {

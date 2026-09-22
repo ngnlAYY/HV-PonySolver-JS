@@ -70,7 +70,7 @@ describe('settings menu', () => {
     expect(prompt).toHaveBeenNthCalledWith(2, '请输入模型下载 Key（已设置时不会回填原值；留空会清除）', '')
     expect(verify).toHaveBeenCalledWith(VALID_KEY_UPPER)
     expect(setValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey', VALID_KEY)
-    expect(alert).toHaveBeenCalledWith('模型下载和校验成功，Key 可用')
+    expect(alert).toHaveBeenCalledWith('模型下载 Key 已验证并保存')
   })
 
   it('keeps the saved model key when top-level settings verification fails', async () => {

@@ -37,6 +37,8 @@
 
 漂移检查包含结构提取和部分关键词检查，不等同全文语义证明。新增契约先写会拒绝实际漂移的回归，再扩展对应事实提取器；不要删除断言或把所有正文拼接来解决失败。
 
+运维中的 R2 上传示例另校验可复制命令本身：必须显式选择远程 R2，并按 `apps/model-worker` 的执行目录定位 `../../other/` 中的对应资产。周围说明不能补足命令缺失的 `--remote` 或错误的文件路径，也不允许额外参数覆盖远程选择。
+
 ## 按修改类型同步
 
 | 修改                   | 同步范围                                                     |
@@ -90,6 +92,8 @@ rg --hidden --glob '!docs/decisions/archived/**' '机制名或关键词' docs/de
 ```
 
 笔记结构和状态由[笔记校验入口](../../scripts/docs-drift/verify-notes.mjs)检查；取舍是否真实、理由是否充分和代价是否明确仍需审阅。归档时在 `Status: implemented` 后紧邻写入 `Archived: YYYY-MM-DD`，移动到 archived 的对应类别，再运行 `AGENT_NOTE_ROOT=docs/decisions mise exec -- node scripts/docs-drift/notes/verify-archived-agent-notes.ts --write` 追加封印。只允许新增封印，不能改写既有项。CI guardrails 使用完整 Git 历史，PR 比较 base SHA、push 比较 before SHA，不能使用本次 HEAD 冒充变更前状态；本地与无前后版本对的手动校验使用 HEAD。
+
+归档根、各级目录、Markdown 与 `manifest.json` 必须为实际目录或普通文件，拒绝符号链接。清单严格校验版本、归档内相对 Markdown 路径及 SHA-256 格式；每条封印独立读取并重算哈希，不能仅凭路径存在或扫描器发现来认定有效。缺失归档目录保持可选，但已有清单或路径异常时，`--write` 也必须失败且不能改写清单。
 
 ## 链接、示例与证据
 
