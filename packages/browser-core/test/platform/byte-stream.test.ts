@@ -45,6 +45,58 @@ describe('bounded byte streams', () => {
     expect(Array.from(new Uint8Array(result))).toEqual([1, 2, 3])
   })
 
+  it('copies unknown-size chunks as they arrive instead of retaining source buffers', async () => {
+    const chunk = new Uint8Array(1)
+    let value = 0
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (value === 3) {
+            controller.close()
+            return
+          }
+          chunk[0] = ++value
+          controller.enqueue(chunk)
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const result = await readBoundedByteStream(body, { expectedByteLength: null, maxByteLength: 3, sizeError })
+    expect(Array.from(new Uint8Array(result))).toEqual([1, 2, 3])
+  })
+
+  it('bounds unknown-size allocations and ignores empty chunks', async () => {
+    let value = 0
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (value === 100_000) {
+            controller.close()
+            return
+          }
+          controller.enqueue(new Uint8Array(value++ % 2 === 0 ? [] : [1]))
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const OriginalUint8Array = Uint8Array
+    const allocations: number[] = []
+    vi.stubGlobal(
+      'Uint8Array',
+      new Proxy(OriginalUint8Array, {
+        construct(target, args) {
+          if (typeof args[0] === 'number') allocations.push(args[0])
+          return Reflect.construct(target, args)
+        },
+      }),
+    )
+    const result = await readBoundedByteStream(body, { expectedByteLength: null, maxByteLength: 50_000, sizeError })
+    expect(result.byteLength).toBe(50_000)
+    expect(new OriginalUint8Array(result).every((byte) => byte === 1)).toBe(true)
+    expect(allocations.length).toBeLessThan(4)
+    expect(allocations.every((length) => length <= 50_000)).toBe(true)
+  })
+
   it.each([
     { expectedByteLength: 3, maxByteLength: 4, chunks: [[1, 2]], error: 'size 2/3' },
     { expectedByteLength: 3, maxByteLength: 4, chunks: [[1, 2, 3, 4]], error: 'size 4/3' },

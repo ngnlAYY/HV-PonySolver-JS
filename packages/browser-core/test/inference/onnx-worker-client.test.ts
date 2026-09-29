@@ -42,6 +42,34 @@ describe('OnnxWorkerClient', () => {
     vi.unstubAllGlobals()
   })
 
+  it.each(['prepare', 'detect'] as const)(
+    'measures %s with a monotonic clock despite wall-clock rollback',
+    async (phase) => {
+      stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+      const modelCache: ModelRepository = {
+        getCached: vi.fn(async () => new ArrayBuffer(8)),
+        download: vi.fn(),
+        putCached: vi.fn(),
+      }
+      const panel = createMockPanel()
+      const client = new OnnxWorkerClient(modelCache, panel)
+      try {
+        if (phase === 'detect') await client.prepare()
+        vi.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValue(500)
+        vi.spyOn(performance, 'now').mockReturnValueOnce(100).mockReturnValue(125.4)
+        if (phase === 'detect') {
+          await client.detect(new Blob(['image']))
+          expect(panel.setStatus).toHaveBeenCalledWith({ inference: '完成 25ms' })
+        } else {
+          await client.prepare()
+          expect(panel.setSessionReady).toHaveBeenCalledWith(25)
+        }
+      } finally {
+        client.destroy()
+      }
+    },
+  )
+
   it('preserves permanent Worker failures through repeated explicit preparation', async () => {
     class IntegrityFailureWorker {
       onmessage: ((event: MessageEvent) => void) | null = null

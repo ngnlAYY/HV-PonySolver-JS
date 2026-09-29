@@ -11,7 +11,6 @@ import {
   runtimeId,
   storageSet,
   type ExtensionPort,
-  type ExtensionSender,
 } from '../platform/webextension'
 import { MODEL_CREDENTIALS_REVISION_KEY, nextModelCredentialsRevision } from '../protocol/model-credentials-revision'
 import { DETECT_DEADLINE_CONFIG } from '../protocol/deadlines'
@@ -55,32 +54,27 @@ export const BROKER_DOWNLOAD_MODEL_TIMEOUT_MS = prepareDeadlineConfig.brokerTime
 export const BROKER_QUERY_MODEL_QUOTA_TIMEOUT_MS = prepareDeadlineConfig.brokerTimeoutMs
 export const BROKER_DEFAULT_TIMEOUT_MS = 105_000
 
-function senderUrl(sender: ExtensionSender | undefined): string {
-  return sender?.url ?? sender?.tab?.url ?? ''
-}
-
-function isAllowedContentUrl(url: string): boolean {
+export function isTrustedPort(port: ExtensionPort, ownExtensionId: string, optionsUrl: string): boolean {
+  const sender = port.sender
+  if (sender?.id !== ownExtensionId || !sender.url || (sender.frameId !== undefined && sender.frameId !== 0)) {
+    return false
+  }
+  // tab.url 属于顶层标签页，不能替代实际发送 frame 的 URL；本产品不注入子 frame。
+  const url = sender.url
   try {
     const parsed = new URL(url)
-    return (
-      parsed.protocol === 'https:' &&
-      (parsed.hostname === 'hentaiverse.org' || parsed.hostname === 'alt.hentaiverse.org')
-    )
+    if (parsed.username || parsed.password) return false
+    // 非浏览器 URL 实现可能把扩展 scheme 的 origin 序列化为 null，按 scheme/host 比较。
+    const origin = `${parsed.protocol}//${parsed.host}`
+    if (sender.origin !== undefined && sender.origin !== origin) return false
+    if (port.name === CONTENT_PORT_NAME) {
+      return parsed.origin === 'https://hentaiverse.org' || parsed.origin === 'https://alt.hentaiverse.org'
+    }
+    if (port.name === OPTIONS_PORT_NAME) {
+      return url === optionsUrl || url.startsWith(`${optionsUrl}?`) || url.startsWith(`${optionsUrl}#`)
+    }
   } catch {
     return false
-  }
-}
-
-export function isTrustedPort(port: ExtensionPort, ownExtensionId: string, optionsUrl: string): boolean {
-  if (port.sender?.id !== ownExtensionId) {
-    return false
-  }
-  const url = senderUrl(port.sender)
-  if (port.name === CONTENT_PORT_NAME) {
-    return isAllowedContentUrl(url)
-  }
-  if (port.name === OPTIONS_PORT_NAME) {
-    return url === optionsUrl || url.startsWith(`${optionsUrl}?`) || url.startsWith(`${optionsUrl}#`)
   }
   return false
 }

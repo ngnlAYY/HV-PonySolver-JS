@@ -114,6 +114,30 @@ describe('CachedImageLoader', () => {
     expect(secondCancel).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['http', 'headers'] as const)('does not wait for stalled %s error cleanup', async (failure) => {
+    vi.useFakeTimers()
+    const cancellations = [vi.fn(() => new Promise<void>(() => undefined)), vi.fn(() => Promise.reject('cleanup'))]
+    const responses = cancellations.map(
+      (cancel) =>
+        new Response(new ReadableStream<Uint8Array>({ cancel }), {
+          status: failure === 'http' ? 503 : 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+    )
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(responses[0]).mockResolvedValueOnce(responses[1])
+    let error: unknown
+    const completed = new CachedImageLoader(50).get(FAKE_URL).catch((reason: unknown) => {
+      error = reason
+    })
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain(failure === 'http' ? 'HTTP 503' : 'Content-Type 无效')
+    await completed
+    for (const cancel of cancellations) expect(cancel).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('falls back after a cache fetch throws and logs a warning', async () => {
     const fetchStub = vi
       .fn()

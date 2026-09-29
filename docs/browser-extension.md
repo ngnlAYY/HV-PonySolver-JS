@@ -84,7 +84,9 @@ apps/extension/dist/
 
 remote 的 Key 作为 Bearer 凭据发送至模型服务，因此 Firefox 声明 `authenticationInfo`。任何模式都不请求 `<all_urls>`、tabs、scripting、cookies、debugger 或 unlimited storage，也不声明 `web_accessible_resources` 或图片资源。
 
-扩展页面 CSP 为 `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'`。所有可执行 JS、module Worker、精简 ORT glue 和 WASM 随包分发。动态导入、远程可执行 `.js`/`.mjs`/`.wasm` 引用或资产哈希漂移会使构建审计失败。remote 包不能含 `.ort`；packaged 必须且只能含清单指定的一个模型。
+扩展页面 CSP 的执行部分为 `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'`；remote 追加 `connect-src 'self' https://models.ngnl.host`，packaged 追加 `connect-src 'self'`。所有可执行 JS、module Worker、精简 ORT glue 和 WASM 随包分发。动态导入、远程可执行 `.js`/`.mjs`/`.wasm` 引用或资产哈希漂移会使构建审计失败。remote 包不能含 `.ort`；packaged 必须且只能含清单指定的一个模型。
+
+构建审计锁定 Manifest V3、扩展版本、各浏览器的后台入口、独立标签页设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 与默认顶层隔离世界。额外的 `optional_permissions`、`optional_host_permissions`、`externally_connectable` 和 `sandbox` 声明一律拒绝，不能通过另一清单字段扩权。HTML 审计覆盖嵌套 template，拒绝内联脚本、事件属性、`javascript:` URL、`srcdoc` 和 base URL 覆写；这些检查防止 CSP 下不可运行或未经审计的执行路径混入产物，不为扩展增加权限。
 
 ## Runtime architecture
 
@@ -98,6 +100,8 @@ flowchart TD
     Firefox --> Host
     Host -->|转移模型 ArrayBuffer| Worker[包内 module Worker + ORT]
 ```
+
+Broker 以实际 `sender.url` 校验来源，不用 `sender.tab.url` 兜底。内容 Port 只接受两个 Hentaiverse HTTPS 标准端口 origin；设置 Port 只接受本扩展设置页及其 query/hash。浏览器提供 `sender.origin` 时必须与发送页面一致，opaque origin（`null`）不接受；提供 `frameId` 时必须为 0。未提供这两个可选字段时仍要求合法的发送页面 URL 与本扩展 ID，不以标签页地址补足身份。拒绝发生在监听消息或调用 Host 之前。
 
 内容脚本不接收 Key 或模型字节。验证码图片仅在浏览器上下文间传递，使用 JSON-safe Base64，最大 2 MiB，并严格限制 MIME。HTTP Content-Type 先验证再规范化为小写基础 MIME；跨上下文协议仍使用精确白名单。Firefox 隔离世界使用 `FileReader.readAsDataURL()` 读取 Blob，避免依赖可能被拒绝的 `Blob.arrayBuffer()`。
 
@@ -123,7 +127,7 @@ packaged Host 不构造这些远程能力，不打开或修改原 Key 存储，�
 | 模型 Key       | 独立秘密 IndexedDB | 不读、不改      | 不可见           |
 | 普通设置与历史 | `storage.local`    | `storage.local` | 通过内存镜像读取 |
 
-内容存储镜像只保留应用命名空间，包含两个世界的历史以支持预热。初始化先监听再读快照，按 key 保留最早旧值和最新新值；5 秒超时、取消、超过 1024 个不同缓冲 key 或快照读取失败都会清理监听器并失败。最多维护四个前缀索引。
+内容存储镜像只保留应用命名空间，包含两个世界的历史以支持预热。初始化先监听再读快照，按 key 保留最早旧值和最新新值；5 秒超时、取消、超过 1024 个不同缓冲 key 或快照读取失败都会清理监听器并失败。最多维护四个前缀索引。预先取消不访问存储；销毁后拒绝启动排队写入与删除，已发起调用仍按真实结果结算，不能撤销已提交变更。
 
 历史解析缓存只在序列化值相同时复用，返回副本，并保留写入后的最终校对。破坏性裁剪读取已提交快照，不让乐观未决写入挤掉旧记录；读取失败或不完整时跳过删除。面板会恢复挂载到当前 body，并在清除自身 mutation 前处理外部移除；完整历史与可见性规则见[设置说明](usage/settings.md)。
 

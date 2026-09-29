@@ -79,6 +79,8 @@ sequenceDiagram
 
 ## 模型下载、缓存和存储
 
+验证码图片与模型共用 `readBoundedByteStream`：已知长度只分配最终缓冲区；未知长度按上限内的容量倍增并即时复制，不保留分块数组、空分块或外部大缓冲的视图，结束后只返回实际字节。峰值仍包含增长/裁剪时的新旧缓冲，不能把字节上限解释为整个进程的内存上限。HTTP 或头校验失败时发起流清理但不等待取消 Promise；同步抛错、拒绝或永不完成均不能阻塞图片网络回退，也不能将模型 HTTP 错误改写成清理超时。
+
 核心 [model-downloader.ts](../../packages/browser-core/src/model/model-downloader.ts) 负责请求初始化、Bearer Key、重定向拒绝、响应状态、流式有界读取、完整性验证和下载确认回执。用户脚本 [model-downloader.ts](../../apps/userscript/src/model/model-downloader.ts) 只增加用户脚本 Key 来源和调用者/超时 AbortSignal 的组合，实际协议仍由核心负责。
 
 [ModelCache](../../packages/browser-core/src/model/model-cache.ts) 编排缓存读取、共享下载、写入和确认；[indexeddb-model-store.ts](../../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务和生命周期；[model-cache-record.ts](../../packages/browser-core/src/model/model-cache-record.ts) 校验记录；[shared-model-downloads.ts](../../packages/browser-core/src/model/shared-model-downloads.ts) 合并同一时刻的网络下载。对带下载确认回执的远程模型，内容与待确认元数据先在同一事务落盘；确认成功并将匹配元数据改为已确认后，后续读取才允许命中。没有确认回执的路径不会额外发送确认请求。关闭或 `versionchange` 必须取消数据库操作和共享下载。
@@ -95,7 +97,7 @@ sequenceDiagram
 
 [HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 为新记录分配每世界独立的 `sequence` 正安全整数，取本实例已分配序号与当前可见记录序号的最大值加一。分配发生在异步写入前，失败允许留下序号空洞；重建实例后从已保存记录恢复顺序。独立键历史按序号、时间戳和稳定 key 排序后裁剪；旧记录缺少序号时仍按原时间戳规则读取，非枚举存储的旧数组继续保持原顺序。显示用的 `timestamp`/`time` 不做单调化，也不重写旧数据。尚未互相观察到的并发写可使用同一序号，再按时间戳和 key 确定顺序；之后看到这些写入的新记录会取得更大序号。非法序号按损坏记录处理，安全整数上限耗尽则通过保存失败通道报告，不写入溢出值。
 
-App 每轮在 `prepareTarget()` 前捕获当前页面的 `performance.now()`，与本轮手动变更快照一起经 `SolverService.trigger(target, startedAt, signal, answerSelection)` 传给 Solver。新历史的 `elapsed` 计入准备与重试，自动模式截至原生提交点击，手动模式截至记录结果；开始扫描前的加载、防抖和提交后的网络响应不计入。Solver 独立统计图片获取和识别请求耗时，并在目标仍有效时统一写入“完成 Nms”，供用户脚本与扩展共用。持续时间按整数毫秒记录，历史时刻仍由 `Date.now()` 生成；旧历史不重新计算。修改时应覆盖准备重试、系统校时、新目标重置、取消和 DOM 替换。
+App 每轮在 `prepareTarget()` 前捕获当前页面的 `performance.now()`，与本轮手动变更快照一起经 `SolverService.trigger(target, startedAt, signal, answerSelection)` 传给 Solver。新历史的 `elapsed` 计入准备与重试，自动模式截至原生提交点击，手动模式截至记录结果；开始扫描前的加载、防抖和提交后的网络响应不计入。Solver 独立统计图片获取和识别请求耗时，并在目标仍有效时统一写入“完成 Nms”，供用户脚本与扩展共用。持续时间按整数毫秒记录，OnnxWorkerClient 的初始化与推理阶段也使用 `performance.now()`，避免系统时钟回拨产生负耗时；历史时刻仍由 `Date.now()` 生成，旧历史不重新计算。修改时应覆盖准备重试、系统校时、新目标重置、取消和 DOM 替换。
 
 用户脚本 [status-panel.ts](../../apps/userscript/src/status-panel/status-panel.ts) 只把 HistoryStore 和 GM 设置存储传给核心。修改面板默认位置、显示条件、紧凑模式或历史上限时，同时检查 [panel-settings.ts](../../packages/browser-core/src/status-panel/panel-settings.ts)、用户脚本对应设置文件、核心/用户脚本面板测试和 README/专题文档。
 

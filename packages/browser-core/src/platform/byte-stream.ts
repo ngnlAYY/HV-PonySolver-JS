@@ -13,7 +13,7 @@ export function cancelByteStream(body: Pick<ReadableStream<Uint8Array>, 'cancel'
   }
 }
 
-/** 已知身份的资产直接写入最终缓冲；只有未知长度的响应才保留有界分块。 */
+/** 已知长度直接写入最终缓冲；未知长度按需倍增，避免保留任意数量的分块及其底层缓冲。 */
 export async function readBoundedByteStream(
   body: ReadableStream<Uint8Array>,
   options: ByteStreamOptions,
@@ -30,32 +30,27 @@ export async function readBoundedByteStream(
     throw new Error('资产长度契约无效')
   }
   const reader = body.getReader()
-  const chunks: Uint8Array[] = []
   let offset = 0
   try {
-    const output = expectedByteLength === null ? null : new Uint8Array(expectedByteLength)
+    let output = new Uint8Array(expectedByteLength ?? 0)
     while (true) {
       const pending = reader.read()
       const { done, value } = await (options.wait ? options.wait(pending) : pending)
       if (done) break
-      if (!value) continue
+      if (!value?.byteLength) continue
       const nextOffset = offset + value.byteLength
       if (nextOffset > limit) throw sizeError(nextOffset, limit)
-      if (output) output.set(value, offset)
-      else chunks.push(value)
+      if (nextOffset > output.byteLength) {
+        const capacity = Math.min(limit, Math.max(nextOffset, output.byteLength * 2, 64 * 1024))
+        const grown = new Uint8Array(capacity)
+        grown.set(output)
+        output = grown
+      }
+      output.set(value, offset)
       offset = nextOffset
     }
-    if (output) {
-      if (offset !== output.byteLength) throw sizeError(offset, output.byteLength)
-      return output.buffer
-    }
-    const merged = new Uint8Array(offset)
-    let written = 0
-    for (const chunk of chunks) {
-      merged.set(chunk, written)
-      written += chunk.byteLength
-    }
-    return merged.buffer
+    if (expectedByteLength !== null && offset !== expectedByteLength) throw sizeError(offset, expectedByteLength)
+    return offset === output.byteLength ? output.buffer : output.slice(0, offset).buffer
   } catch (error) {
     cancelByteStream(reader, error)
     throw error

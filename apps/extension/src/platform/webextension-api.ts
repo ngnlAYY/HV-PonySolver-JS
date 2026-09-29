@@ -1,6 +1,8 @@
 export type ExtensionSender = Readonly<{
   id?: string
   url?: string
+  origin?: string
+  frameId?: number
   tab?: Readonly<{ url?: string }>
 }>
 

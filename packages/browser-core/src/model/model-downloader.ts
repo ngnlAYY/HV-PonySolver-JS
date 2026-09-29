@@ -1,6 +1,6 @@
 import { inferenceTimeoutConfig } from '../inference/inference-config'
 import { resolveFetchImplementation } from '../platform/fetch'
-import { readBoundedByteStream } from '../platform/byte-stream'
+import { cancelByteStream, readBoundedByteStream } from '../platform/byte-stream'
 import { raceAbort } from '../utils/abort-race'
 import {
   MODEL_DOWNLOAD_RECEIPT_HEADER,
@@ -171,17 +171,6 @@ function parseRetryAfterSeconds(value: string | null): number | null {
   return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : null
 }
 
-async function cancelResponseBody(response: Response, deadline: DownloadDeadline): Promise<void> {
-  try {
-    const cancellation = response.body?.cancel()
-    if (cancellation) {
-      await deadline.runPromise(cancellation)
-    }
-  } catch {
-    // The primary HTTP/read error remains authoritative if cleanup fails or times out.
-  }
-}
-
 function captureModelDownloadConfirmation(
   response: Response,
   buffer: ArrayBuffer,
@@ -214,7 +203,7 @@ export async function confirmCachedModelDownload(buffer: ArrayBuffer, signal?: A
       ),
     )
     if (!response.ok) {
-      await cancelResponseBody(response, deadline)
+      cancelByteStream(response.body)
       deadline.throwIfExpired()
       if (response.status === 403) {
         throw new ModelAccessKeyRejectedError()
@@ -263,7 +252,7 @@ async function readModelResponse(
   try {
     declaredByteLength = parseDeclaredByteLength(contentLength)
   } catch (error) {
-    await cancelResponseBody(response, deadline)
+    cancelByteStream(response.body, error)
     throw error
   }
   // A suspicious declaration may be lying about the payload, so it must not
@@ -272,11 +261,11 @@ async function readModelResponse(
     declaredByteLength !== null && isSuspiciousDeclaredLength(contentLength, expectedByteLength ?? maxByteLength)
   const trustDeclared = declaredByteLength !== null && !suspiciousDeclared
   if (expectedByteLength !== null && declaredByteLength !== null && declaredByteLength > expectedByteLength) {
-    await cancelResponseBody(response, deadline)
+    cancelByteStream(response.body)
     throw new Error(`下载模型大小校验失败: ${contentLength} != ${expectedByteLength}`)
   }
   if (declaredByteLength !== null && declaredByteLength > maxByteLength) {
-    await cancelResponseBody(response, deadline)
+    cancelByteStream(response.body)
     throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxByteLength}`)
   }
   if (!response.body) {
@@ -285,8 +274,8 @@ async function readModelResponse(
     // non-standard bodyless responses.
     throw new Error('下载模型响应正文不可用')
   }
-  // Suspicious declarations collect into chunks instead of a pre-sized buffer:
-  // their length claim is unproven until the caller's hash check passes.
+  // Suspicious declarations use a bounded, growing buffer instead of trusting
+  // their length claim before the caller's hash check passes.
   let expectedContentLength: number | null
   if (declaredByteLength === null) {
     expectedContentLength = expectedByteLength
@@ -323,7 +312,7 @@ export async function downloadModel(
       fetchImpl(getModelUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
     if (!response.ok) {
-      await cancelResponseBody(response, deadline)
+      cancelByteStream(response.body)
       deadline.throwIfExpired()
       if (response.status === 429) {
         throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
@@ -438,7 +427,7 @@ export async function queryModelDownloadQuota(
       fetchImpl(getQuotaUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
     if (!response.ok) {
-      await cancelResponseBody(response, deadline)
+      cancelByteStream(response.body)
       deadline.throwIfExpired()
       if (response.status === 403) {
         throw new ModelAccessKeyRejectedError()
@@ -486,7 +475,7 @@ export async function probeModelAccessKey(
     const response = await deadline.run(() =>
       fetchImpl(getModelUrl(), createModelProbeInit(deadline.signal, accessKey)),
     )
-    await cancelResponseBody(response, deadline)
+    cancelByteStream(response.body)
     deadline.throwIfExpired()
     // Defensive: the Worker only meters GET, so a HEAD probe is never rejected
     // for quota today. Should that contract change, an exhausted quota still

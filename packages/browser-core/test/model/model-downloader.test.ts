@@ -281,6 +281,44 @@ describe('downloadModel', () => {
     expect(cancel).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['download', 'quota', 'probe', 'confirmation'] as const)(
+    'preserves HTTP failure during stalled %s response cleanup',
+    async (operation) => {
+      vi.useFakeTimers()
+      const cancel = vi.fn(() => new Promise<void>(() => undefined))
+      const failure = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 503 })
+      const fetchImpl = vi.fn<typeof fetch>()
+      let buffer: ArrayBuffer | undefined
+      if (operation === 'confirmation') {
+        fetchImpl.mockResolvedValueOnce(
+          new Response(new Uint8Array([1, 2, 3]), {
+            headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: RECEIPT_ID },
+          }),
+        )
+        buffer = await downloadCoreModel(undefined, { integrity: TEST_INTEGRITY }, { fetchImpl })
+      }
+      fetchImpl.mockResolvedValue(failure)
+      const options = { integrity: TEST_INTEGRITY }
+      const result = buffer
+        ? confirmCachedModelDownload(buffer)
+        : operation === 'quota'
+          ? queryModelDownloadQuota(undefined, options, { fetchImpl })
+          : operation === 'probe'
+            ? probeModelAccessKey(undefined, options, { fetchImpl })
+            : downloadCoreModel(undefined, options, { fetchImpl })
+      let error: unknown
+      const completed = result.catch((reason: unknown) => {
+        error = reason
+      })
+      await vi.advanceTimersByTimeAsync(1)
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toContain('HTTP 503')
+      await completed
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
   it('returns a typed quota error with Retry-After metadata for HTTP 429', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 429, headers: { 'retry-after': '3600' } }))
     vi.stubGlobal('fetch', fetchMock)

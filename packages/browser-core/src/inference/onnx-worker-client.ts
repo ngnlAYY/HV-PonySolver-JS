@@ -275,7 +275,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     this.assertRequestActive(signal)
     await this.prepare(signal)
     this.assertRequestActive(signal)
-    const startedAt = Date.now()
+    const startedAt = performance.now()
     this.panel.setStatus({ inference: '推理中' })
     try {
       const worker = this.worker
@@ -298,7 +298,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
         throw error
       }
       this.consecutiveDetectErrors = 0
-      this.panel.setStatus({ inference: `完成 ${Date.now() - startedAt}ms` })
+      this.panel.setStatus({ inference: `完成 ${Math.round(performance.now() - startedAt)}ms` })
       return response.result
     } catch (error) {
       if (!signal?.aborted && !this.destroyed) {
@@ -331,7 +331,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     if (this.consecutiveDetectErrors >= inferenceRecoveryConfig.maxConsecutiveWorkerErrors) {
       throw new Error('ONNX Worker 连续多次请求超时，已停止自动重建')
     }
-    const startedAt = Date.now()
+    const startedAt = performance.now()
     if (mode === 'normal') {
       this.panel.setStatus({ session: '初始化中' })
     }
@@ -360,7 +360,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       // Only a completed detect proves the session actually answers on this
       // device, so the consecutive-timeout count survives a successful init.
       if (mode === 'normal') {
-        this.panel.setSessionReady(Date.now() - startedAt)
+        this.panel.setSessionReady(Math.round(performance.now() - startedAt))
       }
     } catch (error) {
       if (createdWorker && createdBridge && this.worker === createdWorker && this.requestBridge === createdBridge) {

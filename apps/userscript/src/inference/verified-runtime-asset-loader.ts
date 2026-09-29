@@ -45,10 +45,15 @@ async function readBoundedResponse(
     throw new Error(`${label} 响应正文不可用`)
   }
 
+  // Content-Length 描述线上编码后的长度；fetch 正文可能已解压，不能与清单的原始长度直接比较。
   const declaredLength = response.headers.get('content-length')
   if (declaredLength !== null) {
     const parsedLength = Number(declaredLength)
-    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0 || parsedLength > expected.maxByteLength) {
+    if (
+      !/^(?:0|[1-9]\d*)$/u.test(declaredLength) ||
+      !Number.isSafeInteger(parsedLength) ||
+      parsedLength > expected.maxByteLength
+    ) {
       const error = new Error(`${label} 响应大小无效`)
       cancelBody(response.body, error)
       throw error

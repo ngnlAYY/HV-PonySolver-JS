@@ -105,6 +105,17 @@ describe('ExtensionStorageMirror', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('does not subscribe or read storage for an already-aborted initialization', async () => {
+    const api = rawExtensionApi()
+    vi.stubGlobal('browser', api)
+    const controller = new AbortController()
+    controller.abort(new Error('abandoned'))
+
+    await expect(ExtensionStorageMirror.create({ signal: controller.signal })).rejects.toThrow('abandoned')
+    expect(api.storage.local.get).not.toHaveBeenCalled()
+    expect(api.storage.onChanged.addListener).not.toHaveBeenCalled()
+  })
+
   it('keeps prefix indices current through writes, rollback and external deletion', async () => {
     const api = rawExtensionApi()
     vi.mocked(api.storage.local.get).mockResolvedValue({ 'history:a': 'old', unrelated: 'x' })
@@ -329,6 +340,41 @@ describe('ExtensionStorageMirror', () => {
     await expect(write).resolves.toBeUndefined()
     emitStorageChanges(api, { setting: { oldValue: 'new', newValue: 'late' } })
     expect(mirror.getSync('setting')).toBeNull()
+  })
+
+  it.each(['set', 'remove'] as const)('never starts a queued %s after destroy', async (operation) => {
+    const api = rawExtensionApi()
+    const pendingWrite = deferred<void>()
+    vi.mocked(api.storage.local.get).mockResolvedValue({})
+    vi.mocked(api.storage.local.set).mockReturnValueOnce(pendingWrite.promise)
+    vi.stubGlobal('browser', api)
+    const mirror = await ExtensionStorageMirror.create()
+    const firstWrite = mirror.set('setting', 'first')
+    await vi.waitFor(() => expect(api.storage.local.set).toHaveBeenCalledOnce())
+    const queued = operation === 'set' ? mirror.set('setting', 'stale') : mirror.remove('setting')
+    const settled = queued.then(
+      () => null,
+      (error: unknown) => error,
+    )
+
+    mirror.destroy()
+    pendingWrite.resolve(undefined)
+    await expect(firstWrite).resolves.toBeUndefined()
+    expect(await settled).toEqual(new Error('扩展存储镜像已销毁'))
+    expect(api.storage.local.set).toHaveBeenCalledOnce()
+    expect(api.storage.local.remove).not.toHaveBeenCalled()
+    expect(mirror.getSync('setting')).toBeNull()
+  })
+
+  it('does not start a write when destroyed before its first microtask', async () => {
+    const api = rawExtensionApi()
+    vi.mocked(api.storage.local.get).mockResolvedValue({})
+    vi.stubGlobal('browser', api)
+    const mirror = await ExtensionStorageMirror.create()
+    const write = mirror.set('setting', 'stale')
+    mirror.destroy()
+    await expect(write).rejects.toThrow('扩展存储镜像已销毁')
+    expect(api.storage.local.set).not.toHaveBeenCalled()
   })
 
   it.each(['success', 'failure'] as const)(

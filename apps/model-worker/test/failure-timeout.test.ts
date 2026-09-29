@@ -232,6 +232,49 @@ describe('failure-timeout', () => {
     expect(await object?.body.getReader().read()).toEqual({ done: true, value: undefined })
   })
 
+  it.each(
+    (['model-integrity', 'runtime-integrity', 'quota-reserve'] as const).flatMap((failure) =>
+      (['hang', 'reject', 'throw'] as const).map((cleanup) => ({ failure, cleanup })),
+    ),
+  )('preserves $failure when R2 cancellation does $cleanup', async ({ failure, cleanup }) => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture, {
+      keyValues: new Map([[fixture.validKey, '1']]),
+      ...(failure === 'quota-reserve' ? { quotaReserveError: new Error('unavailable') } : {}),
+    })
+    const getObject = env.MODEL_BUCKET.get.bind(env.MODEL_BUCKET)
+    const cancel = vi.fn(() => {
+      if (cleanup === 'throw') throw new Error('cleanup failed')
+      return cleanup === 'reject' ? Promise.reject(new Error('cleanup failed')) : new Promise<void>(() => undefined)
+    })
+    vi.spyOn(env.MODEL_BUCKET, 'get').mockImplementation(async (key) => {
+      const object = await getObject(key)
+      if (!object) throw new Error('missing fixture')
+      const body = new ReadableStream<Uint8Array>()
+      vi.spyOn(body, 'cancel').mockImplementation(cancel)
+      Object.defineProperty(object, 'body', { value: body })
+      if (failure !== 'quota-reserve') Object.defineProperty(object, 'size', { value: 0 })
+      return object
+    })
+    const request =
+      failure === 'runtime-integrity'
+        ? assetRequest(fixture.publicRuntimeWasmPath, 'GET')
+        : authorizedModelRequest(fixture, 'GET')
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      const response = await Promise.race([
+        fetchWorker(request, env).then((result) => result.status),
+        new Promise<number>((resolve) => {
+          timeout = setTimeout(() => resolve(0), 1_000)
+        }),
+      ])
+      expect(response).toBe(failure === 'quota-reserve' ? 503 : 500)
+      expect(cancel).toHaveBeenCalledOnce()
+    } finally {
+      clearTimeout(timeout)
+    }
+  })
+
   it('logs only secret-free classification fields when quota storage fails', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {

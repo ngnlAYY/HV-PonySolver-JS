@@ -68,20 +68,20 @@ async function readObjectForRequest(
   )
 }
 
-async function cancelResponseBody(response: Response): Promise<void> {
+function cancelResponseBody(response: Response): void {
   try {
-    await response.body?.cancel()
+    void response.body?.cancel().catch(() => undefined)
   } catch {
-    // Cancellation is best-effort cleanup and must not replace the primary response error.
+    // 清理不得等待不响应取消的流，也不能覆盖原始 HTTP 错误。
   }
 }
 
-async function cancelObjectBody(object: R2Object | R2ObjectBody): Promise<void> {
+function cancelObjectBody(object: R2Object | R2ObjectBody): void {
   if (!('body' in object)) return
   try {
-    await object.body.cancel()
+    void object.body.cancel().catch(() => undefined)
   } catch {
-    // Integrity failure remains authoritative if stream cleanup also fails.
+    // 完整性错误不应被清理失败或清理挂起覆盖。
   }
 }
 
@@ -117,7 +117,7 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
     return internalErrorResponse(request)
   }
   if (access.decision === 'real' && !hasExpectedR2ObjectIntegrity(object, route.integrity)) {
-    await cancelObjectBody(object)
+    cancelObjectBody(object)
     return internalErrorResponse(request)
   }
   const response = modelObjectResponse(request, object, route.filename)
@@ -130,12 +130,12 @@ async function serveModel(request: Request, env: Env, config: WorkerConfig, rout
     if (quota.allowed) {
       return attachModelDownloadReceipt(response, quota.receiptId)
     }
-    await cancelResponseBody(response)
+    cancelResponseBody(response)
     return quota.reason === 'quota-exhausted'
       ? quotaExceededResponse(request, quota.retryAfterSeconds)
       : serviceUnavailableResponse(request, quota.retryAfterSeconds)
   } catch (error) {
-    await cancelResponseBody(response)
+    cancelResponseBody(response)
     // Log only non-sensitive classification fields; the underlying error message may embed quota identities.
     logWorkerWarning({
       route: route.logRoute,
@@ -152,7 +152,7 @@ async function serveRuntime(request: Request, env: Env, config: WorkerConfig): P
     return internalErrorResponse(request)
   }
   if (!hasExpectedR2ObjectIntegrity(object, ORT_RUNTIME_WASM_INTEGRITY)) {
-    await cancelObjectBody(object)
+    cancelObjectBody(object)
     return internalErrorResponse(request)
   }
   return runtimeObjectResponse(request, object)

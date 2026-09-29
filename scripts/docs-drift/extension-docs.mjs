@@ -37,11 +37,33 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
     }
   }
 
-  const requiredCspDirectives = ["object-src 'none'", "worker-src 'self'"]
+  const requiredCspDirectives = [
+    "script-src 'self' 'wasm-unsafe-eval'",
+    "object-src 'none'",
+    "worker-src 'self'",
+    "connect-src 'self' https://models.ngnl.host",
+  ]
   for (const directive of requiredCspDirectives) {
     if (!extensionDoc.includes(directive)) {
       errors.push(`extension documentation omits ${directive}`)
     }
+  }
+
+  // 安全边界属于扩展专题，README 中的同名摘要不能补足正文缺项。
+  for (const fact of [
+    'sender.url',
+    'sender.origin',
+    'frameId',
+    'optional_permissions',
+    'optional_host_permissions',
+    'externally_connectable',
+    'sandbox',
+    'srcdoc',
+    'javascript:',
+    '销毁后拒绝启动排队写入',
+    '不能撤销已提交变更',
+  ]) {
+    if (!extensionDoc.includes(fact)) errors.push(`extension documentation omits ${fact}`)
   }
 
   const requiredFacts = [

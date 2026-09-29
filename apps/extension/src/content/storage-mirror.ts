@@ -48,6 +48,7 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
   static async create(
     options: Readonly<{ signal?: AbortSignal; acceptsKey?: (key: string) => boolean }> = {},
   ): Promise<ExtensionStorageMirror> {
+    if (options.signal?.aborted) throw options.signal.reason ?? new Error('扩展存储初始化已取消')
     const mirror = new ExtensionStorageMirror(options.acceptsKey ?? (() => true))
     const controller = new AbortController()
     const onAbort = (): void => controller.abort(options.signal?.reason ?? new Error('扩展存储初始化已取消'))
@@ -221,6 +222,8 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
     this.refreshVisibleValue(key, state)
 
     const operation = state.tail.then(() => {
+      // 已交给浏览器的写入不能撤销；尚未启动的旧生命周期操作不得继续持久化。
+      if (this.destroyed) throw new Error('扩展存储镜像已销毁')
       mutation.writeRevision = state.committedRevision
       return persist()
     })

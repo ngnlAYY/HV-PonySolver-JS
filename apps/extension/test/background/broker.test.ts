@@ -174,6 +174,57 @@ describe('broker sender validation', () => {
     ).toBe(false)
   })
 
+  it.each([
+    { tab: { url: 'https://hentaiverse.org/' } },
+    { url: 'https://hentaiverse.org:8443/' },
+    { url: 'https://user:password@hentaiverse.org/' },
+    { url: 'https://hentaiverse.org/', origin: 'null' },
+    { url: 'https://hentaiverse.org/', origin: 'https://untrusted.invalid' },
+    { url: 'https://hentaiverse.org/', origin: 'https://alt.hentaiverse.org' },
+    { url: 'https://hentaiverse.org/', frameId: 1 },
+    { url: 'https://hentaiverse.org/', frameId: -1 },
+    { url: 'about:blank', tab: { url: 'https://hentaiverse.org/' } },
+    { url: 'not a URL', tab: { url: 'https://hentaiverse.org/' } },
+  ])('rejects ambiguous content sender metadata: %j', (sender) => {
+    expect(isTrustedPort(port(CONTENT_PORT_NAME, { id: extensionId, ...sender }), extensionId, optionsUrl)).toBe(false)
+  })
+
+  it.each(['https://hentaiverse.org', 'https://alt.hentaiverse.org'])(
+    'accepts a top-level sender with a matching origin: %s',
+    (origin) => {
+      expect(
+        isTrustedPort(
+          port(CONTENT_PORT_NAME, { id: extensionId, url: `${origin}:443/?s=Battle`, origin, frameId: 0 }),
+          extensionId,
+          optionsUrl,
+        ),
+      ).toBe(true)
+    },
+  )
+
+  it.each(['chrome-extension:', 'moz-extension:'])('validates options sender metadata for %s', (scheme) => {
+    const origin = `${scheme}//extension-id`
+    const url = `${origin}/options/options.html`
+    for (const suffix of ['', '?section=key', '#key']) {
+      expect(
+        isTrustedPort(
+          port(OPTIONS_PORT_NAME, { id: extensionId, url: `${url}${suffix}`, origin, frameId: 0 }),
+          extensionId,
+          url,
+        ),
+      ).toBe(true)
+    }
+    for (const sender of [
+      { tab: { url } },
+      { url, origin: 'null' },
+      { url, origin: `${scheme}//other-id` },
+      { url, frameId: 1 },
+      { url: `${url}/untrusted.html` },
+    ]) {
+      expect(isTrustedPort(port(OPTIONS_PORT_NAME, { id: extensionId, ...sender }), extensionId, url)).toBe(false)
+    }
+  })
+
   it('accepts the extension options page but rejects unrelated extension pages', () => {
     expect(
       isTrustedPort(port(OPTIONS_PORT_NAME, { id: extensionId, url: `${optionsUrl}#key` }), extensionId, optionsUrl),
@@ -190,6 +241,23 @@ describe('broker sender validation', () => {
 })
 
 describe('broker queue and privilege boundaries', () => {
+  it('disconnects untrusted origins before attaching listeners or invoking the Host', () => {
+    const invokeHost = vi.fn()
+    registerBroker(invokeHost)
+    const client = port(CONTENT_PORT_NAME, {
+      id: 'extension-id',
+      url: 'https://hentaiverse.org/',
+      origin: 'null',
+    })
+    platformMocks.connectListener?.(client)
+    client.emitMessage(prepareRequest(0))
+
+    expect(client.disconnect).toHaveBeenCalledTimes(1)
+    expect(client.onMessage.addListener).not.toHaveBeenCalled()
+    expect(client.onDisconnect.addListener).not.toHaveBeenCalled()
+    expect(invokeHost).not.toHaveBeenCalled()
+  })
+
   it('limits pending detects per content Port and releases capacity after completion', async () => {
     const resolvers: Array<(response: HostResponse) => void> = []
     const invokeHost = vi.fn(

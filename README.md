@@ -64,6 +64,8 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 
 当前客户端使用 `.ort`，Model Worker 为旧客户端保留 `.onnx` 路由。远程 Key 只通过 `Authorization: Bearer` 传递，不写入 URL、日志或构建产物。扩展内容脚本不接收 Key 或模型字节；内置模型扩展不读取旧 Key，也不保留远程模型下载能力。
 
+扩展消息校验实际发送页面；构建审计限制权限、注入范围和可执行内容，具体边界见[扩展权限与安全策略](docs/browser-extension.md#permission-matrix)。
+
 模型下载校验长度和 SHA-256，再写入 IndexedDB。额度默认按每 Key、每 UTC 自然月最多 5 次**已确认缓存下载**计算；查询、Key 验证和有效缓存命中不消耗次数。关闭额度时客户端显示无限制。完整时序见[模型缓存与计次](docs/model-cache-strategy.md)。
 
 用户脚本两种运行时构建没有自动回退；“内置精简运行时”仍需下载模型和 WASM。扩展内置模型可从安装包提取，完整性校验不提供保密性。精确资产身份与更新步骤见[模型和 Runtime 清单](docs/onnx-runtime.md)。
@@ -90,4 +92,4 @@ mise exec -- node --test "scripts/docs-drift/test/*.test.mjs"
 git diff --check
 ```
 
-普通检查和构建不发布产品。commit、push、artifact、Release 和部署需要明确授权；本地检查通过也不代表远程鉴权、最低版本浏览器或 Android 验证完成。
+普通检查和构建不发布产品。commit、push、artifact、Release 和部署需要明确授权；本地检查通过也不代表远程鉴权、最低版本浏览器或 Android 验证完成。本轮跨工作区的修复、证据与未验证项见 [2026-09-29 审计记录](docs/audits/2026-09-29-web-extension-audit.md)。

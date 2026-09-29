@@ -50,6 +50,8 @@ docs/
 
 [2026-09-07 仓库审计](audits/2026-09-07-repository-audit.md)记录当时发现，[源码盘点](audits/source-inventory.md)记录当时数量，[优化实施记录](audits/2026-09-07-implementation-record.md)保存迁移和验证。旧[实施入口](development/implementation-plan.md)继续提供导航。这些记录中的通过数、浏览器版本、commit 和未运行项目均保持历史含义。
 
+[2026-09-29 Web 与扩展审计](audits/2026-09-29-web-extension-audit.md)覆盖浏览器核心、用户脚本、扩展、Model Worker、shared 与工具门禁，记录本轮有界流、生命周期、校验和 MV3 加固，以及未验证的生产/最低版本/Android 边界。同日[依赖安全补丁复核](audits/2026-09-29-dependency-security-remediation.md)记录后续 Vitest/undici 告警修复及重新执行的验证。
+
 ## 事实来源与检查
 
 客户端版本看各应用 `package.json`；工具链看 `mise.toml`；包命令和格式规则看根 `package.json`；资产看 shared 与 Runtime 清单；部署配置看 `wrangler.template.toml`。详细映射见[架构权威模块表](architecture/overview.md#权威模块与变更入口)。

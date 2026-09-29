@@ -1,5 +1,6 @@
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { JSDOM } from 'jsdom'
 import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 import {
@@ -13,7 +14,7 @@ import {
   remoteModelHost,
   packagedModelIdentity,
 } from './config.mjs'
-import { normalizeModelDelivery, extensionContentSecurityPolicy } from './policy.mjs'
+import { createManifest, normalizeModelDelivery, extensionContentSecurityPolicy } from './policy.mjs'
 import { sha256, assertPackagedModelIdentity, verifyPackagedModelBytes } from './assets.mjs'
 
 async function walkFiles(root, current = root) {
@@ -113,23 +114,47 @@ function auditPackagedMetafiles(metafiles, target, fixture = false) {
   }
 }
 
+const htmlUrlAttributes = new Set(['href', 'src', 'action', 'formaction', 'data'])
+
 function auditHtmlSource(source, relativePath, relativeFiles) {
   const dom = new JSDOM(source)
+  const baseUrl = `https://extension.invalid/${relativePath}`
   try {
-    for (const element of dom.window.document.querySelectorAll('script[src], link[href]')) {
-      const attribute = element.localName === 'script' ? 'src' : 'href'
-      if (/^https?:/iu.test(element.getAttribute(attribute) ?? '')) {
-        throw new Error(`${relativePath} references remote executable content`)
-      }
-      const reference = element.getAttribute(attribute) ?? ''
-      const resource = new globalThis.URL(reference, `https://extension.invalid/${relativePath}`)
-      if (resource.origin !== 'https://extension.invalid' || !relativeFiles.has(resource.pathname.slice(1))) {
-        throw new Error(`${relativePath} references a missing or non-local resource: ${reference}`)
-      }
-    }
-    for (const script of dom.window.document.scripts) {
-      if (script.textContent?.trim()) {
-        throw new Error(`${relativePath} contains inline script content`)
+    const roots = [dom.window.document]
+    for (const root of roots) {
+      for (const element of root.querySelectorAll('*')) {
+        // template 内容不在 document 查询结果中；后续插入时仍须满足同一执行边界。
+        if (element instanceof dom.window.HTMLTemplateElement) roots.push(element.content)
+        if (element.localName === 'base') {
+          throw new Error(`${relativePath} contains a base URL override`)
+        }
+        for (const attribute of element.attributes) {
+          const name = attribute.localName.toLowerCase()
+          if (name.startsWith('on')) {
+            throw new Error(`${relativePath} contains an inline event handler: ${attribute.name}`)
+          }
+          if (name === 'srcdoc') {
+            throw new Error(`${relativePath} contains inline frame srcdoc content`)
+          }
+          // URL 解析会处理实体解码后的制表符、换行与 scheme 大小写，不能只检查原始前缀。
+          if (htmlUrlAttributes.has(name) && new globalThis.URL(attribute.value, baseUrl).protocol === 'javascript:') {
+            throw new Error(`${relativePath} contains an executable URL: ${attribute.name}`)
+          }
+          const scriptReference = element.localName === 'script' && (name === 'src' || name === 'href')
+          const styleReference = element.localName === 'link' && name === 'href'
+          if (!scriptReference && !styleReference) continue
+          const reference = attribute.value
+          const resource = new globalThis.URL(reference, baseUrl)
+          if (resource.origin !== 'https://extension.invalid' || !relativeFiles.has(resource.pathname.slice(1))) {
+            if (/^https?:/iu.test(reference)) {
+              throw new Error(`${relativePath} references remote executable content`)
+            }
+            throw new Error(`${relativePath} references a missing or non-local resource: ${reference}`)
+          }
+        }
+        if (element.localName === 'script' && element.textContent?.trim()) {
+          throw new Error(`${relativePath} contains inline script content`)
+        }
       }
     }
   } finally {
@@ -143,30 +168,46 @@ async function auditTargetInventory(target, options, files) {
   }
   const modelDelivery = normalizeModelDelivery(options.modelDelivery)
   const manifest = JSON.parse(requireInventoryFile(files, 'manifest.json').bytes.toString('utf8'))
-  const expectedBackground =
-    target === 'chromium' ? manifest.background?.service_worker : manifest.background?.scripts?.[0]
-  if (expectedBackground !== EXTENSION_PATHS.backgroundScript) {
+  if (manifest?.manifest_version !== 3) {
+    throw new Error(`${target} package must use Manifest V3`)
+  }
+  if (manifest.version !== version) {
+    throw new Error(`${target} package version does not match the extension package`)
+  }
+  for (const field of ['optional_permissions', 'optional_host_permissions', 'externally_connectable', 'sandbox']) {
+    if (field in manifest) {
+      throw new Error(`${target} package unexpectedly declares ${field}`)
+    }
+  }
+  const expectedManifest = createManifest(target, { modelDelivery })
+  if (!isDeepStrictEqual(manifest.background, expectedManifest.background)) {
     throw new Error(`${target} background declaration is invalid`)
   }
-  if (manifest.options_ui?.page !== EXTENSION_PATHS.optionsPage) {
+  if (!isDeepStrictEqual(manifest.options_ui, expectedManifest.options_ui)) {
     throw new Error(`${target} options page declaration is invalid`)
   }
-  if (
-    manifest.content_scripts?.length !== 1 ||
-    JSON.stringify(manifest.content_scripts[0].js) !== JSON.stringify([EXTENSION_PATHS.contentScript])
-  ) {
+  if (!isDeepStrictEqual(manifest.content_scripts, expectedManifest.content_scripts)) {
     throw new Error(`${target} content script declaration is invalid`)
   }
+  if (!isDeepStrictEqual(manifest.action, expectedManifest.action)) {
+    throw new Error(`${target} action declaration is invalid`)
+  }
   const expectedCsp = extensionContentSecurityPolicy(modelDelivery)
-  if (manifest.content_security_policy?.extension_pages !== expectedCsp) {
+  if (!isDeepStrictEqual(manifest.content_security_policy, { extension_pages: expectedCsp })) {
     throw new Error(`${target} extension CSP does not match the ${modelDelivery} security policy`)
   }
   const expectedPermissions = target === 'chromium' ? ['offscreen', 'storage'] : ['storage']
-  if ([...manifest.permissions].sort().join(',') !== expectedPermissions.join(',')) {
+  if (
+    !Array.isArray(manifest.permissions) ||
+    !isDeepStrictEqual([...manifest.permissions].sort(), expectedPermissions)
+  ) {
     throw new Error(`${target} package requests unexpected API permissions`)
   }
   const expectedHosts = [...contentMatches, ...(modelDelivery === 'remote' ? [remoteModelHost] : [])].sort()
-  if ([...manifest.host_permissions].sort().join(',') !== expectedHosts.join(',')) {
+  if (
+    !Array.isArray(manifest.host_permissions) ||
+    !isDeepStrictEqual([...manifest.host_permissions].sort(), expectedHosts)
+  ) {
     throw new Error(`${target} package requests unexpected host permissions`)
   }
   if (target === 'firefox') {

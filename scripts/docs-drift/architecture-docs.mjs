@@ -33,6 +33,9 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
       errors.push(`docs/architecture/browser-runtime.md must mention ${configName}`)
     }
   }
+  for (const fact of ['readBoundedByteStream', '不等待取消 Promise', 'performance.now()']) {
+    if (!readme.includes(fact)) errors.push(`docs/architecture/browser-runtime.md must mention ${fact}`)
+  }
   return errors
 }
 

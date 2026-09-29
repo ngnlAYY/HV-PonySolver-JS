@@ -1,5 +1,6 @@
 import { imagePreprocessConfig } from '../inference/inference-config'
 import { resolveFetchImplementation } from '../platform/fetch'
+import { cancelByteStream, readBoundedByteStream } from '../platform/byte-stream'
 import { raceAbort } from '../utils/abort-race'
 import { warn } from '../utils/logger'
 import type { ImageLoader } from './captcha-types'
@@ -39,64 +40,6 @@ function contentType(response: Response): string {
   // HTTP 参数已完成校验；Blob 和跨上下文协议只携带规范化的基础图片类型。
   const parameterStart = value.indexOf(';')
   return (parameterStart === -1 ? value : value.slice(0, parameterStart)).trim().toLowerCase()
-}
-
-function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
-  try {
-    const cancellation = reader.cancel()
-    void cancellation.catch(() => undefined)
-  } catch {
-    // Cancellation is best-effort cleanup and must not replace the primary error.
-  }
-}
-
-async function readBoundedBody(
-  body: ReadableStream<Uint8Array>,
-  declaredLength: number | null,
-  signal: AbortSignal,
-): Promise<Uint8Array<ArrayBuffer>> {
-  const reader = body.getReader()
-  const chunks: Uint8Array[] = []
-  let actualLength = 0
-  try {
-    while (true) {
-      const { done, value } = await raceAbort(reader.read(), signal, () => abortReason(signal))
-      if (done) {
-        break
-      }
-      actualLength += value.byteLength
-      if (actualLength > imagePreprocessConfig.maxEncodedBytes) {
-        throw new Error(`验证码图片数据超过限制: ${actualLength}`)
-      }
-      if (declaredLength !== null && actualLength > declaredLength) {
-        throw new Error('验证码图片 Content-Length 与正文不匹配')
-      }
-      chunks.push(value)
-    }
-    if (actualLength < 1) {
-      throw new Error('验证码图片数据为空')
-    }
-    if (declaredLength !== null && actualLength !== declaredLength) {
-      throw new Error('验证码图片 Content-Length 与正文不匹配')
-    }
-  } catch (error) {
-    cancelReader(reader)
-    throw error
-  } finally {
-    try {
-      reader.releaseLock()
-    } catch {
-      // Releasing a failed or still-pending reader is best-effort cleanup.
-    }
-  }
-
-  const output = new Uint8Array(new ArrayBuffer(actualLength))
-  let offset = 0
-  for (const chunk of chunks) {
-    output.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return output
 }
 
 export class CachedImageLoader implements ImageLoader {
@@ -154,11 +97,7 @@ export class CachedImageLoader implements ImageLoader {
       () => abortReason(signal),
     )
     if (!response.ok) {
-      try {
-        await response.body?.cancel()
-      } catch {
-        // Cancellation is best-effort cleanup and must not replace the HTTP error.
-      }
+      cancelByteStream(response.body)
       const suffix = fallback ? ' (回退也失败)' : ''
       throw new Error(`图片缓存不可用: HTTP ${response.status}${suffix}`)
     }
@@ -174,19 +113,24 @@ export class CachedImageLoader implements ImageLoader {
         throw new Error('验证码图片响应正文不可用')
       }
       readerAcquired = true
-      const bytes = await readBoundedBody(response.body, declaredLength, signal)
+      const bytes = await readBoundedByteStream(response.body, {
+        expectedByteLength: declaredLength,
+        maxByteLength: imagePreprocessConfig.maxEncodedBytes,
+        sizeError: (actual) =>
+          new Error(
+            actual > imagePreprocessConfig.maxEncodedBytes
+              ? `验证码图片数据超过限制: ${actual}`
+              : '验证码图片 Content-Length 与正文不匹配',
+          ),
+        wait: (promise) => raceAbort(promise, signal, () => abortReason(signal)),
+      })
       if (signal.aborted) {
         throw abortReason(signal)
       }
-      return new Blob([bytes.buffer], { type })
+      if (bytes.byteLength === 0) throw new Error('验证码图片数据为空')
+      return new Blob([bytes], { type })
     } catch (error) {
-      if (!readerAcquired) {
-        try {
-          await response.body?.cancel()
-        } catch {
-          // Cancellation is best-effort cleanup and must not replace the primary error.
-        }
-      }
+      if (!readerAcquired) cancelByteStream(response.body, error)
       throw error
     }
   }

@@ -3,6 +3,27 @@ import test from 'node:test'
 import { join } from 'node:path'
 import { readFile, runCheck, withFixture, writeFile } from './fixtures.mjs'
 
+for (const [document, facts] of [
+  ['docs/architecture/browser-runtime.md', ['readBoundedByteStream', '不等待取消 Promise', 'performance.now()']],
+  ['docs/onnx-runtime.md', ['Content-Length', '规范十进制', '解压', '不等待取消 Promise']],
+]) {
+  for (const fact of facts) {
+    test(`bounded IO contract cannot be replaced by a README mention: ${document} ${fact}`, async () => {
+      await withFixture(async (root) => {
+        const path = join(root, document)
+        const source = await readFile(path, 'utf8')
+        assert.ok(source.includes(fact), `fixture must document ${fact}`)
+        await writeFile(path, source.replaceAll(fact, 'omitted-io-contract'))
+        const readmePath = join(root, 'README.md')
+        await writeFile(readmePath, `${await readFile(readmePath, 'utf8')}\n${fact}\n`)
+        const result = await runCheck(root)
+        assert.equal(result.exitCode, 1)
+        assert.ok(result.stderr.includes(`${document}`) && result.stderr.includes(fact), result.stderr)
+      })
+    })
+  }
+}
+
 test('fails clearly when the Model Worker probe example uses a shell placeholder', async () => {
   await withFixture(async (fixtureRoot) => {
     const opsDocPath = join(fixtureRoot, 'docs/model-worker-ops.md')

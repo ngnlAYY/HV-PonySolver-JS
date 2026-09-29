@@ -42,6 +42,37 @@ describe('loadVerifiedRuntimeWasm', () => {
     await expect(loadVerifiedRuntimeWasm(fetchImpl, expectedAsset)).rejects.toThrow('响应大小无效')
   })
 
+  it.each(['', '03', '+3', '-3', '3e0', '0x3', '3.0', '9007199254740992'])(
+    'rejects invalid declared length %j before reading verified bytes',
+    async (length) => {
+      const cancel = vi.fn(() => new Promise<void>(() => undefined))
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3]))
+          controller.close()
+        },
+        cancel,
+      })
+      const getReader = vi.spyOn(body, 'getReader')
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response(body, { headers: { 'content-length': length } }))
+      await expect(loadVerifiedRuntimeWasm(fetchImpl, expectedAsset)).rejects.toThrow('响应大小无效')
+      expect(getReader).not.toHaveBeenCalled()
+      expect(cancel).toHaveBeenCalledOnce()
+    },
+  )
+
+  it.each([undefined, 'gzip'])(
+    'accepts verified decoded bytes when encoding metadata is %j and wire length differs',
+    async (encoding) => {
+      const headers = new Headers({ 'content-length': '2' })
+      if (encoding) headers.set('content-encoding', encoding)
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { headers }))
+      await expect(loadVerifiedRuntimeWasm(fetchImpl, expectedAsset)).resolves.toEqual(new Uint8Array([1, 2, 3]).buffer)
+    },
+  )
+
   it('rejects same-sized bytes with a different SHA-256', async () => {
     const fetchImpl = vi.fn(
       async () => new Response(new Uint8Array([3, 2, 1]), { status: 200 }),

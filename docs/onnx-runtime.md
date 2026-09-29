@@ -181,7 +181,9 @@ pnpm test
 
 ONNX Runtime 资产由 `ONNX_RUNTIME_ASSETS` 统一描述，其中 `externalFullRuntime` 对应默认外置完整版，`bundledMinimalRuntime` 对应显式内置精简版。默认外置 classic JS 使用 `externalFullRuntime.byteLength`、`externalFullRuntime.sha256` 和 `externalFullRuntime.maxByteLength`；默认外置 JSEP MJS 使用 `externalFullRuntime.mjsByteLength`、`externalFullRuntime.mjsSha256` 和 `externalFullRuntime.mjsMaxByteLength`；默认外置 WASM 使用 `externalFullRuntime.wasmByteLength`、`externalFullRuntime.wasmSha256` 和 `externalFullRuntime.wasmMaxByteLength`；构建 glue 使用 `bundleAsset.byteLength`、`bundleAsset.sha256` 和 `bundleAsset.maxByteLength`；首方 WASM 使用 `wasmAsset.url`、`wasmAsset.byteLength`、`wasmAsset.sha256` 和 `wasmAsset.maxByteLength`。相关入口为 `build:onnx-runtime` 与 `verify:onnx-runtime`。
 
-所有资产只接受可流式读取的响应正文；`body === null` 时失败关闭，不退回无界 `arrayBuffer()`。共享有界读取原语对已知长度预分配缓冲区，避免同时保留全部分块和完整 WASM；取消、超限或长度不符时释放 reader。完整性错误不写入缓存。
+用户脚本 Runtime 的 `Content-Length` 若存在，必须是规范十进制非负安全整数且不超过清单上限，拒绝空值、符号、前导零、指数、十六进制和小数写法。该头描述线上编码后的大小，不能与 fetch 解压后的字节长度直接比较；无论 Content-Encoding 是否通过 CORS 暴露，实际正文仍必须通过清单的精确长度和 SHA-256 校验。缺少长度头仍允许有界读取。
+
+所有资产只接受可流式读取的响应正文；`body === null` 时失败关闭，不退回无界 `arrayBuffer()`。共享有界读取原语对已知长度预分配缓冲区；未知长度按需倍增并即时复制分块，不保留分块数组及其底层大缓冲。取消、超限或长度不符时发起 reader 取消并释放锁，不等待取消 Promise，也不让清理错误覆盖原始错误。完整性错误不写入缓存。
 
 旧 ONNX 的本地校验使用以下命令；当前 ORT 则由扩展内置构建及下载器按各自共享清单检查。
 
