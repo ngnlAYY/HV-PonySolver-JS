@@ -38,7 +38,7 @@
   -> HostResponse -> 原路径返回
 ```
 
-内容客户端为每个请求保存 `RequestLifecycle`，监听响应、断开和超时，并在用户取消时发送同一 Port 上的 request-scoped `cancel`。实现位于 [`src/content/remote-detector-client.ts`](../../apps/extension/src/content/remote-detector-client.ts) 和 [`src/protocol/request-lifecycle.ts`](../../apps/extension/src/protocol/request-lifecycle.ts)。客户端仅在存在活跃的非静默准备或识别请求时，将 Host 阶段广播和断连状态写入面板；单独的静默预热以及请求结束后的晚到广播不会改变面板。广播只更新模型/会话状态；推理状态保留在内容侧，因为只有内容侧能测量完整往返时间。
+内容客户端为每个请求保存 `RequestLifecycle`，监听响应、断开和超时，并在用户取消时发送同一 Port 上的 request-scoped `cancel`。实现位于 [`src/content/remote-detector-client.ts`](../../apps/extension/src/content/remote-detector-client.ts) 和 [`src/protocol/request-lifecycle.ts`](../../apps/extension/src/protocol/request-lifecycle.ts)。客户端仅在存在活跃的非静默准备或识别请求时，将 Host 阶段广播和断连状态写入面板；单独的静默预热以及请求结束后的晚到广播不会改变面板。广播只更新模型/会话状态；推理状态保留在内容侧，因为只有内容侧能测量完整往返时间。初始化往返耗时在同一内容页面内用 `performance.now()` 测量并取整，不受系统时间回拨或前跳影响；静默、取消、超时与销毁路径仍不记录就绪耗时。
 
 Broker 是受信边界：[`src/background/broker.ts`](../../apps/extension/src/background/broker.ts) 检查扩展 ID、实际发送页面 URL、端口名称、协议形状和请求 ID，再按端口及后台代际施加并发限制。缺失 sender.url 时失败关闭，不能用属于顶层标签页的 sender.tab.url 替代；内容来源匹配完整 HTTPS origin，拒绝非标准端口与 URL 凭据。sender.origin 若存在必须与实际发送页面匹配，拒绝 opaque origin；frameId 若存在必须为 0，与当前只注入顶层页面的清单一致。两个字段缺省时保留浏览器兼容路径，但不跳过 URL 与扩展 ID 校验。它把每个 Host 调用绑定到 `AbortSignal`；端口断开、客户端取消或 Broker 超时都会终止对应请求。状态广播是单向的，不会结算请求。Broker 也广播凭证版本变化，并把持久化版本留给下一代内容脚本恢复。
 

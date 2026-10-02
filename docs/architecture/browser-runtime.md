@@ -34,6 +34,8 @@ App
 
 [core App](../../packages/browser-core/src/app/app.ts) 在稳定的 documentElement 上观察验证码目标相关的 DOM 变化，使用启动延迟和 MutationObserver 防抖调度扫描。整体替换 body 或暂时移除后重新插入，不会丢失新目标通知；面板恢复与识别调度各自维护观察器。它保存当前、失败和准备中的目标，并在销毁、页面切换、Key 变化时推进取消信号或凭据修订号。
 
+目标变化或移除时，取消不等待防抖：观察器先比较活动轮次的完整 `CaptchaTarget`，取消旧信号，再由防抖扫描最新目标。`prepareTarget()` 用 `raceAbort` 释放等待，即使底层准备 Promise 迟到成功或失败，也不能阻塞新轮次、重试旧目标或写入旧结果。相同目标的无关子节点变化与提交按钮启用不取消初始化；已完成目标仍按原去重规则处理。
+
 一次自动处理的主链路是：
 
 ```mermaid
@@ -97,7 +99,7 @@ sequenceDiagram
 
 [HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 为新记录分配每世界独立的 `sequence` 正安全整数，取本实例已分配序号与当前可见记录序号的最大值加一。分配发生在异步写入前，失败允许留下序号空洞；重建实例后从已保存记录恢复顺序。独立键历史按序号、时间戳和稳定 key 排序后裁剪；旧记录缺少序号时仍按原时间戳规则读取，非枚举存储的旧数组继续保持原顺序。显示用的 `timestamp`/`time` 不做单调化，也不重写旧数据。尚未互相观察到的并发写可使用同一序号，再按时间戳和 key 确定顺序；之后看到这些写入的新记录会取得更大序号。非法序号按损坏记录处理，安全整数上限耗尽则通过保存失败通道报告，不写入溢出值。
 
-App 每轮在 `prepareTarget()` 前捕获当前页面的 `performance.now()`，与本轮手动变更快照一起经 `SolverService.trigger(target, startedAt, signal, answerSelection)` 传给 Solver。新历史的 `elapsed` 计入准备与重试，自动模式截至原生提交点击，手动模式截至记录结果；开始扫描前的加载、防抖和提交后的网络响应不计入。Solver 独立统计图片获取和识别请求耗时，并在目标仍有效时统一写入“完成 Nms”，供用户脚本与扩展共用。持续时间按整数毫秒记录，OnnxWorkerClient 的初始化与推理阶段也使用 `performance.now()`，避免系统时钟回拨产生负耗时；历史时刻仍由 `Date.now()` 生成，旧历史不重新计算。修改时应覆盖准备重试、系统校时、新目标重置、取消和 DOM 替换。
+App 每轮在 `prepareTarget()` 前捕获当前页面的 `performance.now()`，与本轮手动变更快照一起经 `SolverService.trigger(target, startedAt, signal, answerSelection)` 传给 Solver。新历史的 `elapsed` 计入准备与重试，自动模式截至原生提交点击，手动模式截至记录结果；开始扫描前的加载、防抖和提交后的网络响应不计入。Solver 独立统计图片获取和识别请求耗时，并在目标仍有效时统一写入“完成 Nms”，供用户脚本与扩展共用。持续时间按整数毫秒记录，OnnxWorkerClient 的初始化与推理阶段以及扩展 RemoteDetectorClient 的初始化往返耗时也使用 `performance.now()`，避免系统时钟回拨产生负耗时；历史时刻仍由 `Date.now()` 生成，旧历史不重新计算。修改时应覆盖准备重试、系统校时、新目标重置、取消和 DOM 替换。
 
 用户脚本 [status-panel.ts](../../apps/userscript/src/status-panel/status-panel.ts) 只把 HistoryStore 和 GM 设置存储传给核心。修改面板默认位置、显示条件、紧凑模式或历史上限时，同时检查 [panel-settings.ts](../../packages/browser-core/src/status-panel/panel-settings.ts)、用户脚本对应设置文件、核心/用户脚本面板测试和 README/专题文档。
 

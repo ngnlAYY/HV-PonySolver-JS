@@ -37,7 +37,7 @@ export class RemoteDetectorClient implements DetectorService {
   async prepare(signal?: AbortSignal, options?: Readonly<{ silent?: boolean }>): Promise<void> {
     this.assertNotAborted(signal)
     const silent = options?.silent === true
-    const startedAt = Date.now()
+    const startedAt = performance.now()
     if (!silent) {
       this.statusSink.setStatus({ session: '初始化中' })
     }
@@ -54,7 +54,7 @@ export class RemoteDetectorClient implements DetectorService {
       )
       this.assertNotAborted(signal)
       if (!this.destroyed && !silent) {
-        this.statusSink.setSessionReady(Date.now() - startedAt)
+        this.statusSink.setSessionReady(Math.round(performance.now() - startedAt))
       }
     } catch (error) {
       if (!this.destroyed && !silent && !signal?.aborted) {

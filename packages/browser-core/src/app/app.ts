@@ -2,6 +2,7 @@ import { captchaSelectors } from '../captcha/captcha-selectors'
 import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from '../captcha/captcha-target'
 import { TRANSIENT_RETRY_DELAYS_MS } from '../captcha/captcha-solver'
 import { isPermanentModelError } from '../model/permanent-model-error'
+import { raceAbort } from '../utils/abort-race'
 import { sleep } from '../utils/delay'
 import { formatErrorMessage } from '../utils/errors'
 import { warn } from '../utils/logger'
@@ -13,6 +14,7 @@ const TRANSIENT_FAILURE_RETRY_AFTER_MS = 30_000
 const SOLVER_FAILURE_RETRY_AFTER_MS = 30_000
 
 type PrepareTargetResult = 'prepared' | 'stale' | 'permanent-failure' | 'transient-failure'
+type ActiveSolve = Readonly<{ target: CaptchaTarget; controller: AbortController }>
 
 export class App {
   private readonly panel: AppDependencies['panel']
@@ -30,6 +32,7 @@ export class App {
   private transientSuppressionAt: number | null = null
   private solverFailureSuppressionAt: number | null = null
   private preparingCaptchaTarget: CaptchaTarget | null = null
+  private activeSolve: ActiveSolve | null = null
   private modelCredentialsRevision = 0
   private destroyed = false
   private settingsMenuRegistered = false
@@ -119,6 +122,7 @@ export class App {
     this.transientSuppressionAt = null
     this.solverFailureSuppressionAt = null
     this.preparingCaptchaTarget = null
+    this.activeSolve = null
     this.modelCredentialsRevision += 1
     this.detector.destroy()
     this.dispose?.()
@@ -157,7 +161,12 @@ export class App {
       return
     }
     this.observer = new MutationObserver((records) => {
-      if (!this.isCaptchaRelatedMutation(records) || this.observerTimeoutId !== null) {
+      if (this.destroyed || !this.isCaptchaRelatedMutation(records)) {
+        return
+      }
+      // 取消不等待扫描防抖；旧初始化不能挡住新目标，也不能在目标短暂离开后继续提交。
+      this.cancelStaleSolve()
+      if (this.observerTimeoutId !== null) {
         return
       }
       this.observerTimeoutId = setTimeout(() => {
@@ -174,6 +183,17 @@ export class App {
         childList: true,
         subtree: true,
       })
+    }
+  }
+
+  private cancelStaleSolve(): void {
+    const active = this.activeSolve
+    if (!active || active.controller.signal.aborted || isSameCaptchaTarget(active.target, findCaptchaTarget())) {
+      return
+    }
+    active.controller.abort()
+    if (this.solveAbortController === active.controller) {
+      this.solveAbortController = new AbortController()
     }
   }
 
@@ -229,7 +249,7 @@ export class App {
           return 'stale'
         }
         try {
-          await this.detector.prepare(signal)
+          await raceAbort(this.detector.prepare(signal), signal)
           return this.isTargetCurrent(target, signal) && credentialsRevision === this.modelCredentialsRevision
             ? 'prepared'
             : 'stale'
@@ -259,11 +279,13 @@ export class App {
 
   private async runSolve(): Promise<void> {
     let target: CaptchaTarget | null = null
-    const signal = this.solveAbortController?.signal
+    let activeSolve: ActiveSolve | null = null
+    const controller = this.solveAbortController
+    const signal = controller?.signal
     const credentialsRevision = this.modelCredentialsRevision
     try {
       target = findCaptchaTarget()
-      if (this.destroyed || this.solver.isBusy || !target) {
+      if (this.destroyed || this.solver.isBusy || !target || !controller) {
         return
       }
       this.recoverFailedTargetAfterSubmitEnabled(target)
@@ -291,6 +313,8 @@ export class App {
         return
       }
       this.solverFailureSuppressionAt = null
+      activeSolve = { target, controller }
+      this.activeSolve = activeSolve
       const startedAt = performance.now()
       const answerSelection = this.solver.captureAnswerSelection?.(target)
       const prepareResult = await this.prepareTarget(target, credentialsRevision, signal)
@@ -328,6 +352,9 @@ export class App {
         warn('处理验证码失败:', formatErrorMessage(error))
       }
     } finally {
+      if (this.activeSolve === activeSolve) {
+        this.activeSolve = null
+      }
       this.scheduledScan = false
       if (this.pendingScan && !this.destroyed) {
         this.pendingScan = false

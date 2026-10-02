@@ -191,6 +191,8 @@ function checkModelCacheStrategyDocs(cacheDoc, facts) {
     'GET /quota',
     'POST /quota',
     'MODEL_DOWNLOAD_QUOTA_ENABLED=false',
+    'ModelAccessKeyRejectedError',
+    '永久错误',
     '`429`',
     '`503`',
   ]

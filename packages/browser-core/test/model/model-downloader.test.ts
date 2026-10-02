@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
 
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
-import type { ModelDownloadQuotaExceededError } from '../../src/model/model-download-error'
-import { PermanentModelError } from '../../src/model/permanent-model-error'
+import { ModelAccessKeyRejectedError, type ModelDownloadQuotaExceededError } from '../../src/model/model-download-error'
+import { isPermanentModelError, PermanentModelError } from '../../src/model/permanent-model-error'
 import {
   confirmCachedModelDownload,
   copyModelDownloadConfirmation,
@@ -200,12 +200,19 @@ describe('downloadModel', () => {
 
   it('does not include access keys or tokenized URLs in HTTP errors', async () => {
     getModelAccessKey.mockResolvedValue('secret-token')
-    const fetchMock = vi.fn(async () => new Response(null, { status: 403 }))
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const response = new Response(new ReadableStream({ cancel }), { status: 403 })
+    const fetchMock = vi.fn(async () => response)
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('模型下载失败: HTTP 403')
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('secret-token')
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('?key=')
+    const result = downloadModel(undefined, { integrity: TEST_INTEGRITY })
+    await expect(result).rejects.toThrow(ModelAccessKeyRejectedError)
+    await expect(result).rejects.toThrow('模型 Key 无效或已失效')
+    await expect(result).rejects.not.toThrow('secret-token')
+    await expect(result).rejects.not.toThrow('?key=')
+    await expect(result.catch((error: unknown) => isPermanentModelError(error))).resolves.toBe(true)
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('reports a rejected Key when a suspicious declaration carries a non-model body', async () => {

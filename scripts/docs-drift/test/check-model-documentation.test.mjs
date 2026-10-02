@@ -4,11 +4,22 @@ import { join } from 'node:path'
 import { readFile, runCheck, withFixture, writeFile } from './fixtures.mjs'
 
 for (const [document, facts] of [
-  ['docs/architecture/browser-runtime.md', ['readBoundedByteStream', '不等待取消 Promise', 'performance.now()']],
+  [
+    'docs/architecture/browser-runtime.md',
+    [
+      'readBoundedByteStream',
+      '不等待取消 Promise',
+      'performance.now()',
+      '取消不等待防抖',
+      'raceAbort',
+      'RemoteDetectorClient',
+    ],
+  ],
+  ['docs/model-cache-strategy.md', ['ModelAccessKeyRejectedError', '永久错误']],
   ['docs/onnx-runtime.md', ['Content-Length', '规范十进制', '解压', '不等待取消 Promise']],
 ]) {
   for (const fact of facts) {
-    test(`bounded IO contract cannot be replaced by a README mention: ${document} ${fact}`, async () => {
+    test(`browser runtime contract cannot be replaced by a README mention: ${document} ${fact}`, async () => {
       await withFixture(async (root) => {
         const path = join(root, document)
         const source = await readFile(path, 'utf8')

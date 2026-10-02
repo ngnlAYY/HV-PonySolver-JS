@@ -99,7 +99,7 @@ describe('downloadModel', () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 403 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('模型下载失败: HTTP 403')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('模型 Key 无效或已失效')
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('secret-token')
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toThrow('?key=')
   })

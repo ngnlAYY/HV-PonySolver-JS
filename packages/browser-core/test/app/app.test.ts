@@ -7,6 +7,7 @@ import { CaptchaSolver } from '../../src/captcha/captcha-solver'
 import type { CaptchaTarget } from '../../src/captcha/captcha-target'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
 import { PermanentModelError } from '../../src/model/permanent-model-error'
+import { downloadModel } from '../../src/model/model-downloader'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
 import { appendCaptcha } from '../../../../test/support/captcha-fixture'
 
@@ -88,6 +89,7 @@ describe('App', () => {
       app.destroy()
     }
     apps.length = 0
+    if (!document.body) document.documentElement.appendChild(document.createElement('body'))
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
@@ -354,11 +356,15 @@ describe('App', () => {
     await settleDom()
     expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
 
+    const oldSignal = harness.app.getAbortSignal()
     document.body.remove()
     await settleDom()
+    expect(oldSignal?.aborted).toBe(true)
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
     document.documentElement.appendChild(document.createElement('body'))
     const next = appendCaptcha('/replacement-body.png')
     await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
     resolvePrepare?.()
     await settleDom()
 
@@ -504,6 +510,50 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(2)
     expect(harness.trigger.mock.calls[0]?.[0]?.master).toBe(first)
     expect(harness.trigger.mock.calls[1]?.[0]?.master).toBe(replacement)
+  })
+
+  it('cancels an active submit delay when a new target arrives and records only the new result', async () => {
+    const captcha = appendCaptcha('/old-submit.png')
+    const image = captcha.querySelector('img')
+    if (!image) throw new Error('captcha image missing')
+    const click = vi.spyOn(captcha.submitButton, 'click').mockImplementation(() => undefined)
+    const panel = createPanel()
+    const detector = createDetector()
+    vi.mocked(detector.detect).mockResolvedValue({
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.9 },
+      detections: [],
+      candidates: [],
+    })
+    const submitDelay = vi
+      .fn(async (): Promise<readonly [number, number]> => [0, 0])
+      .mockResolvedValueOnce([10_000, 10_000])
+    const solver = new CaptchaSolver(
+      panel,
+      detector,
+      { get: async () => new Blob(['captcha']) },
+      new AnswerSubmitter(submitDelay, async () => [0, 0]),
+      async () => 'auto',
+    )
+    const { app } = createHarness({ panel, detector, solver })
+    apps.push(app)
+    app.init()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(submitDelay).toHaveBeenCalledTimes(1)
+    expect(click).not.toHaveBeenCalled()
+    const oldSignal = app.getAbortSignal()
+
+    image.src = '/new-submit.png'
+    await vi.advanceTimersByTimeAsync(101)
+    expect(oldSignal?.aborted).toBe(true)
+    expect(detector.detect).toHaveBeenCalledTimes(2)
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+    expect(panel.addError).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(panel.addSuccess).toHaveBeenCalledTimes(1)
   })
 
   it('rescans a handled target after its image source changes', async () => {
@@ -745,6 +795,87 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['resolve', 'reject'] as const)(
+    'cancels stale preparation before debounce and ignores its late %s after the newest target starts',
+    async (settlement) => {
+      const captcha = appendCaptcha('/captcha-a.png')
+      const image = captcha.querySelector('img')
+      if (!image) throw new Error('captcha image missing')
+      const harness = createHarness()
+      let settleOld: (() => void) | undefined
+      let resolveNew: (() => void) | undefined
+      vi.mocked(harness.detector.prepare)
+        .mockReturnValueOnce(
+          new Promise<void>((resolve, reject) => {
+            settleOld = settlement === 'resolve' ? resolve : () => reject(new Error('late old failure'))
+          }),
+        )
+        .mockReturnValueOnce(
+          new Promise<void>((resolve) => {
+            resolveNew = resolve
+          }),
+        )
+      apps.push(harness.app)
+      harness.app.init()
+      await settleDom()
+      const oldSignal = harness.app.getAbortSignal()
+
+      // A same-target mutation must not cancel shared preparation.
+      captcha.appendChild(document.createElement('span'))
+      await settleDom()
+      expect(oldSignal?.aborted).toBe(false)
+      expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+
+      image.src = '/captcha-b.png'
+      await Promise.resolve()
+      expect(oldSignal?.aborted).toBe(true)
+      const newSignal = harness.app.getAbortSignal()
+      expect(newSignal).not.toBe(oldSignal)
+      image.src = '/captcha-c.png'
+      await settleDom()
+      expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+      expect(newSignal?.aborted).toBe(false)
+      expect(harness.trigger).not.toHaveBeenCalled()
+
+      settleOld?.()
+      await settleDom()
+      expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+      expect(harness.trigger).not.toHaveBeenCalled()
+      expect(newSignal?.aborted).toBe(false)
+      resolveNew?.()
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+      expect(harness.trigger.mock.calls[0]?.[0]?.captchaKey).toContain('/captcha-c.png')
+    },
+  )
+
+  it.each(['controls', 'form action', 'submit action'] as const)(
+    'cancels pending preparation when %s changes without changing the image URL',
+    async (change) => {
+      const captcha = appendCaptcha('/same-image.png')
+      const form = captcha.querySelector('form')
+      if (!form) throw new Error('captcha form missing')
+      if (change === 'submit action') captcha.submitButton.type = 'submit'
+      const harness = createHarness()
+      vi.mocked(harness.detector.prepare).mockReturnValueOnce(new Promise<void>(() => undefined))
+      apps.push(harness.app)
+      harness.app.init()
+      await settleDom()
+      const oldSignal = harness.app.getAbortSignal()
+      if (change === 'controls') {
+        captcha.replaceWith(appendCaptcha('/same-image.png'))
+      } else if (change === 'form action') {
+        form.action = '/next-submit'
+      } else {
+        captcha.submitButton.setAttribute('formaction', '/next-submit')
+      }
+      await settleDom()
+      expect(oldSignal?.aborted).toBe(true)
+      expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+    },
+  )
+
   it('abandons a target replaced while prepare is pending and solves the replacement', async () => {
     let resolvePrepare: (() => void) | undefined
     const harness = createHarness()
@@ -827,6 +958,29 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(1)
   })
 
+  it('does not retry a model GET 403 until credentials change', async () => {
+    const captcha = appendCaptcha('/forbidden-model.png')
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 403 }))
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare).mockImplementation(async (signal) => {
+      await downloadModel(signal, {}, { fetchImpl })
+    })
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+    expect(harness.trigger).not.toHaveBeenCalled()
+
+    vi.mocked(harness.detector.prepare).mockResolvedValue(undefined)
+    harness.app.recoverAfterModelCredentialsChanged()
+    await settleDom()
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+  })
+
   it('does not retry a reconstructed permanent model prepare failure', async () => {
     appendCaptcha('/captcha.png')
     const harness = createHarness()
@@ -877,7 +1031,8 @@ describe('App', () => {
     const prepareThenable = {
       then(resolve: (value: void) => void): void {
         resolve()
-        queueMicrotask(() => appRef.current?.recoverAfterModelCredentialsChanged())
+        // Cross the abort-race wrapper, then rotate credentials between prepareTarget and trigger.
+        queueMicrotask(() => queueMicrotask(() => appRef.current?.recoverAfterModelCredentialsChanged()))
       },
     }
     vi.mocked(detector.prepare)

@@ -25,7 +25,7 @@ vi.mock('../../src/platform/webextension', async (importOriginal) => {
 
 import { RemoteDetectorClient } from '../../src/content/remote-detector-client'
 import { PREFETCH_MISS_STORAGE_KEY } from '../../src/content/prefetch'
-import { encodeImage, PROTOCOL_VERSION } from '../../src/protocol/messages'
+import { encodeImage, isHostRequest, PROTOCOL_VERSION } from '../../src/protocol/messages'
 
 function createPort(): TestPort {
   let messageListener: ((message: unknown) => void) | undefined
@@ -128,6 +128,30 @@ describe('RemoteDetectorClient', () => {
 
     await expect(detectPromise).resolves.toEqual(result)
   })
+
+  it.each([-5_000, 10_000])(
+    'measures preparation with a monotonic clock despite a %dms clock change',
+    async (shift) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
+      const sink = statusSink()
+      const client = new RemoteDetectorClient(sink)
+      try {
+        const preparation = client.prepare()
+        const port = platformMocks.ports[0]
+        const request = port && vi.mocked(port.postMessage).mock.calls[0]?.[0]
+        if (!port || !isHostRequest(request) || request.type !== 'prepare') throw new Error('prepare request missing')
+        await vi.advanceTimersByTimeAsync(25)
+        vi.setSystemTime(Date.now() + shift)
+        await vi.advanceTimersByTimeAsync(100)
+        port.emitMessage({ protocol: PROTOCOL_VERSION, type: 'result', requestId: request.requestId, ok: true })
+        await preparation
+        expect(sink.setSessionReady).toHaveBeenCalledExactlyOnceWith(125)
+      } finally {
+        client.destroy()
+        vi.useRealTimers()
+      }
+    },
+  )
 
   it('prepares silently without touching the status panel', async () => {
     const sink = statusSink()

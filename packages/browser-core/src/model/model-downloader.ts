@@ -314,6 +314,9 @@ export async function downloadModel(
     if (!response.ok) {
       cancelByteStream(response.body)
       deadline.throwIfExpired()
+      if (response.status === 403) {
+        throw new ModelAccessKeyRejectedError()
+      }
       if (response.status === 429) {
         throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
       }
