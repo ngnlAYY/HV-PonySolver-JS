@@ -46,6 +46,9 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
     'srcset',
     'currentSrc',
     '首次初始化也允许 body 缺失',
+    '外层 fieldset',
+    '首个 legend',
+    '消费该次 Promise 拒绝',
   ]) {
     if (!readme.includes(fact)) errors.push(`docs/architecture/browser-runtime.md must mention ${fact}`)
   }

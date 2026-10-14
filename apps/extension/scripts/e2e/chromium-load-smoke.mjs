@@ -24,11 +24,28 @@ export function resolveRemoteSmokeMode(args, environment = process.env) {
   if (args[0] === '--load-only') {
     return { mode: 'load-only' }
   }
+  assertSensitiveLoggingDisabled(environment)
   const key = environment.KvKey?.trim() ?? ''
   if (!key) {
     throw new Error('KvKey is required for the authenticated remote inference smoke')
   }
   return { mode: 'authenticated', key }
+}
+
+function assertSensitiveLoggingDisabled(environment) {
+  if (environment.DEBUG || environment.PWDEBUG) {
+    throw new Error('受保护鉴权 smoke 禁止启用 DEBUG 或 PWDEBUG，以免浏览器自动化日志记录 Key')
+  }
+}
+
+export async function fillRemoteModelKey(page, key) {
+  assertSensitiveLoggingDisabled(process.env)
+  try {
+    await page.locator('#model-key').fill(key)
+  } catch {
+    // Playwright 的 call log 包含 fill 参数，原异常及 cause 均不能越过秘密边界。
+    throw new Error('模型 Key 输入失败；已隐藏浏览器自动化错误详情')
+  }
 }
 
 async function readJsonFile(filename, label) {
@@ -205,7 +222,7 @@ export async function runRemoteChromiumSmoke(args = process.argv.slice(2), envir
       return { browserVersion, mode: policy.mode }
     }
 
-    await page.locator('#model-key').fill(policy.key)
+    await fillRemoteModelKey(page, policy.key)
     await verifyRemoteModelKey(page, browserErrors)
     const contexts = await page.evaluate(() =>
       globalThis.chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] }),

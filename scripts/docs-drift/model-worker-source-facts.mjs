@@ -321,9 +321,10 @@ function hasMemberCallWithStringAndIdentifierArgument(
 
 function readSelectedObjectMissingStatus(modelResponseSource, requestRouterSource, errors) {
   const internalErrorResponseBody = readFunctionBodySource(modelResponseSource, 'internalErrorResponse')
-  const statusMatch = /return\s+textResponse\(\s*request\s*,\s*INTERNAL_ERROR_MESSAGE\s*,\s*(?<status>[0-9]+)/s.exec(
-    stripIgnoredSyntax(internalErrorResponseBody),
-  )
+  const statusMatch =
+    /return\s+textResponse\(\s*request\s*,\s*INTERNAL_ERROR_MESSAGE\s*,\s*(?<status>[0-9]+)\s*(?=[,)])/s.exec(
+      stripIgnoredSyntax(internalErrorResponseBody),
+    )
   const serveModelBody = readFunctionBodySource(requestRouterSource, 'serveModel')
   const normalizedServeModelBody = stripIgnoredSyntax(stripDeadFalseBranches(serveModelBody))
   const objectReadMatch = /(?:env\.MODEL_BUCKET\.get|readObjectForRequest)\s*\(/.exec(normalizedServeModelBody)

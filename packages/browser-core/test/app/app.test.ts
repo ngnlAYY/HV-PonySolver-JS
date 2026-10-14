@@ -850,6 +850,89 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(2)
   })
 
+  it('cancels preparation before debounce when an outer fieldset disables controls and recovers on enable', async () => {
+    const captcha = appendCaptcha('/outer-fieldset.png')
+    const fieldset = document.createElement('fieldset')
+    fieldset.append(captcha)
+    document.body.append(fieldset)
+    const harness = createHarness()
+    let resolveOld: (() => void) | undefined
+    vi.mocked(harness.detector.prepare).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveOld = resolve
+      }),
+    )
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    const oldSignal = harness.app.getAbortSignal()
+    expect(oldSignal?.aborted).toBe(false)
+
+    fieldset.disabled = true
+    await Promise.resolve()
+    expect(oldSignal?.aborted).toBe(true)
+    expect(harness.trigger).not.toHaveBeenCalled()
+
+    fieldset.disabled = false
+    await settleDom()
+    expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+    resolveOld?.()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+  })
+
+  it('rescans a suppressed initially disabled captcha when only its outer fieldset becomes enabled', async () => {
+    const captcha = appendCaptcha('/initially-disabled.png')
+    const fieldset = document.createElement('fieldset')
+    fieldset.disabled = true
+    fieldset.append(captcha)
+    document.body.append(fieldset)
+    const harness = createHarness()
+    harness.trigger.mockImplementation(async (target?: CaptchaTarget) => ({
+      handled: !fieldset.disabled,
+      captchaKey: target?.captchaKey ?? null,
+    }))
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    fieldset.disabled = false
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+  })
+
+  it('respects the first legend exception and cancels when an ancestor fieldset gets a new first legend', async () => {
+    const captcha = appendCaptcha('/legend.png')
+    const fieldset = document.createElement('fieldset')
+    const legend = document.createElement('legend')
+    legend.append(captcha)
+    fieldset.append(legend)
+    document.body.append(fieldset)
+    const harness = createHarness()
+    vi.mocked(harness.detector.prepare).mockReturnValueOnce(new Promise<void>(() => undefined))
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    const signal = harness.app.getAbortSignal()
+
+    fieldset.disabled = true
+    await Promise.resolve()
+    expect(signal?.aborted).toBe(false)
+    const unrelated = document.createElement('fieldset')
+    document.body.append(unrelated)
+    unrelated.disabled = true
+    await Promise.resolve()
+    expect(signal?.aborted).toBe(false)
+
+    fieldset.prepend(document.createElement('legend'))
+    await Promise.resolve()
+    expect(signal?.aborted).toBe(true)
+  })
+
   it('retries a suppressed failed captcha exactly once when its submit button becomes enabled', async () => {
     const captcha = appendCaptcha('/captcha.png')
     const submit = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!

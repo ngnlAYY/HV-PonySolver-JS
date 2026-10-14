@@ -37,15 +37,10 @@ function hasConstLiteralTerminator(source, literalEnd) {
     return true
   }
 
-  const suffixEnd = skipTypeScriptConstSuffix(source, suffixStart.index)
-  if (suffixEnd === suffixStart.index) {
+  if (!identifierAt(source, suffixStart.index, 'as') && !identifierAt(source, suffixStart.index, 'satisfies')) {
     return false
   }
-  const boundary = readConstLiteralBoundary(source, suffixEnd)
-  if (boundary.char === undefined || boundary.char === ';' || boundary.char === ',') {
-    return true
-  }
-  return boundary.hasLineBreak && isStatementStart(source, boundary.index)
+  return hasTypeOnlyStringInitializer(source, literalEnd)
 }
 
 function readConstLiteralBoundary(source, startIndex) {
@@ -81,45 +76,22 @@ function isStatementStart(source, index) {
   )
 }
 
-function skipTypeScriptConstSuffix(source, startIndex) {
-  let index = startIndex
-  const firstSuffixEnd = skipSingleTypeScriptConstSuffix(source, index)
-  if (firstSuffixEnd === index) {
-    return startIndex
-  }
-  index = skipWhitespaceAndComments(source, firstSuffixEnd)
-  const secondSuffixEnd = skipSingleTypeScriptConstSuffix(source, index)
-  return secondSuffixEnd === index ? firstSuffixEnd : secondSuffixEnd
-}
-
-function skipSingleTypeScriptConstSuffix(source, startIndex) {
-  let index = startIndex
-  if (identifierAt(source, index, 'as')) {
-    index = skipWhitespaceAndComments(source, index + 'as'.length)
-    if (!identifierAt(source, index, 'const')) {
-      return startIndex
-    }
-    return index + 'const'.length
-  }
-  if (identifierAt(source, index, 'satisfies')) {
-    index = skipWhitespaceAndComments(source, index + 'satisfies'.length)
-    while (
-      index < source.length &&
-      source[index] !== ';' &&
-      source[index] !== ',' &&
-      source[index] !== '\n' &&
-      source[index] !== '\r'
-    ) {
-      const skipped = skipIgnoredSyntaxAndRegexLiteral(source, index)
-      if (skipped !== index) {
-        index = skipped
-        continue
+function hasTypeOnlyStringInitializer(source, literalEnd) {
+  // satisfies 后可继续运算；必须检查整个 initializer，不能把行尾当类型边界。
+  const sourceFile = parseTypeScriptSource(source)
+  if (sourceFile.parseDiagnostics.length > 0) return false
+  for (const statement of sourceFile.statements) {
+    if (!typeScriptParser.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      let initializer = declaration.initializer
+      if (!initializer) continue
+      while (typeScriptParser.isAsExpression(initializer) || typeScriptParser.isSatisfiesExpression(initializer)) {
+        initializer = initializer.expression
       }
-      index += 1
+      if (typeScriptParser.isStringLiteral(initializer) && initializer.end === literalEnd) return true
     }
-    return index
   }
-  return startIndex
+  return false
 }
 
 function readTopLevelConstValueStart(source, constantName) {
@@ -340,7 +312,7 @@ function hasAmbiguousReturnTypeBrace(source, startIndex, bodyStart) {
   )
 }
 
-function readFunctionBodyFromTypeScriptAst(source, functionName) {
+function parseTypeScriptSource(source) {
   typeScriptParser ??= loadModule('typescript')
   let sourceFile = parsedSources.get(source)
   if (!sourceFile) {
@@ -354,6 +326,11 @@ function readFunctionBodyFromTypeScriptAst(source, functionName) {
     if (parsedSources.size >= MAX_PARSED_SOURCES) parsedSources.delete(parsedSources.keys().next().value)
     parsedSources.set(source, sourceFile)
   }
+  return sourceFile
+}
+
+function readFunctionBodyFromTypeScriptAst(source, functionName) {
+  const sourceFile = parseTypeScriptSource(source)
   for (const statement of sourceFile.statements) {
     if (
       !typeScriptParser.isFunctionDeclaration(statement) ||

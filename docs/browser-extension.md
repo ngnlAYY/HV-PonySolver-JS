@@ -150,7 +150,7 @@ packaged 设置页不打开 Key Port，Key 控件禁用并显示“当前版本�
 
 包内 Node 测试使用 `node --test "scripts/**/*.test.mjs"`，覆盖 build、benchmark、browser、E2E、fixture 与 release 契约。脚本按这七个职责目录组织，日常使用包命令。
 
-benchmark 按参数、统计、结果 schema、比较与 CSV 分模块，聚合入口只转发契约，runner 只编排采样。每次至少两个测量样本，`--samples 1` 在启动浏览器前拒绝。入口与成本见[命令参考](development/commands.md)。
+benchmark 按参数、统计、结果 schema、比较与 CSV 分模块，聚合入口只转发契约，runner 只编排采样。每次至少两个测量样本，`--samples 1` 在启动浏览器前拒绝。报告逐场景核对 invocation 总数、从零起连续且唯一的索引，以及每次 warmup/measured 数量与 config 完全一致；不能用满足最低采样量代替声明数量。入口与成本见[命令参考](development/commands.md)。
 
 浏览器完整版本比较只删除末尾零：`140.15.0` 等同 `140.15`，不等同 `140.15.1`。最低支持和精确最低执行使用 [browser-support.mjs](../apps/extension/scripts/browser/browser-support.mjs) 的 major 策略。
 
@@ -178,7 +178,7 @@ mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:firefox:load-only
 mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:chromium:authenticated
 ```
 
-缺少 Key 必须失败。不要把 Key 写入命令行、日志或证据。
+缺少 Key 必须失败。不要把 Key 写入命令行、日志或证据。鉴权模式拒绝非空 `DEBUG`/`PWDEBUG`；Key 输入失败只输出固定安全错误，不传递 Playwright call log、原异常或 cause。
 
 内置模型是另一组产物，重新构建后再验收：
 

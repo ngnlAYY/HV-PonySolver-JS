@@ -148,7 +148,15 @@ export class App {
     const captchaMaster = document.getElementById('riddlemaster')
     for (const record of records) {
       const target = record.target
-      if (captchaMaster && (target === captchaMaster || captchaMaster.contains(target as Node))) {
+      if (
+        captchaMaster &&
+        (target === captchaMaster ||
+          captchaMaster.contains(target) ||
+          // 外层 fieldset 的 disabled、首个 legend 顺序同样影响控件有效禁用状态。
+          (target instanceof HTMLFieldSetElement &&
+            target.contains(captchaMaster) &&
+            (record.type === 'childList' || record.attributeName === 'disabled')))
+      ) {
         return true
       }
       for (let index = 0; index < record.addedNodes.length; index += 1) {

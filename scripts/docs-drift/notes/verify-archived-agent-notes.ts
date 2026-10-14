@@ -198,13 +198,20 @@ if (repoRoot) {
   const manifestRel = relative(repoRoot, manifestPath).split('\\').join('/')
   let baselineRaw: string | null = null
   try {
-    baselineRaw = execFileSync('git', ['show', `${baseRef}:${manifestRel}`], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    const git = (args: string[]) =>
+      execFileSync('git', args, {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    // 先解析为 commit 身份，再查清单是否缺失；Git 失败不能等同于“没有历史封印”。
+    const baselineCommit = git(['rev-parse', '--verify', '--end-of-options', `${baseRef}^{commit}`]).trim()
+    const manifestEntry = git(['ls-tree', '--name-only', '-z', baselineCommit, '--', manifestRel])
+    if (manifestEntry !== '') {
+      baselineRaw = git(['show', `${baselineCommit}:${manifestRel}`])
+    }
   } catch {
-    // manifest absent at baseline — nothing to compare
+    fail('archive baseline must resolve to an accessible commit and its manifest must be readable')
   }
   if (baselineRaw !== null) {
     const baseline = parseManifest(baselineRaw, `archived/manifest.json at ${baseRef}`)

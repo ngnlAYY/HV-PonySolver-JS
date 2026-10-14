@@ -147,6 +147,39 @@ test('fails clearly when Model Worker string facts use runtime expressions', asy
   })
 })
 
+test('rejects runtime concatenation after a satisfies suffix', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const source = await readFile(responsePath, 'utf8')
+    const anchor = "const CACHE_CONTROL = 'no-store'"
+    const replacement = `${anchor} satisfies string + ', max-age=86400'`
+    assert.ok(source.includes(anchor))
+    const changed = source.replace(anchor, replacement)
+    assert.ok(changed.includes(replacement))
+    await writeFile(responsePath, changed)
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /CACHE_CONTROL.*string literal/s)
+  })
+})
+
+for (const status of ['500 - 100', '500 + 1', '500n', '500_000']) {
+  test(`rejects a numeric prefix instead of a complete HTTP status literal: ${status}`, async () => {
+    await withFixture(async (fixtureRoot) => {
+      const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+      const source = await readFile(responsePath, 'utf8')
+      const anchor = 'textResponse(request, INTERNAL_ERROR_MESSAGE, 500'
+      assert.ok(source.includes(anchor))
+      const changed = source.replace(anchor, `textResponse(request, INTERNAL_ERROR_MESSAGE, ${status}`)
+      assert.notEqual(changed, source)
+      await writeFile(responsePath, changed)
+      const result = await runCheck(fixtureRoot)
+      assert.notEqual(result.exitCode, 0)
+      assert.match(result.stderr, /must return a literal status for selected R2 object misses/s)
+    })
+  })
+}
+
 test('accepts Model Worker string facts with TypeScript-only annotations', async () => {
   await withFixture(async (fixtureRoot) => {
     const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
@@ -326,51 +359,42 @@ export async function createModelResponse`,
 
 test('accepts selected R2 miss status with equivalent null-guard shape', async () => {
   await withFixture(async (fixtureRoot) => {
-    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
-    const responseSource = await readFile(responsePath, 'utf8')
-    await writeFile(
-      responsePath,
-      responseSource.replace(
-        `if (object === null) {
-    return textResponse(request, INTERNAL_ERROR_MESSAGE, 500, { 'content-type': 'text/plain;charset=UTF-8' })
-  }`,
-        `if (null === object) return textResponse(
-    request,
-    INTERNAL_ERROR_MESSAGE,
-    500,
-    { 'content-type': 'text/plain;charset=UTF-8' },
-  )`,
-      ),
-    )
+    const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
+    const routerSource = await readFile(routerPath, 'utf8')
+    const anchor = `if (!object) {
+    return internalErrorResponse(request)
+  }`
+    const replacement = 'if (null === object) return internalErrorResponse(request)'
+    assert.ok(routerSource.includes(anchor))
+    const changed = routerSource.replace(anchor, replacement)
+    assert.ok(changed.includes(replacement))
+    await writeFile(routerPath, changed)
 
     const result = await runCheck(fixtureRoot)
     assert.equal(result.exitCode, 0, result.stderr)
   })
 })
 
-test('fails clearly when selected R2 miss status is masked by nested dead decoy after bucket get', async () => {
+test('fails clearly when selected R2 miss handling exists only in a nested dead decoy after bucket get', async () => {
   await withFixture(async (fixtureRoot) => {
-    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
-    const responseSource = await readFile(responsePath, 'utf8')
-    await writeFile(
-      responsePath,
-      responseSource
-        .replace(
-          'textResponse(request, INTERNAL_ERROR_MESSAGE, 500',
-          'textResponse(request, INTERNAL_ERROR_MESSAGE, 404',
-        )
-        .replace(
-          'const object = await env.modelBucket.get(objectKey)',
-          'const object = await env.modelBucket.get(objectKey)\n  if (false) { if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) } }',
-        ),
-    )
+    const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
+    const source = await readFile(routerPath, 'utf8')
+    const objectAnchor = 'const object = await readObjectForRequest(request, env, objectKey)'
+    const guardAnchor = `if (!object) {
+    return internalErrorResponse(request)
+  }`
+    const decoy = 'if (false) { if (object === null) { return internalErrorResponse(request) } }'
+    const changedGuard = "if (!object) return textResponse(request, 'Not Found', 404)"
+    assert.ok(source.includes(objectAnchor))
+    assert.ok(source.includes(guardAnchor))
+    const changed = source.replace(objectAnchor, `${objectAnchor}\n  ${decoy}`).replace(guardAnchor, changedGuard)
+    assert.ok(changed.includes(decoy))
+    assert.ok(changed.includes(changedGuard))
+    await writeFile(routerPath, changed)
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(
-      result.stderr,
-      /docs\/reference\/model-worker-http.md.*selected R2 object missing docs must mention 404 Internal Server Error/s,
-    )
+    assert.match(result.stderr, /must return a literal status for selected R2 object misses/s)
   })
 })
 

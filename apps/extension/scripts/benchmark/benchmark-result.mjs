@@ -310,14 +310,19 @@ export function validateBenchmarkResult(result, options = {}) {
       throw new Error(`${scenario.key} changes artifact provenance within one browser result`)
     }
     artifactByBrowser.set(scenario.browser, artifactFingerprint)
-    if (!Array.isArray(scenario.invocations) || scenario.invocations.length < (allowReducedSampling ? 1 : 3)) {
-      throw new Error(`${scenario.key} has fewer than ${allowReducedSampling ? 1 : 3} independent invocations`)
+    if (!Array.isArray(scenario.invocations) || scenario.invocations.length !== result.config.invocations) {
+      throw new Error(`${scenario.key} invocation count must match config.invocations`)
     }
     const invocationIndices = new Set()
     const browserVersions = new Set()
     const driverVersions = new Set()
     for (const invocation of scenario.invocations) {
-      if (!Number.isSafeInteger(invocation.index) || invocation.index < 0 || invocationIndices.has(invocation.index)) {
+      if (
+        !Number.isSafeInteger(invocation.index) ||
+        invocation.index < 0 ||
+        invocation.index >= result.config.invocations ||
+        invocationIndices.has(invocation.index)
+      ) {
         throw new Error(`${scenario.key} has an invalid or duplicate invocation index`)
       }
       invocationIndices.add(invocation.index)
@@ -331,13 +336,11 @@ export function validateBenchmarkResult(result, options = {}) {
         throw new Error(`${scenario.key} invocation driverVersion must be a string or null`)
       }
       driverVersions.add(invocation.driverVersion)
-      const minimumWarmups = allowReducedSampling ? 0 : 3
-      const minimumSamples = allowReducedSampling ? 1 : 10
-      if (!Array.isArray(invocation.warmupSamples) || invocation.warmupSamples.length < minimumWarmups) {
-        throw new Error(`${scenario.key} invocation ${invocation.index} has insufficient warmup samples`)
+      if (!Array.isArray(invocation.warmupSamples) || invocation.warmupSamples.length !== result.config.warmups) {
+        throw new Error(`${scenario.key} invocation ${invocation.index} warmup count must match config.warmups`)
       }
-      if (!Array.isArray(invocation.measuredSamples) || invocation.measuredSamples.length < minimumSamples) {
-        throw new Error(`${scenario.key} invocation ${invocation.index} has insufficient measured samples`)
+      if (!Array.isArray(invocation.measuredSamples) || invocation.measuredSamples.length !== result.config.samples) {
+        throw new Error(`${scenario.key} invocation ${invocation.index} measured count must match config.samples`)
       }
       for (const [sampleIndex, sample] of [...invocation.warmupSamples, ...invocation.measuredSamples].entries()) {
         validateSample(sample, scenario, `${scenario.key} invocation ${invocation.index} sample ${sampleIndex}`)

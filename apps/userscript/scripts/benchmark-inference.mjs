@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -6,7 +6,10 @@ import { build } from 'esbuild'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(scriptDir, '..')
-const tmpDir = resolve(appDir, '.tmp/benchmark-inference')
+const tmpRoot = resolve(appDir, '.tmp')
+await mkdir(tmpRoot, { recursive: true })
+// 每次调用只拥有自己的工作目录，并发成功或失败均不能清理其他运行。
+const tmpDir = await mkdtemp(resolve(tmpRoot, 'benchmark-inference-'))
 const entryPath = resolve(tmpDir, 'entry.ts')
 const outputPath = resolve(tmpDir, 'entry.mjs')
 
@@ -17,7 +20,6 @@ const preprocessIterations = 20
 const parserIterations = 1000
 
 async function loadBenchmarkedFunctions() {
-  await mkdir(tmpDir, { recursive: true })
   await writeFile(
     entryPath,
     [

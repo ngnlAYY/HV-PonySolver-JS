@@ -62,6 +62,10 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
     'javascript:',
     '销毁后拒绝启动排队写入',
     '不能撤销已提交变更',
+    'DEBUG',
+    'PWDEBUG',
+    '不传递 Playwright call log',
+    '数量与 config 完全一致',
   ]) {
     if (!extensionDoc.includes(fact)) errors.push(`extension documentation omits ${fact}`)
   }

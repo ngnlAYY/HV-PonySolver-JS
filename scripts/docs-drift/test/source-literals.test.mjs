@@ -1,7 +1,32 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { readFunctionBodySource } from '../source-literals.mjs'
+import { readConstStringLiteral, readFunctionBodySource } from '../source-literals.mjs'
+
+for (const expression of [
+  "'no-store' as const",
+  "'no-store' satisfies string",
+  "'no-store' as const satisfies string",
+  "'no-store' satisfies ('no-store' | 'private')",
+  "'no-store' satisfies string & {}",
+]) {
+  test(`accepts a type-only literal initializer: ${expression}`, () => {
+    assert.equal(readConstStringLiteral(`const CACHE_CONTROL = ${expression}`, 'CACHE_CONTROL'), 'no-store')
+  })
+}
+
+for (const expression of [
+  "'no-store' satisfies string + ', max-age=86400'",
+  "'no-store' as const satisfies string + ', max-age=86400'",
+  "'no-store' satisfies string && 'public'",
+  "'no-store' satisfies string === 'no-store' ? 'public' : 'private'",
+  "'no-store' satisfies string\n  + ', max-age=86400'",
+  "'no-store' satisfies",
+]) {
+  test(`rejects a non-literal initializer after type syntax: ${expression}`, () => {
+    assert.equal(readConstStringLiteral(`const CACHE_CONTROL = ${expression}`, 'CACHE_CONTROL'), null)
+  })
+}
 
 test('reads a function body after an object return type', () => {
   const source = `

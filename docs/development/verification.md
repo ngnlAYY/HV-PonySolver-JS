@@ -68,7 +68,7 @@ Vitest 主要验证 TypeScript/运行时逻辑；包内 Node 测试覆盖构建�
 
 内置模型 smoke 关闭随机回退，核对 checkbox index/confidence；fixture 还需匹配 artifact 的预期结果。Chromium 加载已校验 ZIP 的解压目录，Firefox 临时安装实际 ZIP。最低版本 job 设置 `REQUIRE_EXACT_MINIMUM_BROWSER=true`，更高浏览器版本不能冒充覆盖。工具安装、命令和证据格式见[扩展手册](../browser-extension.md)。
 
-显式执行 authenticated 命令但缺 Key 时必须失败。CI 的远程鉴权 job 有两种跳过情形：条件不满足时整个 job 为 skipped；job 已启动但缺 Key 时输出 `enabled=false`，后续 smoke 跳过，job 本身仍可能成功。发布必须同时要求 job 成功和 `outputs.enabled == 'true'`，不能只看绿色状态。受保护凭据只从指定环境读取，不写入日志、快照、URL 或文档。
+显式执行 authenticated 命令但缺 Key 时必须失败。CI 的远程鉴权 job 有两种跳过情形：条件不满足时整个 job 为 skipped；job 已启动但缺 Key 时输出 `enabled=false`，后续 smoke 跳过，job 本身仍可能成功。发布必须同时要求 job 成功和 `outputs.enabled == 'true'`，不能只看绿色状态。受保护凭据只从指定环境读取，不写入日志、快照、URL 或文档。Chromium 鉴权 smoke 拒绝非空 `DEBUG`/`PWDEBUG`，并截断 Key 输入失败的原始异常链；脱敏回归只用公开假值和离线页面。
 
 ## CI job 与本地命令
 

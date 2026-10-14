@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { spawnSync } from 'node:child_process'
 
 import { JSDOM } from 'jsdom'
 
-import { resolveRemoteSmokeMode, verifyRemoteModelKey } from './chromium-load-smoke.mjs'
+import { fillRemoteModelKey, resolveRemoteSmokeMode, verifyRemoteModelKey } from './chromium-load-smoke.mjs'
 
 test('remote load-only mode never requires or implies an authenticated Key', () => {
   assert.deepEqual(resolveRemoteSmokeMode(['--load-only'], {}), { mode: 'load-only' })
@@ -20,6 +21,58 @@ test('authenticated remote CI branch fails closed when KvKey is absent', () => {
     mode: 'authenticated',
     key: 'test-key',
   })
+})
+
+test('authenticated smoke refuses automation debug logging before reading credentials', () => {
+  for (const name of ['DEBUG', 'PWDEBUG']) {
+    const environment = {
+      [name]: '1',
+      get KvKey() {
+        throw new Error('credentials must not be read')
+      },
+    }
+    assert.throws(() => resolveRemoteSmokeMode(['--authenticated'], environment), /禁止启用 DEBUG 或 PWDEBUG/u)
+    assert.deepEqual(resolveRemoteSmokeMode(['--load-only'], environment), { mode: 'load-only' })
+  }
+})
+
+test('sensitive fill preserves the supplied value on success', async () => {
+  const fakeValue = 'public-test-value'
+  let received
+  await fillRemoteModelKey(
+    {
+      locator: () => ({
+        fill: async (value) => {
+          received = value
+        },
+      }),
+    },
+    fakeValue,
+  )
+  assert.equal(received, fakeValue)
+})
+
+test('sensitive fill discards call logs and causes even at an uncaught CLI boundary', () => {
+  const moduleUrl = new globalThis.URL('./chromium-load-smoke.mjs', import.meta.url).href
+  const fakeValue = 'public-fake-fill-input'
+  const script = `
+    import assert from 'node:assert/strict'
+    import { fillRemoteModelKey } from ${JSON.stringify(moduleUrl)}
+    const page = { locator: () => ({ fill: async () => {
+      throw new Error('locator.fill(' + ${JSON.stringify(fakeValue)} + ') failed', {
+        cause: new Error(${JSON.stringify(fakeValue)})
+      })
+    } }) }
+    try { await fillRemoteModelKey(page, ${JSON.stringify(fakeValue)}) }
+    catch (error) { assert.equal(error.cause, undefined); throw error }
+  `
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf8',
+    env: { ...process.env, KvKey: '', DEBUG: '', PWDEBUG: '' },
+  })
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /模型 Key 输入失败/u)
+  assert.equal(`${result.stdout}${result.stderr}`.includes(fakeValue), false)
 })
 
 test('remote smoke requires one explicit non-ambiguous mode', () => {

@@ -91,6 +91,8 @@ export function getGmValueSync(key: string, defaultValue = '', options: GetGmVal
     if (typeof value === 'string') {
       return value.trim()
     }
+    // 同步快照不能等待 GM Promise，但必须消费本次读取的拒绝；后续异步读取是另一次调用。
+    void Promise.resolve(value).catch(() => undefined)
   }
   return (options.sensitive ? defaultValue : (safeStorage.getItem(key) ?? defaultValue)).trim()
 }

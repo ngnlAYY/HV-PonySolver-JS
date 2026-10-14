@@ -93,6 +93,8 @@ pnpm --filter @hv-pony-solver/userscript verify:onnx-runtime
 
 `build:external-runtime` 是默认 `build` 的显式别名；`verify-onnx-runtime-assets` 与 `verify:onnx-runtime` 等价。两种构建覆盖同一输出，须分别执行“构建 → 对应预算检查”，步骤见[用户脚本指南](../usage/userscript.md)。
 
+`benchmark:inference` 每次在应用 `.tmp/` 下创建独立临时目录，只清理本次目录；并发成功或失败不删除另一进程的输入/输出。此并发回归纳入用户脚本 `test` 与 `test:coverage`。
+
 旧版 ONNX 校验单独执行：
 
 ```bash
@@ -132,6 +134,8 @@ pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 ```bash
 pnpm --filter @hv-pony-solver/extension benchmark:compare -- BASELINE_JSON CANDIDATE_JSON [OUTPUT_JSON]
 ```
+
+比较器要求完整报告的 invocation/warmup/measured 数量与各自 config 一致，索引连续且唯一；满足最低数量或重新计算 summary 都不能让截短报告通过。显式降低采样的 smoke 同样必须匹配其声明数量，不能作为正式比较证据。
 
 product 基准要求固定 ORT 模型和 Chromium，默认连续识别 100 次，支持 `--iterations 1000`。它测量冷/热 `prepare`、四标签页并发、20 次取消尝试及恢复、4000×4000 合成图片和缓存关闭后命中；实际取消与抢先完成分别计数。推理使用正式内置 ZIP 的 content client → broker → Offscreen → Worker → ORT，缓存使用生产下载器/IndexedDB 的 localhost 回放，不读取生产 Key。
 

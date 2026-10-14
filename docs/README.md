@@ -28,7 +28,7 @@
 
 ## 决策与历史
 
-[文档重建决定](decisions/implemented/process/2026-09-16-documentation-rebuild.md)说明契约归属与稳定路径的取舍。行为决定按主题检索 [decisions](decisions/)，包括近期 [JPX 扫描恢复](decisions/implemented/bug-fix/2026-10-04-jpx-ajax-scan-recovery.md)与[图片选源、设置取消及首次上传门禁](decisions/implemented/bug-fix/2026-10-12-audit-follow-up.md)。
+[文档重建决定](decisions/implemented/process/2026-09-16-documentation-rebuild.md)说明契约归属与稳定路径的取舍。行为决定按主题检索 [decisions](decisions/)，包括近期 [JPX 扫描恢复](decisions/implemented/bug-fix/2026-10-04-jpx-ajax-scan-recovery.md)、[图片选源、设置取消及首次上传门禁](decisions/implemented/bug-fix/2026-10-12-audit-follow-up.md)与[秘密日志、生命周期和证据校验修复](decisions/implemented/bug-fix/2026-10-14-audit-regression-hardening.md)。
 
 | 历史记录                                                                 | 内容                                                                         |
 | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |

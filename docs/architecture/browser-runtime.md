@@ -36,7 +36,7 @@ App
 
 JPX 的 `AjaxRound` 会批量清除页面定时器，留下失效的待扫描句柄。每次相关 mutation 都重挂定时器，保留基于 `performance.now()` 的原扫描截止时间；已过期则立即排队，不再等待完整 100ms，持续变化也不延后截止时间。无关 mutation 不重挂，去重、失败冷却与销毁约束不变；这不是全页定时器保护或轮询恢复。
 
-目标变化或移除时，取消不等待防抖：先比较完整 `CaptchaTarget` 并取消旧信号，再扫描最新目标。`prepareTarget()` 通过 `raceAbort` 释放等待，底层准备 Promise 迟到结算不能阻塞新轮次、重试旧目标或写入旧结果。无关子节点变化和提交按钮启用不取消同一目标的初始化，已完成目标仍去重。
+目标变化或移除时，取消不等待防抖：先比较完整 `CaptchaTarget` 并取消旧信号，再扫描最新目标。`prepareTarget()` 通过 `raceAbort` 释放等待，底层准备 Promise 迟到结算不能阻塞新轮次、重试旧目标或写入旧结果。无关子节点变化和提交按钮启用不取消同一目标的初始化，已完成目标仍去重。外层 fieldset 的 disabled 变化及直接子节点变化也进入复核，以覆盖继承禁用和首个 legend 顺序变化；只有有效控件状态变化才取消，重新启用会补扫失败目标。
 
 图片快照同时保存解析后的 `src`、`srcset`、`sizes` 和 `picture` 的 source 身份及属性；选源声明变化即令旧轮次失效，不能只比较 `currentSrc`。响应式图片等待 `complete` 和 `currentSrc`，不回退旧 `src`；App 捕获图片 `load/error` 后补扫，覆盖选源完成但没有新 DOM mutation 的情形。销毁时移除监听，迟到加载不重启应用。
 
@@ -102,7 +102,7 @@ sequenceDiagram
 
 保存和读取只去除 Key 首尾空白，保留验证过的原始大小写，以兼容历史 KV 条目；额度身份仍由服务端规范化。已经丢失大小写的旧存储值无法反推，需重新输入原 Key。
 
-普通设置用 `gmSettingsStorage`；历史适配器 [answer-history-store.ts](../../apps/userscript/src/persistence/answer-history-store.ts) 注入 `userscriptHistoryStorage`，无缓存枚举同源 localStorage 前缀。先取 key 快照，跳过其他标签已删除值；新记录独立键追加，有效旧根只读兼容，禁止整根 JSON 读改写。每世界读取最多 50 条，稳定追加后裁剪；并发可暂时多存，旧根仍可保留。
+普通设置用 `gmSettingsStorage`；同步 GM 快照遇异步返回时立即采用默认值/允许的回退，并消费该次 Promise 拒绝，不能指望后续异步读取处理另一份 Promise。历史适配器 [answer-history-store.ts](../../apps/userscript/src/persistence/answer-history-store.ts) 注入 `userscriptHistoryStorage`，无缓存枚举同源 localStorage 前缀。先取 key 快照，跳过其他标签已删除值；新记录独立键追加，有效旧根只读兼容，禁止整根 JSON 读改写。每世界读取最多 50 条，稳定追加后裁剪；并发可暂时多存，旧根仍可保留。
 
 缓存策略、`GET /quota`、`POST /quota`、确认时机和 `no-store` 约束请只在[模型缓存专题](../model-cache-strategy.md)维护。不要在平台适配器中复制额度或缓存状态机。
 

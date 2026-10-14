@@ -41,7 +41,7 @@ function run(root, extra = {}) {
   })
 }
 
-function runArchiveWriter(root) {
+function runArchiveWriter(root, extra = {}) {
   return spawnSync(
     process.execPath,
     [resolve(import.meta.dirname, '../notes/verify-archived-agent-notes.ts'), '--write'],
@@ -52,6 +52,7 @@ function runArchiveWriter(root) {
         ...process.env,
         AGENT_NOTE_ROOT: join(root, 'docs/decisions'),
         AGENT_NOTE_ARCHIVE_BASE_REF: 'HEAD',
+        ...extra,
       },
     },
   )
@@ -117,6 +118,26 @@ test('archive seals reject edits even when the new seal is recomputed', async ()
     assert.notEqual(run(root).status, 0)
     await rm(join(root, 'docs/decisions/archived'), { recursive: true })
     assert.notEqual(run(root).status, 0)
+  })
+})
+
+test('the direct archive writer rejects an unavailable or non-commit baseline without rewriting seals', async () => {
+  await fixture(async (root) => {
+    const { archive, manifest } = await createSealedArchive(root)
+    const changed = `${archived}\nChanged after sealing.\n`
+    await writeFile(archive, changed)
+    const recomputed = JSON.stringify({ version: 1, files: { [archiveKey]: seal(changed) } })
+    await writeFile(manifest, recomputed)
+    for (const baseRef of ['nonexistent-ref', 'HEAD:docs/decisions/archived/manifest.json']) {
+      const result = runArchiveWriter(root, { AGENT_NOTE_ARCHIVE_BASE_REF: baseRef })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /archive baseline must resolve to an accessible commit/u)
+      assert.equal(await readFile(manifest, 'utf8'), recomputed)
+    }
+    const validBaseline = runArchiveWriter(root)
+    assert.notEqual(validBaseline.status, 0)
+    assert.match(validBaseline.stderr, /archived seals are append-only/u)
+    assert.equal(await readFile(manifest, 'utf8'), recomputed)
   })
 })
 

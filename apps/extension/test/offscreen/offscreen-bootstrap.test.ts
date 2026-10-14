@@ -93,37 +93,42 @@ describe('offscreen idle-notification backoff', () => {
     expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('restarts the backoff budget when the service worker confirms the generation', async () => {
+  it('keeps exponential backoff and the attempt cap when confirmed idle documents fail to close', async () => {
     vi.useFakeTimers()
     const warnSpy = vi.spyOn(console, 'warn')
+    const closeDocument = vi.fn(async () => {
+      throw new Error('close failed')
+    })
     registerOffscreenHost(() => ({ handle: vi.fn(), destroy: vi.fn() }) as never)
     const listener = mocks.addRuntimeMessageListener.mock.calls[0]![0] as RuntimeMessageListener
     listener({ type: OFFSCREEN_MESSAGE_TYPE, operation: 'claim', epoch: 'epoch-confirm' }, serviceWorkerSender, vi.fn())
 
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS + OFFSCREEN_IDLE_NOTIFICATION_RETRY_BASE_MS)
-    expect(idleNotifications()).toHaveLength(2)
-    const generation = idleNotifications()[0]!.generation
-
-    // Repeated confirmations keep the heartbeat alive well past the give-up cap.
-    for (let cycle = 0; cycle < 8; cycle += 1) {
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
+    expect(idleNotifications()).toHaveLength(1)
+    const generation = idleNotifications()[0]?.generation
+    for (let attempt = 1; attempt <= MAX_OFFSCREEN_IDLE_NOTIFICATIONS; attempt += 1) {
+      const confirmed = vi.fn()
       listener(
-        {
-          type: OFFSCREEN_MESSAGE_TYPE,
-          operation: 'confirm-idle',
-          epoch: 'epoch-confirm',
-          generation,
-        },
+        { type: OFFSCREEN_MESSAGE_TYPE, operation: 'confirm-idle', epoch: 'epoch-confirm', generation },
         serviceWorkerSender,
-        vi.fn(),
+        confirmed,
       )
-      await vi.advanceTimersByTimeAsync(
-        OFFSCREEN_IDLE_NOTIFICATION_RETRY_BASE_MS * 2 ** 1 + OFFSCREEN_IDLE_NOTIFICATION_RETRY_BASE_MS,
+      expect(confirmed).toHaveBeenCalledWith(expect.objectContaining({ idle: true, generation }))
+      await closeDocument().catch(() => undefined)
+      const delay = Math.min(
+        OFFSCREEN_IDLE_NOTIFICATION_RETRY_BASE_MS * 2 ** (attempt - 1),
+        OFFSCREEN_IDLE_NOTIFICATION_MAX_RETRY_MS,
       )
-      expect(idleNotifications().length).toBeGreaterThanOrEqual(2 + cycle * 2)
+      await vi.advanceTimersByTimeAsync(delay - 1)
+      expect(idleNotifications()).toHaveLength(attempt)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(idleNotifications()).toHaveLength(Math.min(attempt + 1, MAX_OFFSCREEN_IDLE_NOTIFICATIONS))
     }
 
-    expect(idleNotifications().length).toBeGreaterThan(MAX_OFFSCREEN_IDLE_NOTIFICATIONS)
-    expect(warnSpy).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_NOTIFICATION_MAX_RETRY_MS * 10)
+    expect(idleNotifications()).toHaveLength(MAX_OFFSCREEN_IDLE_NOTIFICATIONS)
+    expect(closeDocument).toHaveBeenCalledTimes(MAX_OFFSCREEN_IDLE_NOTIFICATIONS)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 
   it('re-arms a fresh heartbeat for a later generation after giving up', async () => {

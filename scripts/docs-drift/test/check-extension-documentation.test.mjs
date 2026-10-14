@@ -30,6 +30,10 @@ for (const fact of [
   'javascript:',
   '销毁后拒绝启动排队写入',
   '不能撤销已提交变更',
+  'DEBUG',
+  'PWDEBUG',
+  '不传递 Playwright call log',
+  '数量与 config 完全一致',
 ]) {
   test(`extension security contract belongs in its topic document: ${fact}`, async () => {
     await withFixture(async (root) => {

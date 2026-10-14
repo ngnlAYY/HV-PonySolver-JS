@@ -227,6 +227,51 @@ describe('extension transport benchmark contract', () => {
     assert.throws(() => validateBenchmarkResult(negativeSnapshot), /available JS heap profiler/u)
   })
 
+  it('requires exact configured counts and continuous invocation indices, not only sampling floors', () => {
+    const valid = result('baseline', [10, 11, 12, 13, 14], { config: { invocations: 5, warmups: 5, samples: 100 } })
+    assert.equal(validateBenchmarkResult(valid), valid)
+    for (const count of [3, 6]) {
+      const changed = clone(valid)
+      changed.scenarios[0].invocations = Array.from({ length: count }, (_, index) => ({
+        ...clone(valid.scenarios[0].invocations[0]),
+        index,
+      }))
+      assert.throws(() => validateBenchmarkResult(changed), /invocation count must match config.invocations/u)
+    }
+    for (const index of [-1, 0, 5, 99, 1.5]) {
+      const changed = clone(valid)
+      changed.scenarios[0].invocations[4].index = index
+      assert.throws(() => validateBenchmarkResult(changed), /invalid or duplicate invocation index/u)
+    }
+    for (const count of [3, 6]) {
+      const changed = clone(valid)
+      const invocation = changed.scenarios[0].invocations[0]
+      invocation.warmupSamples = Array.from({ length: count }, () => clone(invocation.warmupSamples[0]))
+      assert.throws(() => validateBenchmarkResult(changed), /warmup count must match config.warmups/u)
+    }
+    for (const count of [10, 101]) {
+      const changed = clone(valid)
+      const invocation = changed.scenarios[0].invocations[0]
+      invocation.measuredSamples = Array.from({ length: count }, () => clone(invocation.measuredSamples[0]))
+      invocation.summary = summarizeMeasuredSamples(invocation.measuredSamples)
+      assert.throws(() => validateBenchmarkResult(changed), /measured count must match config.samples/u)
+      assert.throws(() => compareBenchmarkResults(valid, changed), /measured count must match config.samples/u)
+    }
+  })
+
+  it('still requires declared counts in explicitly reduced diagnostic sampling', () => {
+    const valid = result('diagnostic', [10], {
+      config: { allowReducedSampling: true, invocations: 1, warmups: 0, samples: 2 },
+    })
+    assert.equal(validateBenchmarkResult(valid, { allowReducedSampling: true }), valid)
+    const changed = clone(valid)
+    changed.config.samples = 3
+    assert.throws(
+      () => validateBenchmarkResult(changed, { allowReducedSampling: true }),
+      /measured count must match config.samples/u,
+    )
+  })
+
   it('compares only aligned, same-environment evidence and never gates on heap snapshots', () => {
     const baseline = result('baseline', [10, 11, 12])
     const candidate = result('candidate', [8, 8.8, 9.6])

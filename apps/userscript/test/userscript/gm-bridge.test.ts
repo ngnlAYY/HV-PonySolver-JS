@@ -56,6 +56,28 @@ describe('gm-bridge', () => {
     expect(gmGetValue).toHaveBeenCalledWith('key', 'fallback')
   })
 
+  it.each([false, true])(
+    'consumes rejected async reads without delaying the sync fallback (sensitive=%s)',
+    async (sensitive) => {
+      const { getGmValueSync } = await import('../../src/userscript/gm-bridge')
+      localStorage.setItem('setting', 'local-value')
+      const rejected = Promise.reject<string>(new Error('GM read unavailable'))
+      const catchRead = vi.spyOn(rejected, 'catch')
+      testGlobal.GM_getValue = vi.fn(() => rejected)
+
+      expect(getGmValueSync('setting', 'fallback', { sensitive })).toBe(sensitive ? 'fallback' : 'local-value')
+      expect(catchRead).toHaveBeenCalledWith(expect.any(Function))
+      // Vitest also fails this regression if a discarded rejection escapes the turn.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    },
+  )
+
+  it('does not wait for an unresolved GM read in the sync path', async () => {
+    const { getGmValueSync } = await import('../../src/userscript/gm-bridge')
+    testGlobal.GM_getValue = vi.fn(() => new Promise<string>(() => undefined))
+    expect(getGmValueSync('setting', 'fallback')).toBe('fallback')
+  })
+
   it('returns null when safeStorage.getItem catches localStorage errors', async () => {
     const { safeStorage } = await import('../../src/userscript/gm-bridge')
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {

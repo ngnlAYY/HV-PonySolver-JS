@@ -1,6 +1,6 @@
 # AGENTS.md — HV-PonySolver-JS
 
-适用于仓库及全部子目录；更具体的 `AGENTS.md` 仅覆盖其目录。最后复核：2026-10-12。
+适用于仓库及全部子目录；更具体的 `AGENTS.md` 仅覆盖其目录。最后复核：2026-10-14。
 
 ## 项目定位
 
@@ -55,7 +55,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 默认保留已勾选答案，区分手动与自动归属，绝不撤销手动项。每轮模型准备前开始跟踪人工变更；图片读取、推理、设置读取及点击等待中被手动取消的候选，本轮不得勾回，新轮次重建基线。
 - 旧自动项可参与结果合并。合计不超过 4 项时保持；超过 4 项时只按置信度从低到高裁剪自动项，目标至多 3 项。手动项已达目标仍不得取消；提交等待后按实时选中和自动归属再次复核超量，每次初始/最终裁剪点击前重查归属。
 - 关闭保留模式可清空并接管本轮答案，但提交前仍确认同一组有效表单、checkbox 与按钮。
-- 控件数量、类型、连接、所属表单、有效禁用状态或提交按钮异常时停止。禁用检查覆盖 `fieldset` 继承和首个 `legend` 例外，不点击失效或替换后的 DOM。
+- 控件数量、类型、连接、所属表单、有效禁用状态或提交按钮异常时停止。禁用检查覆盖 `fieldset` 继承和首个 `legend` 例外；外层 fieldset 禁用及 legend 顺序变化须进入即时取消/恢复复核，不点击失效或替换后的 DOM。
 - 同一验证码的同类失败须冷却或去重，避免日志和面板无界重复。
 - App 观察当前 documentElement，覆盖 body 替换与暂时缺失。JPX 等脚本清除扫描 timer 后，相关 mutation 重挂扫描并保留原单调时钟截止时间，不因持续变化无限延期；销毁后迟到回调不得重启。
 - 自动模式每题只作一次原生提交；取消、超时、路由或目标变化后旧轮次停止点击/提交。观察器先取消变化或移除的活动目标，再防抖扫描；旧初始化迟到结算不得阻塞新目标或覆盖状态。
@@ -80,7 +80,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 内容设置镜像按 key 合并初始化变更，限制超时、取消和不同 key 数量。快照失败清理监听器；预取消不读快照或监听。销毁后不启动排队写入/删除，已发起调用按真实结果结算。历史解析缓存观察外部写入并保留写后最终校对。
 - 原生 `fetch` 通过已有解析辅助函数调用，保留接收者，避免 `Illegal invocation`。
 - 消息严格校验 schema、来源、大小、超时和取消，`unknown` 不直接断言可信。Broker 只用实际 `sender.url`，不以 `sender.tab.url` 兜底；提供的 `sender.origin` 须一致且非 opaque，提供 `frameId` 时须为 0。内容仅限两个 Hentaiverse HTTPS 标准端口 origin，设置仅限本扩展设置页。
-- Port 断连在回调内经平台助手同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。BFCache 断连取消未决请求，恢复后按需连接，不自动重放下载或 Key 操作。
+- Port 断连在回调内经平台助手同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。BFCache 断连取消未决请求，恢复后按需连接，不自动重放下载或 Key 操作。Offscreen 同一空闲代际的确认不重置关闭重试次数或退避预算，新活动/代际才恢复预算。
 - 图片消息有明确上限；HTTP Content-Type 严格校验后规范化基础 MIME，消息保持精确白名单。排队 detect 取消即移除并释放图片，不等队头。模型用可转移 `ArrayBuffer`，不改成无界 Base64 或重复拷贝。
 - 识别遵循 latest-wins，迟到旧结果不覆盖新状态。图片、模型和 Runtime 共用有界字节读取；未知长度在上限内增长自有缓冲并即时复制，不保留任意分块或外部大缓冲视图。
 - 浏览器和 Worker 流取消仅尽力清理，不等待可能挂起的取消 Promise，不覆盖原 HTTP、完整性或调用方取消错误。
@@ -120,14 +120,14 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 公开行为、命令、默认值、路由、头、资产或构建变化时，同步 README 摘要、所属专题、测试与 `scripts/docs-drift/` 事实提取/回归。
 - 精确命令归 `docs/development/commands.md`，HTTP 归 `docs/reference/model-worker-http.md`，资产归 `docs/onnx-runtime.md`。迁移契约同步逐篇读取与负向测试，不拼接全部正文掩盖缺项。
 - 非平凡行为、架构、跨文件契约、工具流程、测试策略或数据格式变化须更新已有决定或新增 `docs/decisions/<lifecycle>/<class>/日期-主题.md`。遵循 [write-notes-like-deepseek 格式约定](docs/development/documentation.md#决策笔记)，理由翻转另写互链；机械修改不立 Note。
-- 归档根/目录/Markdown/封印清单拒绝 symlink。每条封印独立校验普通文件、归档相对路径和 SHA-256；扫描遗漏不替代验证，清单异常不追加封印。
+- 归档根/目录/Markdown/封印清单拒绝 symlink。每条封印独立校验普通文件、归档相对路径和 SHA-256；扫描遗漏不替代验证，清单异常不追加封印；Git 仓库内直接入口也验证基线 commit，无效基线或读取失败不能冒充历史清单缺失。
 - 新维护文档按[导航](docs/README.md)归类；目录迁移同步包命令、测试发现、CI 和引用。历史审计保留原日期与证据，不刷新旧测试结果。
 
 ## 配置与秘密
 
 不提交 `.env`、凭据、KV/R2 标识、受保护 E2E 值或其日志，不强制跟踪 `config/`。`apps/model-worker/wrangler.template.toml` 是权威配置，生成的 `wrangler.toml` 不手工维护。
 
-Actions 部署值通过受保护 secrets/variables 和手动输入传入；无生产凭据时不执行生产下载/部署。测试只用明确测试绑定或进程内 fixture；真实 Key E2E 仅在受保护环境显式启用并 fail closed。普通 CI、content E2E 和内置 E2E 不访问生产模型服务。
+Actions 部署值通过受保护 secrets/variables 和手动输入传入；无生产凭据时不执行生产下载/部署。测试只用明确测试绑定或进程内 fixture；真实 Key E2E 仅在受保护环境显式启用并 fail closed；Chromium 鉴权 smoke 拒绝非空 DEBUG/PWDEBUG，Key 输入异常不透传 call log、原异常或 cause。普通 CI、content E2E 和内置 E2E 不访问生产模型服务。
 
 ## 测试与验证
 

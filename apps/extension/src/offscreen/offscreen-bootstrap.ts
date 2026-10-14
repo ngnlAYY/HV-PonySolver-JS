@@ -256,11 +256,7 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
     }
 
     if (message.operation === 'confirm-idle') {
-      if (message.epoch === currentEpoch && message.generation === idleGeneration) {
-        // The worker acknowledged this idle generation (and will try to close
-        // the document); a failed close restarts the backoff from the base.
-        resetIdleRetries()
-      }
+      // 确认只证明仍为空闲，不代表 closeDocument 成功；同代际必须共用有限重试预算。
       const response: OffscreenIdleConfirmationResponse = {
         type: OFFSCREEN_MESSAGE_TYPE,
         operation: 'idle-confirmed',
