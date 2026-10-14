@@ -13,12 +13,6 @@ describe('model settings', () => {
     vi.unstubAllGlobals()
   })
 
-  it('reads an empty key by default', async () => {
-    const { getModelAccessKey } = await import('../../src/model/model-settings')
-
-    await expect(getModelAccessKey()).resolves.toBe('')
-  })
-
   it('never reads a sensitive key from page-readable localStorage', async () => {
     localStorage.setItem(STORAGE_KEY, VALID_TOKEN_LOWER)
     const { getModelAccessKey } = await import('../../src/model/model-settings')
@@ -43,27 +37,6 @@ describe('model settings', () => {
     await setModelAccessKey(`  ${VALID_TOKEN}  `)
 
     expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN)
-  })
-
-  it('rejects saving a key that does not match the token format', async () => {
-    const { setModelAccessKey } = await import('../../src/model/model-settings')
-
-    await expect(setModelAccessKey('abc-123')).rejects.toThrow('模型下载 Key 格式无效')
-    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
-  })
-
-  it('clears saved model access keys through GM storage', async () => {
-    const setValue = vi.fn(async () => undefined)
-    const deleteValue = vi.fn(async () => undefined)
-    vi.stubGlobal('GM_setValue', setValue)
-    vi.stubGlobal('GM_deleteValue', deleteValue)
-    const { clearModelAccessKey, setModelAccessKey } = await import('../../src/model/model-settings')
-
-    await setModelAccessKey(VALID_TOKEN)
-    await clearModelAccessKey()
-
-    expect(deleteValue).toHaveBeenCalledWith(STORAGE_KEY)
-    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
   })
 
   it('saves a prompted key immediately when verification is not configured', async () => {

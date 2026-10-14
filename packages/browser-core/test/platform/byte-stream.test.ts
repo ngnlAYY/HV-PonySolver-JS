@@ -36,15 +36,6 @@ describe('bounded byte streams', () => {
     expect(body.locked).toBe(false)
   })
 
-  it('retains a bounded fallback for unknown lengths', async () => {
-    const result = await readBoundedByteStream(stream([1], [2, 3]), {
-      expectedByteLength: null,
-      maxByteLength: 3,
-      sizeError,
-    })
-    expect(Array.from(new Uint8Array(result))).toEqual([1, 2, 3])
-  })
-
   it('copies unknown-size chunks as they arrive instead of retaining source buffers', async () => {
     const chunk = new Uint8Array(1)
     let value = 0

@@ -37,7 +37,19 @@ function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
     )
   }
   errors.push(...checkDocumentedPnpmCommands(rootPackageJson, workspacePackageJsons, readmeLines))
-  for (const commandName of ['check:quick', 'test:coverage', 'build']) {
+  for (const commandName of [
+    'format:check',
+    'lint',
+    'typecheck',
+    'test:coverage',
+    'test:root',
+    'docs:check',
+    'architecture:check',
+    'browser-sinks:check',
+    'extension:package-check',
+    'bundle:check',
+    'build',
+  ]) {
     if (checkCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check', commandName)) {
       errors.push(
         `docs/development/commands.md pnpm check description must mention ${commandName} because package.json scripts.check runs it`,
@@ -46,11 +58,8 @@ function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
   }
 
   const quickCheckCommand = rootPackageJson.scripts?.['check:quick']
-  if (checkCommand.includes('check:quick') && typeof quickCheckCommand !== 'string') {
-    errors.push('package.json scripts.check:quick is missing because package.json scripts.check runs it')
-    return errors
-  }
   if (typeof quickCheckCommand !== 'string') {
+    errors.push('package.json scripts.check:quick is missing')
     return errors
   }
   for (const commandName of [

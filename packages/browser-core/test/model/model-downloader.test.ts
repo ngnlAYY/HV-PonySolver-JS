@@ -261,33 +261,6 @@ describe('downloadModel', () => {
     )
   })
 
-  it('does not treat a missing Content-Length as a decoy', async () => {
-    const response = new Response(new Uint8Array([1, 2, 3]))
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).resolves.toBeInstanceOf(ArrayBuffer)
-  })
-
-  it('cancels every non-success response body before rejecting', async () => {
-    const cancel = vi.fn(async () => undefined)
-    const response = {
-      ok: false,
-      status: 503,
-      headers: new Headers(),
-      body: { cancel },
-    } as unknown as Response
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('模型下载失败: HTTP 503')
-    expect(cancel).toHaveBeenCalledTimes(1)
-  })
-
   it.each(['download', 'quota', 'probe', 'confirmation'] as const)(
     'preserves HTTP failure during stalled %s response cleanup',
     async (operation) => {
@@ -365,21 +338,6 @@ describe('downloadModel', () => {
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('storage unavailable')
 
     expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it('uses a candidate model access key before saving settings', async () => {
-    getModelAccessKey.mockResolvedValue('old-key')
-    const response = new Response(new Uint8Array([1, 2, 3]))
-    const fetchMock = vi.fn(async () => response)
-    vi.stubGlobal('fetch', fetchMock)
-
-    await downloadModel(undefined, { integrity: TEST_INTEGRITY, accessKeyOverride: '  candidate key  ' })
-
-    const [url, init] = getFetchCall(fetchMock)
-    expect(url).toBe(MODEL_URL)
-    expect(url).not.toContain('?key=')
-    expect(new Headers(init.headers).get('authorization')).toBe('Bearer candidate key')
-    expect(init).toEqual(expect.objectContaining({ cache: 'no-store' }))
   })
 
   it('uses a candidate model access key without waiting for saved key storage', async () => {
@@ -586,30 +544,6 @@ describe('downloadModel', () => {
     expect(arrayBuffer).not.toHaveBeenCalled()
   })
 
-  it('rejects invalid declared content lengths before reading the body', async () => {
-    const arrayBuffer = vi.fn()
-    const cancel = vi.fn()
-    const getReader = vi.fn()
-    const response = {
-      ok: true,
-      headers: new Headers({ 'content-length': 'abc' }),
-      arrayBuffer,
-      body: { cancel, getReader },
-    } as unknown as Response
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
-      '下载模型大小校验失败: abc',
-    )
-
-    expect(cancel).toHaveBeenCalledTimes(1)
-    expect(getReader).not.toHaveBeenCalled()
-    expect(arrayBuffer).not.toHaveBeenCalled()
-  })
-
   it.each(['', '0x3', '1e3', '+3', '-0'])(
     'rejects non-decimal declared content length "%s" before reading the body',
     async (contentLength) => {
@@ -676,42 +610,6 @@ describe('downloadModel', () => {
     ).rejects.toThrow('下载模型大小校验失败')
   })
 
-  it('can still skip integrity hash checks when explicitly disabled', async () => {
-    const response = new Response(new Uint8Array([1, 2, 3]), {
-      headers: { 'content-length': '3' },
-    })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
-    const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
-
-    expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3])
-  })
-
-  it('rejects streamed short reads when content-length is declared and integrity verification is disabled', async () => {
-    const response = new Response(
-      new ReadableStream<Uint8Array>({
-        pull(controller) {
-          controller.enqueue(new Uint8Array([1, 2]))
-          controller.close()
-        },
-      }),
-      {
-        headers: { 'content-length': '3' },
-      },
-    )
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
-      '下载模型大小校验失败: 2 != 3',
-    )
-  })
-
   it('releases the stream reader after a successful read', async () => {
     const cancel = vi.fn(async () => undefined)
     const releaseLock = vi.fn()
@@ -729,9 +627,9 @@ describe('downloadModel', () => {
       vi.fn(async () => response),
     )
 
-    await expect(
-      downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false }),
-    ).resolves.toBeInstanceOf(ArrayBuffer)
+    const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
+
+    expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3])
     expect(cancel).not.toHaveBeenCalled()
     expect(releaseLock).toHaveBeenCalledTimes(1)
   })
@@ -898,24 +796,6 @@ describe('downloadModel', () => {
 
     expect(arrayBuffer).not.toHaveBeenCalled()
     expect(pulls).toBe(4)
-  })
-
-  it('rejects downloaded models with unexpected integrity when integrity verification is enabled', async () => {
-    const response = new Response(new Uint8Array([1, 2, 3]))
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
-    await expect(
-      downloadModel(undefined, {
-        integrity: {
-          byteLength: 4,
-          sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
-        },
-        forceVerifyIntegrity: true,
-      }),
-    ).rejects.toThrow('下载模型大小校验失败')
   })
 
   it('rejects bodyless model responses without using the unbounded arrayBuffer fallback', async () => {

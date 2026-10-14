@@ -15,7 +15,8 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test && node --test \"scripts/**/*.test.mjs\"",
+    "test": "pnpm -r test && pnpm test:root",
+    "test:root": "node --test \"scripts/**/*.test.mjs\"",
     "test:coverage": "pnpm -r test:coverage",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
@@ -50,7 +51,7 @@
     "check:model-worker": "pnpm --filter @hv-pony-solver/model-worker typecheck && pnpm --filter @hv-pony-solver/model-worker test && pnpm --filter @hv-pony-solver/model-worker build",
     "check:shared": "pnpm --filter @hv-pony-solver/shared typecheck && pnpm --filter @hv-pony-solver/shared test && pnpm --filter @hv-pony-solver/shared build",
     "check:quick": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm docs:check && pnpm architecture:check && pnpm browser-sinks:check && pnpm extension:package-check && pnpm bundle:check",
-    "check": "pnpm check:quick && pnpm test:coverage && pnpm build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:coverage && pnpm test:root && pnpm docs:check && pnpm architecture:check && pnpm browser-sinks:check && pnpm extension:package-check && pnpm bundle:check && pnpm build",
     "build:onnx-runtime": "bash scripts/ort-runtime/build-minimal-ort-runtime.sh",
     "verify:onnx-runtime": "pnpm --filter @hv-pony-solver/userscript verify:onnx-runtime"
   },

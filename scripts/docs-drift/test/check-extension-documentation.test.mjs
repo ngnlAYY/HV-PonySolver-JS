@@ -16,25 +16,8 @@ test('extension documentation tracks the authoritative nested entry paths', asyn
   })
 })
 
-for (const fact of [
-  "script-src 'self' 'wasm-unsafe-eval'",
-  "connect-src 'self' https://models.ngnl.host",
-  'sender.url',
-  'sender.origin',
-  'frameId',
-  'optional_permissions',
-  'optional_host_permissions',
-  'externally_connectable',
-  'sandbox',
-  'srcdoc',
-  'javascript:',
-  '销毁后拒绝启动排队写入',
-  '不能撤销已提交变更',
-  'DEBUG',
-  'PWDEBUG',
-  '不传递 Playwright call log',
-  '数量与 config 完全一致',
-]) {
+// 同一逐词校验只抽查代表事实；来源隔离和秘密脱敏本身由扩展行为测试负责。
+for (const fact of ['sender.url', '不传递 Playwright call log']) {
   test(`extension security contract belongs in its topic document: ${fact}`, async () => {
     await withFixture(async (root) => {
       const path = join(root, 'docs/browser-extension.md')

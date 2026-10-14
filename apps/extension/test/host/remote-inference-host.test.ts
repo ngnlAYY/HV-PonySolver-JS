@@ -202,7 +202,7 @@ describe('createRemoteInferenceHost', () => {
 
       await expect(
         host.handle({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'factory-clear' }),
-      ).resolves.toMatchObject({ ok: true, requestId: 'factory-clear' })
+      ).resolves.toEqual({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'factory-clear', ok: true })
       expect(storageRemove).toHaveBeenCalledWith(
         MODEL_ACCESS_KEY_STORAGE_KEY,
         expect.any(AbortSignal),

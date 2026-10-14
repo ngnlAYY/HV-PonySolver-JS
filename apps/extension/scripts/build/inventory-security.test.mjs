@@ -185,11 +185,22 @@ for (const target of ['chromium', 'firefox']) {
     test(`accepts unchanged ${target}/${modelDelivery} security policy`, async () => {
       await auditTargetInventory(target, options, inventory(target, modelDelivery))
     })
-    for (const [label, mutate, expected] of manifestMutations) {
-      test(`rejects ${label} in ${target}/${modelDelivery}`, async () => {
-        await assert.rejects(auditTargetInventory(target, options, inventory(target, modelDelivery, mutate)), expected)
-      })
-    }
+  }
+}
+
+// 这些字段走同一精确比较，不随模型模式改变；保留两种后台形态，避免四倍重复。
+// 四种正例及 build-extension.test.mjs 的权限/CSP/模型身份断言仍独立覆盖产物矩阵。
+for (const [target, modelDelivery] of [
+  ['chromium', 'remote'],
+  ['firefox', 'packaged'],
+]) {
+  for (const [label, mutate, expected] of manifestMutations) {
+    test(`rejects ${label} in ${target}/${modelDelivery}`, async () => {
+      await assert.rejects(
+        auditTargetInventory(target, { modelDelivery, model }, inventory(target, modelDelivery, mutate)),
+        expected,
+      )
+    })
   }
 }
 

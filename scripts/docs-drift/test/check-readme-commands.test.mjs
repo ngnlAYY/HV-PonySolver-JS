@@ -3,7 +3,7 @@ import test from 'node:test'
 import { join } from 'node:path'
 import { readFile, runCheck, withFixture, writeFile } from './fixtures.mjs'
 
-test('fails clearly when pnpm check references a missing check:quick script', async () => {
+test('fails clearly when the documented check:quick script is missing', async () => {
   await withFixture(async (fixtureRoot) => {
     const packageJsonPath = join(fixtureRoot, 'package.json')
     const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'))

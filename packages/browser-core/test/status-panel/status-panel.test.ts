@@ -311,14 +311,6 @@ describe('StatusPanel history persistence', () => {
     panel.destroy()
   })
 
-  it('keeps the panel visible without div#csp when the visibility limit is disabled', () => {
-    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage(false, false))
-    panel.create()
-
-    expect(document.querySelector<HTMLDivElement>('.ponyLog')?.hidden).toBe(false)
-    panel.destroy()
-  })
-
   it.each([true, false])(
     'reattaches the same history and status panel after body contents change (requireCsp=%s)',
     async (requireCsp) => {
@@ -365,6 +357,7 @@ describe('StatusPanel history persistence', () => {
     panel.create()
     const element = document.querySelector<HTMLDivElement>('.ponyLog')!
     const body = document.createElement('body')
+    expect(element.hidden).toBe(false)
 
     document.body.replaceWith(body)
 

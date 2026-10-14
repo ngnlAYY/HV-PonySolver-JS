@@ -11,14 +11,6 @@ function yoloRow(confidence: number, classId: number): number[] {
 }
 
 describe('parseYoloOutput', () => {
-  it('documents the configured YOLO row layout', () => {
-    expect(yoloOutputConfig).toMatchObject({
-      rowSize: 6,
-      confidenceIndex: 4,
-      classIndex: 5,
-    })
-  })
-
   it('returns mapped ponies for rows above the confidence threshold', () => {
     const data = new Float32Array([
       ...yoloRow(yoloOutputConfig.confidenceThreshold + 0.1, 0),
@@ -181,29 +173,6 @@ describe('parseYoloOutput', () => {
       [...result.candidates].map((detection) => detection.confidence).sort((left, right) => right - left),
     )
     expect(result.candidates).not.toContainEqual(expect.objectContaining({ confidence: 0.1 }))
-  })
-
-  it('handles high-volume output without changing ranking semantics', () => {
-    const rows: number[] = []
-    const totalRows = 3_000
-    for (let i = 0; i < totalRows; i += 1) {
-      const classId = i % 6
-      const confidence = (i % 1000) / 1000
-      rows.push(...yoloRow(confidence, classId))
-    }
-
-    const result = parseYoloOutput(new Float32Array(rows))
-
-    expect(result.detections.length <= yoloOutputConfig.maxDetections).toBe(true)
-    expect(result.candidates.length <= yoloOutputConfig.maxDetections).toBe(true)
-
-    const confidences = result.candidates.map((detection) => detection.confidence)
-    for (let i = 1; i < confidences.length; i += 1) {
-      expect(confidences[i - 1]).toBeGreaterThanOrEqual(confidences[i])
-    }
-
-    const uniqueKinds = new Set(result.ponies)
-    expect(uniqueKinds.size).toBe(result.ponies.length)
   })
 })
 

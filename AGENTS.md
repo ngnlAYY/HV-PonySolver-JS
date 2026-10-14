@@ -149,7 +149,9 @@ mise exec -- node scripts/ci/assert-pinned-actions.mjs
 git diff --check
 ```
 
-`check` 包含格式、lint、类型、工作区和根测试、文档、架构、危险调用、扩展打包、包体、覆盖率与构建。格式按忽略规则排除生成物、第三方资产与锁文件。`pnpm test` 包含根级 `scripts/**/*.test.mjs`，`pnpm -r test:coverage` 不包含，不能替代前者或证明 CI test job 通过。
+`check` 包含格式、lint、类型、工作区和根测试、文档、架构、危险调用、扩展打包、包体、覆盖率与构建。完整检查只跑一次工作区覆盖率测试及一次 `test:root`，不先运行 `check:quick` 重复普通测试；`check:quick` 仍使用普通测试。格式按忽略规则排除生成物、第三方资产与锁文件。`pnpm test` 先跑工作区再调用 `test:root`，后者以带引号的 `scripts/**/*.test.mjs` 发现根级用例；`pnpm -r test:coverage` 不含根级测试，单独运行不能替代前者或证明 CI test job 通过。
+
+测试按所有权去重：共用行为归 browser-core，应用保留适配接线与平台特有回归。删除用例须指出保留的等价行为断言；安全边界、取消/并发时序、已修缺陷和真实产物验证不能用行覆盖率替代，不降低门槛或以 skip/todo、缩窄 include 隐藏测试。具体取舍见[验证手册](docs/development/verification.md#测试归属与精简)。
 
 - 修改用户脚本 Runtime 后分别检查 default/bundled 包体，不互相替代。
 - 修改扩展构建、安全或协议后，至少运行相关构建/E2E；远程/内置、Chromium/Firefox、最低版本/Android 各自提供证据。load-only 不证明真实模型鉴权。

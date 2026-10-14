@@ -50,9 +50,18 @@ mise exec -- pnpm --filter @hv-pony-solver/model-worker test
 
 ## 根命令与测试分层
 
-`pnpm test` 先执行工作区测试，再执行根级 `scripts/**/*.test.mjs`，其中包括工作流、工具版本、文档和边界检查器的回归。`pnpm test:coverage` 只调度工作区覆盖率，不含根级测试，不能替代 `pnpm test`。
+`pnpm test` 先执行工作区普通测试，再调用 `pnpm test:root` 运行根级 `scripts/**/*.test.mjs`，其中包括工作流、工具版本、文档和边界检查器的回归。`pnpm test:coverage` 只调度工作区覆盖率，不含根级测试，单独运行不能替代 `pnpm test`。完整 `pnpm check` 执行一次工作区覆盖率测试，再执行一次 `test:root`，不重复普通工作区测试；`check:quick` 和 CI 独立 test/coverage-build job 的行为不变。
 
 Vitest 主要验证 TypeScript/运行时逻辑；包内 Node 测试覆盖构建器、配置、完整性和发布工具。`pnpm check` 的[完整顺序](commands.md#仓库级命令)包含格式、静态门禁、测试、覆盖率和构建，但不自动执行浏览器 E2E 或联网依赖审计。依赖变更另运行 `mise exec -- pnpm audit:high`，与 CI 的 High 门槛一致。
+
+### 测试归属与精简
+
+- 共用 DOM、答题、推理、模型下载和历史逻辑归 browser-core；用户脚本只补 GM、菜单、存储和 Runtime 适配，不重复整套共用行为。
+- 删除等价用例前指出仍保留的行为断言；取消时点、手动答案归属、Key 隔离、事务身份、来源校验和既有缺陷回归不能仅凭行覆盖率删除。
+- 文档静态关键词检查按校验分支和每篇专题选代表负例；保留逐篇失败、README 不能补足专题、源码提取和伪装事实的负例，不逐词重复全仓扫描。
+- 清单共有字段的负例覆盖两种后台形态，不重复四种模型/浏览器组合；四种有效清单、权限/CSP/模型身份差异、危险 HTML 及产物/E2E 矩阵仍独立验证。
+- WASM 单测用小型确定性字节和对应测试身份驱动真实读取/哈希路径，不反复深比较完整 WASM；真实文件身份归构建审计与浏览器 E2E。
+- 不降低覆盖率门槛，不用 skip/todo、改 include 或合并用例计数冒充精简；[精简决定](../decisions/implemented/testing/2026-10-14-test-suite-ownership.md)记录归属和取舍。
 
 ## 浏览器证据边界
 

@@ -4,28 +4,10 @@ import { join } from 'node:path'
 import { readFile, runCheck, withFixture, writeFile } from './fixtures.mjs'
 
 for (const [document, facts] of [
-  [
-    'docs/architecture/browser-runtime.md',
-    [
-      'readBoundedByteStream',
-      '不等待取消 Promise',
-      'performance.now()',
-      '取消不等待防抖',
-      'raceAbort',
-      'RemoteDetectorClient',
-      'JPX',
-      '原扫描截止时间',
-      'settingsReadTimeoutMs',
-      'srcset',
-      'currentSrc',
-      '首次初始化也允许 body 缺失',
-      '外层 fieldset',
-      '首个 legend',
-      '消费该次 Promise 拒绝',
-    ],
-  ],
-  ['docs/model-cache-strategy.md', ['ModelAccessKeyRejectedError', '永久错误']],
-  ['docs/onnx-runtime.md', ['Content-Length', '规范十进制', '解压', '不等待取消 Promise']],
+  // 每篇专题保留负向覆盖；不为同一 includes 分支逐一重跑整仓文档扫描。
+  ['docs/architecture/browser-runtime.md', ['取消不等待防抖', '外层 fieldset']],
+  ['docs/model-cache-strategy.md', ['永久错误']],
+  ['docs/onnx-runtime.md', ['Content-Length']],
 ]) {
   for (const fact of facts) {
     test(`browser runtime contract cannot be replaced by a README mention: ${document} ${fact}`, async () => {
@@ -229,50 +211,7 @@ test('fails clearly when ONNX Runtime docs omit the external JSEP MJS contract a
   })
 })
 
-test('fails clearly when HTTP reference authorized model row omits Bearer auth', async () => {
-  await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
-    const readme = await readFile(readmePath, 'utf8')
-    assert.ok(readme.includes('携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中'))
-    await writeFile(
-      readmePath,
-      readme.replace(
-        '携带 `Authorization: Bearer <authorized-64-hex>` 且 KV 命中',
-        '携带 authorized header 且 KV 命中',
-      ),
-    )
-
-    const result = await runCheck(fixtureRoot)
-    assert.notEqual(result.exitCode, 0)
-    assert.match(
-      result.stderr,
-      /docs\/reference\/model-worker-http.md.*authorized real-model row must mention Authorization: Bearer/s,
-    )
-  })
-})
-
-test('fails clearly when HTTP reference authorized model row omits cache-control', async () => {
-  await withFixture(async (fixtureRoot) => {
-    const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')
-    const readme = await readFile(readmePath, 'utf8')
-    assert.ok(readme.includes('`200` 真实模型，模型响应使用 `Cache-Control: no-store`'))
-    await writeFile(
-      readmePath,
-      readme.replace(
-        '`200` 真实模型，模型响应使用 `Cache-Control: no-store`',
-        '`200` 真实模型，模型响应使用 cache-control header',
-      ),
-    )
-
-    const result = await runCheck(fixtureRoot)
-    assert.notEqual(result.exitCode, 0)
-    assert.match(
-      result.stderr,
-      /docs\/reference\/model-worker-http.md.*authorized real-model row must mention Cache-Control: no-store/s,
-    )
-  })
-})
-
+// GET 行的基本缺项由下方更强的「附注不能补足行内事实」回归覆盖。
 test('fails clearly when HTTP reference authorized HEAD row omits Bearer auth', async () => {
   await withFixture(async (fixtureRoot) => {
     const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')

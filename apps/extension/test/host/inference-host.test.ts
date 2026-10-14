@@ -50,22 +50,6 @@ describe('InferenceHost', () => {
     expect(deps.detector.detect).toHaveBeenCalledWith(expect.any(Blob), expect.any(AbortSignal))
   })
 
-  it('downloads the model through the Host without exposing model bytes', async () => {
-    const deps = dependencies()
-    const host = new InferenceHost(deps)
-
-    await expect(
-      host.handle({ protocol: PROTOCOL_VERSION, type: 'download-model', requestId: 'download-1' }),
-    ).resolves.toEqual({
-      protocol: PROTOCOL_VERSION,
-      type: 'result',
-      requestId: 'download-1',
-      ok: true,
-      notice: '模型下载和校验成功，已缓存',
-    })
-    expect(deps.downloadModel).toHaveBeenCalledWith(expect.any(AbortSignal))
-  })
-
   it('lets a newer clear intent cancel an in-flight manual download before clearing credentials', async () => {
     const deps = dependencies()
     let downloadSignal: AbortSignal | undefined
@@ -127,22 +111,6 @@ describe('InferenceHost', () => {
     })
   })
 
-  it('stores a candidate Key only after a verified model download', async () => {
-    const deps = dependencies()
-    const host = new InferenceHost(deps)
-
-    await expect(
-      host.handle({
-        protocol: PROTOCOL_VERSION,
-        type: 'verify-key',
-        requestId: 'verify-1',
-        candidateKey: `  ${'a'.repeat(64)}  `,
-      }),
-    ).resolves.toMatchObject({ ok: true })
-
-    expect(deps.verifyKey).toHaveBeenCalledWith('a'.repeat(64), expect.any(AbortSignal))
-  })
-
   it('relays a verifier notice to the caller and omits it otherwise', async () => {
     const deps = dependencies()
     vi.mocked(deps.verifyKey!).mockResolvedValueOnce('模型 Key 有效并已安全保存；额度已用完')
@@ -153,7 +121,7 @@ describe('InferenceHost', () => {
         protocol: PROTOCOL_VERSION,
         type: 'verify-key',
         requestId: 'verify-notice',
-        candidateKey: 'a'.repeat(64),
+        candidateKey: `  ${'a'.repeat(64)}  `,
       }),
     ).resolves.toEqual({
       protocol: PROTOCOL_VERSION,
@@ -162,6 +130,7 @@ describe('InferenceHost', () => {
       ok: true,
       notice: '模型 Key 有效并已安全保存；额度已用完',
     })
+    expect(deps.verifyKey).toHaveBeenCalledWith('a'.repeat(64), expect.any(AbortSignal))
 
     await expect(
       host.handle({
@@ -171,15 +140,6 @@ describe('InferenceHost', () => {
         candidateKey: 'a'.repeat(64),
       }),
     ).resolves.toEqual({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'verify-plain', ok: true })
-  })
-
-  it('never attaches a notice to clear-key', async () => {
-    const deps = dependencies()
-    const host = new InferenceHost(deps)
-
-    await expect(
-      host.handle({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'clear-notice' }),
-    ).resolves.toEqual({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'clear-notice', ok: true })
   })
 
   it('does not persist a Key when validation fails', async () => {
@@ -195,22 +155,6 @@ describe('InferenceHost', () => {
         candidateKey: 'b'.repeat(64),
       }),
     ).resolves.toMatchObject({ ok: false, error: 'Error: HTTP 401' })
-    expect(deps.verifyKey).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not persist a Key when packaged inference initialization fails', async () => {
-    const deps = dependencies()
-    vi.mocked(deps.verifyKey!).mockRejectedValueOnce(new Error('WASM initialization failed'))
-    const host = new InferenceHost(deps)
-
-    await expect(
-      host.handle({
-        protocol: PROTOCOL_VERSION,
-        type: 'verify-key',
-        requestId: 'verify-3',
-        candidateKey: 'c'.repeat(64),
-      }),
-    ).resolves.toMatchObject({ ok: false, error: 'Error: WASM initialization failed' })
     expect(deps.verifyKey).toHaveBeenCalledTimes(1)
   })
 

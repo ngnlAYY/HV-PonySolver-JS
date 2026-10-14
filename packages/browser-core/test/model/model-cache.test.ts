@@ -240,6 +240,7 @@ describe('readCachedModelBuffer', () => {
           byteLength: 1,
           sha256: TEST_INTEGRITY.sha256,
           buffer: bufferFromBytes([9]),
+          confirmationPending: false,
         },
         { integrity: TEST_INTEGRITY },
       ),
@@ -247,6 +248,7 @@ describe('readCachedModelBuffer', () => {
   })
 
   it('ignores cached buffers with forged integrity metadata by default', async () => {
+    vi.mocked(verifyModelIntegrity).mockClear()
     await expect(
       readCachedModelBuffer(
         {
@@ -255,10 +257,12 @@ describe('readCachedModelBuffer', () => {
           byteLength: TEST_INTEGRITY.byteLength,
           sha256: TEST_INTEGRITY.sha256,
           buffer: bufferFromBytes([9, 9, 9]),
+          confirmationPending: false,
         },
         { integrity: TEST_INTEGRITY },
       ),
     ).resolves.toBeNull()
+    expect(verifyModelIntegrity).toHaveBeenCalledTimes(1)
   })
 
   it('rejects mismatched cache metadata even when integrity hashing is explicitly disabled', async () => {
@@ -272,6 +276,7 @@ describe('readCachedModelBuffer', () => {
           byteLength: 1,
           sha256: '0000000000000000000000000000000000000000000000000000000000000000',
           buffer,
+          confirmationPending: false,
         },
         { integrity: TEST_INTEGRITY, verifyIntegrity: false },
       ),
@@ -630,11 +635,12 @@ describe('ModelCache', () => {
   })
 
   it('shares one download for access key overrides that normalize to the same value', async () => {
-    const downloadModelImpl = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)
+    const downloadModelImpl = vi.fn<typeof downloadModel>(async () => new Uint8Array([1, 2, 3]).buffer)
     const cache = new ModelCache(createStatusPanel(), downloadModelImpl)
+    const signal = new AbortController().signal
 
     const [first, second] = await Promise.all([
-      cache.download(undefined, false, ' candidate-token '),
+      cache.download(signal, false, ' candidate-token '),
       cache.download(undefined, false, 'candidate-token'),
     ])
 
@@ -644,6 +650,7 @@ describe('ModelCache', () => {
       accessKeyOverride: 'candidate-token',
       verifyIntegrity: false,
     })
+    expect(vi.mocked(downloadModelImpl).mock.calls[0]?.[0]).not.toBe(signal)
   })
 
   it('reports elapsed time when download completes', async () => {
@@ -655,22 +662,6 @@ describe('ModelCache', () => {
     expect(buffer.byteLength).toBeGreaterThan(0)
     expect(panel.setStatus).toHaveBeenCalledWith({ model: '下载中' })
     expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^下载完成 \d+ms$/) })
-  })
-
-  it('normalizes access key overrides before forwarding them to model downloads', async () => {
-    const panel = createStatusPanel()
-    const cache = new ModelCache(panel)
-    const signal = new AbortController().signal
-    vi.mocked(downloadModel).mockClear()
-
-    await cache.download(signal, false, ' candidate-token ')
-
-    expect(downloadModel).toHaveBeenCalledTimes(1)
-    expect(downloadModel).toHaveBeenCalledWith(expect.any(AbortSignal), {
-      accessKeyOverride: 'candidate-token',
-      verifyIntegrity: false,
-    })
-    expect(vi.mocked(downloadModel).mock.calls[0]?.[0]).not.toBe(signal)
   })
 
   it('confirms quota usage only after the cache transaction completes', async () => {
@@ -773,14 +764,6 @@ describe('ModelCache', () => {
     const cache = new ModelCache(createStatusPanel())
 
     await expect(cache.putCached(bufferFromBytes([9, 9, 9]))).rejects.toThrow('缓存写入模型大小校验失败')
-  })
-
-  it('does not reject bad model buffers when cache write verification is explicitly disabled', async () => {
-    stubIndexedDb()
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const cache = new ModelCache(createStatusPanel())
-
-    await expect(cache.putCached(bufferFromBytes([9, 9, 9]), false)).resolves.toBeUndefined()
   })
 
   it('skips cache integrity verification when caller marks cache data as already verified', async () => {

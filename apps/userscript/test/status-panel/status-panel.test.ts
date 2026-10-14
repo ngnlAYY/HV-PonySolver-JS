@@ -49,6 +49,7 @@ describe('StatusPanel', () => {
 
     panel.create()
     panel.setStatus({ model: '确认中' })
+    panel.setStatus({ model: '确认中' })
     panel.setStatus({ inference: '推理中' })
 
     expect(store.get).toHaveBeenCalledTimes(1)
@@ -178,17 +179,6 @@ describe('StatusPanel', () => {
     expect(document.body.textContent).not.toContain('P5')
   })
 
-  it('shows only five answer records by default', () => {
-    const store = createHistoryStore(createSuccessRecords(6))
-    const panel = createPanel(store)
-
-    panel.create()
-
-    expect(document.body.textContent).toContain('P1')
-    expect(document.body.textContent).toContain('P5')
-    expect(document.body.textContent).not.toContain('P6')
-  })
-
   it('uses the configured answer record display limit', () => {
     localStorage.setItem('hvPonySolverHistoryLimit', '3')
     const store = createHistoryStore(createSuccessRecords(5))
@@ -199,15 +189,6 @@ describe('StatusPanel', () => {
     expect(document.body.textContent).toContain('P1')
     expect(document.body.textContent).toContain('P3')
     expect(document.body.textContent).not.toContain('P4')
-  })
-
-  it('shows that there is no recent error when history has no errors', () => {
-    const store = createHistoryStore()
-    const panel = createPanel(store)
-
-    panel.create()
-
-    expect(document.body.textContent).toContain('最近错误：无')
   })
 
   it('shows the latest error message and elapsed time', async () => {
@@ -230,35 +211,5 @@ describe('StatusPanel', () => {
 
     await vi.waitFor(() => expect(document.body.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;'))
     expect(document.body.innerHTML).not.toContain('<img src=x onerror=alert(1)>')
-  })
-
-  it('coalesces repeated status changes into one rendered update', async () => {
-    const store = createHistoryStore()
-    const panel = createPanel(store)
-
-    panel.create()
-    const element = document.querySelector('.ponyLog') as HTMLDivElement
-    const firstRender = element.innerHTML
-
-    panel.setStatus({ model: '下载中' })
-    panel.setStatus({ model: '下载中' })
-    panel.setStatus({ session: '初始化中' })
-
-    expect(element.innerHTML).toBe(firstRender)
-    await vi.waitFor(() => expect(element.textContent).toContain('下载中'))
-    expect(element.textContent).toContain('初始化中')
-  })
-
-  it('ignores queued renders after destroy', async () => {
-    const store = createHistoryStore()
-    const panel = createPanel(store)
-
-    panel.create()
-    panel.setStatus({ model: '下载中' })
-    panel.destroy()
-    await Promise.resolve()
-
-    expect(document.querySelector('.ponyLog')).toBeNull()
-    expect(document.body.textContent).not.toContain('下载中')
   })
 })

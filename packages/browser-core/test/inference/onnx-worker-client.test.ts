@@ -276,23 +276,6 @@ describe('OnnxWorkerClient', () => {
     expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')
   })
 
-  it('keeps the init message runtime-profile independent', async () => {
-    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
-    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
-    const modelCache = {
-      getCached: vi.fn(async () => modelBuffer),
-      download: vi.fn(async () => modelBuffer),
-      putCached: vi.fn(async () => undefined),
-    } as unknown as ModelCache
-    const client = new OnnxWorkerClient(modelCache, createMockPanel())
-
-    await client.prepare()
-
-    expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init', modelBuffer })
-    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('wasmPath')
-    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')
-  })
-
   it('sends image blobs to worker without copying them into array buffers', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
@@ -306,6 +289,9 @@ describe('OnnxWorkerClient', () => {
 
     const result = await client.detect(imageBlob)
 
+    expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init', modelBuffer })
+    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('wasmPath')
+    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')
     const detectMessage = SuccessfulWorker.messages.find((message) => message.type === 'detect')
     const detectTransfer =
       SuccessfulWorker.transfers[SuccessfulWorker.messages.findIndex((message) => message.type === 'detect')]
@@ -313,21 +299,6 @@ describe('OnnxWorkerClient', () => {
     expect(detectMessage).not.toHaveProperty('size')
     expect(detectTransfer).toEqual([])
     expect(imageBlob.arrayBuffer).not.toHaveBeenCalled()
-    expect(result.ponies).toEqual(['TS'])
-  })
-
-  it('uses worker parsed results as detect output', async () => {
-    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
-    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
-    const modelCache = {
-      getCached: vi.fn(async () => modelBuffer),
-      download: vi.fn(async () => modelBuffer),
-      putCached: vi.fn(async () => undefined),
-    } as unknown as ModelCache
-    const client = new OnnxWorkerClient(modelCache, createMockPanel())
-
-    const result = await client.detect({} as Blob)
-
     expect(result).toMatchObject({ success: true, ponies: ['TS'] })
   })
 
@@ -348,24 +319,6 @@ describe('OnnxWorkerClient', () => {
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: expect.stringMatching(/^完成 \d+ms$/) })
   })
 
-  it('reports session readiness after preparing without a transient overwritten status', async () => {
-    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
-    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
-    const modelCache = {
-      getCached: vi.fn(async () => modelBuffer),
-      download: vi.fn(async () => modelBuffer),
-      putCached: vi.fn(async () => undefined),
-    } as unknown as ModelCache
-    const panel = createMockPanel()
-    const client = new OnnxWorkerClient(modelCache, panel)
-
-    await client.prepare()
-
-    expect(panel.setStatus).toHaveBeenCalledWith({ session: '初始化中' })
-    expect(panel.setStatus).not.toHaveBeenCalledWith({ session: expect.stringMatching(/^Worker 初始化 \d+ms$/) })
-    expect(panel.setSessionReady).toHaveBeenCalledWith(expect.any(Number))
-  })
-
   it('does not reset session readiness when prepare is called after ready', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
@@ -378,6 +331,9 @@ describe('OnnxWorkerClient', () => {
     const client = new OnnxWorkerClient(modelCache, panel)
 
     await client.prepare()
+    expect(panel.setStatus).toHaveBeenCalledWith({ session: '初始化中' })
+    expect(panel.setStatus).not.toHaveBeenCalledWith({ session: expect.stringMatching(/^Worker 初始化 \d+ms$/) })
+    expect(panel.setSessionReady).toHaveBeenCalledWith(expect.any(Number))
     await client.prepare()
 
     expect(panel.setSessionReady).toHaveBeenCalledTimes(1)
@@ -470,36 +426,6 @@ describe('OnnxWorkerClient', () => {
     expect(modelCache.getCached).toHaveBeenCalledTimes(2)
   })
 
-  it('serializes overlapping detect requests', async () => {
-    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
-    SuccessfulWorker.autoRespond = false
-    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
-    const modelCache = {
-      getCached: vi.fn(async () => modelBuffer),
-      download: vi.fn(async () => modelBuffer),
-      putCached: vi.fn(async () => undefined),
-    } as unknown as ModelCache
-    const client = new OnnxWorkerClient(modelCache, createMockPanel())
-    const preparePromise = client.prepare()
-    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
-    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
-    await preparePromise
-
-    const firstDetect = client.detect({} as Blob)
-    const secondDetect = client.detect({} as Blob)
-    await vi.waitFor(() =>
-      expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1),
-    )
-    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[1]?.requestId)
-    await firstDetect
-    await vi.waitFor(() =>
-      expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(2),
-    )
-    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[2]?.requestId)
-
-    await secondDetect
-  })
-
   it('settles an aborted queued detect without posting it to the Worker', async () => {
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     SuccessfulWorker.autoRespond = false
@@ -563,6 +489,7 @@ describe('OnnxWorkerClient', () => {
       )
       controller.abort()
       await expect(cancelled).rejects.toThrow('推理请求已取消')
+      expect(SuccessfulWorker.messages).toHaveLength(2)
       SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[1]?.requestId)
       await first
       await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(3))
@@ -974,32 +901,6 @@ describe('OnnxWorkerClient', () => {
     expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1)
   })
 
-  it('marks session error, rejects pending init, and creates a new worker on next prepare after timeout', async () => {
-    vi.useFakeTimers()
-    stubWorker(TimeoutThenSuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
-    const modelCache = {
-      getCached: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
-      download: vi.fn(async () => new Uint8Array([1, 2, 3, 4]).buffer),
-      putCached: vi.fn(async () => undefined),
-    } as unknown as ModelCache
-    const panel = createMockPanel()
-    const client = new OnnxWorkerClient(modelCache, panel)
-
-    const preparePromise = client.prepare()
-    await vi.waitFor(() => expect(TimeoutThenSuccessfulWorker.messages).toHaveLength(1))
-    vi.advanceTimersByTime(inferenceTimeoutConfig.workerInitTimeoutMs)
-
-    await expect(preparePromise).rejects.toThrow('ONNX Worker 请求超时')
-    expect(panel.setStatus).toHaveBeenCalledWith({ session: '错误' })
-
-    const nextPreparePromise = client.prepare()
-    await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))
-    SuccessfulWorker.instances[0]?.respond(SuccessfulWorker.messages[0]?.requestId)
-
-    await expect(nextPreparePromise).resolves.toBeUndefined()
-    expect(TimeoutThenSuccessfulWorker.constructedCount).toBe(2)
-  })
-
   it('ignores stale worker error events after a timed-out prepare is replaced', async () => {
     vi.useFakeTimers()
     stubWorker(TimeoutThenSuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
@@ -1016,6 +917,7 @@ describe('OnnxWorkerClient', () => {
     vi.advanceTimersByTime(inferenceTimeoutConfig.workerInitTimeoutMs)
 
     await expect(stalePreparePromise).rejects.toThrow('ONNX Worker 请求超时')
+    expect(panel.setStatus).toHaveBeenCalledWith({ session: '错误' })
 
     const replacementPreparePromise = client.prepare()
     await vi.waitFor(() => expect(SuccessfulWorker.messages).toHaveLength(1))

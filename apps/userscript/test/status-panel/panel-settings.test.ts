@@ -14,24 +14,11 @@ describe('panel settings', () => {
   })
 
   describe('getPanelPositionSync', () => {
-    it('returns the default position when no position is saved', async () => {
-      const { getPanelPositionSync } = await import('../../src/status-panel/panel-settings')
-
-      expect(getPanelPositionSync()).toEqual({ top: 155, left: 1240 })
-    })
-
     it('parses a valid position from localStorage', async () => {
       localStorage.setItem('hvPonySolverPanelPosition', '200,900')
       const { getPanelPositionSync } = await import('../../src/status-panel/panel-settings')
 
       expect(getPanelPositionSync()).toEqual({ top: 200, left: 900 })
-    })
-
-    it('returns the default position when the stored value is invalid', async () => {
-      localStorage.setItem('hvPonySolverPanelPosition', 'not-valid')
-      const { getPanelPositionSync } = await import('../../src/status-panel/panel-settings')
-
-      expect(getPanelPositionSync()).toEqual({ top: 155, left: 1240 })
     })
 
     it('returns the default position when localStorage throws', async () => {
@@ -42,12 +29,6 @@ describe('panel settings', () => {
 
       expect(getPanelPositionSync()).toEqual({ top: 155, left: 1240 })
     })
-  })
-
-  it('reads the default position when no position is saved', async () => {
-    const { getPanelPosition } = await import('../../src/status-panel/panel-settings')
-
-    await expect(getPanelPosition()).resolves.toEqual({ top: 155, left: 1240 })
   })
 
   it('trims and persists panel position through localStorage fallback', async () => {

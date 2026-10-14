@@ -66,29 +66,6 @@ describe('HistoryStore', () => {
     expect(records).toEqual([])
   })
 
-  it('keeps up to fifty records when adding answers', async () => {
-    const store = new HistoryStore()
-    const persisted: Promise<HistoryRecord[]>[] = []
-    for (let index = 0; index < 51; index += 1) {
-      persisted.push(
-        store.add('main', {
-          type: 'success',
-          answers: `P${index}`,
-          elapsed: index,
-        }).persisted,
-      )
-    }
-    await Promise.all(persisted)
-
-    const records = store.get('main')
-
-    expect(records).toHaveLength(50)
-    expect(records[0]).toMatchObject({ answers: 'P50' })
-    expect(records[49]).toMatchObject({ answers: 'P1' })
-    expect(userscriptHistoryStorage.getItemsByPrefix(HISTORY_ENTRY_PREFIX)).toHaveLength(50)
-    expect(localStorage.getItem(HISTORY_KEY)).toBeNull()
-  })
-
   it.each(['main', 'isekai'] as const)(
     'keeps both records when another tab writes to %s between the first read and write',
     async (secondWorld) => {

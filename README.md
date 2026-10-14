@@ -69,4 +69,4 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 - [HTTP 契约](docs/reference/model-worker-http.md)、[CI 与发布](docs/development/releases.md)、[Worker 运维](docs/model-worker-ops.md)
 - [文档维护与检查](docs/development/documentation.md#验证文档修改)
 
-完整检查为 `mise exec -- pnpm check`，先按[验证手册](docs/development/verification.md#model-worker-测试配置)备份并准备 Worker 测试配置。普通检查和构建不发布产品；commit、push、artifact、Release 和部署需明确授权。本地通过不代表远程鉴权、最低版本或 Android 验收完成。
+完整检查为 `mise exec -- pnpm check`，先按[验证手册](docs/development/verification.md#model-worker-测试配置)备份并准备 Worker 测试配置。工作区以覆盖率模式执行一次，根级工具测试通过 `test:root` 单独执行，不重复普通工作区测试；覆盖率门槛不变。普通检查和构建不发布产品；commit、push、artifact、Release 和部署需明确授权。本地通过不代表远程鉴权、最低版本或 Android 验收完成。

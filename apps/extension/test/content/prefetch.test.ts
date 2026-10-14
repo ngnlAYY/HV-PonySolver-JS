@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { HISTORY_ENTRY_PREFIX, HISTORY_KEY } from '@hv-pony-solver/browser-core/persistence/answer-history-config'
+import { HISTORY_ENTRY_PREFIX } from '@hv-pony-solver/browser-core/persistence/answer-history-config'
 import { HistoryStore } from '@hv-pony-solver/browser-core/persistence/answer-history-store'
 import type { EnumerableTextStorage } from '@hv-pony-solver/browser-core/platform/storage'
 
@@ -69,7 +69,6 @@ describe('scheduleExperiencedPrefetch', () => {
   it.each([
     ['keyed main', new Map([[`${HISTORY_ENTRY_PREFIX}main:one`, validRecord()]])],
     ['keyed isekai', new Map([[`${HISTORY_ENTRY_PREFIX}isekai:one`, validRecord('manual')]])],
-    ['valid legacy', new Map([[HISTORY_KEY, `{"main":[${validRecord()}]}`]])],
   ])('prefetches once silently for %s history', async (_label, items) => {
     const detector = { prepare: vi.fn(async () => undefined) }
     scheduleExperiencedPrefetch(new HistoryStore(new MemoryStorage(items)), detector as never, () => undefined)
@@ -82,14 +81,6 @@ describe('scheduleExperiencedPrefetch', () => {
 
   it.each([
     ['fresh install', new Map<string, string>()],
-    ['empty legacy', new Map([[HISTORY_KEY, '{"main":[]}']])],
-    ['corrupt legacy', new Map([[HISTORY_KEY, 'not-json']])],
-    ['unknown legacy shape', new Map([[HISTORY_KEY, '{"unexpected":true}']])],
-    [
-      'invalid nonempty legacy record',
-      new Map([[HISTORY_KEY, '{"main":[{"type":"success","answers":"TS","elapsed":"fast"}]}']]),
-    ],
-    ['invalid keyed record', new Map([[`${HISTORY_ENTRY_PREFIX}main:bad`, '{"type":"noop","elapsed":1}']])],
     [
       'error-only history',
       new Map([[`${HISTORY_ENTRY_PREFIX}main:err`, '{"type":"error","elapsed":1,"message":"识别失败"}']]),

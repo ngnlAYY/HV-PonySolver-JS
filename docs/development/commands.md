@@ -28,7 +28,8 @@ mise exec -- pnpm install --frozen-lockfile
 | `pnpm format`                           | 全仓格式写入；日常修改优先只格式化指定文件                       |
 | `pnpm lint`                             | ESLint                                                           |
 | `pnpm typecheck`                        | 各工作区 TypeScript 检查                                         |
-| `pnpm test`                             | 工作区测试及根级 `scripts/**/*.test.mjs`                         |
+| `pnpm test`                             | 工作区普通测试，然后执行 `test:root`                             |
+| `pnpm test:root`                        | 仅运行根级 `scripts/**/*.test.mjs`，不调度工作区                 |
 | `pnpm test:coverage`                    | 工作区覆盖率；不含根级 Node 测试                                 |
 | `pnpm audit:high`                       | 依赖安全审计，high 及以上失败                                    |
 | `pnpm docs:check`                       | 事实漂移、命令、本地链接/锚点、决策结构与归档封印                |
@@ -50,10 +51,12 @@ mise exec -- pnpm install --frozen-lockfile
 
 聚合检查的顺序由根包脚本定义：
 
-| 命令               | 执行顺序                                                                                                                                          |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm check:quick` | `format:check`、`lint`、`typecheck`、`test`、`docs:check`、`architecture:check`、`browser-sinks:check`、`extension:package-check`、`bundle:check` |
-| `pnpm check`       | `check:quick` → `test:coverage` → `build`                                                                                                         |
+| 命令               | 执行顺序                                                                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm check:quick` | `format:check`、`lint`、`typecheck`、`test`、`docs:check`、`architecture:check`、`browser-sinks:check`、`extension:package-check`、`bundle:check`                                |
+| `pnpm check`       | `format:check`、`lint`、`typecheck`、`test:coverage`、`test:root`、`docs:check`、`architecture:check`、`browser-sinks:check`、`extension:package-check`、`bundle:check`、`build` |
+
+`check` 直接执行一次工作区覆盖率测试和一次根级 Node 测试，不先调用 `check:quick` 重跑普通工作区测试；`check:quick` 的普通测试行为不变，覆盖率门槛和各项静态/构建门禁不变。
 
 浏览器 E2E 不在以上聚合检查内：
 

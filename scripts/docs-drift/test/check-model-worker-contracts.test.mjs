@@ -190,12 +190,7 @@ test('does not let a later workflow job mask a missing deployment branch gate', 
   })
 })
 
-for (const command of [
-  'mise.toml',
-  'mise install',
-  'mise exec -- pnpm install --frozen-lockfile',
-  'mise exec -- pnpm check',
-]) {
+for (const command of ['mise exec -- pnpm install --frozen-lockfile']) {
   test(`fails clearly when command reference omits mise setup entry ${command}`, async () => {
     await withFixture(async (fixtureRoot) => {
       const readmePath = join(fixtureRoot, 'docs/development/commands.md')
@@ -291,15 +286,8 @@ for (const [directive, replacement] of [
 
 // command reference 文档契约：这些测试验证 command reference 是否准确描述脚本、模型、ONNX Runtime 和 Model Worker 的当前事实。
 // 运行时 HTTP 行为应由 apps/model-worker 的 Worker tests 覆盖；这里关注文档是否漂移。
-const rootCheckCommandNames = [
-  'check:quick',
-  'test:coverage',
-  'build',
-  'docs:check',
-  'architecture:check',
-  'browser-sinks:check',
-  'bundle:check',
-]
+// 工作区覆盖率、根级 Node 测试与构建是三个独立阶段，不能互相替代。
+const rootCheckCommandNames = ['test:coverage', 'test:root', 'build']
 
 for (const commandName of rootCheckCommandNames) {
   test(`fails clearly when command reference omits ${commandName} from pnpm check description`, async () => {

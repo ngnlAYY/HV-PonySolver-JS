@@ -75,24 +75,24 @@ afterEach(() => {
 })
 
 describe('RemoteDetectorClient', () => {
-  it.each(['image/png; charset=binary', 'IMAGE/PNG ; note="value with spaces"', 'image/png   '])(
-    'encodes images loaded with HTTP Content-Type %j using the strict protocol MIME',
-    async (contentType) => {
-      const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])
-      const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-        new Response(bytes, {
-          headers: { 'content-type': contentType, 'content-length': String(bytes.length) },
-        }),
-      )
-      try {
-        const blob = await new CachedImageLoader().get('https://hentaiverse.org/captcha.png')
-        await expect(encodeImage(blob)).resolves.toEqual({ mimeType: 'image/png', imageBase64: 'iVBORw0KGgo=' })
-        expect(fetch).toHaveBeenCalledTimes(1)
-      } finally {
-        fetch.mockRestore()
-      }
-    },
-  )
+  it('encodes an image loaded with a normalized HTTP Content-Type using the strict protocol MIME', async () => {
+    const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(bytes, {
+        headers: {
+          'content-type': 'IMAGE/PNG ; note="value with spaces"',
+          'content-length': String(bytes.length),
+        },
+      }),
+    )
+    try {
+      const blob = await new CachedImageLoader().get('https://hentaiverse.org/captcha.png')
+      await expect(encodeImage(blob)).resolves.toEqual({ mimeType: 'image/png', imageBase64: 'iVBORw0KGgo=' })
+      expect(fetch).toHaveBeenCalledTimes(1)
+    } finally {
+      fetch.mockRestore()
+    }
+  })
 
   it('ignores stale responses and resolves the matching JSON-safe detection result', async () => {
     const client = new RemoteDetectorClient(statusSink())
@@ -153,24 +153,6 @@ describe('RemoteDetectorClient', () => {
     },
   )
 
-  it('prepares silently without touching the status panel', async () => {
-    const sink = statusSink()
-    const client = new RemoteDetectorClient(sink)
-    const preparePromise = client.prepare(undefined, { silent: true })
-    await vi.waitFor(() => expect(platformMocks.ports[0]?.postMessage).toHaveBeenCalledTimes(1))
-    const request = vi.mocked(platformMocks.ports[0]!.postMessage).mock.calls[0]![0] as { requestId: string }
-    platformMocks.ports[0]!.emitMessage({
-      protocol: PROTOCOL_VERSION,
-      type: 'result',
-      requestId: request.requestId,
-      ok: true,
-    })
-
-    await expect(preparePromise).resolves.toBeUndefined()
-    expect(sink.setStatus).not.toHaveBeenCalled()
-    expect(sink.setSessionReady).not.toHaveBeenCalled()
-  })
-
   it.each(['prepare', 'detect'] as const)(
     'shows broadcasts only while visible %s is pending alongside silent preparation',
     async (operation) => {
@@ -181,6 +163,7 @@ describe('RemoteDetectorClient', () => {
       const broadcast = { protocol: PROTOCOL_VERSION, type: 'status', status: { model: '下载中' } }
       port.emitMessage(broadcast)
       expect(sink.setStatus).not.toHaveBeenCalled()
+      expect(sink.setSessionReady).not.toHaveBeenCalled()
 
       const visible =
         operation === 'prepare'
@@ -209,11 +192,13 @@ describe('RemoteDetectorClient', () => {
       port.emitMessage(broadcast)
       expect(sink.setStatus).not.toHaveBeenCalled()
 
+      sink.setSessionReady.mockClear()
       const silentRequest = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
       port.emitMessage({ protocol: PROTOCOL_VERSION, type: 'result', requestId: silentRequest.requestId, ok: true })
-      await silent
+      await expect(silent).resolves.toBeUndefined()
       port.emitMessage(broadcast)
       expect(sink.setStatus).not.toHaveBeenCalled()
+      expect(sink.setSessionReady).not.toHaveBeenCalled()
       client.destroy()
     },
   )

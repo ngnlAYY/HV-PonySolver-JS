@@ -67,18 +67,6 @@ describe('CachedImageLoader', () => {
     expect(logger.warn).not.toHaveBeenCalled()
   })
 
-  it('falls back after an HTTP cache miss and logs a warning', async () => {
-    const fetchStub = vi.fn().mockResolvedValueOnce(makeFailResponse(504)).mockResolvedValueOnce(makeOkResponse())
-    globalThis.fetch = fetchStub
-
-    const result = await new CachedImageLoader().get(FAKE_URL)
-
-    expect(Array.from(new Uint8Array(await result.arrayBuffer()))).toEqual(Array.from(FAKE_BYTES))
-    expect(fetchStub).toHaveBeenCalledTimes(2)
-    expect(logger.warn).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(logger.warn).mock.calls[0][0]).toContain('仅缓存读取失败')
-  })
-
   it('preserves the browser receiver when calling the default fetch', async () => {
     const fetchStub = vi.fn(function (this: typeof globalThis): Promise<Response> {
       if (this !== globalThis) {
@@ -165,13 +153,6 @@ describe('CachedImageLoader', () => {
     expect(Array.from(new Uint8Array(await result.arrayBuffer()))).toEqual(Array.from(FAKE_BYTES))
     expect(fetchStub).toHaveBeenCalledTimes(2)
     expect((fetchStub.mock.calls[1]![1] as RequestInit).cache).toBe('default')
-  })
-
-  it('reports the fallback suffix when both requests fail', async () => {
-    const fetchStub = vi.fn().mockResolvedValueOnce(makeFailResponse(504)).mockResolvedValueOnce(makeFailResponse(503))
-    globalThis.fetch = fetchStub
-
-    await expect(new CachedImageLoader().get(FAKE_URL)).rejects.toThrow('图片缓存不可用: HTTP 503 (回退也失败)')
   })
 
   it.each([
@@ -388,8 +369,12 @@ describe('CachedImageLoader', () => {
     const fetchStub = vi.fn().mockResolvedValueOnce(makeFailResponse(504)).mockResolvedValueOnce(makeOkResponse())
     globalThis.fetch = fetchStub
 
-    await new CachedImageLoader().get(FAKE_URL)
+    const result = await new CachedImageLoader().get(FAKE_URL)
 
+    expect(Array.from(new Uint8Array(await result.arrayBuffer()))).toEqual(Array.from(FAKE_BYTES))
+    expect(fetchStub).toHaveBeenCalledTimes(2)
+    expect(logger.warn).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(logger.warn).mock.calls[0][0]).toContain('仅缓存读取失败')
     const [firstCall, secondCall] = fetchStub.mock.calls as [string, RequestInit][]
     expect(firstCall[1]).toMatchObject({
       cache: 'only-if-cached',

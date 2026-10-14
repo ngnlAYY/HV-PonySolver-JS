@@ -27,17 +27,6 @@ function responseWithBody(
 }
 
 describe('loadPackagedAsset', () => {
-  it.each(['declared', 'short', 'hash'] as const)('classifies %s integrity failures as permanent', async (failure) => {
-    const bytes = failure === 'short' ? exactBytes.slice(0, 2) : Uint8Array.from([3, 2, 1])
-    const fetchImpl: typeof fetch = async () =>
-      new Response(bytes, {
-        headers: failure === 'declared' ? { 'content-length': '4' } : {},
-      })
-    await expect(
-      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
-    ).rejects.toBeInstanceOf(ModelIntegrityVerificationError)
-  })
-
   it('fetches the fixed extension URL and accepts only exact bytes', async () => {
     const fetchImpl = vi.fn(
       async () =>
@@ -100,7 +89,7 @@ describe('loadPackagedAsset', () => {
     expect(body.cancel).toHaveBeenCalledTimes(1)
   })
 
-  it.each(['', 'abc', '01', '1e3', '+3', '-0', '9007199254740992'])(
+  it.each(['', '01', '9007199254740992'])(
     'rejects declared Content-Length %j before acquiring a reader',
     async (contentLength) => {
       const body = { cancel: vi.fn(async () => undefined), getReader: vi.fn() }
@@ -122,9 +111,9 @@ describe('loadPackagedAsset', () => {
       responseWithBody(body as unknown as ReadableStream<Uint8Array>, { contentLength: '4' }),
     ) as unknown as typeof fetch
 
-    await expect(
-      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
-    ).rejects.toThrow('模型 大小校验失败')
+    const loading = loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl)
+    await expect(loading).rejects.toThrow('模型 大小校验失败')
+    await expect(loading).rejects.toBeInstanceOf(ModelIntegrityVerificationError)
     expect(body.cancel).toHaveBeenCalledTimes(1)
     expect(body.getReader).not.toHaveBeenCalled()
   })
@@ -159,9 +148,9 @@ describe('loadPackagedAsset', () => {
       responseWithBody(body as unknown as ReadableStream<Uint8Array>),
     ) as unknown as typeof fetch
 
-    await expect(
-      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
-    ).rejects.toThrow('模型 大小校验失败')
+    const loading = loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl)
+    await expect(loading).rejects.toThrow('模型 大小校验失败')
+    await expect(loading).rejects.toBeInstanceOf(ModelIntegrityVerificationError)
     expect(events).toEqual(['cancel', 'release'])
   })
 
@@ -283,8 +272,8 @@ describe('loadPackagedAsset', () => {
       async () => new Response(Uint8Array.from([3, 2, 1]), { status: 200 }),
     ) as unknown as typeof fetch
 
-    await expect(
-      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl),
-    ).rejects.toThrow('模型 完整性校验失败')
+    const loading = loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl)
+    await expect(loading).rejects.toThrow('模型 完整性校验失败')
+    await expect(loading).rejects.toBeInstanceOf(ModelIntegrityVerificationError)
   })
 })

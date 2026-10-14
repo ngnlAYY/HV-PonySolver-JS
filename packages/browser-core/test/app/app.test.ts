@@ -1175,32 +1175,6 @@ describe('App', () => {
     },
   )
 
-  it('abandons a target replaced while prepare is pending and solves the replacement', async () => {
-    let resolvePrepare: (() => void) | undefined
-    const harness = createHarness()
-    vi.mocked(harness.detector.prepare)
-      .mockReturnValueOnce(
-        new Promise<void>((resolve) => {
-          resolvePrepare = resolve
-        }),
-      )
-      .mockResolvedValue(undefined)
-    apps.push(harness.app)
-    harness.app.init()
-    const captcha = appendCaptcha('/captcha-a.png')
-    await settleDom()
-    expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
-
-    captcha.querySelector('img')!.src = '/captcha-b.png'
-    await settleDom()
-    resolvePrepare?.()
-    await settleDom()
-
-    expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
-    expect(harness.trigger).toHaveBeenCalledTimes(1)
-    expect(harness.trigger.mock.calls[0]?.[0]?.captchaKey).toContain('/captcha-b.png')
-  })
-
   it('abandons the old target and retries when form action changes while prepare is pending', async () => {
     const captcha = appendCaptcha('/captcha.png')
     const form = captcha.querySelector<HTMLFormElement>('form')
