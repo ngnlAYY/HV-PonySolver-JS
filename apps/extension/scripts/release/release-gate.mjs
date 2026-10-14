@@ -155,8 +155,9 @@ function assertCanonicalEnvironment(environment) {
   let url
   try {
     url = new globalThis.URL(environment.PACKAGED_MODEL_URL)
-  } catch (error) {
-    throw new Error('PACKAGED_MODEL_URL is invalid', { cause: error })
+  } catch {
+    // Native URL errors retain the full input, including protected query values.
+    throw new Error('PACKAGED_MODEL_URL is invalid')
   }
   if (url.protocol !== 'https:') {
     throw new Error('PACKAGED_MODEL_URL must use HTTPS')

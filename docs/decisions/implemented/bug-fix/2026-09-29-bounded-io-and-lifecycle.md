@@ -18,7 +18,7 @@ Status: implemented
 
 ### 既有决定检索
 
-检索全部非归档 lifecycle 的流、取消、镜像、耗时和完整性主题。[扩展 MV3 边界](2026-09-29-extension-mv3-boundaries.md)覆盖准入和产物审计，本篇补充其后的运行期资源；[Port 断连](2026-09-18-extension-port-disconnect-errors.md)部分重叠页面销毁，但不处理排队持久化；[验证码恢复与手动答案](2026-09-22-captcha-recovery-and-manual-selection.md)继续约束取消后的 DOM 行为；[构建安全与可重复性](2026-09-22-build-safety-and-reproducibility.md)与本篇实现无冲突。均保留，不取代或翻转理由；无待吸收或废弃的相关 proposed/rejected 记录。
+检索非归档 lifecycle 的流、取消、镜像、耗时与完整性：[MV3 边界](2026-09-29-extension-mv3-boundaries.md)覆盖准入/产物，本篇补运行期资源；[Port 断连](2026-09-18-extension-port-disconnect-errors.md)覆盖销毁但未处理排队持久化；[验证码恢复](2026-09-22-captcha-recovery-and-manual-selection.md)仍约束取消后 DOM；[构建安全](2026-09-22-build-safety-and-reproducibility.md)无冲突。均保留，不翻转理由；无须吸收或废弃的相关 proposed/rejected 记录。
 
 ## Alternatives considered
 
@@ -30,6 +30,6 @@ Status: implemented
 
 ## Consequences
 
-故障返回不再由清理是否完成决定；旧镜像不能启动未提交副作用。未知长度流的保留内存随字节上限而非分块个数增长，但增长/裁剪时仍有临时双缓冲，未宣称整个进程内存峰值等于上限或实测吞吐提升。有限时间内持续产生空分块的 CPU 开销仍受调用方期限约束，不是流实现安全证明。
+故障返回不再等待清理；旧镜像不启动新副作用。未知长度流的保留内存受字节上限约束，增长/裁剪仍有临时双缓冲，不代表进程峰值等于上限或吞吐提升。持续空分块的 CPU 开销仍靠调用方期限约束，不能视为流安全证明。
 
-负向回归先复现挂起、旧队列写入、长度头解析及回拨计时，再验证修复；测试也覆盖分块缓冲复用、空/小分块、压缩长度差异与已启动写入的真实结算。定向测试、全仓库检查与浏览器证据记录在[本轮审计](../../../audits/2026-09-29-web-extension-audit.md)。不改变权限、模型身份、消息 schema、额度规则、依赖版本或发布流程。
+回归先复现挂起、旧队列写入、长度头解析和回拨计时，再验证修复；还覆盖分块缓冲复用、空/小分块、压缩长度差异及已启动写入的真实结算。定向、全仓库和浏览器证据见[本轮审计](../../../audits/2026-09-29-web-extension-audit.md)。权限、模型身份、schema、额度、依赖及发布流程不变。

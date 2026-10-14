@@ -2,9 +2,9 @@
 
 > 历史快照：数字、发现和通过结果仅代表原记录日期。当前目录与文档入口见[文档导航](../README.md)，文档重建依据见[决策记录](../decisions/implemented/process/2026-09-16-documentation-rebuild.md)。
 
-本轮审计覆盖源码、目录、模块化、风格、注释、文档、测试与构建/CI 的维护结构，并补充维护者文档。核心结论：工作区和浏览器领域划分已有良好基础；优先改进架构门禁覆盖、脚本目录分组、公共导出面与文档导航，随后再处理职责集中的协议/基准模块和大型测试。
+审计覆盖源码、目录、模块、风格、注释、文档、测试和构建/CI。建议先补架构门禁、脚本分组、公共导出与导航，再拆职责集中的协议/基准模块和大型测试。优先级表示维护顺序，不是安全漏洞等级。
 
-本报告记录初次审计时的工作区快照，包含当时已有的未提交工具链、CI 与文档修改。初次审计只新增文档及导航，没有移动源码、修改业务行为或提交 Git。优先级表示当时建议的维护顺序，不是安全漏洞等级。
+初次快照包含已有未提交的工具链、CI 和文档修改；当轮只新增文档与导航，未移动源码、改变业务或提交 Git。
 
 后续实施及根配置精简已完成，并纳入提交 `ef5efc9`；迁移映射与验证证据见[实施记录](2026-09-07-implementation-record.md)。下文数字、失败现象和验证范围保留初次审计时的语境；代码链接随迁移更新到当前入口，不表示原问题仍然存在。
 
@@ -21,7 +21,7 @@
 | A8      | 增加维护文档的本地链接/锚点门禁；架构时序与未纳入事实提取器的语义仍需人工核对                           |
 | A10     | mise 工具链与脚本入口已统一；尚未抽取跨 job 初始化步骤，保留各 job 的权限和证据隔离                     |
 
-根 Prettier 配置已合入 `package.json`，根 Vitest workspace 配置已删除，ESLint 公共规则已合并。完整检查与已执行浏览器场景的边界以[实施验证证据](2026-09-07-implementation-record.md#验证证据)为准；当前目录数量见[实施后盘点](source-inventory.md#实施后盘点)。
+根 Prettier 配置已合入 `package.json`，根 Vitest workspace 配置已删除，ESLint 公共规则已合并。完整检查与已执行浏览器场景的边界以[实施验证证据](2026-09-07-implementation-record.md#验证证据)为准；该提交的目录数量见[实施后盘点](source-inventory.md#实施后盘点)。
 
 ## 范围与方法
 
@@ -41,7 +41,7 @@
 
 本轮执行了全量文件和 TypeScript AST 盘点；对 142 个源码文件的静态 import、re-export 与字符串动态导入检查工作区方向，得到 104 条跨工作区导入，未发现当前源码的反向依赖。进一步沿页面提交、取消、模型缓存/确认、扩展消息/Host、Worker 路由/额度和构建发布边界复核源码与测试。脚本、配置、文档和测试目录也全部纳入盘点，与现有测试覆盖对应的行为已纳入复核。
 
-这不等于对每条测试断言作人工形式证明，也不覆盖计算生成的动态模块路径、任意别名解析、线上资源或全部浏览器环境。未对第三方压缩 Runtime 作逐行审查；其字节身份由项目资产契约约束。
+范围不含逐条断言证明、计算生成的动态路径、任意别名、线上资源和全部浏览器环境；第三方压缩 Runtime 未逐行审查，仅由资产契约约束字节身份。
 
 ## 优化优先级
 
@@ -72,29 +72,7 @@
 
 因此，“当前 architecture:check 通过”只能证明现有规则通过，不能证明这些结构约束已被完整保护。全量源码导入盘点没有发现当前业务采用这些违规路径，本项不是已发生的运行时故障。
 
-可在仓库根目录使用当前检查器复查同一组规则匹配结果：
-
-```bash
-mise exec -- node --input-type=module <<'JS'
-import { BOUNDARY_RULES, extractImportSpecifiers, matchesForbiddenImport } from './scripts/checks/check-architecture-boundaries.mjs'
-
-const probes = [
-  ['apps/model-worker/src', "import { App } from '../../../packages/browser-core/src/app/app'"],
-  ['packages/shared/src', "import type { ExtensionSender } from '../../../apps/extension/src/platform/webextension-api'"],
-  ['apps/model-worker/src', "import { App } from '@hv-pony-solver/browser-core/app/app'"],
-]
-for (const [fromDir, source] of probes) {
-  const imports = extractImportSpecifiers(source)
-  const blocked = BOUNDARY_RULES.filter((rule) => rule.fromDir === fromDir).some((rule) =>
-    imports.some((item) => (!item.typeOnly || rule.includeTypeOnly) &&
-      rule.forbiddenImports.some((pattern) => matchesForbiddenImport(item.specifier, pattern))),
-  )
-  console.log({ fromDir, source, blocked })
-}
-JS
-```
-
-初次审计输出依次为 `blocked: false`、`false`、`true`；在 `ef5efc9` 上复查，三项均为 `blocked: true`。这验证解析与规则匹配层，不执行示例模块，也不替代真实路径回归和实际类型检查。
+初次合成探测依次得到 `blocked: false`、`false`、`true`；在 `ef5efc9` 复查均为 `true`。这些结果只验证解析与规则匹配层，不执行示例模块，也不替代真实路径回归与类型检查；持续回归见[架构检查测试](../../scripts/checks/check-architecture-boundaries.test.mjs)。
 
 建议先为禁止方向增加合成回归用例，再统一包名与相对路径的判定，按每条规则的意图决定是否包含类型依赖。推理与 UI 间有意允许的 type-only 契约要保留；禁止 shared/核心反向依赖应用的规则则应覆盖类型。无需引入新架构框架。
 
@@ -119,7 +97,7 @@ JS
 
 本轮新增 `docs/README.md`，按 `architecture/`、`development/`、`audits/` 分组补齐全局与分平台架构、验证指南、风格/注释约定、目录方案、文档维护和审计盘点；README 与 AGENTS 增加入口，并修正 README 中过时的 pnpm 版本措辞。
 
-[文档检查器读取列表](../../scripts/docs-drift/check-docs-drift.mjs#L64)显式绑定 README 和四篇专题，[架构文档检查](../../scripts/docs-drift/architecture-docs.mjs#L37)部分使用关键词存在性判断。它不能证明新架构页的所有链接或时序正确。新增文档通过源码交叉审阅与独立链接检查验证；长期应扩展现有事实提取器的覆盖，而不是用更多必需关键词代替语义。
+当时的[文档检查器](../../scripts/docs-drift/check-docs-drift.mjs)显式绑定 README 和四篇专题，[架构文档检查](../../scripts/docs-drift/architecture-docs.mjs)部分使用关键词存在性判断。它不能证明新架构页的所有链接或时序正确。新增文档通过源码交叉审阅与独立链接检查验证；长期应扩展现有事实提取器的覆盖，而不是用更多必需关键词代替语义。
 
 后续收敛 README 时逐节迁移深层解释，并同步漂移测试读取目标。现有专题路径保留，避免已有链接失效；不为本轮补全文档同时大规模删除既有契约正文。
 
@@ -151,7 +129,7 @@ JS
 
 ## A5：公共导出与目录耦合
 
-[browser-core](../../packages/browser-core/package.json#L6)与 [shared](../../packages/shared/package.json#L6)均以 `./*` 暴露源文件子路径。应用大量使用 `browser-core/inference/...`、`model/...`、`platform/...` 等路径。这些当前是合法 API，不是越界导入，但会增加未来文件移动的影响面。
+审计时 [browser-core](../../packages/browser-core/package.json)与 [shared](../../packages/shared/package.json)均以 `./*` 暴露源文件子路径。应用大量使用 `browser-core/inference/...`、`model/...`、`platform/...` 等路径。这些在审计时是合法 API，不是越界导入，但会增加未来文件移动的影响面。
 
 建议先清点调用者，再按领域列出稳定入口并收紧 exports。保留必要的 type-only 接口，避免改成一个导出所有实现的大桶文件。纯重导出 shim 可在调用者迁移后删除；GM、Blob Worker、设置和 Key 注入适配器有独立语义，应继续保留。
 
@@ -179,7 +157,7 @@ JS
 
 ## A9：注释情况
 
-AST 盘点发现 142 个源码文件中 89 个没有注释，但其中包含短类型文件、适配器和纯重导出，不能据此要求每个文件加注释。关键区域已有说明，例如 [model-cache](../../packages/browser-core/src/model/model-cache.ts#L108)的缓冲区所有权、[IndexedDB store](../../packages/browser-core/src/model/indexeddb-model-store.ts#L203)的事务完成和身份绑定、[GM bridge](../../apps/userscript/src/userscript/gm-bridge.ts#L5)的敏感存储边界。
+AST 盘点发现 142 个源码文件中 89 个没有注释，但其中包含短类型文件、适配器和纯重导出，不能据此要求每个文件加注释。关键区域已有说明，例如 [model-cache](../../packages/browser-core/src/model/model-cache.ts)的缓冲区所有权、[IndexedDB store](../../packages/browser-core/src/model/indexeddb-model-store.ts)的事务完成和身份绑定、[GM bridge](../../apps/userscript/src/userscript/gm-bridge.ts)的敏感存储边界。
 
 缺口主要在公共接口的前置条件、平台差异、调用方与被调用方的清理责任、为什么不能重试或回退。这些应以简短 TSDoc/模块注释补充，跨文件时序已由本轮架构页说明。无需批量翻译现有准确英文注释，也不以注释覆盖率作为质量目标。具体例子见[注释指南](../development/contributing.md#注释应该解释什么)。
 

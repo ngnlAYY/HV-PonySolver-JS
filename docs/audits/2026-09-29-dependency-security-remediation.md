@@ -1,6 +1,6 @@
 # 2026-09-29 测试依赖安全补丁复核
 
-本记录接续[同日 Web 与扩展审计](2026-09-29-web-extension-audit.md)中的 4 项 moderate 告警。只记录后续依赖修复及重新执行的证据；不把此前源码审计结果改写为当时已无告警。
+本记录保存 2026-09-29 对[同日审计](2026-09-29-web-extension-audit.md)中 4 项 moderate 告警的补丁与复验。结果仅属当时，不改写初次审计或代表当前漏洞状态。
 
 ## 修复范围
 
@@ -11,9 +11,9 @@
 | undici（Miniflare）                            | 7.29.0     | 7.29.1         | Cloudflare Worker 本地测试与 Wrangler 工具链       |
 | undici（jsdom）                                | 8.10.0     | 8.10.2         | DOM 测试及使用 jsdom 的构建检查                    |
 
-修复版本对照上游公告：`https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9` 与 `https://github.com/nodejs/undici/security/advisories/GHSA-3wwx-pv8p-q78v`。两个公告对应此前四项报告，不能将报告数解释为四个独立漏洞或四条已证实的生产攻击路径。
+修复依据为 [Vitest](https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9)与 [undici](https://github.com/nodejs/undici/security/advisories/GHSA-3wwx-pv8p-q78v) 两份公告；4 项报告不等于 4 个独立漏洞或生产攻击路径。
 
-六份包清单同步 Vitest 下限，根 coverage 插件保持精确版本；workspace 按 major 精确覆盖 undici。pnpm 生成的锁文件只改变这些依赖和 peer 上下文，没有全量升级。Node/pnpm、Cloudflare pool、Miniflare、Wrangler、jsdom、Vite、用户脚本/扩展版本及 ORT 资产保持原值。没有忽略 advisory、降低审计门槛或放宽供应链策略。取舍见[测试工具链安全决定](../decisions/implemented/bug-fix/2026-09-29-test-toolchain-security.md)。
+六份清单同步 Vitest 下限，coverage 精确对齐，undici 按 major 覆盖；pnpm 只更新相关依赖与 peer 上下文。Node/pnpm、Cloudflare pool、Miniflare、Wrangler、jsdom、Vite、客户端版本、ORT 资产和供应链/审计门禁不变。取舍见[工具链安全决定](../decisions/implemented/bug-fix/2026-09-29-test-toolchain-security.md)。
 
 ## 审计与安装
 

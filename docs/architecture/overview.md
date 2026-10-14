@@ -1,6 +1,6 @@
 # 整体架构与职责边界
 
-项目由三个应用和两个内部包组成。浏览器负责验证码图片预处理、模型推理、答案选择和提交；Cloudflare 服务负责模型授权与分发。图片和识别结果不进入模型服务。
+三个应用和两个内部包共同实现浏览器本地识别。Cloudflare 只负责模型授权与分发，不接收验证码图片或识别结果。
 
 ## 名称与责任
 
@@ -24,7 +24,7 @@ flowchart TD
     Service[apps/model-worker] --> Shared
 ```
 
-图中箭头表示允许的应用源码依赖方向，不表示所有模块都需要直接依赖目标包。构建脚本另有读取资产和清单的关系，例如扩展构建复用用户脚本的定制 Runtime 资产；这种构建关系不授权应用之间直接导入业务源码。
+箭头表示允许的源码依赖。构建脚本可读取其他应用的资产和清单，例如扩展复用用户脚本的定制 Runtime；这不授权应用间导入业务源码。
 
 | 单元           | 负责                                                            | 能力从哪里来                                      | 不应承担                             |
 | -------------- | --------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------ |
@@ -34,13 +34,11 @@ flowchart TD
 | `extension`    | 内容脚本、消息、后台/Offscreen、设置页、远程/内置 Host 和打包   | WebExtension API、扩展源存储、包内资产            | 向内容脚本提供模型 Key 或模型二进制  |
 | `model-worker` | Bearer/KV 鉴权、R2 响应、每 Key 下载额度和 CORS                 | Cloudflare KV、R2、Durable Object                 | 图片识别、答案选择或浏览器状态       |
 
-当前内部包同时提供根入口和经过调用者盘点的显式子路径导出。新增文件不会自动成为公共接口；移动已公开的核心源码仍会影响调用方。目录和迁移记录见[目录方案](../development/directory-layout.md#共享包导出边界)。
+内部包只提供根入口与显式子路径；新文件不会自动公开，移动公共源码需核对调用方。规则见[共享包导出边界](../development/directory-layout.md#共享包导出边界)。
 
 ## 运行链路
 
-页面入口创建共享核心 App。App 定位验证码并调度本轮处理；Solver 读取图片、调用 Detector，再依据配置交给提交器。提交器在操作前后复核目标和控件身份，防止页面切换后的旧任务继续点击。面板接收状态与有上限的历史记录；可见性独立于识别是否运行。
-
-平台差异集中在 Detector 和持久化能力的组装上：
+页面入口创建核心 App，依次调度目标定位、图片读取、Detector 推理和答案提交；每次操作复核目标与控件，过期任务不能继续点击。面板状态与历史有上限，可见性不影响识别。平台负责组装 Detector 与存储：
 
 | 平台/模式         | 推理承载位置            | 模型来源                        | Runtime 来源                   | 设置与 Key                                        |
 | ----------------- | ----------------------- | ------------------------------- | ------------------------------ | ------------------------------------------------- |
@@ -49,15 +47,15 @@ flowchart TD
 | 扩展 remote       | Host 创建 module Worker | 模型服务；扩展源 IndexedDB 缓存 | 扩展包内 JS/WASM               | 普通设置 `storage.local`；Key 独立 IndexedDB      |
 | 扩展 packaged     | Host 创建 module Worker | 包内固定模型                    | 扩展包内 JS/WASM               | 普通设置 `storage.local`；不构建 Key/远程下载能力 |
 
-Chromium Host 在 Offscreen Document 中运行，Firefox Host 由 background script 持有。`bundled` 描述用户脚本 Runtime 的构建方式，`packaged` 描述扩展模型的交付方式，二者不能互换。
+Chromium Host 在 Offscreen Document 中运行，Firefox Host 由 background script 持有。
 
 ## 数据边界与所有权
 
-验证码图片只在页面、内容客户端、Host 和推理 Worker 的浏览器链路中传递。扩展图片消息使用有明确上限的 Base64 以适应 JSON 消息边界；模型在 Host 与 Worker 间使用可转移 `ArrayBuffer`。修改这两条链路时分别核对消息大小与缓冲区所有权，不能把图片的传输方式直接套用到模型。
+扩展图片在浏览器上下文间以有上限的 Base64 适配 JSON 消息；模型在 Host 与 Worker 间使用可转移 `ArrayBuffer`。分别核对消息大小与缓冲区所有权，不把图片传输方式套用到模型。
 
-模型缓存和额度确认是两个独立系统的协作。Worker 的模型 GET 只预留回执；客户端下载、验证实际字节并完成本地缓存事务之后，才确认下载。二进制和确认元数据必须绑定同一次缓存写入，迟到的确认不能覆盖另一份模型。完整流程以[模型缓存策略](../model-cache-strategy.md)和[服务端状态机](model-service.md#额度-durable-objectreserveconfirm-与-ttl-清理状态)为准。
+模型 GET 只预留回执；客户端校验实际字节并提交缓存事务后才确认下载。二进制与确认元数据绑定同一次写入，迟到确认不能覆盖新模型。完整流程见[模型缓存](../model-cache-strategy.md)与[服务端状态机](model-service.md#额度-durable-objectreserveconfirm-与-ttl-清理状态)。
 
-日志与状态广播只携带必要的非敏感状态；Key、内部对象身份和完整模型数据不应进入这些通道。远程与内置能力隔离既是代码组装边界，也是构建产物审计边界。
+日志和广播只携带必要的非敏感状态，不包含 Key、内部对象身份或模型数据。远程/内置能力隔离同时受组装与产物审计约束。
 
 ## 权威模块与变更入口
 
@@ -79,9 +77,7 @@ Chromium Host 在 Offscreen Document 中运行，Firefox Host 由 background scr
 
 ## 扩展一个功能的落点
 
-新增平台通用的识别行为，先在核心的领域目录实现，并通过已有接口提供平台能力。新增平台 API 交互，放在对应应用适配层。新增纯协议常量时再评估 `shared`；不要因为两个文件都用到某个值就把平台行为移到共享包。
-
-公共设置变更通常横跨核心默认值、用户脚本菜单、扩展设置页和内容存储镜像。模型变更横跨共享清单、下载校验、打包、服务端配置和发布证据。以表格列出的维护入口追踪影响，比按应用逐个复制逻辑更容易保持一致。
+平台通用识别行为放核心领域目录，平台 API 放对应应用适配层，纯协议常量才进入 `shared`。公共设置需核对核心默认值、两平台入口和内容镜像；模型变化需核对清单、校验、打包、服务配置及发布证据。
 
 详细流程见[浏览器运行时](browser-runtime.md)、[扩展运行时](extension-runtime.md)、[Model Worker](model-service.md)，验证命令见[开发与验证](../development/verification.md)。
 
@@ -89,4 +85,4 @@ Chromium Host 在 Offscreen Document 中运行，Firefox Host 由 background scr
 
 `architecture:check` 保护显式 package exports、禁止方向和反向类型依赖；`inferenceTimeoutConfig` 集中维护异步期限，`StatusPanel` 负责 UI 状态输出，Model Worker Core 与浏览器应用隔离。缺失受保护目录时失败关闭，深层相对路径或 `typeof import()` 不构成例外。
 
-静态导入检查不能证明跨上下文时序或运行环境。改动评审还要确认数据所有权、取消传播、事务完成点和实际浏览器证据；选择相应的[验证矩阵](../development/verification.md)。HTTP 头与资产值分别在[接口参考](../reference/model-worker-http.md)和[Runtime 专题](../onnx-runtime.md)维护，避免在每篇架构页复制。
+静态检查不证明跨上下文时序；评审仍需核对所有权、取消、事务完成点与[浏览器证据](../development/verification.md)。精确 HTTP 头和资产值分别维护在[接口参考](../reference/model-worker-http.md)与[Runtime 专题](../onnx-runtime.md)。

@@ -11,6 +11,7 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
     'workerInitTimeoutMs',
     'workerDetectTimeoutMs',
     'modelDownloadTimeoutMs',
+    'settingsReadTimeoutMs',
   ]
   const errors = []
   for (const configName of requiredConfigs) {
@@ -40,6 +41,11 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
     '取消不等待防抖',
     'raceAbort',
     'RemoteDetectorClient',
+    'JPX',
+    '原扫描截止时间',
+    'srcset',
+    'currentSrc',
+    '首次初始化也允许 body 缺失',
   ]) {
     if (!readme.includes(fact)) errors.push(`docs/architecture/browser-runtime.md must mention ${fact}`)
   }

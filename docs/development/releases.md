@@ -1,54 +1,48 @@
 # CI、制品与发布
 
-本页解释验证、Actions artifact、GitHub Release 和 Cloudflare 部署之间的门禁。操作前先确认目标产品、版本和 commit；普通构建成功不会自动发布。扩展证据格式见[扩展手册](../browser-extension.md)，Worker 的具体操作见[运维手册](../model-worker-ops.md)。
+操作前确认产品、版本、目标 commit 和用户授权。普通检查或构建不执行发布。验证范围见[验证手册](verification.md)，扩展证据格式见[扩展手册](../browser-extension.md)，Worker 操作见[运维手册](../model-worker-ops.md)。
 
 ## 发布入口
 
-| 手动输入                      | 产物或副作用                              | 关键限制                                                                          |
-| ----------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------- |
-| `publish_userscript_artifact` | 上传用户脚本 Actions artifact             | 不创建 GitHub Release                                                             |
-| `publish_extension_release`   | 远程桌面扩展 ZIP、校验和、artifact 元数据 | 仅 main；标签来自扩展包版本；双浏览器、最低桌面版本、受保护远程推理和 CodeQL 门禁 |
-| `publish_extension_artifact`  | canonical 内置模型扩展 artifact           | 独立双浏览器、受保护远程推理和同一 Firefox ZIP 的 Android 142 外部证据            |
-| `publish_model_worker`        | Cloudflare 真实部署                       | main、production-model-worker 环境、完整 secrets 与显式发布意图                   |
+| 手动输入                      | 产物或副作用                                              | 发布条件                                                                             |
+| ----------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `publish_userscript_artifact` | 用户脚本 Actions artifact，不创建 Release                 | 仓库检查；如选择 `run_userscript_e2e`，还需该 E2E 成功                               |
+| `publish_extension_release`   | remote 桌面 Chromium/Firefox ZIP、校验和、artifact 元数据 | main；仓库检查、CodeQL、双浏览器加载、packaged fixture、最低桌面版本、受保护远程推理 |
+| `publish_extension_artifact`  | canonical 内置模型扩展 artifact                           | main；上述扩展门禁，加 canonical 双浏览器及同一 Firefox ZIP 的 Android 142 外部证据  |
+| `publish_model_worker`        | Cloudflare 真实部署                                       | main、production-model-worker 环境、完整 secrets 与显式发布意图                      |
 
-前三项位于 Repository CI，最后一项位于独立部署工作流，默认都关闭。
+前三项属于 Repository CI，最后一项属于独立部署 workflow，默认均关闭。普通 push、PR 和未选择发布的手动运行不创建 Release 或发布产品 artifact；测试报告等 CI 证据仍可上传。
 
 ## 仓库验证工作流
 
-`.github/workflows/verify-monorepo.yml` 在 Pull Request、`main` 推送和手动触发时执行：
+[verify-monorepo.yml](../../.github/workflows/verify-monorepo.yml) 在 PR、main push 和手动触发时运行；逐 job 的检查内容见[本地命令映射](verification.md#ci-job-与本地命令)。维护时保留以下边界：
 
-- 通过固定 commit SHA 的 `jdx/mise-action` 安装 `mise.toml` 声明的 Node.js `24.15.0` 和 pnpm `12.3.0`，保留 pnpm store 缓存并执行冻结依赖安装。
-- 检查外部 GitHub Action 是否固定到完整 commit SHA，要求 Docker Action 使用完整 `sha256` digest，并强制每个 `actions/checkout` 设置 `persist-credentials: false`。
-- 依赖审计、第一方格式检查、ESLint 和 TypeScript 类型检查。
-- JavaScript/TypeScript CodeQL 扫描，并在 Pull Request 中执行依赖审查。
-- 文档漂移、命令示例、本地链接和决策结构/归档封印检查，以及架构边界和浏览器危险调用检查。guardrails checkout 获取完整历史，供归档与变更前基线比较。
-- 工作区及根级 `scripts/**/*.test.mjs` 测试，以及工作区覆盖率；递归覆盖率命令不包含根级测试。
-- 默认外部 profile 构建及 `256 KiB` 预算。
-- 显式内置 profile 构建及 `1 MiB` 预算。
-- Pull Request 和 `main` push 执行用户脚本 Playwright Chromium E2E；手动运行由 `run_userscript_e2e` 控制。
-- 扩展 job 只构建一次远程产物并复用于有界 transport 基准与 Chromium/Firefox 加载检查；Release 直接下载并发布这份已测试产物，不再二次构建；另执行内容脚本、内置模型双浏览器推理及 Chromium 116/Firefox 140 精确最低版本门禁。
-- 受仓库变量和受保护环境控制的真实远程模型与 canonical 内置模型门禁；缺少生产配置时明确跳过，不能冒充已验证。
-- 手动选择 `publish_userscript_artifact`、`publish_extension_artifact` 或 `publish_extension_release` 时执行对应发布门禁；三个选项默认都关闭。
-- 同一 workflow/event/ref 的新自动 CI 会取消旧运行；手动制品/发布运行与 push 使用不同并发组，彼此串行且不会被 push 抢占；每个 job 都有独立超时，避免浏览器、网络或发布门禁永久占用 runner。
+- `jdx/mise-action` 读取根 `mise.toml`，保留 pnpm store 缓存与冻结安装；仅需 Node 的发布步骤可限定安装 Node。
+- 外部 Action 固定完整 commit SHA，Docker Action 固定完整 `sha256` digest；每次 checkout 均设置 `persist-credentials: false`。guardrails 获取完整历史，供归档封印比较。
+- `test` 包含工作区和根级 `scripts/**/*.test.mjs`；覆盖率不替代根测试。coverage-build 分别检查默认 `256 KiB` 与内置 Runtime `1 MiB` 用户脚本预算。
+- 用户脚本 E2E 在 PR/main push 执行，手动运行由 `run_userscript_e2e` 控制。extension-e2e 内构建一次 remote，供基准和双浏览器 load-only 复用；Release 发布这份已测试产物，不二次构建。
+- remote 鉴权与 canonical 模型受环境/仓库变量控制。job 未运行或 `enabled=false` 都不产生相应证据；发布 gate 同时检查成功状态与 enabled 输出。显式 authenticated 命令缺 Key 必须失败。
+- 两种扩展发布均显式依赖本次 CodeQL 成功。内置 artifact 还要求 `firefox_android_e2e_run_id` 指向受信任外部 workflow 的成功 run，核对 commit、事件、Android 142 推理以及同一 Firefox ZIP 的名称、长度和 SHA-256。
 
-普通 push 和 Pull Request 不创建 GitHub Release，也不发布生产扩展 artifact。
+门禁约束完整产品 ZIP 的首次上传，包括 job 间传递用的 artifact。remote 的受测 ZIP 等待全部远程发布门禁；canonical 的 Android 证据校验与 preflight 在构建 job 内完成，此前 ZIP 只保留在该 job 本地。只有显式授权且全部所需门禁通过，才上传供最终发布 job 使用的同一份产物。普通 canonical 检查不上传产品 ZIP。
+
+canonical 下载 URL 与 Bearer 来自受保护配置。下载器在发送前校验配置，错误只报告类别，不保留可回显配置的原生异常或 `cause`；非法 URL、请求头及底层请求失败均不得将值带入 CI 日志。
+
+自动 CI 在同一 workflow/event/ref 下取消旧运行；手动运行使用独立并发组，同组串行且不被 push 抢占。每个 job 保留独立超时。
 
 ## Model Worker 部署工作流
 
-`.github/workflows/deploy-cloudflare-model-worker.yml` 仅支持从 `refs/heads/main` 手动触发生产 job；其他 ref 的 job 会在读取受保护 secrets 前跳过：
+[.github/workflows/deploy-cloudflare-model-worker.yml](../../.github/workflows/deploy-cloudflare-model-worker.yml) 仅手动触发，生产 job 只在 `refs/heads/main` 运行，并绑定 `production-model-worker` Environment；其他 ref 在读取受保护 secrets 前跳过。
 
-- Cloudflare secrets 完整时，默认只渲染配置、执行检查并运行 Wrangler dry-run，不执行部署。
-- Cloudflare secrets 不完整且 `publish_model_worker=false` 时，工作流仍执行 typecheck 与测试，但会安全跳过配置渲染、Wrangler dry-run 和部署；若已经请求发布则 fail closed。
-- 手动输入 `enable_model_download_quota` 控制是否启用每 Key 月度下载限制，默认开启；关闭后模型请求不受 5 次限制，额度查询会提示限制未开启。
-- 整个 job 绑定 `production-model-worker` GitHub Environment；在 `refs/heads/main` 上只有 `publish_model_worker=true`、环境审批通过且所需 secrets 完整时才实际部署。
-- 工作流不自动运行线上公开契约探测；部署完成只证明 Wrangler 发布命令成功。等待边缘传播后，由操作者按 [`docs/model-worker-ops.md`](../../docs/model-worker-ops.md) 手动执行 `check:deployment`。
+- Cloudflare secrets 完整且未选择发布时，只渲染配置、检查并执行 Wrangler dry-run。
+- Cloudflare secrets 不完整且 `publish_model_worker=false` 时仍执行 typecheck 与测试，跳过配置渲染、Wrangler dry-run 和部署；`publish_model_worker=true` 且 secrets 不完整时 fail closed。
+- 实际部署须同时满足 main、`publish_model_worker=true`、环境审批及完整 secrets。`enable_model_download_quota` 默认开启；关闭后模型下载不限每月 5 次，查询显示限制未启用。
+- workflow 不自动执行线上公开探测。部署后等待边缘传播，再按[运维手册](../model-worker-ops.md)运行 `check:deployment`。
 
-dry-run 成功只证明 Wrangler 可以生成部署包，不证明 Cloudflare 已更新，也不证明 R2、KV 或线上路由正确。
+dry-run 只证明可以生成部署包；Wrangler 部署成功也不能证明 R2/KV、线上路由或真实模型鉴权正常。回滚仍须保留 Durable Object 绑定、类导出和迁移契约。
 
 ## 发布审阅与交付证据
 
-用户脚本版本由 `apps/userscript/package.json` 决定，扩展版本由 `apps/extension/package.json` 决定；不联动升级私有内部包。发布前核对实际 ZIP 与 artifact 哈希、目标 commit 的门禁状态和所需 E2E 证据。扩展 Release 复用已测试的远程产物，不二次构建。
+用户脚本和扩展分别取各自 `package.json` 版本，不联动升级内部私有包。扩展 Release 标签为 `extension-v<扩展版本>`，校验实际 ZIP、SHA-256、artifact 元数据与目标 commit 后发布；已有标签会失败。它不执行浏览器商店提交或签名，也不提供 Firefox Android 证据。
 
-CodeQL job 成功表示分析执行完成；处理安全告警时还需等待目标分支的新分析，核对分析结果与告警实例状态。发布输入不代表浏览器商店提交、签名或 Android 验证。
-
-记录 run URL、commit、产物身份、已通过的具体门禁以及 skipped/未运行项。禁止把“已触发”记成“已通过”。仓库任务仅在用户明确要求时创建 commit、push、发布或部署；推送前确认远程没有未整合提交。
+CodeQL 成功表示分析执行完成；修复告警后还须等待目标分支新分析，核对分析结果与告警实例。交付记录 run URL、commit、产物身份、通过门禁和 skipped/未运行项，不把“已触发”写成“已通过”。仅在明确授权时 commit、push、发布或部署；推送前确认远程没有未整合提交。

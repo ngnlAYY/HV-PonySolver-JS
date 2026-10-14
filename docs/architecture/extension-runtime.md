@@ -4,25 +4,25 @@
 
 ## 模块导航
 
-| 目录                 | 责任                                                 | 主要入口                                                                                                                                              |
-| -------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/content/`       | 页面 DOM、内容 Port、设置镜像、预热                  | `main.ts`, `remote-detector-client.ts`                                                                                                                |
-| `src/background/`    | Broker、浏览器后台生命周期、Chromium Offscreen 准入  | `chromium-bootstrap.ts`, `firefox-bootstrap.ts`, `broker.ts`                                                                                          |
-| `src/offscreen/`     | Chromium 长寿命 Host 中转、epoch、取消和空闲回收     | `offscreen-bootstrap.ts`                                                                                                                              |
-| `src/host/`          | 推理 Host、远程/内置模型、Key 存储、资产校验、状态   | `inference-host.ts`, `remote-inference-host.ts`, `packaged-inference-host.ts`                                                                         |
-| `src/protocol/`      | 协议类型、运行时 guard、图片载荷、截止时间和请求结算 | `messages.ts`, `port-messages.ts`, `offscreen-messages.ts`, `image-payload.ts`                                                                        |
-| `src/platform/`      | `browser`/`chrome` API 的最小适配层                  | `webextension-api.ts`, `webextension-runtime.ts`, `webextension-storage.ts`                                                                           |
-| `src/options/`       | 普通设置和远程/内置模式设置页                        | `ordinary-settings.ts`, `remote.ts`, `packaged.ts`                                                                                                    |
-| `scripts/build/`     | 目标构建、资产、策略、清单审计、归档                 | `build-extension.mjs`, `target.mjs`, `inventory.mjs`, `policy.mjs`, `archive.mjs`                                                                     |
-| `scripts/benchmark/` | 基准参数、统计、结果校验、比较、CSV 和产品/runner    | `benchmark-contract.mjs`, `benchmark-config.mjs`, `benchmark-statistics.mjs`, `benchmark-result.mjs`, `benchmark-comparison.mjs`, `benchmark-csv.mjs` |
-| `scripts/`           | 浏览器、E2E、模型下载、发布门禁                      | 按 `build/benchmark/browser/e2e/fixtures/model/release` 分组                                                                                          |
-| `test/`              | 与源码目录对应的单元、协议、构建和平台 fixture       | `test/<area>/*.test.ts`                                                                                                                               |
+以下路径相对于 `apps/extension/`，源码测试位于对应的 `test/<area>/`。
+
+| 目录                                                   | 职责                                      |
+| ------------------------------------------------------ | ----------------------------------------- |
+| [src/content](../../apps/extension/src/content/)       | DOM、内容 Port、设置镜像、预热            |
+| [src/background](../../apps/extension/src/background/) | Broker、后台生命周期、Offscreen 准入      |
+| [src/offscreen](../../apps/extension/src/offscreen/)   | Chromium Host 中转、epoch、取消与空闲回收 |
+| [src/host](../../apps/extension/src/host/)             | Detector、远程/内置模型、Key、资产校验    |
+| [src/protocol](../../apps/extension/src/protocol/)     | 消息 guard、图片载荷、截止时间、请求结算  |
+| [src/platform](../../apps/extension/src/platform/)     | WebExtension API 最小适配层               |
+| [src/options](../../apps/extension/src/options/)       | 普通设置与模型管理界面                    |
+
+脚本按 `build/benchmark/browser/e2e/fixtures/model/release` 分组，入口与测试见[扩展手册](../browser-extension.md#script-and-test-entry-points)。
 
 平台适配层只暴露最小的运行时、存储、Offscreen 和 action 能力。业务模块不要直接读取 `globalThis.browser`/`chrome`，协议边界也不要绕过 `unknown` guard。
 
 ## 一次识别请求的生命周期
 
-扩展版的页面内容脚本在 Hentaiverse 页面内运行。它观察验证码 DOM、读取同源图片，并由 `RemoteDetectorClient` 将图片编码成带上限的 Base64 消息。`messages.ts` 是稳定协议聚合入口，具体协议校验、Port/Offscreen 消息和图片载荷分别位于 [`src/protocol/protocol-validation.ts`](../../apps/extension/src/protocol/protocol-validation.ts)、[`src/protocol/port-messages.ts`](../../apps/extension/src/protocol/port-messages.ts)、[`src/protocol/offscreen-messages.ts`](../../apps/extension/src/protocol/offscreen-messages.ts) 和 [`src/protocol/image-payload.ts`](../../apps/extension/src/protocol/image-payload.ts)；内容脚本入口和页面生命周期处理在 [`src/content/main.ts`](../../apps/extension/src/content/main.ts) 与 [`src/content/content-runtime.ts`](../../apps/extension/src/content/content-runtime.ts)。
+内容脚本观察 Hentaiverse DOM 并读取同源图片，`RemoteDetectorClient` 编码为有上限的 Base64 消息。协议从 [messages.ts](../../apps/extension/src/protocol/messages.ts) 聚合导出，具体 guard、Port/Offscreen 消息和图片处理按[协议目录](../development/directory-layout.md#协议和测试目录)拆分；页面生命周期由 [content-runtime.ts](../../apps/extension/src/content/content-runtime.ts) 管理。
 
 请求沿着下面的路径传播：
 
@@ -38,41 +38,43 @@
   -> HostResponse -> 原路径返回
 ```
 
-内容客户端为每个请求保存 `RequestLifecycle`，监听响应、断开和超时，并在用户取消时发送同一 Port 上的 request-scoped `cancel`。实现位于 [`src/content/remote-detector-client.ts`](../../apps/extension/src/content/remote-detector-client.ts) 和 [`src/protocol/request-lifecycle.ts`](../../apps/extension/src/protocol/request-lifecycle.ts)。客户端仅在存在活跃的非静默准备或识别请求时，将 Host 阶段广播和断连状态写入面板；单独的静默预热以及请求结束后的晚到广播不会改变面板。广播只更新模型/会话状态；推理状态保留在内容侧，因为只有内容侧能测量完整往返时间。初始化往返耗时在同一内容页面内用 `performance.now()` 测量并取整，不受系统时间回拨或前跳影响；静默、取消、超时与销毁路径仍不记录就绪耗时。
+[内容客户端](../../apps/extension/src/content/remote-detector-client.ts) 为每个请求创建 [RequestLifecycle](../../apps/extension/src/protocol/request-lifecycle.ts)，监听响应、断连和超时；取消时在同一 Port 发送指定 request id 的 `cancel`。仅非静默 prepare/detect 活动期间，Host 广播和断连才更新面板的模型/会话状态。推理状态在内容侧统计，初始化往返用同页 `performance.now()` 取整；静默、取消、超时、销毁及请求结束后的广播不写就绪耗时。
 
-Broker 是受信边界：[`src/background/broker.ts`](../../apps/extension/src/background/broker.ts) 检查扩展 ID、实际发送页面 URL、端口名称、协议形状和请求 ID，再按端口及后台代际施加并发限制。缺失 sender.url 时失败关闭，不能用属于顶层标签页的 sender.tab.url 替代；内容来源匹配完整 HTTPS origin，拒绝非标准端口与 URL 凭据。sender.origin 若存在必须与实际发送页面匹配，拒绝 opaque origin；frameId 若存在必须为 0，与当前只注入顶层页面的清单一致。两个字段缺省时保留浏览器兼容路径，但不跳过 URL 与扩展 ID 校验。它把每个 Host 调用绑定到 `AbortSignal`；端口断开、客户端取消或 Broker 超时都会终止对应请求。状态广播是单向的，不会结算请求。Broker 也广播凭证版本变化，并把持久化版本留给下一代内容脚本恢复。
+[Broker](../../apps/extension/src/background/broker.ts) 在监听消息前校验扩展 ID、实际 `sender.url` 与 Port 名称，再校验 schema/request id 并按端口与后台代际限流。它不以 `sender.tab.url` 兜底；`sender.origin`、`frameId` 与 HTTPS origin 的规则见[来源边界](../browser-extension.md#runtime-architecture)。每个 Host 调用绑定 `AbortSignal`，断连、取消或超时终止对应请求。单向状态广播不结算请求；凭证版本同时广播与持久化，供下一代内容脚本恢复。
 
-Chromium 的 service worker 可随时重启，因此它不持有推理会话。[`src/background/chromium-bootstrap.ts`](../../apps/extension/src/background/chromium-bootstrap.ts) 为当前 worker 生成 epoch，接管并复用匹配的 Offscreen context，并将请求转为 Offscreen 消息；[`src/background/chromium-offscreen.ts`](../../apps/extension/src/background/chromium-offscreen.ts) 负责创建、并发准入和空闲关闭。Offscreen 页由 [`src/offscreen/offscreen-bootstrap.ts`](../../apps/extension/src/offscreen/offscreen-bootstrap.ts) 验证消息来源和 epoch，维护活动请求、取消历史、空闲通知退避，并在页面销毁时终止 Host。Firefox 不需要 Offscreen 转发，由 [`src/background/firefox-bootstrap.ts`](../../apps/extension/src/background/firefox-bootstrap.ts) 在 background script 中直接持有 Host。
+Chromium service worker 不持有推理会话。[chromium-bootstrap.ts](../../apps/extension/src/background/chromium-bootstrap.ts) 每次启动生成 epoch 并接管匹配的 Offscreen context；[chromium-offscreen.ts](../../apps/extension/src/background/chromium-offscreen.ts) 管理创建、准入与空闲关闭。[Offscreen 入口](../../apps/extension/src/offscreen/offscreen-bootstrap.ts) 校验来源/epoch，维护活动请求、取消历史和空闲通知退避，销毁时终止 Host。Firefox 的 [bootstrap](../../apps/extension/src/background/firefox-bootstrap.ts) 在 background script 直接持有 Host。
 
-Host 在 [`src/host/inference-host.ts`](../../apps/extension/src/host/inference-host.ts) 统一处理 `prepare`、`detect` 以及模型管理意图。推理请求解码图片后交给 Detector；模型管理请求按串行尾链执行，并以新一代操作取消旧操作。Host 销毁时同时终止 Detector、活动模型操作和底层资源。真正的 ONNX Worker 入口是 [`src/host/inference-worker-entry.ts`](../../apps/extension/src/host/inference-worker-entry.ts)，构建后成为 `runtime/inference-worker.js`。
+[InferenceHost](../../apps/extension/src/host/inference-host.ts) 解码图片后调用 Detector，模型管理意图通过串行尾链执行，新代际取消旧操作；销毁终止 Detector、模型操作和底层资源。[Worker 入口](../../apps/extension/src/host/inference-worker-entry.ts) 构建为 `runtime/inference-worker.js`。
 
-构建器与运行时共同使用 [`src/platform/extension-paths.ts`](../../apps/extension/src/platform/extension-paths.ts) 的 `EXTENSION_PATHS` 定义入口路径。修改路径时须同步检查清单引用、设置页来源校验、Offscreen 创建和 Worker URL；产物目录树见[扩展产物说明](../browser-extension.md#build-outputs-and-local-loading)。
+构建与运行时共用 [EXTENSION_PATHS](../../apps/extension/src/platform/extension-paths.ts)；路径变更须核对清单、设置页来源、Offscreen 和 Worker URL。[产物目录](../browser-extension.md#build-outputs-and-local-loading)保持同步。
 
 ## 远程模型与内置模型边界
 
-模型交付在构建时固定为 `remote` 或 `packaged`，运行时不会自动探测或回退。构建入口 [`scripts/build/build-extension.mjs`](../../apps/extension/scripts/build/build-extension.mjs) 将模式传给 [`scripts/build/target.mjs`](../../apps/extension/scripts/build/target.mjs)，后者选择背景、设置页和 Chromium Offscreen 入口。
+构建入口 [build-extension.mjs](../../apps/extension/scripts/build/build-extension.mjs) 将固定模式传给 [target.mjs](../../apps/extension/scripts/build/target.mjs)，选择后台、设置页和 Offscreen 入口；运行时不自动探测或回退。
 
-远程模式由 [`src/host/remote-inference-host.ts`](../../apps/extension/src/host/remote-inference-host.ts) 组装：Key 只持久化在扩展源 IndexedDB，候选 Key 会短暂经过设置页 Port、Broker 和 Host 内存；它不写入普通存储、内容脚本消息、URL 或日志。模型下载经过共享模型缓存和完整性校验，成功写入缓存后才确认额度。设置页的验证、查询、下载和清除操作通过独立的 options Port 进入 Broker，见 [`src/options/remote.ts`](../../apps/extension/src/options/remote.ts)。
+[remote-inference-host.ts](../../apps/extension/src/host/remote-inference-host.ts) 组装模型缓存与 Key IndexedDB；下载校验并写入后才确认额度。[远程设置页](../../apps/extension/src/options/remote.ts) 经独立 options Port 验证、查询、下载或清除。候选 Key 只短暂经过该 Port、Broker 与 Host 内存，不进入内容消息、普通存储、URL 或日志。
 
-内置模式由 [`src/host/packaged-inference-host.ts`](../../apps/extension/src/host/packaged-inference-host.ts) 和包内模型/运行时资产组成。它不构造远程 Host 能力，不读取或修改旧 Key，也不声明模型服务 Host 权限；设置页只保留普通设置并禁用 Key 控件，见 [`src/options/packaged.ts`](../../apps/extension/src/options/packaged.ts)。包内模型由 [`src/host/packaged-asset.ts`](../../apps/extension/src/host/packaged-asset.ts) 执行状态、重定向、声明长度、实际长度和 SHA-256 校验。确定性的长度或哈希异常属于永久模型错误，模型及 WASM 的错误类别会通过严格校验的 Worker 响应保留，避免对同一损坏资产进行瞬时故障自动重试；网络和取消错误不归入完整性故障。构建后的远程/内置能力隔离还由 [`scripts/build/inventory.mjs`](../../apps/extension/scripts/build/inventory.mjs) 审计。清单审计比较完整后台、设置页、action、内容脚本和 CSP 声明，不只检查首个入口；另拒绝可选权限、外部连接和 sandbox。HTML 使用 DOM 解析并递归检查 template，避免内联事件、可执行 URL、srcdoc 或 base 覆写绕过单纯 script 标签检查。安全字段与 HTML 的故障注入在 `scripts/build/inventory-security.test.mjs`，覆盖 Chromium/Firefox 与 remote/packaged 四种清单。
+[packaged-inference-host.ts](../../apps/extension/src/host/packaged-inference-host.ts) 只组装包内资产，不构造远程能力、不读改旧 Key、不声明模型服务 Host 权限；[设置页](../../apps/extension/src/options/packaged.ts) 禁用 Key 控件。[packaged-asset.ts](../../apps/extension/src/host/packaged-asset.ts) 校验状态、重定向、声明/实际长度及 SHA-256。确定性模型/WASM 完整性错误经严格 Worker 协议保留永久分类，不自动重试；网络与取消另行分类。
 
-两种模式共用内容脚本、Broker、消息协议、推理 Worker 和普通设置，但远程专属模块不能被内置产物引用。扩展包中的 ORT glue、WASM 和 Worker 都是本地资源；扩展不通过远程可执行脚本运行。
+两模式共用内容脚本、Broker、协议、Worker 和普通设置；远程专属模块不得进入内置产物，可执行资产一律随包分发。完整清单/CSP/HTML 审计见[权限契约](../browser-extension.md#permission-matrix)，故障注入覆盖双浏览器、双模式的 `scripts/build/inventory-security.test.mjs`。
 
 ## 设置、存储与同步
 
 ### 普通设置镜像
 
-普通设置和历史存放在 `storage.local`，内容侧通过 [`src/content/storage-mirror.ts`](../../apps/extension/src/content/storage-mirror.ts) 建立同步内存镜像。镜像初始化期间先监听并合并变更，再读取全量快照；初始化有超时、取消和缓冲 Key 上限。写入按 Key 串行、以乐观值供当前页面读取，并在 `storage.onChanged` 提交后校正；前缀索引仅用于有限的历史扫描。`getCommittedItemsByPrefix()` 在该索引基础上还原每个未决键的已提交值，供历史裁剪使用；普通读取仍显示乐观值，本地未决删除和外部已提交变更同样参与快照校正。
+普通设置与历史存于 `storage.local`，[storage-mirror.ts](../../apps/extension/src/content/storage-mirror.ts) 提供内容侧同步镜像。初始化先监听再读快照，合并变更并限制期限、取消与不同 key 数量。写入按 key 串行，乐观值供普通读取，`storage.onChanged` 后校正。有限前缀索引用于历史扫描；`getCommittedItemsByPrefix()` 还原未决键的已提交值，包含未决删除与外部写入，供安全裁剪。
 
-镜像销毁后拒绝启动排队写入和删除，包括首次微任务尚未开始的操作；已发起的浏览器存储调用仍按真实结果结算，不能宣称撤销已经提交的变更。初始化信号预先取消时，不注册监听器、不读取快照。
+销毁拒绝尚未开始的写入/删除，包括首个微任务；已发起调用仍按真实结果结算，不能撤销已提交变更。预先取消不注册监听器、不读取快照。
 
 ### Key 提交与凭证修订
 
-远程模式的模型 Key 使用 [`src/host/indexeddb-string-storage.ts`](../../apps/extension/src/host/indexeddb-string-storage.ts) 的独立 IndexedDB。内容脚本不接收 Key，普通设置加载流程只读取 `storage.local`，已保存的 Key 不回显到控件。Key 的原生 IndexedDB 事务提交回调独立于请求的取消结算：即使调用方已收到取消，仍驱动远程 Host 取消并等待共享 Detector 中尚未完成的旧初始化结束，覆盖静默预热及所有 Port 消费者；已经就绪的有效会话继续复用。提交前真正回滚不会通知，已关闭 Host 的迟到回调也不会重新启动同步。Firefox 通过注入回调、Chromium Offscreen 通过严格验证来源的 runtime 消息通知 Broker，不依赖原请求成功响应。Broker 再通过凭证版本消息和持久版本让已有内容页面在后台重启或 Key 修复后重新准备；Key 本身不进入内容脚本消息、URL、普通存储或日志。
+Key 使用 [indexeddb-string-storage.ts](../../apps/extension/src/host/indexeddb-string-storage.ts) 的独立 IndexedDB，不回显、不进入内容脚本。原生事务 commit 独立于请求取消结算：即使调用方已取消，仍驱动 Host 取消并等待共享 Detector 的旧初始化，覆盖静默预热与所有 Port；就绪会话继续复用。提交前回滚不通知，Host 关闭后的迟到回调不恢复同步。
+
+Firefox 注入回调、Chromium Offscreen 发送严格来源校验的 runtime 消息，均不依赖原请求成功响应。Broker 广播并持久化凭证修订号，让内容页在后台重启或 Key 修复后重新准备；广播不包含 Key。
 
 ### 设置页并发操作
 
-设置页普通字段由 [`src/options/ordinary-settings.ts`](../../apps/extension/src/options/ordinary-settings.ts) 统一加载、解析、脏字段跟踪和串行保存。远程操作按代际取消旧请求；验证与清除还记录按钮点击时的输入修订号，成功返回只清空此后未编辑的输入，同样文字重新输入也会保留。额度查询在后台 Port 瞬断时只进行一次有限重连，验证和下载不自动重放，以避免重复副作用。页面销毁会取消未完成的 Key 操作。
+[ordinary-settings.ts](../../apps/extension/src/options/ordinary-settings.ts) 管理普通字段加载、解析、脏状态与串行保存。远程操作按代际取消旧请求；验证/清除成功只清空点击后未编辑的输入，重新输入同样文字也保留。仅额度查询在 Port 瞬断后重连一次，其他操作不自动重放；页面销毁取消未完成操作。
 
 ## 取消、断连和恢复
 
@@ -84,9 +86,9 @@ Host 在 [`src/host/inference-host.ts`](../../apps/extension/src/host/inference-
 
 Port 断开会拒绝该 Port 上所有未决内容请求并允许下一次请求重新连接。Chromium 后台重启后，新的 epoch 会使旧 Offscreen 请求失效，再由新请求重新 claim；空闲 Offscreen 关闭失败会用有限次数的指数退避重试。Firefox 页面卸载直接销毁 Host。有关超时层级的权威说明见 [`src/protocol/deadlines.ts`](../../apps/extension/src/protocol/deadlines.ts)。
 
-后台 Broker、内容客户端和设置页的 `onDisconnect` 回调都通过 [`readPortDisconnectError`](../../apps/extension/src/platform/webextension-runtime.ts) 同步读取 Chromium 的 `runtime.lastError`，兼容 Firefox 的 `port.error`。即使回调来自已失效的 Port，也先读取再判断身份，避免浏览器报告 `Unchecked runtime.lastError`；错误只在该回调期间可读，不能推迟到 Promise continuation。内容和设置页保留浏览器原因并拒绝未决请求，Broker 继续取消该 Port 的 Host 工作，不额外输出预期页面离开的日志。
+所有 `onDisconnect` 回调通过 [readPortDisconnectError](../../apps/extension/src/platform/webextension-runtime.ts) 同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。失效 Port 也先读取再判身份，不能推迟到 Promise continuation，否则可能报告 `Unchecked runtime.lastError`。内容/设置页保留原因并拒绝未决请求，Broker 取消 Host 工作，不为预期页面离开额外记日志。
 
-页面进入 BFCache 时，既有 `pagehide.persisted` 路径销毁当前应用并取消工作；`pageshow.persisted` 重建存储镜像与应用，再按需建立新 Port。读取断连原因不触发自动重放，额度查询仍是唯一允许一次有限重连的设置操作。处理依据和回归范围见[断连错误决定](../decisions/implemented/bug-fix/2026-09-18-extension-port-disconnect-errors.md)。
+BFCache 的 `pagehide.persisted` 销毁应用并取消工作，`pageshow.persisted` 重建镜像/应用并按需建新 Port；读取错误不触发重放。依据与回归见[断连错误决定](../decisions/implemented/bug-fix/2026-09-18-extension-port-disconnect-errors.md)。
 
 ## 测试与证据对应关系
 

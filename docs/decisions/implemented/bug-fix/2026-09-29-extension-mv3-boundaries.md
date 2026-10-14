@@ -20,7 +20,7 @@ HTML 审计用现有 JSDOM 解析属性，遍历包括嵌套 template 的所有�
 
 ## Existing record audit
 
-检索全部非归档决定中的来源、sender、Port、清单和 CSP，没有已有同主题记录。[Port 断连错误决定](2026-09-18-extension-port-disconnect-errors.md)处理准入之后的取消与错误读取，本篇不改变它；[构建安全与可重复性决定](2026-09-22-build-safety-and-reproducibility.md)处理输出目录与 ZIP 时间，本篇补充产物语义审计，不取代原决定。未发现需要吸收或废弃的相关 proposed/rejected 记录。
+检索非归档决定中的来源、sender、Port、清单和 CSP，无同主题记录。[Port 断连](2026-09-18-extension-port-disconnect-errors.md)处理准入后的取消/错误，[构建安全](2026-09-22-build-safety-and-reproducibility.md)处理目录/ZIP 时间，均保留；本篇补产物语义审计。无须吸收或废弃的相关 proposed/rejected 记录。
 
 ## Alternatives considered
 
@@ -38,6 +38,6 @@ HTML 审计用现有 JSDOM 解析属性，遍历包括嵌套 template 的所有�
 
 ## Consequences
 
-过去仅能借助 tab URL 或矛盾元数据通过的连接现在被拒绝；当前合法顶层内容页与独立设置页行为不变。运行时仅增加准入时的 URL/元数据检查，无新依赖或权限。
+仅靠 tab URL 或矛盾元数据的连接被拒绝，合法顶层内容页与设置页不变；运行时只增加准入检查，无新依赖或权限。
 
-构建审计更严格，新增后台字段、popup、frame 注入、sandbox 或额外权限必须同时修改产品策略、负向测试与文档；不应删除断言让变更通过。该门禁不是通用 JavaScript/HTML 安全证明，不替代消息 schema、CSP、资产完整性、浏览器 E2E 或安全扫描。
+新增后台字段、popup、frame 注入、sandbox 或权限须同步产品策略、负向测试与文档，不能删断言放行。门禁不构成通用 JavaScript/HTML 安全证明，也不替代 schema、CSP、完整性、E2E 或安全扫描。

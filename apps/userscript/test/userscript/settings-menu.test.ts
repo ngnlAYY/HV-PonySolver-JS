@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // The core setter only persists Worker tokens (64 hex chars).
-const VALID_KEY = 'a'.repeat(64)
-const VALID_KEY_UPPER = VALID_KEY.toUpperCase()
+const VALID_KEY = 'aB'.repeat(32)
 
 describe('settings menu', () => {
   beforeEach(() => {
@@ -51,25 +50,31 @@ describe('settings menu', () => {
     expect(localStorage.getItem('hvPonySolverHistoryLimit')).toBeNull()
   })
 
-  it('sets the model key through the top-level settings menu after verification succeeds', async () => {
+  it('saves the verified model key casing through the top-level settings menu', async () => {
     const registerMenuCommand = vi.fn()
-    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(`  ${VALID_KEY_UPPER}  `)
+    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(`  ${VALID_KEY}  `)
     const alert = vi.fn()
-    const setValue = vi.fn(async () => undefined)
+    const store = new Map<string, string>()
+    const setValue = vi.fn(async (key: string, value: string) => {
+      store.set(key, value)
+    })
     const verify = vi.fn(async (_candidateKey: string) => undefined)
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
     vi.stubGlobal('GM_setValue', setValue)
+    vi.stubGlobal('GM_getValue', async (key: string, fallback: string) => store.get(key) ?? fallback)
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
     const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+    const { getModelAccessKey } = await import('../../src/model/model-settings')
 
     registerSettingsMenu({ onVerifyModelAccessKey: verify })
     await registerMenuCommand.mock.calls[0][1]()
 
     expect(prompt).toHaveBeenNthCalledWith(1, expect.stringContaining('1. 设置模型下载 Key'), '1')
     expect(prompt).toHaveBeenNthCalledWith(2, '请输入模型下载 Key（已设置时不会回填原值；留空会清除）', '')
-    expect(verify).toHaveBeenCalledWith(VALID_KEY_UPPER)
-    expect(setValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey', VALID_KEY)
+    expect(verify).toHaveBeenCalledExactlyOnceWith(VALID_KEY)
+    expect(setValue).toHaveBeenCalledExactlyOnceWith('hvPonySolverModelAccessKey', verify.mock.calls[0][0])
+    await expect(getModelAccessKey()).resolves.toBe(VALID_KEY)
     expect(alert).toHaveBeenCalledWith('模型下载 Key 已验证并保存')
   })
 

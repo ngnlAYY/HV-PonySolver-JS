@@ -29,6 +29,7 @@ export const inferenceTimeoutConfig = {
   modelDownloadTimeoutMs: 30000,
   modelProbeTimeoutMs: 10000,
   modelCacheTimeoutMs: 5000,
+  settingsReadTimeoutMs: 5000,
 } as const
 
 export const inferenceRecoveryConfig = {

@@ -1,69 +1,63 @@
 # 开发约定、代码风格与注释
 
-本页把[根 AGENTS.md](../../AGENTS.md)的开发约束落实为日常修改方法。行为、资产和安全不变量仍以根约束及各专题为准。
+本页说明日常修改方法；产品和安全约束见[根 AGENTS.md](../../AGENTS.md)，环境与检查见[验证手册](verification.md)，文件放置见[目录组织](directory-layout.md)。
 
 ## 开始一次修改
 
-先运行 `git status --short --branch`，阅读任务相关源码、测试和[整体架构](../architecture/overview.md)，确认是否已有未提交修改。先界定预期行为、受影响平台和可观察的验证结果，再确定改动文件。
-
-环境安装和命令矩阵见[开发与验证](verification.md)。目录放置规则见[目录方案](directory-layout.md)。仓库已有索引时可以用 CodeGraph 查找调用关系；源码和配置仍是当前行为的依据。
+先运行 `git status --short --branch`，保留已有改动，阅读 README、相关专题和测试，明确预期行为、影响平台与验证结果。仓库存在 `.codegraph/` 时，定位代码和调用关系先用 `codegraph_explore` 或 `codegraph explore`，再补读未覆盖内容；事实以当前源码和配置为准。
 
 ## TypeScript 与模块接口
 
-[tsconfig.base.json](../../tsconfig.base.json)开启严格类型、索引读取检查和精确可选属性。优先通过控制流收窄表达已验证事实，跨网络、消息、存储和 DOM 的输入从 `unknown` 开始校验。断言用于描述已有运行时保证；新增断言时应能指明保证来自哪条检查，而不能用断言代替检查。
+[tsconfig.base.json](../../tsconfig.base.json) 开启严格类型、索引读取检查和精确可选属性。跨网络、消息、存储与 DOM 的输入从 `unknown` 开始验证，优先控制流收窄；类型断言必须有已执行的运行时检查支撑。
 
-类型导入使用 `import type`，值导入只包含运行时需要的符号。保持 ESM 和现有 package 子路径导入，不使用深层相对路径绕过包接口。`shared` 不依赖应用或平台；共享核心的依赖注入由应用入口完成。
+保持 ESM，类型使用 `import type`，跨包使用显式 package 子路径。`shared` 不依赖平台或应用，browser-core 通过应用入口注入平台能力；不以深层相对路径绕过接口和架构门禁。
 
-默认复用现有能力：取消竞态、错误格式化、Fetch 接收者、存储接口、请求结算、资产清单和超时配置均已有入口。评估复用时先比较语义，例如“可重复查询”和“可能产生下载确认的操作”不能仅因都是 HTTP 请求而共享无条件重试策略。
+先复用已有取消、错误、Fetch、存储、请求结算、资产和超时模块。复用前核对语义：可重复查询与会确认下载的操作不能共用无条件重试。
 
 ## 格式与命名
 
-格式由根 [package.json](../../package.json) 的 `prettier` 字段定义：无分号、单引号、尾逗号和现有行宽。ESLint 规则见 [eslint.config.mjs](../../eslint.config.mjs)。领域文件沿用 kebab-case；类和类型使用 PascalCase，函数及局部变量使用 camelCase，协议字段和 HTTP 头保留标准名称。
+Prettier 规则由根 [package.json](../../package.json) 定义，ESLint 使用 [flat config](../../eslint.config.mjs)。沿用 kebab-case 文件名、PascalCase 类型/类和 camelCase 函数/变量；协议字段与 HTTP 头保留标准名称。
 
-只格式化修改文件，例如：
+只检查、格式化本次文件：
 
 ```bash
 mise exec -- pnpm exec prettier --check docs/README.md docs/development/contributing.md
 ```
 
-需要修正格式时，对明确列出的文件使用 `--write`。`pnpm format:check` 已纳入 `check:quick` 和 CI，只读检查第一方文件；`.gitignore` 与 [`.prettierignore`](../../.prettierignore) 排除生成目录、第三方压缩资产和 pnpm 锁文件。根 `pnpm format` 仍是全仓写操作，日常修改优先明确列出文件，避免带入无关 diff。Prettier 与 ESLint 检查的是不同规则；不支持的格式（如当前未配置解析器的 TOML）由相应配置校验负责。
+修正时将 `--check` 换为 `--write`。根 `pnpm format` 会写全仓，避免带入无关 diff。`.gitignore` 与 [`.prettierignore`](../../.prettierignore) 排除生成物、第三方压缩资产及 pnpm 锁文件；无对应解析器的格式由专门配置检查负责。
 
-根配置使用工具的原生发现方式：Prettier 从 `package.json#prettier` 读取静态规则，ESLint 保留独立 flat config；不在命令中重复传入这些规则。各工作区通过自己的 `vitest.config.ts` 运行测试，由根 `pnpm -r test` 调度，无需额外根 Vitest workspace 配置。工具链与共享编译选项分别保留在 `mise.toml` 和 `tsconfig.base.json`。本仓库的生效配置与测试入口以根配置和包清单为准。
+使用工具原生配置发现：Prettier 读根包字段，ESLint 保留独立配置，工作区各用 `vitest.config.ts`；不再增加重复 Prettier 或根 Vitest workspace 配置。工具版本和共享编译选项分别归 `mise.toml`、`tsconfig.base.json`。
 
 ## 注释应该解释什么
 
-优先记录代码表面看不出的契约：
+注释记录代码表面看不出的约束，公开接口有所有权、副作用、取消、异常或前提时补简短 TSDoc：
 
-| 场景             | 注释应回答的问题                                            | 本仓库参考                                                                   |
-| ---------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| ArrayBuffer 转移 | 谁拥有字节？返回后是否可能 detach？并发消费者能否共享？     | [模型缓存](../../packages/browser-core/src/model/model-cache.ts)             |
-| IndexedDB 写入   | 哪个事务事件才代表成功？迟到写入/确认如何核对身份？         | [模型 store](../../packages/browser-core/src/model/indexeddb-model-store.ts) |
-| 取消与超时       | 哪个对象负责取消？何时清理监听器？旧响应如何被忽略？        | [请求生命周期](../../apps/extension/src/protocol/request-lifecycle.ts)       |
-| 页面操作         | 为什么需要再次检查表单和 checkbox 身份？                    | [答案提交器](../../packages/browser-core/src/captcha/answer-submitter.ts)    |
-| 平台适配         | browser/chrome 或 GM 的差异是什么？降级为什么不适用于 Key？ | [GM bridge](../../apps/userscript/src/userscript/gm-bridge.ts)               |
-| 缓存/额度        | “下载成功”“事务成功”和“确认成功”分别在哪一步成立？          | [缓存专题](../model-cache-strategy.md)                                       |
-| 构建/运维        | 为什么拒绝重定向、脏 checkout、错误模型或未绑定的发布证据？ | [扩展构建审计](../../apps/extension/scripts/build/inventory.mjs)             |
+| 场景       | 应说明的内容                          | 参考                                                                         |
+| ---------- | ------------------------------------- | ---------------------------------------------------------------------------- |
+| 字节转移   | detach 时机、所有权、并发消费者       | [模型缓存](../../packages/browser-core/src/model/model-cache.ts)             |
+| IndexedDB  | 事务提交点、迟到写入/确认身份         | [模型 store](../../packages/browser-core/src/model/indexeddb-model-store.ts) |
+| 取消与超时 | 取消责任、监听清理、旧响应失效        | [请求生命周期](../../apps/extension/src/protocol/request-lifecycle.ts)       |
+| 页面操作   | 再查表单/checkbox 身份的原因          | [答案提交器](../../packages/browser-core/src/captcha/answer-submitter.ts)    |
+| 平台差异   | GM/WebExtension 语义及 Key 的存储边界 | [GM bridge](../../apps/userscript/src/userscript/gm-bridge.ts)               |
+| 缓存与额度 | 下载、事务、确认各自何时成功          | [缓存专题](../model-cache-strategy.md)                                       |
+| 构建与发布 | 资产和证据如何绑定待发布包            | [构建审计](../../apps/extension/scripts/build/inventory.mjs)                 |
 
-公开函数或接口有所有权、副作用、取消语义、异常或前置条件时，添加简短 TSDoc。简单类型别名、显然的 getter 和纯 re-export 不需要凑注释。文件注释用于交代领域职责和非显然边界；详细跨模块流程放在架构文档并相互链接。
-
-新增说明以清晰中文为主，协议术语保留英文；现有准确的英文注释不需要为了统一语言批量翻译。删除过期和逐行复述的注释，保留可诊断的历史原因。不要在注释中复制完整哈希、会漂移的行号、秘密或短期测试结果。
+详细时序放架构文档；简单 getter、类型别名和 re-export 无需凑注释。新增说明以中文为主，不批量翻译准确英文。删除逐行复述和过期说明，保留防坑原因；不复制完整哈希、行号、秘密或短期测试数。
 
 ## 异步资源与错误
 
-异步接口应明确谁创建、谁销毁资源。新增监听器、定时器、Worker、Port 或事务时，检查成功、失败、取消、超时和销毁路径的清理。先发布 pending 状态再开始可同步触发取消的操作，沿用已有生命周期工具；旧任务结束不能覆盖新任务的状态。
+监听器、定时器、Worker、Port 和事务都应明确创建/销毁者，覆盖成功、失败、取消、超时与销毁的清理。先发布 pending 状态，再启动可能同步取消的操作；旧任务结束不能覆盖新状态。
 
-HTTP 拒绝、超时、完整性失败、额度不足和浏览器断连应保留各自语义。面向用户的消息使用中文，内部错误保留足够上下文；Key、对象身份和敏感配置不进入日志、UI 或响应。保持 Fetch 的正确接收者，优先复用已有 Fetch 解析函数。
+HTTP 拒绝、超时、完整性失败、额度不足和断连保留不同语义。用户提示用中文，内部错误保留诊断原因，但 Key、内部对象身份和敏感配置不进入日志、UI 或响应。Fetch 复用既有解析函数，保留正确接收者。
 
 ## 测试与重构
 
-行为变化先增加或调整能观察结果的定向测试。目录移动或纯职责拆分先保留已有回归行为，再逐组迁移；对于取消、幂等、事务和来源校验，不能用只检查新函数被调用的测试替代行为证据。
-
-类型与单元测试不能证明实际浏览器生命周期、用户脚本管理器或远程鉴权。修改这些边界时按[验证手册](verification.md)补充对应 E2E，并准确记录环境和未覆盖项。纯文档补全不需要新增业务测试，但应执行格式、链接、漂移和 diff 检查。
+行为变化用可观察结果验证，目录移动和职责拆分保留原回归。取消、幂等、事务和来源校验不能仅靠“调用了新函数”证明；按[验证矩阵](verification.md#按修改区域选择验证)补对应浏览器证据。纯文档执行格式、链接、漂移和 diff 检查，无需新增业务测试。
 
 ## 决策记录
 
-重要改动必带一篇笔记或同步已有决定。行为、架构、跨文件契约、流程工具、测试策略和数据格式变化写入 `docs/decisions/<lifecycle>/<class>/`，只修改事实时原地更新；理由翻转另开新篇并互链。格式和纯机械修改不立 Note。先检索活跃记录再落笔，说明真实备选、收益、代价和验证；具体格式与校验见[文档维护](documentation.md#决策笔记)。
+非平凡行为、架构、跨文件契约、工具、测试策略和数据格式变化须写入或同步 `docs/decisions/<lifecycle>/<class>/`。先检索活跃记录，说明备选、代价与验证；事实变化原地更新，理由翻转另写并互链，机械修改不立 Note。格式见[文档维护](documentation.md#决策笔记)。
 
 ## 交付
 
-修改公开行为或命令时按[文档联动表](documentation.md#按修改类型同步)更新说明。交付记录包含修改目的、文件、验证结果和剩余限制。提交与推送需有明确用户要求；审计、文档补全和本地验证不自动包含提交、发布或部署。
+按[文档联动表](documentation.md#按修改类型同步)同步公开变化。交付说明目的、主要文件、实测结果及限制；commit、push、发布和部署仅在用户明确要求时执行。

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { spawn, spawnSync } from 'node:child_process'
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath, URL } from 'node:url'
 
 const scriptUrl = new URL('./build-minimal-ort-runtime.sh', import.meta.url)
@@ -60,7 +61,7 @@ test('serializes destructive work and revalidates the dedicated build root', asy
   const firstCleanup = source.indexOf('cleanup_js_build_root\n')
 
   assert.match(source, /command -v flock/u)
-  assert.match(source, /exec \{ORT_BUILD_LOCK_FD\}>"\$BUILD_ROOT\/\.build\.lock"/u)
+  assert.match(source, /exec \{ORT_BUILD_LOCK_FD\}<"\$BUILD_ROOT"/u)
   assert.ok(createdRootCheck >= 0)
   assert.ok(lock > createdRootCheck)
   assert.ok(lock >= 0)
@@ -71,6 +72,96 @@ test('serializes destructive work and revalidates the dedicated build root', asy
   assert.match(source, /remove_build_paths "\$ARTIFACT_DIR"/u)
   assert.doesNotMatch(source, /rm -rf "\$MODEL_INPUT" "\$MODEL_OUTPUT"/u)
   assert.doesNotMatch(source, /rm -rf "\$ARTIFACT_DIR"/u)
+})
+
+test('leaves an external file untouched when an old lock path is a symbolic link', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'ort-lock-symlink-'))
+  t.after(() => rm(parent, { recursive: true, force: true }))
+  const root = join(parent, 'hv-pony-ort-work')
+  const bin = join(parent, 'bin')
+  const marker = join(parent, 'outside-must-survive.txt')
+  await mkdir(root)
+  await mkdir(bin)
+  await writeFile(marker, 'preserve this unrelated file')
+  await symlink(marker, join(root, '.build.lock'))
+  await writeFile(join(bin, 'git'), '#!/bin/sh\nexit 42\n', { mode: 0o755 })
+
+  const result = spawnSync('bash', [fileURLToPath(scriptUrl)], {
+    cwd: parent,
+    encoding: 'utf8',
+    env: { ...process.env, ORT_BUILD_ROOT: root, PATH: `${bin}:${process.env.PATH}` },
+    timeout: 5_000,
+  })
+
+  assert.equal(result.error, undefined)
+  assert.equal(result.status, 42, result.stderr)
+  assert.equal(await readFile(marker, 'utf8'), 'preserve this unrelated file')
+  assert.equal(await readFile(join(root, '.build.lock'), 'utf8'), 'preserve this unrelated file')
+})
+
+test('concurrent builds share the directory lock even with an old lock symlink', async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), 'ort-lock-concurrency-'))
+  t.after(() => rm(parent, { recursive: true, force: true }))
+  const root = join(parent, 'hv-pony-ort-work')
+  const bin = join(parent, 'bin')
+  const ready = join(parent, 'git-started')
+  const release = join(parent, 'release-git')
+  const marker = join(parent, 'outside-must-survive.txt')
+  await mkdir(root)
+  await mkdir(bin)
+  await writeFile(marker, 'preserve this unrelated file')
+  await symlink(marker, join(root, '.build.lock'))
+  await writeFile(
+    join(bin, 'git'),
+    '#!/bin/sh\nprintf ready > "$ORT_LOCK_TEST_READY"\nwhile [ ! -f "$ORT_LOCK_TEST_RELEASE" ]; do sleep 0.01; done\nexit 42\n',
+    { mode: 0o755 },
+  )
+  const options = {
+    cwd: parent,
+    env: {
+      ...process.env,
+      ORT_BUILD_ROOT: root,
+      ORT_LOCK_TEST_READY: ready,
+      ORT_LOCK_TEST_RELEASE: release,
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  }
+  const first = spawn('bash', [fileURLToPath(scriptUrl)], { ...options, stdio: 'ignore' })
+  const firstExit = new Promise((resolve, reject) => {
+    first.once('error', reject)
+    first.once('exit', resolve)
+  })
+  try {
+    let started = false
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      try {
+        await access(ready)
+        started = true
+        break
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+        await delay(20)
+      }
+    }
+    assert.equal(started, true, 'first build must reach the inert git stub while holding the lock')
+    const second = spawnSync('bash', [fileURLToPath(scriptUrl)], {
+      ...options,
+      encoding: 'utf8',
+      timeout: 2_000,
+    })
+    assert.equal(second.error, undefined)
+    assert.equal(second.status, 1)
+    assert.match(second.stderr, /Another ORT build is already using/u)
+    assert.equal(await readFile(marker, 'utf8'), 'preserve this unrelated file')
+  } finally {
+    await writeFile(release, 'release')
+    await firstExit
+  }
+  assert.equal(await firstExit, 42)
+  const next = spawnSync('bash', [fileURLToPath(scriptUrl)], { ...options, encoding: 'utf8', timeout: 2_000 })
+  assert.equal(next.error, undefined)
+  assert.equal(next.status, 42, next.stderr)
+  assert.equal(await readFile(marker, 'utf8'), 'preserve this unrelated file')
 })
 
 test('rejects an initial cwd below a temporary build root before creating build state', async (t) => {

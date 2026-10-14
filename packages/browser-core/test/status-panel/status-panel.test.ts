@@ -87,6 +87,41 @@ describe('StatusPanel history persistence', () => {
     history.pushState(null, '', '/')
   })
 
+  it.each([true, false])('starts without a body and mounts when one arrives (requireCsp=%s)', async (requireCsp) => {
+    const body = document.body
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage(false, requireCsp))
+    body.remove()
+    try {
+      expect(() => panel.create()).not.toThrow()
+      panel.setStatus({ inference: '等待页面恢复' })
+      await Promise.resolve()
+      expect(document.querySelector('.ponyLog')).toBeNull()
+    } finally {
+      document.documentElement.appendChild(body)
+    }
+    await vi.waitFor(() => expect(document.querySelector('.ponyLog')?.textContent).toContain('等待页面恢复'))
+    expect(document.querySelector<HTMLElement>('.ponyLog')?.hidden).toBe(requireCsp)
+    panel.destroy()
+    body.remove()
+    document.documentElement.appendChild(body)
+    await Promise.resolve()
+    expect(document.querySelector('.ponyLog')).toBeNull()
+  })
+
+  it('does not mount if destroyed before the first body arrives', async () => {
+    const body = document.body
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage())
+    body.remove()
+    try {
+      panel.create()
+      panel.destroy()
+    } finally {
+      document.documentElement.appendChild(body)
+    }
+    await Promise.resolve()
+    expect(document.querySelector('.ponyLog')).toBeNull()
+  })
+
   it('renders optimistically, then rolls back and exposes a save failure in compact mode', async () => {
     const persistence = deferred<HistoryRecord[]>()
     const store = historyStore(persistence.promise)

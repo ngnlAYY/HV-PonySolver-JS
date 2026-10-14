@@ -24,6 +24,7 @@ export class App {
   private readonly dispose: AppDependencies['dispose']
   private observer: MutationObserver | null = null
   private observerTimeoutId: ReturnType<typeof setTimeout> | null = null
+  private observerScanDeadline = 0
   private startupTimeoutId: ReturnType<typeof setTimeout> | null = null
   private scheduledScan = false
   private pendingScan = false
@@ -37,6 +38,18 @@ export class App {
   private destroyed = false
   private settingsMenuRegistered = false
   private solveAbortController: AbortController | null = null
+  private readonly onCaptchaImageSettled = (event: Event): void => {
+    const image = event.target
+    if (
+      !this.destroyed &&
+      image instanceof HTMLImageElement &&
+      image.closest(captchaSelectors.master) &&
+      image.parentElement?.closest('[id="riddleimage"]')
+    ) {
+      this.cancelStaleSolve()
+      this.scheduleSolve()
+    }
+  }
 
   constructor(dependencies: AppDependencies) {
     this.panel = dependencies.panel
@@ -107,6 +120,8 @@ export class App {
     this.solveAbortController = null
     this.observer?.disconnect()
     this.observer = null
+    document.removeEventListener('load', this.onCaptchaImageSettled, true)
+    document.removeEventListener('error', this.onCaptchaImageSettled, true)
     if (this.observerTimeoutId !== null) {
       clearTimeout(this.observerTimeoutId)
       this.observerTimeoutId = null
@@ -160,26 +175,37 @@ export class App {
     if (this.observer) {
       return
     }
+    // load 不冒泡；捕获监听覆盖 srcset/picture 完成选源但不再产生 mutation 的情况。
+    document.addEventListener('load', this.onCaptchaImageSettled, true)
+    document.addEventListener('error', this.onCaptchaImageSettled, true)
     this.observer = new MutationObserver((records) => {
       if (this.destroyed || !this.isCaptchaRelatedMutation(records)) {
         return
       }
       // 取消不等待扫描防抖；旧初始化不能挡住新目标，也不能在目标短暂离开后继续提交。
       this.cancelStaleSolve()
-      if (this.observerTimeoutId !== null) {
-        return
+      const now = performance.now()
+      if (this.observerTimeoutId === null) {
+        this.observerScanDeadline = now + MUTATION_SCAN_DEBOUNCE_MS
+      } else {
+        // JPX 等脚本可能批量清除页面定时器。每次相关变更重挂扫描，
+        // 但不延长原截止时间，避免持续 mutation 让新目标一直等不到扫描。
+        clearTimeout(this.observerTimeoutId)
       }
-      this.observerTimeoutId = setTimeout(() => {
-        this.observerTimeoutId = null
-        this.scheduleSolve()
-      }, MUTATION_SCAN_DEBOUNCE_MS)
+      this.observerTimeoutId = setTimeout(
+        () => {
+          this.observerTimeoutId = null
+          this.scheduleSolve()
+        },
+        Math.max(0, this.observerScanDeadline - now),
+      )
     })
     // 局部切页可替换整个 body；观察稳定的父节点才能继续发现新验证码。
     const target = document.documentElement
     if (target) {
       this.observer.observe(target, {
         attributes: true,
-        attributeFilter: ['action', 'formaction', 'type', 'disabled', 'src', 'srcset'],
+        attributeFilter: ['action', 'formaction', 'type', 'disabled', 'src', 'srcset', 'sizes', 'media'],
         childList: true,
         subtree: true,
       })

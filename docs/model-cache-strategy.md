@@ -1,102 +1,76 @@
 # 模型缓存与计次策略
 
-本文面向修改模型加载、IndexedDB 或下载确认的维护者。服务端状态机见[Model Worker 架构](architecture/model-service.md)，HTTP 字段见[接口参考](reference/model-worker-http.md)。
+本文负责模型加载、IndexedDB 和下载确认的客户端契约；服务端状态机见 [Model Worker 架构](architecture/model-service.md)，精确字段见 [HTTP 参考](reference/model-worker-http.md)。
 
-实现导航：浏览器核心的编排入口是 [`ModelCache`](../packages/browser-core/src/model/model-cache.ts)，IndexedDB 事务由 [`IndexedDbModelStore`](../packages/browser-core/src/model/indexeddb-model-store.ts) 管理，记录校验由 [`model-cache-record.ts`](../packages/browser-core/src/model/model-cache-record.ts) 负责，共享下载由 [`shared-model-downloads.ts`](../packages/browser-core/src/model/shared-model-downloads.ts) 负责。用户脚本和扩展只注入各自的 Key、Fetch、Worker 或包内模型来源，不应在适配层复制缓存状态机。
+共用核心以 [ModelCache](../packages/browser-core/src/model/model-cache.ts) 编排，[IndexedDbModelStore](../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务，[model-cache-record.ts](../packages/browser-core/src/model/model-cache-record.ts) 校验记录，[shared-model-downloads.ts](../packages/browser-core/src/model/shared-model-downloads.ts) 共享下载。平台只注入 Key、fetch、Worker 或包内来源，不复制状态机。
 
 ## 缓存分层
 
-模型响应继续使用 `Cache-Control: no-store`。浏览器在完整性验证后自行维护私有本地缓存；Model Worker 不允许共享边缘缓存真实模型、诱饵模型或额度错误。
+| 客户端/资产                   | 来源与缓存                                                 |
+| ----------------------------- | ---------------------------------------------------------- |
+| 用户脚本模型                  | Worker `.ort`；页面源 IndexedDB                            |
+| 远程模型扩展                  | Worker `.ort`；扩展源模型 IndexedDB，与 Key 存储分离       |
+| 内置模型扩展                  | 包内 `model/yolo26n-640.ort`，`force-cache`，不访问 Worker |
+| 用户脚本内置精简 Runtime WASM | 首方内容寻址 URL，公开一年 `immutable`                     |
+| 扩展 Runtime WASM             | 随包分发的 `runtime/` 资产，不访问 Worker                  |
 
-不同客户端的模型来源与缓存如下：
-
-| 客户端/构建                   | 模型来源                               | 本地缓存或读取方式                         |
-| ----------------------------- | -------------------------------------- | ------------------------------------------ |
-| 用户脚本                      | Model Worker 的 `.ort` 路由            | 浏览器 IndexedDB，命中后不重新下载         |
-| 远程模型扩展                  | Model Worker 的 `.ort` 路由            | 扩展源模型 IndexedDB，与 Key 存储分离      |
-| 内置模型扩展                  | 包内 `model/yolo26n-640.ort`           | 扩展内部 URL，`force-cache`，不访问 Worker |
-| 用户脚本内置精简 Runtime WASM | 首方内容寻址 Runtime 路由              | 浏览器 HTTP 缓存，公开一年 `immutable`     |
-| 扩展 Runtime WASM             | 扩展包内 `runtime/<content-hash>.wasm` | 随扩展安装，不访问 Worker                  |
-
-无论来源如何，模型都必须同时通过声明长度、实际长度、最大长度和 SHA-256 校验。下载中断、重定向、HTTP 错误、长度异常、哈希异常或缓存事务失败的内容不得成为有效缓存。
+所有模型来源都执行最大长度、声明长度、实际长度和 SHA-256 校验。重定向、HTTP/完整性错误、下载或缓存事务失败的内容不能成为有效缓存。下载正文必须可流式读取；`body === null` 时失败，不退回无界 `arrayBuffer()`。Runtime profile 和字节读取细节见[资产专题](onnx-runtime.md)。
 
 ## 为什么模型响应保持 `no-store`
 
-- 模型访问由 `Authorization: Bearer` 控制，query-string key 不会授权真实模型。
-- 当前 `/yolo26n-640.onnx` 和 `/yolo26n-640.ort` 路径都不是不可变的内容寻址 URL。
-- 没有经过验证的 token-aware 缓存规则时，共享缓存可能扩大授权边界，或让不同 Key、Origin、真实/诱饵对象互相污染。
-- 浏览器已有带完整性契约的 IndexedDB 缓存，重复下载收益主要在客户端侧实现。
-- `403`、`409`、`429`、`500` 和 `503` 等错误同样必须 `no-store`，避免某个 Key 或一次临时故障污染其他请求。
-- `429` 只通过 `Retry-After` 表示下个 UTC 月边界；`503` 可通过 `Retry-After` 表示最早待确认回执的失效时间。
+模型和错误响应使用 `Cache-Control: no-store`：访问受 `Authorization: Bearer` 控制，模型 URL 尚未内容寻址，共享缓存可能混淆 Key、Origin 和真实/诱饵对象。本地 IndexedDB 已提供通过完整性检查的复用。公开、内容寻址的精简 WASM 才使用长期 HTTP 缓存；query-string key 不授权真实模型。
 
-模型 `GET` 返回 `403` 时，客户端抛出 `ModelAccessKeyRejectedError`，按永久错误处理并提示重新验证 Key，不进行瞬时故障重试。额度查询和确认使用同一 Key 拒绝分类；HTTP 错误正文只做尽力取消，不等待清理完成，不将 Key、URL 或响应正文带入错误提示。凭证实际提交后仍通过原恢复流程重试当前失败验证码，不绕过完整性、缓存或额度确认。
-
-公开的精简 Runtime WASM 是例外：URL 含完整 SHA-256，响应不需要 Key，使用一年 `public, immutable` 缓存。
+模型 GET、额度查询或确认收到 403 时抛出 `ModelAccessKeyRejectedError`，按永久错误处理，提示重新验证 Key，不作瞬时重试。凭证实际提交后可通过既有恢复流程重试当前失败目标。错误正文仅尽力取消，不等待清理，不将 Key、URL 或正文带入提示。
 
 ## 下载完成后确认计次
 
-额度默认按每个规范化 Key、每个 UTC 自然月最多 5 次已确认模型缓存计算，ONNX 与 ORT 共用同一额度。一次远程模型操作的状态变化如下：
+默认每个规范化 Key、每个 UTC 自然月最多确认 5 次；ONNX 与 ORT 共用额度。Key 验证使用不计次的 HEAD，远程下载顺序为：
 
 ```text
-HEAD 验证 Key（不计次）
-  -> GET 真实模型并预留十分钟回执（尚未计次）
-  -> 客户端有界读取并校验长度/SHA-256
-  -> IndexedDB 缓存事务提交
+GET 真实模型，预留十分钟回执（尚未计次）
+  -> 有界读取，校验实际长度和 SHA-256
+  -> IndexedDB 提交模型及待确认元数据
   -> POST /quota 确认回执
-  -> 已用次数 +1
+  -> 服务端计次，本地标记可命中
 ```
 
-关键边界：
-
-- `GET /quota` 只查询 `enabled`、`limit`、`used`、`remaining` 和 `retryAfterSeconds`，不计次。
-- 有效本地缓存命中时不发起模型 `GET`，也不消耗次数。
-- 模型 `GET` 只返回 `X-HV-Model-Download-Receipt` 并占用临时槽位，不立即递增 `used`。
-- 模型与 Runtime 下载只接受可流式读取的响应正文；`body === null` 时失败关闭，不使用无法在分配前执行大小上限的 `arrayBuffer()` fallback。
-- 客户端只有在模型完整读取、校验且成功写入 IndexedDB 后才确认；下载或缓存失败时不确认，回执自然失效。
-- 同一回执重复确认是幂等操作，不会重复计次；未知或失效回执返回 `409`。
-- 5 次已经确认后，新的真实模型 `GET` 在读取 R2 前通过只读额度预检返回不可缓存的 `429`；预检查询失败返回 `503`，同样不读取 R2。允许继续的请求仍在对象完整性检查后原子预留回执；已确认与待确认槽位合计达到 5 且仍有回执未失效时，返回可重试的 `503`，避免并发越过硬上限。
-- `HEAD`、`OPTIONS`、诱饵模型和 Runtime 不计次。
-- `MODEL_DOWNLOAD_QUOTA_ENABLED=false` 时不预留、不确认也不递增次数；查询明确显示“无次数限制”，而不是伪造有限的剩余次数；格式正确的意外确认请求返回 `409`，缺失或畸形回执返回 `400`，不得伪造确认成功。
+- `GET /quota` 只查询已确认次数；缓存命中不发模型 GET，也不计次。HEAD、OPTIONS、诱饵和 Runtime 同样不计次。
+- 回执由 `X-HV-Model-Download-Receipt` 返回。下载/缓存失败不确认，预留自然失效；重复确认幂等，未知或过期回执返回 409。
+- 5 次已确认后，真实 GET 在读取 R2 前返回 `429`；额度预检故障返回 `503`，也不读 R2。预检通过后仍须校验对象并原子预留；已确认与待确认合计占满时返回 `503`。
+- `Retry-After` 对 429 指向下个 UTC 月，对预留占满的 503 指向最早回执过期；额度依赖故障的 503 使用短重试间隔，详见 HTTP 参考。
+- `MODEL_DOWNLOAD_QUOTA_ENABLED=false` 时不预留或计次，查询显示无限制；有效 Key 提交合法回执仍返回 409，缺失/畸形回执返回 400，不伪造确认成功。
 
 ## 缓存可用性的三个阶段
 
-| 阶段                       | 当前调用可用模型 | 后续实例可命中       |
-| -------------------------- | ---------------- | -------------------- |
-| 下载并通过实际字节校验     | 是               | 否                   |
-| 二进制与待确认元数据提交   | 是               | 否，仍须确认         |
-| 服务端确认并更新匹配元数据 | 是               | 是，读取时仍校验记录 |
+| 阶段                       | 当前模型字节      | 后续实例可命中   |
+| -------------------------- | ----------------- | ---------------- |
+| 下载并通过实际字节校验     | 可交给推理 Worker | 否               |
+| 二进制与待确认元数据提交   | 仍可用            | 否，仍须确认     |
+| 服务端确认并更新匹配元数据 | 仍可用            | 是，读取时仍校验 |
 
-无回执的路径不额外确认；上表描述启用额度的远程下载。
+上表适用于带回执的远程下载；无回执无需额外确认。确认失败后的记录必须视为未命中，后续实例重新下载；升级前缺少确认字段的记录也失效。
 
-缓存事务先把远程模型记录标记为“待确认”；只有 `POST /quota` 成功后才写回可命中状态。确认失败不会阻止当前调用继续使用已经验证的内存字节，但该 IndexedDB 记录在后续实例或重启后必须视为未命中并重新下载，不能因内存回执丢失而永久绕过计次。升级前缺少确认状态字段的旧缓存也会一次性失效。失败日志不得包含 Key 或回执。
+调用路径决定错误如何呈现：[OnnxWorkerClient](../packages/browser-core/src/inference/onnx-worker-client.ts) 在会话初始化后尽力缓存，缓存/确认失败可继续使用已就绪会话，但父请求取消或销毁仍终止处理；扩展设置页的显式下载会报告缓存/确认失败，不能把“内存字节可用”当成“下载并缓存成功”。
 
 ## 事务身份与迟到确认
 
-数据库继续使用版本 1 的 `models` store。首次写入在同一事务内保存模型行与 `${cacheKey}:confirmation` 元数据行，以随机 `cacheWriteId`、版本、长度和 SHA-256 绑定；确认成功后只更新元数据，不再次写入模型二进制。更新前必须比较写入身份，较晚完成的旧确认不能覆盖新下载的状态。带 `cacheWriteId` 的模型行只有匹配的元数据明确完成确认时才能命中；旧格式中明确 `confirmationPending=false` 的记录仍可读取，缺失或待确认记录仍失效。
+数据库版本仍为 1，使用 `models` store。初始事务同时写模型行和 `${cacheKey}:confirmation` 元数据行，以随机 `cacheWriteId`、版本、长度、SHA-256 绑定。确认成功只更新匹配元数据，不重写二进制，旧确认不能覆盖新下载。
 
-`ModelCache` 保留原有调用接口，IndexedDB 生命周期、记录校验和共享下载分别由 `indexeddb-model-store`、`model-cache-record`、`shared-model-downloads` 管理。关闭缓存或收到 `versionchange` 时同时取消数据库操作和共享下载。
+带 `cacheWriteId` 的模型必须有匹配且已确认的元数据才能命中；旧格式中明确 `confirmationPending=false` 的记录仍可读取，缺字段或待确认记录失效。命中时同时检查版本、清单身份和实际字节。失败日志不得包含 Key 或回执。
 
 ## 取消与缓冲区所有权
 
-下载确认请求也受同一缓存操作约束：调用方取消、独立关闭缓存、`versionchange` 或操作超时都会取消底层确认请求。被取消的请求即使晚到成功，也不能清除内存回执或写入本地已确认状态；新缓存生命周期可以独立继续处理。取消不能撤销服务端已经处理的 `POST /quota`，因此这项保护不承诺回退已计入的次数。
+调用方取消、缓存关闭、IndexedDB `versionchange` 或操作超时须取消底层确认请求；关闭/versionchange 还取消数据库操作和共享下载。取消后的晚到成功不能清除内存回执或写本地确认状态，也不能宣称撤销服务端已计次数。缓存读取的生命周期取消必须向上传播，不能吞成未命中后再下载。
 
-并发消费者只共享同一次网络 GET；每个仍在等待的消费者获得独立、可转移的 `ArrayBuffer` 所有权，并复制同一幂等确认回执。这样一个推理 Worker 转移缓冲区时不会把另一个缓存调用的字节 detach。
-
-维护时先区分三种结果：缓存命中表示记录和确认元数据均通过校验；下载成功表示内存中的模型可供当前推理使用；缓存确认失败表示当前调用仍可继续，但后续实例必须重新下载。涉及取消、`versionchange`、并发下载或确认代次时，至少检查核心 `test/model` 中的缓存、下载和完整性测试，并同步检查用户脚本与扩展的模型来源测试。
+同一缓存实例中，Key 与完整性选项相同的并发消费者共享网络 GET，但各自取得独立、可转移的 `ArrayBuffer` 及同一幂等回执。一个 Worker 转移缓冲区不会 detach 其他消费者的字节；最后一个等待者离开时才取消尚未完成的共享下载。
 
 ## 重新评估 HTTP 缓存的条件
 
-只有同时满足以下条件，才评估调整模型 HTTP 缓存：
-
-1. 模型 URL 改为不可变版本或内容寻址路径。
-2. 明确禁止共享缓存，或验证 `Authorization`、`Origin` 与真实/诱饵选择不会跨请求泄漏。
-3. 发布流程生成并门禁 version、URL、R2 object key、byteLength 和 SHA-256 的原子映射。
-4. 回滚保留旧版 R2 object，并能让既有客户端继续请求旧身份。
-5. 真实模型、诱饵模型、额度响应和 Runtime 分别评估，不能套用一个全局缓存策略。
+调整模型 HTTP 缓存前，须同时满足：不可变模型 URL；验证授权、Origin 和真实/诱饵隔离；发布门禁原子绑定版本、URL、对象键、长度和 SHA-256；回滚保留旧对象及旧客户端访问能力。模型、额度、诱饵和 Runtime 仍分别制定策略。
 
 ## 变更前验证
 
-先按[验证手册](development/verification.md#model-worker-测试配置)准备 Worker 测试绑定并备份已有生成配置，再按受影响范围运行：
+先按[验证手册](development/verification.md#model-worker-测试配置)备份生成配置并准备 Worker 测试绑定，再按受影响范围运行：
 
 ```bash
 mise exec -- pnpm --filter @hv-pony-solver/browser-core test
@@ -106,4 +80,4 @@ mise exec -- pnpm --filter @hv-pony-solver/model-worker test
 mise exec -- pnpm docs:check
 ```
 
-手动验收应覆盖缓存命中、完整性失败、IndexedDB 写入失败、重复确认、回执失效、5 次已确认、并发预留占满、UTC 月切换、额度关闭以及真实/诱饵对象隔离。
+覆盖缓存命中、实际字节漂移、事务失败、确认代次、取消/versionchange、并发缓冲区所有权，以及服务端幂等、TTL、UTC 月切换、5 次上限、预留占满和额度关闭。真实/诱饵隔离与受保护鉴权另行验收。

@@ -1,36 +1,21 @@
 # 开发与验证手册
 
-本文按“准备环境 → 选择最小验证 → 扩大检查 → 记录证据”组织。所有命令在仓库根目录执行；完整命令索引见[命令参考](commands.md)，发布输入和受保护门禁见[CI 与发布](releases.md)。
+所有命令在仓库根目录执行。先准备环境，再选择能证明改动的最小验证；提交前执行完整检查，按实际结果记录证据。命令索引见[命令参考](commands.md)，发布条件见[CI 与发布](releases.md)。
 
 ## 工具链与工作区
 
-仓库是 pnpm workspace，由根目录 [`mise.toml`](../../mise.toml) 固定 Node.js 24.15.0、pnpm 12.3.0。根 [`package.json`](../../package.json) 的 `engines.node` 是最低兼容要求 `>=24.15.0`，`packageManager` 固定为 `pnpm@12.3.0`。`mise.toml` 是本地和 GitHub Actions 的工具版本来源，不要重新引入 `.node-version`、Corepack 或 `setup-node` 作为第二套来源。
+先按[工具链安装步骤](commands.md#工具链)安装依赖。[mise.toml](../../mise.toml) 统一固定本地与 CI 版本，根 [package.json](../../package.json) 保留最低 Node 兼容要求和 pnpm 声明；不再增加 `.node-version`、Corepack 或 `setup-node` 作为第二来源。日常命令使用 `mise exec -- pnpm`。
 
-[`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `pmOnFail: ignore` 是有意的兼容边界：pnpm 12 只维护不含 YAML document separator 的 project lock，而不在 [`pnpm-lock.yaml`](../../pnpm-lock.yaml) 前写 package-manager environment document。同时启用 `blockExoticSubdeps: true`、`trustPolicy: no-downgrade`，对超过 10080 分钟（7 天）的既有版本使用 `trustPolicyIgnoreAfter: 10080`，并将新依赖的最短发布等待时间设为 10080 分钟；Cloudflare Workers 类型包通过 `minimumReleaseAgeExclude` 明确列为例外。GitHub Dependency Graph 和 Pull Request Dependency Review 因此能读取 workspace 的真实依赖变化。代价是不能把 pnpm 自身的 package-manager mismatch failure 当成版本证明；本仓库改由 mise pin、`packageManager` 声明、`pnpm install --frozen-lockfile` 和 `node-version-contract.test.mjs` fail closed 保证一致性。
+[pnpm-workspace.yaml](../../pnpm-workspace.yaml) 保持以下约束：
 
-首次准备环境：
+- `pmOnFail: ignore` 使 pnpm 12 只维护 project lock，避免 package-manager environment document 影响 GitHub Dependency Graph/Review；版本一致性由 mise、包声明、冻结安装和 `scripts/ci/node-version-contract.test.mjs` 保证。
+- `blockExoticSubdeps: true`、`trustPolicy: no-downgrade`；`minimumReleaseAge` 与 `trustPolicyIgnoreAfter` 均为 10080 分钟（7 天）。Cloudflare Workers 类型包的例外按精确版本列出，不扩大豁免。
 
-```bash
-mise trust
-mise install
-mise exec -- pnpm install --frozen-lockfile
-```
-
-日常命令优先写成 `mise exec -- pnpm ...`。工作区职责和直接入口如下：
-
-| 工作区                  | 主要职责                                    | 直接验证                                                 |
-| ----------------------- | ------------------------------------------- | -------------------------------------------------------- |
-| `packages/shared`       | 模型、令牌、答案和 ORT 资产契约             | `typecheck`、`test`                                      |
-| `packages/browser-core` | DOM、答题、推理、缓存和状态面板共用逻辑     | `typecheck`、`test`                                      |
-| `apps/userscript`       | 用户脚本、GM 适配器、Worker 和构建          | `typecheck`、`test`、`test:e2e`                          |
-| `apps/extension`        | MV3 入口、后台代理、推理 Host、设置页和打包 | `typecheck`、`test`、浏览器 E2E                          |
-| `apps/model-worker`     | Cloudflare Worker、Key 鉴权、R2 资产和额度  | `typecheck`、`test`；线上探测另行执行 `check:deployment` |
-
-依赖方向由 [`scripts/checks/check-architecture-boundaries.mjs`](../../scripts/checks/check-architecture-boundaries.mjs) 维护。启用类型依赖检查的边界同时覆盖 `import type`、`import('…').Type` 与 `typeof import('…')`，不能用类型查询绕开依赖约束。新增跨包导入、移动目录或修改 package export 后必须运行 `architecture:check`。
+工作区职责见[整体架构](../architecture/overview.md)。新增跨包导入、移动目录或修改 package export 后运行 `architecture:check`；类型边界同时检查 `import type`、`import('…').Type` 与 `typeof import('…')`。
 
 ## Model Worker 测试配置
 
-测试和静态检查使用占位绑定，不得使用生产 KV、R2 标识或生产 Key：
+包含 Worker 的测试或构建（包括根 `pnpm check`）前准备占位绑定。`apps/model-worker/wrangler.toml` 是生成物；已有自定义配置时，先在仓库外备份，验证后按字节恢复，禁止输出其中的绑定或凭据。不要手改或提交生成配置，权威来源是 [wrangler.template.toml](../../apps/model-worker/wrangler.template.toml) 和渲染器。
 
 ```bash
 MODEL_KEYS_KV_NAMESPACE_ID=test-kv \
@@ -38,126 +23,89 @@ MODEL_BUCKET_NAME=test-bucket \
 mise exec -- pnpm --filter @hv-pony-solver/model-worker render-config
 ```
 
-之后运行离线检查：
+然后运行离线检查：
 
 ```bash
 mise exec -- pnpm --filter @hv-pony-solver/model-worker typecheck
 mise exec -- pnpm --filter @hv-pony-solver/model-worker test
 ```
 
-`check:deployment` 需要线上绑定、配置或服务可达性时才执行。它不是离线单元测试；执行时必须明确记录目标环境、是否使用受保护凭据以及探测结果，不能用占位绑定把部署探测伪装成通过。
-
-`apps/model-worker/wrangler.toml` 是生成物，不应手工编辑或提交；权威来源是 `apps/model-worker/wrangler.template.toml` 和渲染器。CI 测试 job 使用占位绑定，部署 job 只有秘密完整时才使用 deploy 环境变量；未勾选发布且 secrets 不完整时跳过配置渲染和 Wrangler dry-run/deploy；部署 workflow 不自动执行公开线上探测，显式发布但缺少秘密必须 fail closed。
-
-运行根 `pnpm check` 前，若当前没有可复用的测试配置，先用上面的 `test-kv` 和 `test-bucket` 渲染配置；若已有自定义生成配置，先在仓库外备份；验证后按字节恢复，不能输出其中的绑定或凭据。配置生成属于有副作用的准备步骤，不应在仅审阅源码时自动执行。
+普通测试不用生产 KV/R2 标识或 Key。`check:deployment` 是独立线上探测，需要明确目标环境和服务可达性，不能用占位绑定代替线上证据。部署 job 的 secrets、dry-run 和发布条件见[部署工作流](releases.md#model-worker-部署工作流)。仅审阅源码不需要渲染配置。
 
 ## 按修改区域选择验证
 
-先运行能直接证明修改正确的最小命令，再按边界扩大：
+先运行定向测试，再按影响的边界扩大；各工作区完整命令见[命令参考](commands.md)。
 
-| 修改区域                                      | 最小验证                                           | 补充验证                                                                                          |
-| --------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `packages/shared` 契约或资产                  | shared `typecheck`、`test`                         | `docs:check`；受影响应用检查                                                                      |
-| `packages/browser-core` DOM、答题、面板或推理 | browser-core `typecheck`、`test`                   | `architecture:check`、`browser-sinks:check`、页面 E2E                                             |
-| `apps/userscript` 构建或运行时                | userscript `typecheck`、`test`、`build`            | default/bundled 两个 bundle profile；页面 E2E                                                     |
-| `apps/extension` 消息、权限、缓存或打包       | extension `typecheck`、`test`、`build`             | content、Chromium、Firefox、packaged、最低版本边界                                                |
-| `apps/model-worker` 路由、额度或配置          | 渲染测试配置、worker `typecheck`、`test`           | `docs:check`；需要线上绑定时再执行 `check:deployment`，并记录环境与目标                           |
-| `scripts`、根配置或工作流                     | 对应 `scripts/**/*.test.mjs` 或 `pnpm test`        | `format:check`、`lint`、`docs:check`、`architecture:check`、`browser-sinks:check`、pinned-actions |
-| `README.md` 或 `docs/`                        | `node --test "scripts/docs-drift/test/*.test.mjs"` | `pnpm format:check`、`pnpm docs:check`、`git diff --check`                                        |
+| 修改区域                           | 最小验证                                  | 补充验证                                     |
+| ---------------------------------- | ----------------------------------------- | -------------------------------------------- |
+| shared 契约或资产                  | shared `typecheck`、`test`                | 文档漂移与受影响应用                         |
+| browser-core DOM、答题、面板或推理 | browser-core `typecheck`、`test`          | 架构、危险调用、页面 E2E                     |
+| 用户脚本构建或 Runtime             | userscript `typecheck`、`test`、`build`   | 两个 bundle profile、页面 E2E                |
+| 扩展消息、权限、缓存或打包         | extension `typecheck`、`test`、对应构建   | content、双浏览器、remote/packaged、最低版本 |
+| Worker 路由、额度或配置            | 测试配置、worker `typecheck`、`test`      | 文档漂移；需要线上验收时另做部署探测         |
+| scripts、根配置或工作流            | 对应 Node 测试或 `pnpm test`              | 格式、lint、相关静态门禁与 Action pin        |
+| README 或 docs                     | [文档验证](documentation.md#验证文档修改) | vendor Runtime README 单独检查               |
 
-修改公开命令、默认值、路由、资产或构建方式时，[`README.md`](../../README.md)、主题文档、测试和 [`scripts/docs-drift/`](../../scripts/docs-drift/) 必须一起检查。
+公开命令、默认值、路由、资产或构建变化按[文档联动表](documentation.md#按修改类型同步)检查 README、专题、测试和漂移提取器。
 
 ## 根命令与测试分层
 
-根 [`package.json`](../../package.json) 的主要命令：
+`pnpm test` 先执行工作区测试，再执行根级 `scripts/**/*.test.mjs`，其中包括工作流、工具版本、文档和边界检查器的回归。`pnpm test:coverage` 只调度工作区覆盖率，不含根级测试，不能替代 `pnpm test`。
 
-| 命令                       | 作用                                                |
-| -------------------------- | --------------------------------------------------- |
-| `pnpm format:check`        | 第一方格式检查，排除生成物、vendor 和 pnpm 锁文件   |
-| `pnpm lint`                | ESLint 全仓库检查                                   |
-| `pnpm typecheck`           | 各 workspace 的 TypeScript 检查                     |
-| `pnpm test`                | workspace test，然后 `scripts/**/*.test.mjs`        |
-| `pnpm test:coverage`       | 仅各 workspace 的 `test:coverage`                   |
-| `pnpm docs:check`          | 契约漂移、文档命令、本地链接/标题锚点与决策笔记检查 |
-| `pnpm architecture:check`  | 跨模块导入边界                                      |
-| `pnpm browser-sinks:check` | 浏览器危险 sink 白名单                              |
-| `pnpm bundle:check`        | 默认 userscript 构建和包体门禁                      |
-| `pnpm check:quick`         | format:check、lint、typecheck、test 和主要静态门禁  |
-| `pnpm check`               | `check:quick`、coverage、全仓库 build               |
-
-`pnpm test` 会先执行每个 workspace 的 `test`，再执行根目录 `scripts/**/*.test.mjs`。因此根 Node 测试包括工作流 pin、Node/pnpm 版本、文档漂移、架构和浏览器 sink 规则；这些测试不属于 workspace Vitest。
-
-`pnpm test:coverage` 调用 `pnpm -r test:coverage`，只覆盖 workspace 脚本，不包含根 `scripts/**/*.test.mjs`。它不能替代 `pnpm test`，也不能单独证明 CI `test` job 通过。CI `coverage-build` 还执行全仓库 `build` 和两个 userscript bundle budget profile。
-
-Vitest 主要覆盖 TypeScript/运行时逻辑；包内显式列出的 Node `test` 覆盖构建器、配置解析、完整性契约和发布门禁。E2E 不会由 `pnpm test` 自动执行。
+Vitest 主要验证 TypeScript/运行时逻辑；包内 Node 测试覆盖构建器、配置、完整性和发布工具。`pnpm check` 的[完整顺序](commands.md#仓库级命令)包含格式、静态门禁、测试、覆盖率和构建，但不自动执行浏览器 E2E 或联网依赖审计。依赖变更另运行 `mise exec -- pnpm audit:high`，与 CI 的 High 门槛一致。
 
 ## 浏览器证据边界
 
-```bash
-mise exec -- pnpm test:e2e:userscript
-mise exec -- pnpm test:e2e:extension:content
-mise exec -- pnpm test:e2e:extension:chromium:load-only
-mise exec -- pnpm test:e2e:extension:firefox:load-only
-mise exec -- pnpm test:e2e:extension:packaged
-```
+| 证据                       | 能证明什么                                         | 不能代替什么             |
+| -------------------------- | -------------------------------------------------- | ------------------------ |
+| userscript E2E             | Playwright Chromium 中的用户脚本流程               | 其他管理器、生产鉴权     |
+| extension content          | 临时确定性 Host 的内容脚本整链行为                 | 正式模型推理             |
+| remote load-only           | Chromium 加载/普通设置、Firefox 实际 ZIP/设置控件  | Key 鉴权与模型推理       |
+| authenticated              | 受保护 Key 下载、完整性校验后至少一次真实 `detect` | 内置模型与其他浏览器     |
+| packaged fixture/canonical | 无 Key 推理与会话重建，结果绑定实际 ZIP            | 彼此的模型身份、远程鉴权 |
+| 精确最低版本               | Chromium 116、Firefox Desktop 140 的内置包行为     | 更高版本或 Android       |
+| Firefox Android 142        | 受信任外部 run 对同一 Firefox ZIP 的成功推理       | 本地桌面 Firefox         |
 
-Chromium 与 Firefox、远程模型与内置模型、内容脚本 smoke 与实际推理分别是不同证据。最低版本 job 使用 Chromium 116 和 Firefox 140，证明最低支持版本上的内置包行为。Firefox Android 142 发布证据来自受信任的外部工作流，并由发布 job 校验 run ID、commit SHA、workflow ID、事件和证据文件；本地桌面 Firefox 不能替代它。
+内置模型 smoke 关闭随机回退，核对 checkbox index/confidence；fixture 还需匹配 artifact 的预期结果。Chromium 加载已校验 ZIP 的解压目录，Firefox 临时安装实际 ZIP。最低版本 job 设置 `REQUIRE_EXACT_MINIMUM_BROWSER=true`，更高浏览器版本不能冒充覆盖。工具安装、命令和证据格式见[扩展手册](../browser-extension.md)。
 
-没有受保护生产凭据时，不能把 load-only、fixture 或未执行的 authenticated smoke 描述为真实模型鉴权推理。`extension-remote-authenticated-e2e` 在配置未启用时状态为 skipped，不产生鉴权证据；如果显式要求执行鉴权路径而缺少 Key，必须 fail closed。受保护 Key 只允许在显式 CI environment 中读取，不能出现在日志、测试快照、URL 或文档。
+显式执行 authenticated 命令但缺 Key 时必须失败。CI 的远程鉴权 job 有两种跳过情形：条件不满足时整个 job 为 skipped；job 已启动但缺 Key 时输出 `enabled=false`，后续 smoke 跳过，job 本身仍可能成功。发布必须同时要求 job 成功和 `outputs.enabled == 'true'`，不能只看绿色状态。受保护凭据只从指定环境读取，不写入日志、快照、URL 或文档。
 
 ## CI job 与本地命令
 
-[`verify-monorepo.yml`](../../.github/workflows/verify-monorepo.yml) 的检查与发布职责如下；是否运行还受 workflow 条件控制：
+[Repository CI](../../.github/workflows/verify-monorepo.yml) 的对应关系如下，运行条件以 workflow 为准：
 
-| job                                | 本地对应                                                  | 证明内容                                                              |
-| ---------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------- |
-| guardrails                         | lint、typecheck、audit、docs、architecture、browser-sinks | 静态、文档、边界和依赖安全                                            |
-| codeql                             | 无本地等价物                                              | GitHub CodeQL 分析和告警连续性；扩展发布等待本次分析作业成功          |
-| dependency-review                  | 无本地等价物                                              | PR 依赖 high 严重度门禁                                               |
-| test                               | pnpm test                                                 | workspace 和根 Node 测试                                              |
-| coverage-build                     | test:coverage、build、两个 bundle:check                   | 覆盖率、构建和 userscript 包体                                        |
-| userscript-e2e                     | test:e2e:userscript                                       | Chromium userscript smoke                                             |
-| extension-e2e                      | content、远程 Chromium/Firefox、benchmark:ci              | 扩展传输、桌面加载和有限性能                                          |
-| extension-remote-authenticated-e2e | authenticated 命令                                        | 受保护远程模型鉴权；未启用时 skipped，显式执行缺 Key 必须 fail closed |
-| extension-minimum-versions-e2e     | 精确浏览器加 packaged smokes                              | Chromium 116、Firefox 140                                             |
-| extension-packaged-e2e             | packaged fixture 加双浏览器 smoke                         | 内置模型推理                                                          |
-| extension-canonical-packaged-e2e   | canonical 下载、build:packaged、双浏览器                  | 发布前 canonical 桌面证据                                             |
-| firefox-android-142-release-gate   | 无本地等价物                                              | 外部 Android 142 证据绑定                                             |
-| userscript-artifact                | bundled build、bundle:check:bundled                       | 手动用户脚本 artifact                                                 |
-| extension-artifact                 | release-gate preflight                                    | 内置扩展 artifact 发布门禁                                            |
-| extension-release                  | release-gate preflight 加 Release API                     | main 分支远程模型桌面 ZIP 发布                                        |
+| job                                | 本地入口或范围                                                                                                       |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| guardrails                         | Action pin、`audit:high`、格式、lint、typecheck、docs、architecture、browser-sinks                                   |
+| codeql                             | GitHub CodeQL，无本地等价物；扩展发布依赖本次分析成功                                                                |
+| dependency-review                  | PR high 严重度依赖门禁，无本地等价物                                                                                 |
+| test                               | `pnpm test`，含根级 Node 测试                                                                                        |
+| coverage-build                     | `test:coverage`、`build`、两个用户脚本 bundle profile                                                                |
+| userscript-e2e                     | `test:e2e:userscript`                                                                                                |
+| extension-e2e                      | content、remote 双浏览器 load-only、`benchmark:ci`；首次完整 ZIP 上传等待全部远程发布门禁                            |
+| extension-remote-authenticated-e2e | authenticated；同时核对 job 状态和 enabled 输出                                                                      |
+| extension-minimum-versions-e2e     | 精确 Chromium 116/Firefox 140 加 packaged smoke                                                                      |
+| extension-packaged-e2e             | 确定性 fixture 加桌面双浏览器 smoke                                                                                  |
+| extension-canonical-packaged-e2e   | canonical 下载、`build:packaged`、桌面双浏览器；显式发布时校验外部 Android 142 run、同一 ZIP 与 preflight 后首次上传 |
+| userscript-artifact                | bundled 构建/预算及手动 artifact 上传                                                                                |
+| extension-artifact                 | canonical 内置包发布 preflight                                                                                       |
+| extension-release                  | 复用已测试 remote ZIP，校验身份后创建 Release                                                                        |
 
-[`deploy-cloudflare-model-worker.yml`](../../.github/workflows/deploy-cloudflare-model-worker.yml) 是独立手动部署流程：要求 main，先审计依赖、渲染配置、typecheck、worker tests 和 Wrangler dry-run；未勾选发布且缺少秘密时跳过线上 dry-run/deploy，显式勾选发布但四项 Cloudflare 配置不完整时必须 fail closed，不用伪造值。
+`benchmark:ci` 只测浏览器 Blob 复制与全缓冲 digest，虽绑定扩展产物身份，并未测量扩展消息、prepare、detect 或缓存；实际链路由独立 product 基准测量。基准不提供发布或准确率证据。
 
-修改 CI 时逐项核对 job 实际命令、权限、触发条件和依赖；复用初始化不能删除根级 Node 测试或合并不同浏览器的证据。对应回归在 `scripts/ci/`。
+修改 CI 时核对实际命令、权限、条件和 `needs`，保留根级 Node 测试及各浏览器独立证据；回归位于 `scripts/ci/`。独立的[Worker 部署工作流](releases.md#model-worker-部署工作流)不属于普通 Repository CI。
 
 ## 包体、ORT 与生成物
 
-default userscript profile 由 `bundle:check:default` 检查，预算 256 KiB；bundled profile 由 `bundle:check:bundled` 检查，预算 1 MiB。两个 profile 必须分别报告，压缩构建不能替代默认门禁。
+默认用户脚本预算 `256 KiB`，内置 Runtime 预算 `1 MiB`。分别执行对应构建和 `bundle:check:default` / `bundle:check:bundled`，避免后一次构建覆盖前一次待查产物；压缩构建不能替代默认门禁。
 
-精简 ORT 构建可能下载源码、创建 Python 环境、编译大型资产并清理独立构建根目录。普通审查不要随意运行 `build-minimal-ort-runtime.sh`；优先运行 Node 测试和静态检查。
+精简 ORT 构建涉及下载、Python 环境、大型资产编译和构建根清理，前提见[Runtime 专题](../onnx-runtime.md)。普通文档或源码审阅优先使用已有资产、Node 测试和静态检查。
 
-以下是本地或 CI 生成物，不应作为普通源码提交：
-
-- `apps/*/dist/`、ZIP、校验文件、artifact manifest 和 metafile；
-- `coverage/`、由 [wrangler.template.toml](../../apps/model-worker/wrangler.template.toml) 生成的 `apps/model-worker/wrangler.toml`；
-- `config/` 下的渲染配置和 ORT operator 配置；
-- `other/` 下的运行时输出；
-- Playwright、Firefox/geckodriver、本地浏览器临时目录；
-- 下载模型、Key、日志和 E2E 证据。
-
-验证结束执行：
-
-```bash
-git status --short --branch
-git diff --check
-```
-
-不得用 `git reset --hard` 或 `git checkout --` 清理用户改动。
+`dist/`、coverage、ZIP/manifest/metafile、生成的 `wrangler.toml`、`config/`、`other/` 运行时输出、下载模型、临时浏览器目录和 E2E 证据均不作为普通源码提交。验证后恢复备份配置，检查工作区，保留原有用户改动；不用 `git reset --hard` 或 `git checkout --` 清理。
 
 ## 交付前检查
 
-提交前默认运行：
+准备测试配置后，提交前默认执行：
 
 ```bash
 mise exec -- pnpm check
@@ -165,20 +113,14 @@ mise exec -- node scripts/ci/assert-pinned-actions.mjs
 git diff --check
 ```
 
-如果只修改了局部区域，仍须运行对应的最小命令；发布前不能省略 `extension:package-check`、`bundle:check` 或受影响的浏览器证据。
-
-环境缺少浏览器、geckodriver、Cloudflare 凭据或受保护模型 Key 时，应明确列出未运行的 job、原因和替代证据。静态检查通过不等于页面 E2E、真实远程鉴权、最低版本浏览器或 Firefox Android 发布证据通过。
+此外运行受影响的浏览器 E2E；纯文档任务按下一节验证即可。检查 `git status --short --branch`、`git diff` 和 `git diff --cached`，确认只有预期文件。只有用户明确要求才创建 commit、push、发布或部署。
 
 ## 格式、链接和检查器
 
-纯文档改动至少运行 `mise exec -- pnpm format:check`、`mise exec -- pnpm docs:check`、`mise exec -- node --test "scripts/docs-drift/test/*.test.mjs"` 和 `git diff --check`。Runtime 随附 README 单独检查，方法见[文档维护](documentation.md#验证文档修改)。修改检查器还应运行 lint 与对应 Node 回归。
+纯文档至少运行 `mise exec -- pnpm format:check`、`mise exec -- pnpm docs:check`、`mise exec -- node --test "scripts/docs-drift/test/*.test.mjs"` 和 `git diff --check`。vendor Runtime README 不在默认门禁范围，单独检查方式见[文档维护](documentation.md#验证文档修改)。修改检查器再运行 lint 和对应 Node 回归。
 
-格式规则来自根 package.json，忽略范围来自 .gitignore 与 .prettierignore；ESLint 使用根 flat config，TS 使用共享编译配置，各工作区独立运行 Vitest。只对本次文件执行 Prettier --write，不借任务格式化无关改动。
-
-Action 固定检查要求完整 commit SHA 或 Docker sha256，checkout 的 persist-credentials 必须属于当前步骤；解析器对相关的不支持语法失败关闭。它不等同通用 YAML 解析器。架构检查保护跨包、相对路径与反向类型依赖，浏览器危险调用检查保护 DOM/动态执行边界。
+格式来自根 `package.json`，忽略范围来自 `.gitignore` 与 `.prettierignore`；只对改动文件运行 Prettier `--write`。Action pin 检查要求完整 SHA/digest 及当前 checkout 步骤的凭据配置，对不支持的相关语法失败关闭；它并非通用 YAML 解析器。
 
 ## 验证记录格式
 
-交付时写明实际命令、结果、生成物处理及未运行项。测试绑定只用于离线验证；公开 HEAD/OPTIONS 不证明 Key 能下载真实模型；fixture/load-only 不证明鉴权推理；当前浏览器不证明最低版本；CodeQL 执行成功不证明无告警。历史报告的通过数只属于原记录，不复制进本轮验收。
-
-提交前还要检查 `git status --short --branch`、`git diff`、`git diff --cached` 和 `git diff --check`。只有用户明确要求才创建 commit、push 或发布。
+交付写明命令、结果、生成物处理和未运行项；远程证据加 run URL、commit、浏览器版本及产物身份。缺少浏览器、驱动或受保护凭据时说明限制和已有替代验证。公开 HEAD/OPTIONS、fixture/load-only、当前浏览器和 CodeQL 作业成功分别不证明真实鉴权、最低版本或无安全告警；历史通过数只属于原记录。

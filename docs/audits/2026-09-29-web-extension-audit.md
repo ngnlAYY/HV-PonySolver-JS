@@ -1,10 +1,10 @@
 # 2026-09-29 Web 与扩展全仓库审计
 
-本记录对应结合 `modern-web-guidance`、`chrome-extensions` 的全仓库风险审计，包含同次工作区已有的 MV3 加固。方法为模块/调用链盘点、关键路径源码复核、故障注入与自动化门禁；不是逐行形式化验证，也不把静态门禁通过解释为不存在漏洞。
+本记录保存 2026-09-29 结合 `modern-web-guidance`、`chrome-extensions` 的风险审计及已有 MV3 加固证据。方法为调用链盘点、关键路径复核、故障注入和自动化检查，不属于逐行形式证明；后续文档整理不刷新这些结果。
 
 ## 方法与覆盖
 
-先读取项目契约、架构与两项 skill，执行 modern-web-guidance 的搜索并读取 performance/security 指南，再按项目边界取舍。浏览器流取消、异步存储、service worker 生命周期、单调时钟与 HTTP 压缩长度语义另对照 MDN 和 Chrome 官方资料。使用 CodeGraph 定位入口；索引未覆盖文件再直接读取。
+依据项目契约、架构和两项 skill，核对 performance/security 指南及 MDN、Chrome 官方的流取消、存储、service worker、单调时钟和压缩长度语义；用 CodeGraph 定位，未索引文件直接读取。
 
 | 范围                    | 重点核对                                                                                                         | 证据入口                                                                                                             |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -62,12 +62,12 @@ Worker 测试配置仅使用测试绑定，原生成配置在检查后逐字节�
 
 2026-09-29 的 `mise exec -- pnpm audit:high` 退出 0，但报告 **4 项 moderate**；这不等于零漏洞。完整 moderate 审计退出 1。`pnpm why -r undici` 显示两条工具链分支；`pnpm audit --prod --audit-level moderate` 报告未发现已知漏洞，仅代表按 package manifest 分类的生产依赖图，不代替浏览器产物审计。
 
-| 上游公告              | 当前解析版本与范围                                                                                                                            | 上游修复版本                                       |
+| 上游公告              | 初次审计解析版本与范围                                                                                                                        | 上游修复版本                                       |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
 | `GHSA-82fw-gwwq-j7x9` | vitest / @vitest/mocker 4.1.10，两项报告；开发服务器 redirect mock 越界读取，存在服务可达性及插件入口前提，不能据此断言本项目可被远程直接利用 | 4.1.11；需同步 coverage 插件与 Cloudflare 测试集成 |
 | `GHSA-3wwx-pv8p-q78v` | undici 8.10.0（jsdom）与 7.29.0（miniflare）各一项；恶意 WebSocket 对端触发解压错误可导致 Node 进程退出                                       | 对应分支 8.10.2 / 7.29.1                           |
 
-公告核对来源：`https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9`、`https://github.com/nodejs/undici/security/advisories/GHSA-3wwx-pv8p-q78v`。这两组告警保留为后续测试工具链安全补丁事项：本轮保持包清单/锁文件不变，不用全量依赖升级混入源码修复，也不通过降低门槛或忽略 advisory 消除报告。补丁需分别验证 Vitest/coverage、Cloudflare workerd 与浏览器测试，不宜把不同 major 的 undici 强制统一。
+当时核对 [Vitest 公告](https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9)与 [undici 公告](https://github.com/nodejs/undici/security/advisories/GHSA-3wwx-pv8p-q78v)，源码修复阶段保留包清单/锁文件和审计门槛。后续独立补丁分别验证 Vitest/coverage、Cloudflare workerd 和浏览器，不强制统一 undici major；结果见本节开头的复核记录。
 
 ## 未验证与保留边界
 

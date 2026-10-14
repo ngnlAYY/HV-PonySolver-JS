@@ -17,7 +17,7 @@ Vitest 与 coverage 插件要求匹配的版本；Cloudflare 测试集成还通�
 
 ## Existing record audit
 
-检索活跃决定中的依赖、Vitest、undici、漏洞与安全审计。[构建安全与可重复性决定](2026-09-22-build-safety-and-reproducibility.md)部分重叠：它已采用有范围的 sharp 安全修复并保留门禁，本篇沿用该原则，不改写其历史结果。[有界 IO 与生命周期决定](2026-09-29-bounded-io-and-lifecycle.md)及 [MV3 边界决定](2026-09-29-extension-mv3-boundaries.md)属于上一轮源码修复；其“不升级依赖”描述保持该轮范围，不阻止本轮独立补丁。未发现需要替代的同主题 proposed/rejected 记录。
+检索活跃决定中的依赖、Vitest、undici、漏洞和审计：[构建安全](2026-09-22-build-safety-and-reproducibility.md)部分重叠，沿用其定向 sharp 补丁及保留门禁的原则，不改历史结果；[有界 IO](2026-09-29-bounded-io-and-lifecycle.md)与 [MV3](2026-09-29-extension-mv3-boundaries.md)的“不升级依赖”限定上一轮源码修复，不阻止本轮补丁。无须替代的同主题 proposed/rejected 记录。
 
 ## Alternatives considered
 
@@ -32,4 +32,4 @@ Vitest 与 coverage 插件要求匹配的版本；Cloudflare 测试集成还通�
 
 ## Consequences
 
-4 项已知测试依赖告警消除，现有源码修复和发布边界保留。undici 精确 override 需要在后续安全公告或上游升级时主动复核；Vitest 未来更新仍须同步 coverage 并验证 Cloudflare 集成。审计结果仅反映本次 registry 数据与依赖图，不证明不存在未知漏洞，也不代替 Node 内置组件、浏览器或第三方二进制的安全审计。未使用生产 Key，未运行最低浏览器版本、Android、远程 CI/CodeQL 或发布部署。
+4 项已知告警消除，源码修复与发布边界不变。后续公告/上游升级须复核 undici override；Vitest 更新须同步 coverage 并验证 Cloudflare 集成。审计仅反映当次 registry 与依赖图，不证明无未知漏洞或替代 Node 内置组件、浏览器、第三方二进制审计。未用生产 Key，未运行最低浏览器版本、Android、远程 CI/CodeQL 或发布部署。

@@ -18,23 +18,44 @@ const HASH_CHUNK_BYTES = 1024 * 1024
 
 export const DEFAULT_CANONICAL_MODEL_TIMEOUT_MS = 120_000
 
+// Only errors constructed here have messages safe for command-line output.
+class CanonicalModelError extends Error {}
+
 function canonicalUrl(value) {
   if (!value) {
-    throw new Error('PACKAGED_MODEL_URL is required for the canonical model gate')
+    throw new CanonicalModelError('PACKAGED_MODEL_URL is required for the canonical model gate')
   }
-  const url = new globalThis.URL(value)
+  let url
+  try {
+    if (typeof value !== 'string') throw new TypeError()
+    url = new globalThis.URL(value)
+  } catch {
+    // URL parser errors can retain the complete input, including credentials.
+    throw new CanonicalModelError('PACKAGED_MODEL_URL must be a valid HTTPS URL')
+  }
   if (url.protocol !== 'https:') {
-    throw new Error('PACKAGED_MODEL_URL must use HTTPS')
+    throw new CanonicalModelError('PACKAGED_MODEL_URL must use HTTPS')
+  }
+  if (url.username || url.password) {
+    throw new CanonicalModelError('PACKAGED_MODEL_URL must not contain credentials')
   }
   return url.href
 }
 
+function canonicalBearerToken(value) {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'string' || value !== value.trim() || !/^[A-Za-z0-9._~+/-]+=*$/u.test(value)) {
+    throw new CanonicalModelError('PACKAGED_MODEL_BEARER_TOKEN must be a valid Bearer token')
+  }
+  return value
+}
+
 function assertIdentity(identity) {
   if (!identity || !Number.isSafeInteger(identity.byteLength) || identity.byteLength <= 0) {
-    throw new Error('Canonical model identity has an invalid byte length')
+    throw new CanonicalModelError('Canonical model identity has an invalid byte length')
   }
   if (!/^[a-f0-9]{64}$/u.test(identity.sha256 ?? '')) {
-    throw new Error('Canonical model identity has an invalid SHA-256')
+    throw new CanonicalModelError('Canonical model identity has an invalid SHA-256')
   }
 }
 
@@ -60,7 +81,7 @@ function createDeadlineSignal(callerSignal, timeoutMs, label) {
     callerSignal?.addEventListener('abort', forwardAbort, { once: true })
   }
   const timer = setTimeout(() => {
-    controller.abort(new Error(`${label} timed out after ${timeoutMs} ms`))
+    controller.abort(new CanonicalModelError(`${label} timed out after ${timeoutMs} ms`))
   }, timeoutMs)
   return {
     signal: controller.signal,
@@ -120,13 +141,13 @@ async function readBoundedBody(response, identity, signal) {
     const parsedLength = /^\d+$/u.test(declaredLength) ? Number(declaredLength) : Number.NaN
     if (!Number.isSafeInteger(parsedLength) || parsedLength !== identity.byteLength) {
       cancelBody(response)
-      throw new Error(
-        `Canonical model Content-Length mismatch: expected ${identity.byteLength}, received ${declaredLength}`,
+      throw new CanonicalModelError(
+        `Canonical model Content-Length mismatch: expected ${identity.byteLength}, received ${Number.isSafeInteger(parsedLength) ? parsedLength : 'invalid'}`,
       )
     }
   }
   if (!response.body) {
-    throw new Error('Canonical model response body is unavailable')
+    throw new CanonicalModelError('Canonical model response body is unavailable')
   }
 
   const reader = response.body.getReader()
@@ -142,7 +163,7 @@ async function readBoundedBody(response, identity, signal) {
         if (signal.aborted) {
           throw error
         }
-        throw new Error('Canonical model body stream failed', { cause: error })
+        throw new CanonicalModelError('Canonical model body stream failed')
       }
       if (record.done) {
         complete = true
@@ -150,11 +171,13 @@ async function readBoundedBody(response, identity, signal) {
       }
       const chunk = record.value
       if (!(chunk instanceof Uint8Array)) {
-        throw new Error('Canonical model body stream returned a non-byte chunk')
+        throw new CanonicalModelError('Canonical model body stream returned a non-byte chunk')
       }
       total += chunk.byteLength
       if (total > identity.byteLength) {
-        throw new Error(`Canonical model byte length exceeds ${identity.byteLength}: received at least ${total}`)
+        throw new CanonicalModelError(
+          `Canonical model byte length exceeds ${identity.byteLength}: received at least ${total}`,
+        )
       }
       chunks.push(chunk)
     }
@@ -173,7 +196,9 @@ async function readBoundedBody(response, identity, signal) {
   }
   throwIfAborted(signal, 'Canonical model download')
   if (total !== identity.byteLength) {
-    throw new Error(`Canonical model byte length mismatch: expected ${identity.byteLength}, received ${total}`)
+    throw new CanonicalModelError(
+      `Canonical model byte length mismatch: expected ${identity.byteLength}, received ${total}`,
+    )
   }
   const bytes = new Uint8Array(total)
   let offset = 0
@@ -200,28 +225,35 @@ export async function fetchCanonicalModel(options = {}) {
   const identity = options.identity ?? canonicalIdentity
   assertIdentity(identity)
   const url = canonicalUrl(options.url ?? process.env.PACKAGED_MODEL_URL)
-  const token = options.bearerToken ?? process.env.PACKAGED_MODEL_BEARER_TOKEN
+  const token = canonicalBearerToken(options.bearerToken ?? process.env.PACKAGED_MODEL_BEARER_TOKEN)
   const timeoutMs = options.timeoutMs ?? DEFAULT_CANONICAL_MODEL_TIMEOUT_MS
   const deadline = createDeadlineSignal(options.signal, timeoutMs, 'Canonical model download')
   try {
-    const response = await awaitWithSignal(
-      () =>
-        (options.fetchImpl ?? globalThis.fetch)(url, {
-          headers: token ? { authorization: `Bearer ${token}` } : undefined,
-          redirect: 'error',
-          signal: deadline.signal,
-        }),
-      deadline.signal,
-      'Canonical model download',
-    )
+    let response
+    try {
+      response = await awaitWithSignal(
+        () =>
+          (options.fetchImpl ?? globalThis.fetch)(url, {
+            headers: token ? { authorization: `Bearer ${token}` } : undefined,
+            redirect: 'error',
+            signal: deadline.signal,
+          }),
+        deadline.signal,
+        'Canonical model download',
+      )
+    } catch {
+      throwIfAborted(deadline.signal, 'Canonical model download')
+      // Fetch errors and their nested causes can echo headers or the requested URL.
+      throw new CanonicalModelError('Canonical model request failed')
+    }
     if (!response.ok) {
       cancelBody(response)
-      throw new Error(`Canonical model download failed with HTTP ${response.status}`)
+      throw new CanonicalModelError(`Canonical model download failed with HTTP ${response.status}`)
     }
     const bytes = await readBoundedBody(response, identity, deadline.signal)
     const digest = await sha256WithSignal(bytes, deadline.signal)
     if (digest !== identity.sha256) {
-      throw new Error(`Canonical model SHA-256 mismatch: expected ${identity.sha256}, received ${digest}`)
+      throw new CanonicalModelError(`Canonical model SHA-256 mismatch: expected ${identity.sha256}, received ${digest}`)
     }
     return { bytes, identity: { ...identity }, url }
   } finally {
@@ -233,7 +265,7 @@ export async function downloadCanonicalModel(options = {}) {
   const authenticationRequired = options.authenticationRequired ?? process.env.PACKAGED_MODEL_AUTH_REQUIRED === 'true'
   const bearerToken = options.bearerToken ?? process.env.PACKAGED_MODEL_BEARER_TOKEN
   if (authenticationRequired && !bearerToken) {
-    throw new Error('PACKAGED_MODEL_BEARER_TOKEN is required by PACKAGED_MODEL_AUTH_REQUIRED')
+    throw new CanonicalModelError('PACKAGED_MODEL_BEARER_TOKEN is required by PACKAGED_MODEL_AUTH_REQUIRED')
   }
   const downloaded = await fetchCanonicalModel({ ...options, bearerToken })
   const destination = options.destination ?? path.join(repositoryRoot, 'model', downloaded.identity.filename)
@@ -250,8 +282,14 @@ export async function downloadCanonicalModel(options = {}) {
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : ''
 if (invokedPath === import.meta.url) {
-  const result = await downloadCanonicalModel({ timeoutMs: DEFAULT_CANONICAL_MODEL_TIMEOUT_MS })
-  process.stdout.write(
-    `Downloaded canonical model ${result.identity.filename} (${result.identity.byteLength} bytes, ${result.identity.sha256})\n`,
-  )
+  try {
+    const result = await downloadCanonicalModel({ timeoutMs: DEFAULT_CANONICAL_MODEL_TIMEOUT_MS })
+    process.stdout.write(
+      `Downloaded canonical model ${result.identity.filename} (${result.identity.byteLength} bytes, ${result.identity.sha256})\n`,
+    )
+  } catch (error) {
+    const message = error instanceof CanonicalModelError ? error.message : 'Canonical model download failed'
+    process.stderr.write(`${message}\n`)
+    process.exitCode = 1
+  }
 }

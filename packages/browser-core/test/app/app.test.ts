@@ -6,8 +6,11 @@ import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 import { CaptchaSolver } from '../../src/captcha/captcha-solver'
 import type { CaptchaTarget } from '../../src/captcha/captcha-target'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
+import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import { PermanentModelError } from '../../src/model/permanent-model-error'
 import { downloadModel } from '../../src/model/model-downloader'
+import { HistoryStore } from '../../src/persistence/answer-history-store'
+import { StatusPanel as BrowserStatusPanel } from '../../src/status-panel/status-panel'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
 import { appendCaptcha } from '../../../../test/support/captcha-fixture'
 
@@ -110,6 +113,28 @@ describe('App', () => {
     expect(harness.detector.prepare).not.toHaveBeenCalled()
   })
 
+  it('starts the real panel without a body and handles the captcha inserted after body restoration', async () => {
+    const panel = new BrowserStatusPanel(new HistoryStore(localStorage), {
+      synchronousSnapshot: true,
+      getSync: () => null,
+      get: async () => null,
+      set: async () => undefined,
+      remove: async () => undefined,
+    })
+    const harness = createHarness({ panel })
+    apps.push(harness.app)
+    document.body.remove()
+    expect(() => harness.app.init()).not.toThrow()
+    await settleDom()
+    expect(harness.trigger).not.toHaveBeenCalled()
+    document.documentElement.appendChild(document.createElement('body'))
+    appendCaptcha('/first-body.png')
+    await settleDom()
+    expect(document.querySelectorAll('.ponyLog')).toHaveLength(1)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+    expect(harness.trigger.mock.calls[0]?.[0]?.captchaKey).toContain('/first-body.png')
+  })
+
   it('solves an existing captcha once and ignores unrelated mutations after handling', async () => {
     const captcha = appendCaptcha('/captcha.png')
     const harness = createHarness()
@@ -128,6 +153,59 @@ describe('App', () => {
     document.body.appendChild(document.createElement('aside'))
     await settleDom()
     expect(harness.trigger).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovers the next captcha when JPX-style timer cleanup cancels a pending scan', async () => {
+    const first = appendCaptcha('/first.png')
+    const harness = createHarness()
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    // A late page mutation queues a scan; AJAX round cleanup clears its timer
+    // without letting App reset the pending handle.
+    first.appendChild(document.createElement('span'))
+    await Promise.resolve()
+    expect(vi.getTimerCount()).toBe(1)
+    first.remove()
+    vi.clearAllTimers()
+    await settleDom()
+
+    const second = appendCaptcha('/second.png')
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+    expect(harness.trigger.mock.calls[1]?.[0]).toMatchObject({ master: second })
+
+    second.appendChild(document.createElement('span'))
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+  })
+
+  it('rearms a cleared scan without extending its original deadline under repeated mutations', async () => {
+    const harness = createHarness()
+    apps.push(harness.app)
+    harness.app.init()
+    const captcha = appendCaptcha('/ajax.png')
+    await Promise.resolve()
+    vi.clearAllTimers()
+
+    for (let index = 0; index < 3; index += 1) {
+      await vi.advanceTimersByTimeAsync(25)
+      captcha.appendChild(document.createElement('span'))
+      await Promise.resolve()
+    }
+    await vi.advanceTimersByTimeAsync(24)
+    expect(harness.trigger).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    captcha.appendChild(document.createElement('span'))
+    await Promise.resolve()
+    harness.app.destroy()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('handles checkbox-driven submit readiness with one detect, submit, and history entry', async () => {
@@ -571,6 +649,92 @@ describe('App', () => {
     expect(harness.trigger.mock.calls[1]?.[0]?.captchaKey).toContain('/captcha-b.png')
   })
 
+  it.each(['answer mode', 'submit delay', 'multi-click delay'] as const)(
+    'releases a canceled pending %s read so the newest target can finish',
+    async (stage) => {
+      const captcha = appendCaptcha('/old-settings.png')
+      const image = captcha.querySelector('img')!
+      const click = vi.spyOn(captcha.submitButton, 'click').mockImplementation(() => undefined)
+      const panel = createPanel()
+      const detector = createDetector()
+      vi.mocked(detector.detect).mockResolvedValue({
+        success: true,
+        ponies: ['RA'],
+        confidences: { RA: 0.9 },
+        detections: [],
+        candidates: [],
+      })
+      let rejectOld: ((error: Error) => void) | undefined
+      const pending = new Promise<never>((_resolve, reject) => {
+        rejectOld = reject
+      })
+      const mode = vi.fn(async (): Promise<'auto'> => 'auto')
+      const submitDelay = vi.fn(async (): Promise<readonly [number, number]> => [0, 0])
+      const multiDelay = vi.fn(async (): Promise<readonly [number, number]> => [0, 0])
+      if (stage === 'answer mode') mode.mockReturnValueOnce(pending)
+      else if (stage === 'submit delay') submitDelay.mockReturnValueOnce(pending)
+      else multiDelay.mockReturnValueOnce(pending)
+      const solver = new CaptchaSolver(
+        panel,
+        detector,
+        { get: async () => new Blob(['captcha']) },
+        new AnswerSubmitter(submitDelay, multiDelay),
+        mode,
+      )
+      const { app } = createHarness({ panel, detector, solver })
+      apps.push(app)
+      app.init()
+      await vi.advanceTimersByTimeAsync(100)
+      expect(solver.isBusy).toBe(true)
+      const previousSignal = app.getAbortSignal()
+      image.src = '/new-settings.png'
+      await vi.advanceTimersByTimeAsync(101)
+      expect(previousSignal?.aborted).toBe(true)
+      expect(solver.isBusy).toBe(false)
+      expect(detector.detect).toHaveBeenCalledTimes(2)
+      expect(click).toHaveBeenCalledTimes(1)
+      expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+      rejectOld?.(new Error('late settings rejection'))
+      await settleDom()
+      expect(click).toHaveBeenCalledTimes(1)
+      expect(panel.addError).not.toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
+  it.each(['answer mode', 'submit delay'] as const)('bounds a stalled %s read without submitting', async (stage) => {
+    const captcha = appendCaptcha('/stalled-settings.png')
+    const click = vi.spyOn(captcha.submitButton, 'click').mockImplementation(() => undefined)
+    const panel = createPanel()
+    const detector = createDetector()
+    vi.mocked(detector.detect).mockResolvedValue({
+      success: true,
+      ponies: ['RA'],
+      confidences: { RA: 0.9 },
+      detections: [],
+      candidates: [],
+    })
+    const pending = new Promise<never>(() => undefined)
+    const solver = new CaptchaSolver(
+      panel,
+      detector,
+      { get: async () => new Blob(['captcha']) },
+      new AnswerSubmitter(
+        () => (stage === 'submit delay' ? pending : Promise.resolve([0, 0])),
+        async () => [0, 0],
+      ),
+      () => (stage === 'answer mode' ? pending : Promise.resolve('auto')),
+    )
+    const { app } = createHarness({ panel, detector, solver })
+    apps.push(app)
+    app.init()
+    await vi.advanceTimersByTimeAsync(100 + inferenceTimeoutConfig.settingsReadTimeoutMs)
+    expect(solver.isBusy).toBe(false)
+    expect(click).not.toHaveBeenCalled()
+    expect(panel.addError).toHaveBeenCalledWith(expect.stringContaining('读取答题设置超时'), expect.any(Number))
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('does not accept a solve completed after a URL-only navigation', async () => {
     let resolveFirst: ((result: { handled: boolean; captchaKey: string | null }) => void) | undefined
     const firstResult = new Promise<{ handled: boolean; captchaKey: string | null }>((resolve) => {
@@ -598,27 +762,79 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(2)
   })
 
-  it('rescans a handled target when responsive image selection changes through srcset', async () => {
-    const captcha = appendCaptcha('/captcha-a.png')
-    const image = captcha.querySelector('img')!
-    let currentSrc = 'http://localhost:3000/captcha-a.png'
-    Object.defineProperty(image, 'currentSrc', {
-      configurable: true,
-      get: () => currentSrc,
-    })
-    const harness = createHarness()
-    apps.push(harness.app)
-    harness.app.init()
-    await settleDom()
-    expect(harness.trigger).toHaveBeenCalledTimes(1)
+  it.each(['load', 'error'])(
+    'waits through pending srcset selection, then rescans on %s without another mutation',
+    async (eventType) => {
+      const removeListener = vi.spyOn(document, 'removeEventListener')
+      const captcha = appendCaptcha('/captcha-a.png')
+      const image = captcha.querySelector('img')!
+      let currentSrc = 'http://localhost:3000/captcha-a.png'
+      let complete = true
+      Object.defineProperty(image, 'currentSrc', {
+        configurable: true,
+        get: () => currentSrc,
+      })
+      Object.defineProperty(image, 'complete', { get: () => complete })
+      const harness = createHarness()
+      apps.push(harness.app)
+      harness.app.init()
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
 
-    currentSrc = 'http://localhost:3000/captcha-b.png'
-    image.srcset = '/captcha-b.png 1x'
-    await settleDom()
+      image.srcset = '/captcha-b.png 1x'
+      currentSrc = ''
+      complete = false
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
 
-    expect(harness.trigger).toHaveBeenCalledTimes(2)
-    expect(harness.trigger.mock.calls[1]?.[0]?.captchaKey).toContain('/captcha-b.png')
-  })
+      currentSrc = 'http://localhost:3000/captcha-b.png'
+      complete = true
+      image.dispatchEvent(new Event(eventType))
+      await settleDom()
+
+      expect(harness.trigger).toHaveBeenCalledTimes(2)
+      expect(harness.trigger.mock.calls[1]?.[0]?.captchaKey).toContain('/captcha-b.png')
+      harness.app.destroy()
+      expect(removeListener).toHaveBeenCalledWith('load', expect.any(Function), true)
+      expect(removeListener).toHaveBeenCalledWith('error', expect.any(Function), true)
+      currentSrc = 'http://localhost:3000/captcha-c.png'
+      image.dispatchEvent(new Event('load'))
+      image.dispatchEvent(new Event('error'))
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it.each(['image sizes', 'source sizes', 'source media'] as const)(
+    'cancels preparation before the scan debounce when %s changes',
+    async (change) => {
+      const captcha = appendCaptcha('/responsive.png')
+      const image = captcha.querySelector('img')!
+      const picture = document.createElement('picture')
+      const source = document.createElement('source')
+      source.srcset = '/responsive.png 1x'
+      image.replaceWith(picture)
+      picture.append(source, image)
+      Object.defineProperties(image, {
+        currentSrc: { value: new URL('/responsive.png', location.href).href },
+        complete: { value: true },
+      })
+      const harness = createHarness()
+      vi.mocked(harness.detector.prepare).mockReturnValueOnce(new Promise(() => undefined))
+      apps.push(harness.app)
+      harness.app.init()
+      await vi.advanceTimersByTimeAsync(100)
+      const previousSignal = harness.app.getAbortSignal()
+      if (change === 'image sizes') image.sizes = '100px'
+      else if (change === 'source sizes') source.sizes = '100px'
+      else source.media = '(min-width: 1px)'
+      await Promise.resolve()
+      expect(previousSignal?.aborted).toBe(true)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it('rescans a handled target when an answer control becomes disabled', async () => {
     const captcha = appendCaptcha('/captcha.png')

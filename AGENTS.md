@@ -1,182 +1,139 @@
 # AGENTS.md — HV-PonySolver-JS
 
-本文档适用于仓库根目录及其全部子目录，用于约束自动化代理和人工维护者的开发、验证与交付方式。若后续某个子目录增加更具体的 `AGENTS.md`，则该文件只覆盖其所在目录及下级目录；未覆盖部分仍遵循本文档。
-
-最后复核：2026-10-02。
+适用于仓库及全部子目录；更具体的 `AGENTS.md` 仅覆盖其目录。最后复核：2026-10-12。
 
 ## 项目定位
 
-HV-PonySolver-JS 是一个面向 Hentaiverse Pony 验证码的 TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、Cloudflare Model Worker 和共用浏览器核心。
+TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、Cloudflare Model Worker 和共用浏览器核心。客户端版本以应用 `package.json` 为准：用户脚本 `3.0.0`、扩展 `0.1.1`；私有根包、内部包和 Worker 版本独立，不联动升级。
 
-当前可分发客户端版本以各应用的 `package.json` 为准：用户脚本为 `3.0.0`，浏览器扩展为 `0.1.1`。根包、内部包和 Model Worker 的私有包版本不代表扩展版本，修改时不得为了“统一版本号”而联动升级无关工作区。
-
-必须始终保留以下产品边界：
-
-- 验证码图片预处理、ONNX Runtime Web 推理和答案选择均在浏览器本地完成；图片与识别结果不得发送给 Model Worker。
-- 用户脚本与扩展共享 DOM、答题、推理和模型契约，但各自维护平台适配器、存储和构建入口。
-- Model Worker 只负责 Key 鉴权、模型与运行时资产分发、每 Key 下载额度及对应 HTTP 契约。
-- 扩展同时支持远程模型版和内置模型版。内置模型版不得保留远程模型下载、Key 读取或远程模型 Host 权限。
-- README、补充文档、测试、资产清单与源码共同构成项目契约；修改其中一处时必须检查其他位置是否需要同步。
+- 图片预处理、ONNX Runtime Web 推理和答案选择均在浏览器本地完成；图片与识别结果不发送给 Model Worker。
+- 用户脚本与扩展共享 DOM、答题、推理和模型契约，各自维护平台适配、存储和构建入口。
+- Model Worker 只负责 Key 鉴权、模型/运行时分发、每 Key 下载额度及 HTTP 契约。
+- 扩展保留远程与内置模型两种模式；内置版不得包含远程模型下载、Key 读取或远程模型 Host 权限。
+- 源码、测试、清单、README 和 docs 共同定义契约，修改时同步核对。
 
 ## 开始工作前
 
-1. 先阅读本文件、`README.md` 以及与任务直接相关的 `docs/` 文档。
-   文档导航见 `docs/README.md`；使用说明在 `docs/usage/`，架构在 `docs/architecture/`，HTTP 契约在 `docs/reference/`，开发、命令和发布在 `docs/development/`，历史审计在 `docs/audits/`，决定记录在 `docs/decisions/`。
-2. 检查 `git status --short --branch`，保留用户已有改动，不得擅自覆盖、清理或重置。
-3. 仓库根目录存在 `.codegraph/` 时，定位符号、调用链或架构关系应先使用 `codegraph explore`，再按需读取具体文件。
-4. 优先做范围最小、可验证的修改；不要借当前任务进行无关重构、依赖升级或格式化全仓库。
-5. 任何 Key、Bearer token、Cloudflare 凭据和受保护测试值都视为秘密，不得写入源码、测试夹具、文档、日志、URL、提交信息或构建产物。
+1. 阅读本文件、[README](README.md)和任务相关文档；入口见[文档导航](docs/README.md)。
+2. 检查 `git status --short --branch`，保留已有改动，不覆盖、清理或重置。
+3. 有 `.codegraph/` 时，定位或理解代码先用 `codegraph_explore` / `codegraph explore`，再按需读取；没有索引则跳过，不自行建索引。
+4. 做最小可验证修改，不混入无关重构、依赖升级或全仓格式化。
+5. Key、Bearer、Cloudflare 凭据和受保护测试值不得进入源码、fixture、文档、日志、URL、提交信息或产物。
 
 ## 仓库结构与职责
 
-| 路径                    | 职责                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------- |
-| `apps/userscript`       | 用户脚本入口、GM 平台桥接、用户脚本构建与浏览器测试                               |
-| `apps/extension`        | Chromium/Firefox 扩展入口、后台代理、推理 Host、设置页、打包与浏览器测试          |
-| `apps/model-worker`     | Cloudflare Worker、Key 鉴权、R2 资产响应、Durable Object 下载额度及 Wrangler 配置 |
-| `packages/browser-core` | 用户脚本和扩展共用的 DOM、验证码、答题、推理、模型下载、状态面板与平台接口        |
-| `packages/shared`       | 浏览器端和 Model Worker 共用的模型、答案、令牌及 ORT 资产契约                     |
-| `scripts`               | 仓库级校验、文档漂移、架构门禁、包体预算、E2E 和发布辅助脚本                      |
-| `docs`                  | 按任务组织的使用、架构、接口、开发、决策、审计及扩展/运行时/缓存/运维专题         |
-| `model`                 | 内置扩展构建使用的本地固定模型输入；大体积模型不应随意纳入 Git                    |
-| `other`                 | 可供人工上传或归档的运行时生成物，不是默认源码入口                                |
-| `config`                | 本地生成配置；已被 Git 忽略，不得重新跟踪                                         |
-| `.github/workflows`     | 仓库 CI 与 Model Worker 手动部署流程                                              |
+| 路径                    | 职责                                                  |
+| ----------------------- | ----------------------------------------------------- |
+| `apps/userscript`       | 用户脚本入口、GM 桥接、构建与浏览器测试               |
+| `apps/extension`        | 扩展入口、后台、推理 Host、设置、打包与浏览器测试     |
+| `apps/model-worker`     | Worker、鉴权、R2 响应、Durable Object 额度与 Wrangler |
+| `packages/browser-core` | 共用 DOM、答题、推理、模型下载、面板和平台接口        |
+| `packages/shared`       | 纯模型、答案、令牌与 ORT 资产契约                     |
+| `scripts`               | 门禁、文档漂移、包体、E2E 与发布辅助                  |
+| `docs`                  | 使用、架构、参考、开发、决定、审计与领域专题          |
+| `model` / `other`       | 固定本地模型输入 / Runtime 生成物；非默认源码入口     |
+| `config`                | 被忽略的可再生本地配置，不重新跟踪                    |
+| `.github/workflows`     | 仓库 CI 与 Worker 手动部署                            |
+
+根脚本按 `checks/`、`ci/`、`docs-drift/`、`model/`、`ort-runtime/`、`e2e/`、`lib/` 分组；扩展脚本按 `build/`、`benchmark/`、`browser/`、`e2e/`、`model/`、`fixtures/`、`release/` 分组，不再平铺两级脚本根。文档测试在 `scripts/docs-drift/test/`；根与扩展 Node 测试均以带引号的 `scripts/**/*.test.mjs` 递归发现。目录联动见[目录组织](docs/development/directory-layout.md)。
 
 ## 依赖方向与模块边界
 
-根 `scripts/` 按 `checks/`、`ci/`、`docs-drift/`、`model/`、`ort-runtime/`、`e2e/` 和 `lib/` 分组；扩展 `scripts/` 按 `build/`、`benchmark/`、`browser/`、`e2e/`、`model/`、`fixtures/` 和 `release/` 分组。不要重新把入口和测试平铺到两级脚本根目录；文档测试集中在 `scripts/docs-drift/test/`，根与扩展 Node 测试使用带引号的 `scripts/**/*.test.mjs` 递归发现。
-
-- `packages/shared` 应保持与浏览器 DOM、GM API、WebExtension API 和 Cloudflare 运行时无关。
-- `packages/browser-core` 可以依赖 `packages/shared`，但必须通过平台接口接收存储、网络和页面能力，不能直接依赖用户脚本或扩展实现。
-- `apps/userscript` 和 `apps/extension` 可以依赖共用包，但彼此不得直接导入源码。
-- `apps/model-worker` 可以依赖 `packages/shared` 的纯契约，不得导入浏览器端应用代码或 DOM 逻辑。
-- 超时、状态面板、模型资产和协议常量应继续由各自权威模块集中管理，不得在调用方复制一套隐式常量。
-- 新增跨包导入或移动文件后必须运行 `architecture:check`；不要通过深层相对路径绕开 package export 或架构门禁。
-- `browser-core` 与 `shared` 使用显式 package exports；新增公共子路径前先确认调用者和契约，不恢复任意源文件的通配导出。架构 CLI 对缺失的受保护目录失败关闭，反向类型依赖同样受检查，包括 `import type`、`import('…').Type` 与 `typeof import('…')`。
+- `shared` 不依赖 DOM、GM、WebExtension 或 Cloudflare 运行时。
+- `browser-core` 可依赖 `shared`；存储、网络和页面能力通过平台接口传入，不依赖应用实现。
+- 用户脚本和扩展可依赖共用包，彼此不得导入源码；Worker 只依赖 `shared` 纯契约，不导入浏览器代码。
+- 超时、面板、模型资产与协议常量由[权威模块](docs/architecture/overview.md#权威模块与变更入口)管理，不在调用方复制。
+- 共用包保留显式 exports；新增公共子路径先确认调用者，不恢复通配导出或以深层相对路径绕过边界。
+- 跨包导入或移动文件后运行 `architecture:check`。缺失受保护目录须失败关闭，反向类型依赖同样检查，包括 `import type`、`import('…').Type` 和 `typeof import('…')`。
 
 ## 浏览器端关键不变量
 
+实现与时序见[浏览器运行时](docs/architecture/browser-runtime.md)、[扩展运行时](docs/architecture/extension-runtime.md)。
+
 ### 答案与提交
 
-- 默认开启“保留已勾选答案”，允许用户在自动识别期间手动答题。
-- 手动勾选和程序自动勾选必须可区分；程序不得撤销手动勾选。保留模式从每轮模型准备前跟踪人工变更，图片读取、推理、设置读取及点击等待期间被手动取消的候选，本轮不得重新勾回；新一轮重新捕获变更基线。
-- 保留模式下，已自动勾选项可以参与下一次识别结果合并。合计选中数不超过 4 时保持现状；超过 4 时，仅从自动项中按置信度从低到高移除，目标为至多 3 项。
-- 若手动项本身已达到或超过目标数量，不得为满足数量限制而取消手动项。提交等待结束后须按实时选中状态和自动归属再次检查超量，逐次复核裁剪点击；不得重新勾回用户已取消的答案。
-- 关闭保留模式时，程序可以清空当前勾选并接管本轮答案选择，但仍必须在提交前重新确认表单、checkbox 和按钮仍是同一组可用控件。
-- 答案控件数量、类型、连接状态、所属表单、有效禁用状态或提交按钮异常时应停止本轮处理；禁用判断须覆盖 `fieldset` 继承状态及首个 `legend` 例外，不得对已替换或失效的 DOM 继续点击。初始与最终裁剪每次点击前都须重查自动归属。
-- DOM 观察可能连续触发，同一验证码的同类失败必须经过冷却或去重，避免日志和面板记录无界刷屏。
-- App 的扫描观察器必须覆盖当前 documentElement 内的 body 整体替换和暂时缺失；不能只恢复面板而遗漏新验证码。销毁后不得被迟到的 DOM 回调重新启动。
-- 自动模式只允许一次原生提交；取消、超时、路由切换或新验证码到达后，旧任务不得继续点击或提交。观察器发现活动目标变化或移除时，先取消旧轮次，再防抖扫描最新目标；旧初始化的迟到结算不得阻塞新目标或覆盖新状态。
-- 目标快照必须包含解析后的表单 action、原生提交控件的实际 action 与控件类型；模型准备、推理或设置读取期间地址或类型变化也必须使旧任务失效，不能等进入提交器才记录地址。`formaction` 覆写不得绕过同源约束。
+- 默认保留已勾选答案，区分手动与自动归属，绝不撤销手动项。每轮模型准备前开始跟踪人工变更；图片读取、推理、设置读取及点击等待中被手动取消的候选，本轮不得勾回，新轮次重建基线。
+- 旧自动项可参与结果合并。合计不超过 4 项时保持；超过 4 项时只按置信度从低到高裁剪自动项，目标至多 3 项。手动项已达目标仍不得取消；提交等待后按实时选中和自动归属再次复核超量，每次初始/最终裁剪点击前重查归属。
+- 关闭保留模式可清空并接管本轮答案，但提交前仍确认同一组有效表单、checkbox 与按钮。
+- 控件数量、类型、连接、所属表单、有效禁用状态或提交按钮异常时停止。禁用检查覆盖 `fieldset` 继承和首个 `legend` 例外，不点击失效或替换后的 DOM。
+- 同一验证码的同类失败须冷却或去重，避免日志和面板无界重复。
+- App 观察当前 documentElement，覆盖 body 替换与暂时缺失。JPX 等脚本清除扫描 timer 后，相关 mutation 重挂扫描并保留原单调时钟截止时间，不因持续变化无限延期；销毁后迟到回调不得重启。
+- 自动模式每题只作一次原生提交；取消、超时、路由或目标变化后旧轮次停止点击/提交。观察器先取消变化或移除的活动目标，再防抖扫描；旧初始化迟到结算不得阻塞新目标或覆盖状态。
+- 目标快照从准备前包含解析后的表单 action、原生提交控件实际 action 和控件类型；准备、推理或设置读取时发生变化即令旧任务失效。`formaction` 不得绕过同源约束。
+- 图片快照包含选源声明，`srcset`/`sizes`/`picture` 变化先取消旧轮次；响应式选源未就绪不回退旧图，加载完成补扫。设置读取须可取消且有界，未决 GM 读取不得阻塞新目标。
 
 ### 状态面板
 
-- 默认位置为 `top=155, left=1240`。
-- “仅在页面存在 `div#csp` 时显示面板”默认开启，并允许用户显式关闭。
-- 面板隐藏不等于停止识别；修改可见性逻辑时要分别验证面板状态和答题流程。
-- 局部切页移除面板或替换 body 后，共用 StatusPanel 重新挂载原节点，保留状态、历史及异步写入身份；挂载恢复不能依赖 csp 显示限制开关。渲染缓存命中或清理自身 mutation 记录前也须复核挂载，destroy 必须断开观察并阻止迟到回调复活面板。
-- 新答题历史耗时从本轮模型准备前起算，自动模式截至提交点击，手动模式截至结果记录；识别阶段耗时单独统计。持续时间使用同一页面的单调时钟，记录时刻使用本地时间；取消或过期目标不得写入完成状态。
-- 状态与历史记录必须有数量上限。高频重复错误应聚合，不得无限扩张 DOM、内存或持久化记录。
-- 新历史的排序与裁剪使用每世界独立的追加序号，不能再由系统时间回拨决定新旧；显示时刻保持真实本地时间，旧记录不强制迁移。保存失败时回滚到已保存历史并显示错误。异步存储的破坏性历史裁剪只依据已提交快照，不能让未决乐观写入挤掉已保存记录；快照读取不完整时跳过删除。
-- 用户脚本历史使用同源 localStorage 独立键追加，不能恢复整根 JSON 读改写；有效旧根只读兼容。每世界读取最多 50 条，独立键在稳定追加后裁剪；并发写入可暂时超出该物理数量。
-- 面板渲染使用安全 DOM API；新增 `innerHTML`、动态代码构造或其他浏览器危险调用会触发安全门禁，原则上不得加入白名单。
+- 默认 `top=155, left=1240`，默认仅存在 `div#csp` 时显示，允许关闭限制；隐藏不停止识别，显示和答题分别验证。
+- 首次 body 暂缺时先观察并等待挂载，不中止 App 初始化；局部切页后挂回同一 StatusPanel 节点，保留状态、历史和异步写入身份。恢复独立于 csp 限制；渲染缓存命中或清理自身 mutation 前也复核挂载，destroy 阻止迟到复活。
+- 历史总耗时从模型准备前起算，自动模式截至提交点击，手动模式截至结果记录；识别阶段单独统计。持续时间用同页单调时钟，显示时刻用本地时间；取消/过期目标不写完成状态。
+- 状态、日志和历史有上限，重复错误聚合。新历史按每世界追加序号排序/裁剪，不由系统时间回拨决定新旧；旧记录不强迁移。保存失败回滚到已保存历史并报错。
+- 异步历史裁剪只依据已提交快照，未决乐观写入不能挤掉已保存记录；快照不完整则跳过删除。用户脚本用同源 localStorage 独立键追加，有效旧根只读兼容，不恢复整根 JSON 读改写。每世界最多读取 50 条，稳定追加后裁剪；并发可暂时超出物理数量。
+- 使用安全 DOM API；新增 `innerHTML`、动态代码等危险调用触发门禁，原则上不加白名单。
 
 ### 平台、存储与网络
 
-- 用户脚本通过 GM 桥接访问特权 API；扩展内容脚本不得接收模型 Key 或模型字节。
-- 用户脚本菜单保存或清除 Key，仅在 GM 存储实际提交后取消并等待旧的未完成初始化，再恢复当前失败目标；已就绪会话继续复用。取消输入、验证失败、存储失败不触发恢复，较旧提交和销毁后的迟到回调不得唤醒旧 App。
-- 扩展远程模型 Key 只保存在扩展源 IndexedDB；普通设置和历史使用 `storage.local`。不得把 Key 降级保存到页面存储、查询字符串或可回显控件。Key 的实际事务提交必须独立驱动共享 Host 取消并等待旧的未完成初始化结束，再通知内容页，不能依赖可能已取消的原请求成功响应。调用方取消仍报告取消，但不能宣称撤销已提交的变更；提交前回滚不通知，已关闭 Host 的迟到回调不得唤醒旧生命周期。已就绪会话可继续复用。
-- 内容脚本镜像初始化按 key 合并变更，并受超时、取消和不同 key 数量上限约束；读取快照失败时必须清理监听器。预先取消不读取快照或注册监听；销毁后不得启动尚在排队的写入/删除，已发起调用仍按真实结果结算，不宣称撤销已提交变更。历史解析缓存必须观察外部写入，不能省略写入后的最终校对。
-- 调用原生 `fetch` 时必须保留正确接收者，使用项目已有的 fetch 解析辅助函数，避免 `Illegal invocation`。
-- 跨上下文消息必须执行严格 schema、来源、大小、超时和取消校验。不要把 `unknown` 消息直接断言为可信类型。Broker 必须校验实际 `sender.url`，不得以 `sender.tab.url` 兜底；提供 `sender.origin` 时须与页面一致且非 opaque，提供 `frameId` 时须为 0。内容来源限定两个 Hentaiverse HTTPS 标准端口 origin，设置来源限定本扩展设置页。
-- Port 的 `onDisconnect` 回调须通过平台辅助函数同步读取 Chromium `runtime.lastError`，并兼容 Firefox `port.error`；BFCache 断连仍须取消未决请求，页面恢复后按需重连，不能自动重放模型下载或 Key 操作。
-- 验证码图片消息保持明确的大小上限；HTTP Content-Type 严格校验后规范化为基础 MIME，扩展消息继续使用精确白名单。取消尚未开始的 detect 必须移除队列项并释放图片，不能等慢队头结束再释放。模型字节使用可转移 `ArrayBuffer`，不得改为无界 Base64 或重复拷贝。
-- 异步识别遵循 latest-wins：旧请求完成得更晚时也不能覆盖新请求状态。
-- 图片、模型与运行时共用有界字节流读取；未知长度须按上限内增长的自有缓冲即时复制，不能保留任意数量分块或外部大缓冲视图。浏览器和 Model Worker 的流取消只做尽力清理，不等待可能永不完成的取消 Promise，也不能覆盖原始 HTTP、完整性或调用方取消错误。
+- 用户脚本通过 GM 桥接特权 API；扩展内容脚本不得接收模型 Key 或字节。扩展 Key 只存扩展源 IndexedDB，普通设置/历史用 `storage.local`；不降级到页面存储、URL 或可回显控件。
+- 客户端保存和发送 Key 保留验证过的原始大小写，只去除首尾空白；服务端额度身份规范化不变。下载脚本的配置校验与错误链不得回显 URL、Bearer 或受保护值。
+- GM Key 保存/清除只在实际提交后取消并等待旧未完成初始化，再恢复当前失败目标；已就绪会话复用。取消输入、验证或存储失败不恢复，旧提交和销毁后回调不得唤醒旧 App。
+- 扩展 Key 事务提交独立驱动共享 Host 的同类恢复，再通知内容页，不依赖原请求成功响应。调用方取消仍报告取消，不能声称撤销已提交变更；提交前回滚不通知，关闭后的 Host 不复活，已就绪会话可复用。
+- 内容设置镜像按 key 合并初始化变更，限制超时、取消和不同 key 数量。快照失败清理监听器；预取消不读快照或监听。销毁后不启动排队写入/删除，已发起调用按真实结果结算。历史解析缓存观察外部写入并保留写后最终校对。
+- 原生 `fetch` 通过已有解析辅助函数调用，保留接收者，避免 `Illegal invocation`。
+- 消息严格校验 schema、来源、大小、超时和取消，`unknown` 不直接断言可信。Broker 只用实际 `sender.url`，不以 `sender.tab.url` 兜底；提供的 `sender.origin` 须一致且非 opaque，提供 `frameId` 时须为 0。内容仅限两个 Hentaiverse HTTPS 标准端口 origin，设置仅限本扩展设置页。
+- Port 断连在回调内经平台助手同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。BFCache 断连取消未决请求，恢复后按需连接，不自动重放下载或 Key 操作。
+- 图片消息有明确上限；HTTP Content-Type 严格校验后规范化基础 MIME，消息保持精确白名单。排队 detect 取消即移除并释放图片，不等队头。模型用可转移 `ArrayBuffer`，不改成无界 Base64 或重复拷贝。
+- 识别遵循 latest-wins，迟到旧结果不覆盖新状态。图片、模型和 Runtime 共用有界字节读取；未知长度在上限内增长自有缓冲并即时复制，不保留任意分块或外部大缓冲视图。
+- 浏览器和 Worker 流取消仅尽力清理，不等待可能挂起的取消 Promise，不覆盖原 HTTP、完整性或调用方取消错误。
 
 ## 模型、运行时与扩展产物
 
-- 当前 ORT 模型和定制 WASM 的文件名、URL、对象键、字节长度与 SHA-256 是一组原子契约。替换资产时必须同步共享清单、Worker 配置、构建器、测试和文档。
-- 模型 GET 的 `403` 必须分类为永久 Key 拒绝，不能按瞬时错误自动重试；提示不得包含 Key、URL 或响应正文，已提交凭证仍可通过原恢复流程重试。
-- 模型和 WASM 下载必须拒绝重定向，并同时执行最大长度、声明长度、实际长度和 SHA-256 校验；失败内容不得进入缓存。内置资产的确定性完整性错误须跨推理 Worker 保留永久错误分类，不能降级为瞬时故障自动重试。
-- 远程扩展只有在完整读取、校验并成功写入 IndexedDB 后，才可向后端确认一次下载。
-- 模型二进制与确认元数据必须在同一初始事务内写入并绑定同一写入身份；确认后只更新匹配的元数据，旧确认不得覆盖新模型状态。
-- 缓存关闭、IndexedDB `versionchange`、调用方取消和操作超时必须传播到底层下载确认请求；取消后的晚到结果不得清除回执或标记本地缓存已确认，不得宣称能撤销服务端已处理的确认。
-- 内置扩展构建只接受仓库约定的固定模型输入，构建产物必须审计模型身份、CSP、权限、Host 权限、动态导入和远程可执行代码。
-- 扩展 JS、Worker、ORT glue 和 WASM 必须随包分发；不得引入远程可执行代码。构建审计须检查完整 MV3 后台、设置页、action、内容脚本和 CSP 声明，拒绝未授权的可选权限、外部连接和 sandbox；HTML 包括嵌套 template，不得含内联事件、可执行 URL、srcdoc 或 base URL 覆写。
-- 远程扩展产物不得包含 `.ort`；内置扩展产物必须且只能包含清单声明的一个 `.ort`。
-- 扩展不得声明 `web_accessible_resources` 或图片资源；如产品需求确需改变，必须同时更新威胁模型、构建审计、测试和文档。
-- 扩展 ZIP 时间使用固定的本地日历字段，不能将 UTC 时间点交给按本地时间编码的归档器；相同输入的 ZIP 字节与 SHA-256 必须跨时区一致。
-- 构建输出目录、覆盖率、生成的 Wrangler 配置和下载模型属于生成物，不应作为普通源码提交。
-- 扩展包按 `background/`、`content/`、`options/`、Chromium 专属 `offscreen/` 和 `runtime/` 分组，内置模型保留 `model/`；两份 JSON 清单保留在浏览器目标根目录。入口路径由 `apps/extension/src/platform/extension-paths.ts` 的 `EXTENSION_PATHS` 统一维护，修改时同步清单、运行时 URL、来源校验、构建审计、浏览器脚本和文档；完整目录树见 `docs/browser-extension.md`。
+资产身份与更新见[Runtime](docs/onnx-runtime.md)，缓存事务见[缓存专题](docs/model-cache-strategy.md)，打包见[扩展专题](docs/browser-extension.md)。
+
+- ORT 模型/WASM 的文件名、URL、对象键、长度和 SHA-256 是原子契约；替换时同步清单、Worker 配置、构建器、测试和文档。
+- 模型 GET `403` 是永久 Key 拒绝，不作瞬时自动重试；提示不含 Key、URL 或正文，凭证提交后可走原恢复流程。内置资产确定性完整性失败跨 Worker 保留永久分类。
+- 模型/WASM 拒绝重定向，校验最大、声明、实际长度及 SHA-256；失败内容不缓存。远程扩展完整读取、校验并成功写入 IndexedDB 后才确认下载。
+- 模型字节与回执元数据在同一初始事务内绑定同一写入身份；确认后只更新匹配元数据，旧确认不覆盖新模型。
+- 缓存关闭、IndexedDB `versionchange`、取消和超时传播到确认请求；晚到结果不清回执或标记已确认，不能撤销服务端已处理的确认。
+- 内置构建只接受固定模型输入；产物审计模型身份、CSP、权限、Host、动态导入和远程可执行代码。JS、Worker、ORT glue、WASM 均随包分发，不允许远程执行。
+- 完整审计 MV3 后台、设置、action、content 和 CSP，拒绝未授权可选权限、外部连接与 sandbox。HTML 包括嵌套 template，不含内联事件、可执行 URL、srcdoc 或 base 覆写。
+- 远程包不含 `.ort`；内置包恰含清单声明的一个 `.ort`。不得声明 `web_accessible_resources` 或图片资源，必要变更须同步威胁模型、审计、测试和文档。
+- ZIP 固定本地日历字段，不把 UTC 时间点交给按本地时间编码的归档器；相同输入跨时区字节与 SHA-256 一致。
+- 包内按 `background/`、`content/`、`options/`、Chromium `offscreen/`、`runtime/` 分组，内置另有 `model/`，两份 JSON 清单在目标根。入口由 `apps/extension/src/platform/extension-paths.ts` 的 `EXTENSION_PATHS` 管理，变更同步清单、URL、来源、审计、浏览器脚本和文档。
 
 ## Model Worker 与额度规则
 
-- 模型 Key 只接受 `Authorization: Bearer <64 位十六进制值>`；查询字符串 Key 永远不得授权真实模型。
-- Key 规范化必须统一；Durable Object 身份按规范化 Key 的不可逆摘要隔离，禁止使用全局计数器或在日志中输出原始 Key、规范化 Key、摘要或额度状态。
-- 额度限制默认开启，按每个 Key、每个 UTC 自然月最多 5 次已确认下载计算。ONNX 与 ORT 共用同一 Key 的额度。
-- `GET /quota` 只查询，不计次；真实模型 `GET` 只预留临时回执，不立即计次；客户端成功缓存后使用 `POST /quota` 确认，确认成功才计次。
-- 额度启用时，真实模型 `GET` 在读取 R2 前只读预检已确认额度，耗尽或预检失败不读取对象；预检不取代完整性检查后的原子预留，并发与待确认槽位仍由预留事务约束。
-- 同一回执重复确认必须幂等；未知、失效或未完成的回执不得计次。并发预留必须受硬上限约束，不能通过并发请求突破月度额度。
-- 关闭额度限制时，模型下载不做次数限制，查询接口必须明确返回“未启用/无限制”，不能伪造剩余次数；格式正确的确认请求返回 `409`，缺失或畸形回执返回 `400`，不得伪造确认成功。
-- 模型、额度和公开运行时路由使用各自的 CORS 方法、请求头及公开/私有策略。修改路由时不得重新合并成过宽的全局 CORS 常量。
-- `HEAD`、`OPTIONS`、诱饵模型和运行时资产不计额度。模型响应保持 `no-store`；内容寻址运行时可使用长期 immutable 缓存。
-- R2 对象缺失或完整性契约异常时应失败关闭，不得静默回退到其他对象。
-- Durable Object 绑定、类导出和迁移是持久状态契约。回滚时不得部署一个删除相关绑定或迁移的旧版本。
+精确响应归[HTTP 契约](docs/reference/model-worker-http.md)，状态所有权归[服务架构](docs/architecture/model-service.md)。
+
+- 模型 Key 只接受 `Authorization: Bearer <64 位十六进制值>`，查询字符串永不授权真实模型。统一规范化 Key，以不可逆摘要隔离 DO；不使用全局计数，不记录原 Key、规范化 Key、摘要或额度状态。
+- 默认每 Key 每 UTC 自然月最多 5 次已确认下载，ONNX/ORT 共用。`GET /quota` 只查，模型 GET 只预留回执，成功缓存后 `POST /quota` 确认才计次。
+- 开启额度时，模型 GET 在读 R2 前只读预检已确认额度；耗尽/预检失败不读对象。完整性检查后仍需原子预留，预检不替代并发/待确认槽位硬上限。
+- 回执重复确认幂等；未知、失效或未完成回执不计次，并发不能突破月度上限。
+- 关闭额度时显示未启用/无限制，不伪造有限剩余量。确认请求格式正确返回 `409`，缺失/畸形回执返回 `400`，不伪造成功。
+- 模型、额度、公开 Runtime 各自维护 CORS 方法、头与公私策略，不合并成宽泛全局常量。HEAD、OPTIONS、诱饵和 Runtime 不计次；模型 `no-store`，内容寻址 Runtime 可长期 immutable。
+- R2 缺失或完整性异常失败关闭，不回退其他对象。DO 绑定、类导出、迁移是持久状态契约，回滚不可删除。
 
 ## 编码与文档规范
 
-- 使用 TypeScript 严格类型和 ESM；跨边界输入从 `unknown` 开始验证，避免无依据的类型断言、`any` 和非空断言。
-- ESLint 规则以根 `eslint.config.mjs` 为准；Prettier 规则集中在根 `package.json#prettier`，忽略规则保留在 `.prettierignore`。遵循局部代码风格，仅格式化本次涉及的文件，避免产生无关 diff。
-- 命名应表达领域含义；协议字段、HTTP 头和外部 API 名称保留其标准英文拼写。
-- 面向用户的提示、错误和设置说明使用清晰中文；注释重点解释原因、约束和安全边界，不重复代码表面行为。
-- 错误应保留真实原因和可诊断上下文，但在 UI 或响应中不得泄露 Key、内部对象标识或敏感配置。
-- 网络断开、HTTP 错误、解析失败、完整性失败和额度拒绝应尽量区分；不要用统一的“连接已断开”掩盖后端真实错误。
-- 修改公开行为、命令、默认值、路由、响应头、资产或构建方式时，同步更新 `README.md`、相关 `docs/`、测试以及 `scripts/docs-drift/` 中对应的事实提取器和测试。
-- `apps/model-worker/wrangler.template.toml` 是 Wrangler 配置权威来源；生成的 `wrangler.toml` 不应手工维护。
-- 非平凡行为、架构、跨文件契约、流程工具、测试策略或数据格式变化，必须同步已有决定或写入 `docs/decisions/<lifecycle>/<class>/日期-主题.md`；纯机械修改不立 Note。遵循 `write-notes-like-deepseek` 的状态、备选和后果格式，理由翻转另写并互链；`docs:check` 校验结构和归档封印。
-- 归档根、目录、Markdown 与封印清单不得使用符号链接。每条封印须独立校验普通文件身份、归档内相对路径和 SHA-256；扫描遗漏不能代替核验，清单异常时不得追加封印。
-- 精确命令、HTTP、模型/Runtime 身份分别归 `docs/development/commands.md`、`docs/reference/model-worker-http.md`、`docs/onnx-runtime.md`；README 保留用户入口，移动契约时同步漂移读取目标与负向回归，不能通过拼接全部正文掩盖缺项。
-- 新增维护文档按 `docs/README.md` 的主题目录归档，并遵循 `docs/development/documentation.md` 的联动与链接规则；当前目录与迁移记录见 `docs/development/directory-layout.md`，后续实施也应同步包命令、测试发现、CI 和文档引用。
+- 严格 TypeScript/ESM，边界输入从 `unknown` 校验，避免无依据断言、`any` 和非空断言。命名表达领域，标准协议字段保持英文。
+- ESLint 看根 `eslint.config.mjs`，Prettier 看根 `package.json#prettier` 和 `.prettierignore`；只格式化本次文件。
+- 用户提示用清晰中文；注释说明原因、约束和安全边界。错误保留可诊断原因，不泄露 Key、内部标识或配置；区分断网、HTTP、解析、完整性和额度拒绝。
+- 公开行为、命令、默认值、路由、头、资产或构建变化时，同步 README 摘要、所属专题、测试与 `scripts/docs-drift/` 事实提取/回归。
+- 精确命令归 `docs/development/commands.md`，HTTP 归 `docs/reference/model-worker-http.md`，资产归 `docs/onnx-runtime.md`。迁移契约同步逐篇读取与负向测试，不拼接全部正文掩盖缺项。
+- 非平凡行为、架构、跨文件契约、工具流程、测试策略或数据格式变化须更新已有决定或新增 `docs/decisions/<lifecycle>/<class>/日期-主题.md`。遵循 [write-notes-like-deepseek 格式约定](docs/development/documentation.md#决策笔记)，理由翻转另写互链；机械修改不立 Note。
+- 归档根/目录/Markdown/封印清单拒绝 symlink。每条封印独立校验普通文件、归档相对路径和 SHA-256；扫描遗漏不替代验证，清单异常不追加封印。
+- 新维护文档按[导航](docs/README.md)归类；目录迁移同步包命令、测试发现、CI 和引用。历史审计保留原日期与证据，不刷新旧测试结果。
 
 ## 配置与秘密
 
-- 不提交 `.env`、Key、Cloudflare token、KV/R2 标识、受保护 E2E 凭据或包含这些值的日志。
-- `config/` 是可再生且被忽略的目录，不得使用强制添加重新纳入远程分支。
-- GitHub Actions 中的部署值通过受保护的 secrets/variables 和手动输入传入；默认工作流不得因缺少生产凭据而意外执行生产下载或部署。
-- 测试必须使用明确的测试占位绑定或进程内 fixture；生产 Key 不得出现在单元测试快照中。
-- 需要真实 Key 的鉴权 E2E 必须 fail closed，并只在受保护环境显式启用。普通 CI、内容脚本 E2E 和内置模型 E2E 不得访问生产模型服务。
+不提交 `.env`、凭据、KV/R2 标识、受保护 E2E 值或其日志，不强制跟踪 `config/`。`apps/model-worker/wrangler.template.toml` 是权威配置，生成的 `wrangler.toml` 不手工维护。
+
+Actions 部署值通过受保护 secrets/variables 和手动输入传入；无生产凭据时不执行生产下载/部署。测试只用明确测试绑定或进程内 fixture；真实 Key E2E 仅在受保护环境显式启用并 fail closed。普通 CI、content E2E 和内置 E2E 不访问生产模型服务。
 
 ## 测试与验证
 
-项目通过根目录 `mise.toml` 统一管理本地与 CI 工具链，精确固定 Node.js `24.15.0` 和 pnpm `12.3.0`。`package.json` 保留 Node.js `>=24.15.0` 的兼容要求以及 `pnpm@12.3.0` 的包管理器声明，必须与 mise 配置同步。首次运行 `mise trust`、`mise install`，再运行 `mise exec -- pnpm install --frozen-lockfile` 安装 npm 依赖。优先使用 `mise exec -- pnpm`；包脚本和已激活 mise 的 shell 内可以直接调用 `pnpm`。
+工具链由 `mise.toml` 固定 Node.js `24.15.0`、pnpm `12.3.0`，同步根包 Node `>=24.15.0` 与 `pnpm@12.3.0`。首次 `mise trust`、`mise install`、`mise exec -- pnpm install --frozen-lockfile`；优先用 `mise exec -- pnpm`，包脚本或已激活 shell 可直接用 pnpm。
 
-先运行与改动直接相关的最小测试，再按风险扩大范围。常用定向命令：
-
-```bash
-mise exec -- pnpm --filter @hv-pony-solver/browser-core test
-mise exec -- pnpm --filter @hv-pony-solver/userscript test
-mise exec -- pnpm --filter @hv-pony-solver/extension test
-mise exec -- pnpm --filter @hv-pony-solver/model-worker test
-mise exec -- node --test "scripts/docs-drift/test/*.test.mjs"
-```
-
-提交前的默认完整检查；首次执行前先按下文准备 Model Worker 本地测试配置：
-
-```bash
-mise exec -- pnpm check
-mise exec -- node scripts/ci/assert-pinned-actions.mjs
-git diff --check
-```
-
-`mise exec -- pnpm check` 包含第一方格式检查、lint、类型检查、工作区与根级测试、文档漂移与链接、架构边界、浏览器危险调用、扩展打包、包体预算、覆盖率和全仓库构建。格式检查使用 `.gitignore` 与 `.prettierignore` 排除生成物、第三方资产和 pnpm 锁文件。
-
-特别注意：
-
-- `mise exec -- pnpm test` 会先执行各工作区测试，再执行 `scripts/**/*.test.mjs` 根级测试。
-- `mise exec -- pnpm -r test:coverage` 不包含根级 `scripts/**/*.test.mjs`；它不能替代 `mise exec -- pnpm test`，也不能单独证明 GitHub Actions 的 `test` job 会通过。
-- 包含 Model Worker 的测试或构建（包括根 `pnpm check`）前，按 CI 方式生成测试配置。该命令会覆盖生成的 `wrangler.toml`；已有自定义配置时先在仓库外备份，验证结束后恢复：
+先定向验证，再按风险扩大，例如 `mise exec -- pnpm --filter @hv-pony-solver/browser-core test`；完整矩阵见[验证手册](docs/development/verification.md)。包含 Worker 的测试/构建前，先在仓库外备份已有生成配置，渲染测试绑定，结束按字节恢复：
 
 ```bash
 MODEL_KEYS_KV_NAMESPACE_ID=test-kv \
@@ -184,48 +141,54 @@ MODEL_BUCKET_NAME=test-bucket \
 mise exec -- pnpm --filter @hv-pony-solver/model-worker render-config
 ```
 
-- 修改默认或内置用户脚本运行时后，分别检查对应 bundle profile，不能用一个预算替代另一个。
-- 修改扩展构建、安全边界或浏览器协议后，至少运行相关扩展构建和 E2E；远程、内置、Chromium、Firefox、最低版本与 Firefox Android 证据证明不同边界，不能互相替代。
-- 没有受保护 Key 时，不得把 load-only 测试描述成已完成真实模型鉴权推理。
-- 纯文档修改至少运行 `mise exec -- pnpm format:check`、`mise exec -- pnpm docs:check`、文档漂移测试和 `git diff --check`；vendor 下的项目 Runtime README 不在默认格式/链接门禁范围内，修改时单独核对。
+提交前默认完整检查：
 
-如果完整检查因环境能力缺失而无法执行，应明确记录未运行项目、原因和替代验证，不得笼统声称“全部通过”。
+```bash
+mise exec -- pnpm check
+mise exec -- node scripts/ci/assert-pinned-actions.mjs
+git diff --check
+```
+
+`check` 包含格式、lint、类型、工作区和根测试、文档、架构、危险调用、扩展打包、包体、覆盖率与构建。格式按忽略规则排除生成物、第三方资产与锁文件。`pnpm test` 包含根级 `scripts/**/*.test.mjs`，`pnpm -r test:coverage` 不包含，不能替代前者或证明 CI test job 通过。
+
+- 修改用户脚本 Runtime 后分别检查 default/bundled 包体，不互相替代。
+- 修改扩展构建、安全或协议后，至少运行相关构建/E2E；远程/内置、Chromium/Firefox、最低版本/Android 各自提供证据。load-only 不证明真实模型鉴权。
+- 纯文档至少执行以下命令；vendor Runtime README 另按[维护规则](docs/development/documentation.md#验证文档修改)检查：
+
+```bash
+mise exec -- pnpm format:check
+mise exec -- pnpm docs:check
+mise exec -- node --test "scripts/docs-drift/test/*.test.mjs"
+git diff --check
+```
+
+环境缺能力时明确未运行项、原因与替代验证，不声称全部通过。
 
 ## GitHub Actions 与部署
 
-- 仓库只维护两个工作流：`.github/workflows/verify-monorepo.yml` 的 `Repository CI`，以及 `.github/workflows/deploy-cloudflare-model-worker.yml` 的手动部署流程。
-- 两个工作流使用 `jdx/mise-action` 读取根目录 `mise.toml`，并保留 pnpm store 缓存及冻结依赖安装；仅需 Node.js 的发布步骤可以限定安装 `node`。
-- GitHub Action 必须固定到完整 40 位 commit SHA，Docker Action 必须固定到完整 `sha256` digest，并通过 `scripts/ci/assert-pinned-actions.mjs` 校验。同行 flow 步骤中的每个 `uses` 均须检查；quoted 键和值的转义先解码，纯标量文本不得被当成配置，无法可靠识别的相关语法须拒绝。checkout 凭证配置不能借用相邻步骤或字符串中的字段。
-- 修改 CI 时要核对本地命令与 job 实际命令，尤其不能遗漏根级 Node 测试。
-- CodeQL 属于仓库安全门禁。扩展 artifact 与 Release 发布必须显式依赖本次 `codeql` 作业并要求成功；分析执行成功不等于没有安全告警。修复告警后要等待目标分支的新分析完成，并同时检查最新分析结果和告警实例状态。
-- Model Worker 部署默认不应发生。只有手动输入明确允许发布且 Cloudflare secrets 完整时才可执行真实部署。
-- 下载额度开关属于部署配置：构建或部署选择无限制时，客户端额度查询必须显示未启用限制，而不是显示一个虚假的有限次数。
-- 工作流文件数量应保持精简；合并 job 或 workflow 时必须保留权限最小化、条件执行、发布门禁和已有 Code Scanning 连续性。
+仅维护 `.github/workflows/verify-monorepo.yml`（Repository CI）和 `.github/workflows/deploy-cloudflare-model-worker.yml`（手动部署）。两者用 `jdx/mise-action` 读根工具链，保留 pnpm store 缓存/冻结安装；仅需 Node 的发布步骤可只装 node。
 
-`Repository CI` 的手动发布入口必须按产品类型区分：
+- Actions 固定完整 40 位 commit SHA，Docker 固定完整 `sha256`，由 `assert-pinned-actions.mjs` 校验。同行 flow 中每个 `uses` 都检查，quoted 键值先解码；纯标量不当配置，不能可靠识别的相关语法拒绝，checkout 凭据字段不借用相邻步骤或字符串。
+- CI 修改核对真实 job 命令，不漏根 Node 测试；合并 job/workflow 保留最小权限、条件、发布门禁及 Code Scanning 连续性。
+- 扩展 artifact/Release 显式依赖本次 `codeql` 成功。完整 ZIP 的首次上传（含 job 间传递）也须通过发布授权及全部所需门禁；Android 校验在 canonical 构建 job 内对本地同一 ZIP 完成。分析成功不等于无告警；修复后核对新分析及告警实例。
+- Worker 默认不部署，仅明确允许发布的手动输入且 secrets 完整时部署。额度开关属于部署配置，无限制时客户端显示未启用。
 
-- `publish_userscript_artifact` 只上传用户脚本 Actions artifact，不创建 GitHub Release。
-- `publish_extension_release` 只允许从 `main` 创建 `extension-v<apps/extension/package.json version>`，发布远程模型桌面 Chromium/Firefox ZIP、校验文件和 artifact 元数据；默认关闭，不代表浏览器商店发布或 Firefox Android 验证。
-- `publish_extension_artifact` 发布内置模型扩展 artifact，必须通过 canonical 模型、桌面双浏览器、受保护远程模型和同一 Firefox ZIP 的 Android 142 外部证据门禁。
-- 普通 push、Pull Request 和未勾选发布输入的手动运行不得创建 Release 或发布生产 artifact。
+| 手动输入                      | 授权产物与门禁                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `publish_userscript_artifact` | 只上传用户脚本 Actions artifact，不创建 Release                                                         |
+| `publish_extension_release`   | 仅 main 创建 `extension-v<扩展版本>`，含远程桌面双浏览器 ZIP、校验与元数据；非商店发布/Android 验证     |
+| `publish_extension_artifact`  | 内置模型 artifact，须 canonical、桌面双浏览器、受保护远程模型和同一 Firefox ZIP 的 Android 142 外部证据 |
+
+发布输入默认关闭。普通 push/PR 或未勾选输入的手动运行不创建 Release、不发布生产 artifact。详细门禁见[CI 与发布](docs/development/releases.md)。
 
 ## Git 与交付纪律
 
-- 不使用 `git reset --hard`、`git checkout --` 或其他破坏性命令清理用户改动。构建和工具安装的递归输出清理须拒绝仓库、cwd、home 本身及包含它们的祖先目录，即使输出位于临时目录中也不能例外。
-- 提交前检查 `git status`、`git diff`、`git diff --cached` 和 `git diff --check`，确认只包含本任务文件。
-- 不提交 `dist/`、`coverage/`、生成的 `wrangler.toml`、`config/`、临时浏览器配置、测试证据、下载模型或含秘密的文件。
-- commit 信息应概括行为变化，不使用含糊的“update/fix stuff”。
-- 只有用户明确要求时才创建 commit、push、发布 artifact 或部署；推送前确认远程分支没有未整合的新提交。
-- 推送后若任务要求 CI 或安全复核，应等待对应 commit 的远程检查结束再报告结果；仅“已触发”不等于“已通过”。
+- 不用 `git reset --hard`、`git checkout --` 等清理用户改动。递归构建/安装清理拒绝仓库、cwd、home 及其祖先，临时目录也不例外。
+- ORT 构建持有已验证根目录的只读描述符锁，不跟随或截断遗留 `.build.lock`；加锁后仍核对构建根身份。
+- 提交前检查 status、diff、cached diff 和 `git diff --check`，仅包含本任务文件；不提交 dist、coverage、生成配置、下载模型、浏览器配置、临时证据或秘密。大模型不随意纳入 Git。
+- commit 概括具体行为。仅用户明确要求才 commit、push、发布 artifact 或部署；push 前整合远程新提交。
+- 要求远程 CI/安全复核时，等待对应 commit 检查结束再报告，已触发不等于通过。
 
 ## 本文件的维护
 
-出现下列变化时，应在同一改动中更新本文件：
-
-- 新增、删除或重命名工作区、关键目录或 GitHub Actions 工作流。
-- 调整用户脚本、扩展、共用包或 Model Worker 的依赖方向。
-- 修改答题、面板、Key 存储、模型下载、完整性校验、额度确认或 CORS 的关键不变量。
-- 更换 Node/pnpm 版本、完整验证命令、发布门禁或部署方式。
-- 本文列出的命令、默认值或安全约束已不再符合源码。
-
-维护时以当前源码、测试和工作流为依据，参考历史文档结构但不要保留与本项目无关的规则。更新后至少执行 Markdown 格式检查、`git diff --check` 和受影响的文档漂移测试。
+目录/工作区/workflow、依赖方向、关键不变量、工具链/验证/发布或本文事实变化时，同批更新本文件及相关专题。以源码、测试和工作流为准，保留强约束，详细操作链接到权威文档；至少执行 Markdown 格式、`git diff --check` 和受影响的文档漂移测试。

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const STORAGE_KEY = 'hvPonySolverModelAccessKey'
 // The core setter enforces the Worker's token format (64 hex chars).
-const VALID_TOKEN = 'A'.repeat(64)
+const VALID_TOKEN = 'aB'.repeat(32)
 const VALID_TOKEN_LOWER = VALID_TOKEN.toLowerCase()
 
 describe('model settings', () => {
@@ -35,14 +35,14 @@ describe('model settings', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
   })
 
-  it('trims and normalizes keys before persisting them through GM storage', async () => {
+  it('trims keys and preserves their casing in GM storage', async () => {
     const setValue = vi.fn(async () => undefined)
     vi.stubGlobal('GM_setValue', setValue)
     const { setModelAccessKey } = await import('../../src/model/model-settings')
 
     await setModelAccessKey(`  ${VALID_TOKEN}  `)
 
-    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN_LOWER)
+    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN)
   })
 
   it('rejects saving a key that does not match the token format', async () => {
@@ -86,7 +86,7 @@ describe('model settings', () => {
 
     await setModelAccessKeyFromPrompt()
 
-    await expect(getModelAccessKey()).resolves.toBe(VALID_TOKEN_LOWER)
+    await expect(getModelAccessKey()).resolves.toBe(VALID_TOKEN)
     expect(alert).toHaveBeenCalledWith('模型下载 Key 已保存')
   })
 
@@ -105,6 +105,26 @@ describe('model settings', () => {
     expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
   })
 
+  it('can verify the saved value against the same historical mixed-case KV entry', async () => {
+    const { getModelAccessTokenLookupKeys } = await import('@hv-pony-solver/shared/token')
+    const store = new Map<string, string>()
+    vi.stubGlobal('prompt', () => ` ${VALID_TOKEN} `)
+    vi.stubGlobal('alert', vi.fn())
+    vi.stubGlobal('GM_setValue', async (key: string, value: string) => {
+      store.set(key, value)
+    })
+    vi.stubGlobal('GM_getValue', async (key: string, fallback: string) => store.get(key) ?? fallback)
+    const verify = vi.fn(async (candidate: string) => {
+      if (!getModelAccessTokenLookupKeys(candidate).includes(VALID_TOKEN)) throw new Error('HTTP 403')
+    })
+    const { getModelAccessKey, setModelAccessKeyFromPrompt } = await import('../../src/model/model-settings')
+
+    await setModelAccessKeyFromPrompt(verify)
+
+    expect(verify).toHaveBeenCalledExactlyOnceWith(VALID_TOKEN)
+    await expect(verify(await getModelAccessKey())).resolves.toBeUndefined()
+  })
+
   it('reports verification and storage completion without claiming a model download', async () => {
     const alert = vi.fn()
     const setValue = vi.fn(async () => undefined)
@@ -118,7 +138,7 @@ describe('model settings', () => {
     await setModelAccessKeyFromPrompt(verify, onCommitted)
 
     expect(verify).toHaveBeenCalledWith(VALID_TOKEN)
-    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN_LOWER)
+    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN)
     expect(onCommitted).toHaveBeenCalledExactlyOnceWith()
     expect(alert).toHaveBeenLastCalledWith('模型下载 Key 已验证并保存')
   })
@@ -137,7 +157,7 @@ describe('model settings', () => {
     await clearModelAccessKey()
 
     expect(getValue).toHaveBeenCalledWith(STORAGE_KEY, '')
-    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN_LOWER)
+    expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN)
     expect(deleteValue).toHaveBeenCalledWith(STORAGE_KEY)
   })
 

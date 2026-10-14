@@ -9,6 +9,7 @@ import type { AnswerMode } from './answer-mode-settings'
 import type { AnswerSelectionSnapshot, AnswerSubmissionService, SubmitOptions } from './answer-submitter'
 import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from './captcha-target'
 import type { ImageLoader } from './captcha-types'
+import { readAnswerSettings } from './read-answer-settings'
 import { solverConfig } from './solver-config'
 
 /** Backoff schedule shared by every transient retry loop in the package. */
@@ -166,7 +167,7 @@ export class CaptchaSolver {
       const detectionResult: YoloParseResult = detectionOutcome.value
       const detectionElapsed = Math.round(performance.now() - detectionStartedAt)
 
-      const answerMode = await this.getAnswerMode()
+      const answerMode = await readAnswerSettings(() => this.getAnswerMode(), signal)
       if (!isCurrent()) {
         return result(false)
       }

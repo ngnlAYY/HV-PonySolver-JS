@@ -16,9 +16,7 @@ function createSubmitter(
 }
 
 async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
+  await vi.advanceTimersByTimeAsync(0)
 }
 
 function createForm(includeSubmitButton: boolean): HTMLFormElement {
@@ -379,14 +377,16 @@ describe('AnswerSubmitter', () => {
       const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
       button.click = vi.fn()
       const onSubmitted = vi.fn()
-      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
-
       const submitPromise = createSubmitter([2500, 2500], [700, 700]).submit(form, ['TS', 'RA'], vi.fn(), onSubmitted)
-      await vi.waitFor(() => expect(setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 700))
-      await vi.runOnlyPendingTimersAsync()
       await flushMicrotasks()
-      expect(setTimeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 2500)
-      await vi.runOnlyPendingTimersAsync()
+      expect(checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(699)
+      expect(checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(2)
+      await vi.advanceTimersByTimeAsync(2499)
+      expect(button.click).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
       await submitPromise
 
       expect(button.click).toHaveBeenCalledTimes(1)
@@ -401,18 +401,20 @@ describe('AnswerSubmitter', () => {
       }
       const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
       button.click = vi.fn()
-      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
-
       const submitter = new AnswerSubmitter(
         async () => [2600, 2600],
         async () => [800, 800],
       )
       const submitPromise = submitter.submit(form, ['TS', 'RA'], vi.fn(), vi.fn())
-      await vi.waitFor(() => expect(setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 800))
-      await vi.runOnlyPendingTimersAsync()
       await flushMicrotasks()
-      expect(setTimeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 2600)
-      await vi.runOnlyPendingTimersAsync()
+      expect(checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(799)
+      expect(checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(2)
+      await vi.advanceTimersByTimeAsync(2599)
+      expect(button.click).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
       await submitPromise
 
       expect(button.click).toHaveBeenCalledTimes(1)

@@ -104,7 +104,6 @@ export class StatusPanel implements StatusPanelContract {
         this.scheduleRender()
       })
     }
-    document.body.appendChild(this.el)
     this.configureDomObserver()
     this.render()
   }

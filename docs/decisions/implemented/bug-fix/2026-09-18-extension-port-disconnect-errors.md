@@ -10,13 +10,13 @@ Chromium 在页面进入 BFCache 时主动关闭扩展消息通道，并在 `onD
 
 平台层的 `readPortDisconnectError` 在断连回调内同步读取 `runtime.lastError`，以 Firefox 的 `port.error` 作为兼容来源，去掉空白并在没有具体原因时返回 null。三个 Port 消费者统一调用该函数；内容客户端在检查 Port 身份前读取，避免迟到的旧回调留下未消费错误。
 
-内容客户端和设置页用具体原因拒绝未决请求，没有原因时继续使用原来的中文提示。Broker 读取错误后仍按断连取消该 Port 的请求，保留 Host 结算前的并发计数，不向已断开的页面发送迟到结果，也不新增页面导航日志。
+内容客户端和设置页用具体原因拒绝未决请求，无原因时保留原中文提示。Broker 仍取消该 Port 请求，保留 Host 结算前的并发计数，丢弃迟到响应，不新增导航日志。
 
 现有 `pagehide.persisted` 取消与 `pageshow.persisted` 重建应用的流程保持有效。内容请求按需建立新 Port；设置页仍仅允许额度查询重连一次，模型下载与 Key 操作不自动重放。处理错误不改变消息 schema、权限或模型存储契约。
 
 ## Existing record audit
 
-检索全部非归档决定中的 BFCache、Port、pagehide、pageshow、断连与 lastError，没有已有同主题决定。现有[面板恢复决定](2026-09-16-status-panel-remount.md)处理同一应用内的 DOM 节点移除，与浏览器冻结页面时销毁并重建应用的生命周期无关；[文档重建决定](../process/2026-09-16-documentation-rebuild.md)仅提供记录归属，均不被本篇取代。
+检索非归档决定中的 BFCache、Port、pagehide/pageshow、断连与 lastError，无同主题记录。[面板恢复](2026-09-16-status-panel-remount.md)处理同一实例的 DOM 移除，不涉及冻结页面后重建应用；[文档重建](../process/2026-09-16-documentation-rebuild.md)只约束记录归属，均保留。
 
 ## Alternatives considered
 
@@ -31,4 +31,4 @@ Chromium 在页面进入 BFCache 时主动关闭扩展消息通道，并在 `onD
 
 ## Consequences
 
-页面导航不再因这三处回调漏读错误而产生未处理告警，其他断连原因仍可诊断；代价是新增 Port 消费者必须遵守同步读取约束。它不会保持 BFCache 中的通道，也不会恢复已取消操作。若消费者数量或 Port 适配复杂度继续增长，再评估统一事件包装。
+三处回调不再漏读导航错误，其他断连原因仍可诊断；新增消费者必须同步读取。此变更不保持 BFCache 通道或恢复已取消操作；消费者数量或适配复杂度增长时，再评估统一事件包装。

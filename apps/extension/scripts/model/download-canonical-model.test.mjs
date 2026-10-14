@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { setImmediate } from 'node:timers'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
+import { inspect } from 'node:util'
 
 import { downloadCanonicalModel, fetchCanonicalModel, sha256WithSignal } from './download-canonical-model.mjs'
 
@@ -14,6 +17,8 @@ const identity = {
   byteLength: bytes.byteLength,
   sha256: createHash('sha256').update(bytes).digest('hex'),
 }
+
+const downloaderPath = fileURLToPath(new globalThis.URL('./download-canonical-model.mjs', import.meta.url))
 
 test('canonical downloader refuses redirects and sends an optional bearer token', async () => {
   let request
@@ -71,6 +76,123 @@ test('canonical downloader fails closed on URL, authentication, length, hash and
   )
 })
 
+test('configuration failures reject credentials before invoking fetch without retaining their values', async () => {
+  const marker = 'PUBLIC_CONFIGURATION_SENTINEL'
+  for (const [options, expectedMessage] of [
+    [{ url: `invalid URL ${marker}` }, 'PACKAGED_MODEL_URL must be a valid HTTPS URL'],
+    [
+      { url: `https://fixture:${marker}@models.example/canonical.ort` },
+      'PACKAGED_MODEL_URL must not contain credentials',
+    ],
+    ...['\n', '\r', '\0', ' ', '\u0100'].map((invalid) => [
+      { url: 'https://models.example/canonical.ort', bearerToken: `${marker}${invalid}suffix` },
+      'PACKAGED_MODEL_BEARER_TOKEN must be a valid Bearer token',
+    ]),
+    ...['\n', '\r\n', ' '].map((invalid) => [
+      { url: 'https://models.example/canonical.ort', bearerToken: `${marker}${invalid}` },
+      'PACKAGED_MODEL_BEARER_TOKEN must be a valid Bearer token',
+    ]),
+  ]) {
+    let fetchCalls = 0
+    await assert.rejects(
+      fetchCanonicalModel({
+        ...options,
+        identity,
+        fetchImpl: async () => {
+          fetchCalls += 1
+          return new globalThis.Response(bytes)
+        },
+      }),
+      (error) => {
+        assert.equal(error.message, expectedMessage)
+        assert.equal(error.cause, undefined)
+        assert.ok(!inspect(error).includes(marker))
+        return true
+      },
+    )
+    assert.equal(fetchCalls, 0)
+  }
+})
+
+test('fetch errors and invalid response length headers do not retain sensitive diagnostics', async () => {
+  const marker = 'PUBLIC_DIAGNOSTIC_SENTINEL'
+  for (const [fetchImpl, expectedMessage] of [
+    [
+      async () => {
+        throw new Error(marker, { cause: new Error(`nested ${marker}`) })
+      },
+      'Canonical model request failed',
+    ],
+    [
+      async () => new globalThis.Response(bytes, { headers: { 'content-length': marker } }),
+      'Canonical model Content-Length mismatch: expected 4, received invalid',
+    ],
+  ]) {
+    await assert.rejects(
+      fetchCanonicalModel({ fetchImpl, identity, url: 'https://models.example/canonical.ort' }),
+      (error) => {
+        assert.equal(error.message, expectedMessage)
+        assert.equal(error.cause, undefined)
+        assert.ok(!inspect(error).includes(marker))
+        return true
+      },
+    )
+  }
+})
+
+test('canonical CLI emits only safe configuration messages for malformed URLs and newline-bearing tokens', () => {
+  const marker = 'PUBLIC_CLI_SENTINEL'
+  for (const [url, token, expectedMessage] of [
+    [`invalid URL ${marker}`, '', 'PACKAGED_MODEL_URL must be a valid HTTPS URL'],
+    [
+      'https://models.example/canonical.ort',
+      `${marker}\nsuffix`,
+      'PACKAGED_MODEL_BEARER_TOKEN must be a valid Bearer token',
+    ],
+  ]) {
+    const result = spawnSync(process.execPath, [downloaderPath], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      env: {
+        ...process.env,
+        PACKAGED_MODEL_URL: url,
+        PACKAGED_MODEL_BEARER_TOKEN: token,
+        PACKAGED_MODEL_AUTH_REQUIRED: 'false',
+      },
+    })
+    assert.equal(result.error, undefined)
+    assert.equal(result.status, 1)
+    assert.equal(result.stdout, '')
+    assert.equal(result.stderr, `${expectedMessage}\n`)
+    assert.ok(!`${result.stdout}${result.stderr}`.includes(marker))
+  }
+})
+
+test('canonical CLI does not print unexpected errors or their nested causes', () => {
+  const marker = 'PUBLIC_UNEXPECTED_ERROR_SENTINEL'
+  const preload = `globalThis.fetch = async () => ({ get ok() { throw new Error('${marker}', { cause: new Error('${marker}') }) } })`
+  const result = spawnSync(
+    process.execPath,
+    ['--import', `data:text/javascript,${encodeURIComponent(preload)}`, downloaderPath],
+    {
+      encoding: 'utf8',
+      timeout: 5_000,
+      env: {
+        ...process.env,
+        PACKAGED_MODEL_URL: 'https://models.example/canonical.ort',
+        PACKAGED_MODEL_BEARER_TOKEN: '',
+        PACKAGED_MODEL_AUTH_REQUIRED: 'false',
+      },
+    },
+  )
+
+  assert.equal(result.error, undefined)
+  assert.equal(result.status, 1)
+  assert.equal(result.stdout, '')
+  assert.equal(result.stderr, 'Canonical model download failed\n')
+  assert.ok(!`${result.stdout}${result.stderr}`.includes(marker))
+})
+
 test('canonical downloader bounds streamed bytes and reports body failures', async () => {
   const oversizedBody = new globalThis.ReadableStream({
     start(controller) {
@@ -108,8 +230,7 @@ test('canonical downloader bounds streamed bytes and reports body failures', asy
       identity,
       url: 'https://models.example/canonical.ort',
     }),
-    (error) =>
-      error?.message === 'Canonical model body stream failed' && /broken canonical stream/u.test(error.cause?.message),
+    (error) => error?.message === 'Canonical model body stream failed' && error.cause === undefined,
   )
 })
 

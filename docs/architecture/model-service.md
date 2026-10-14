@@ -1,87 +1,66 @@
 # Model Worker 与共享契约
 
-Model Worker 只承担 Key 鉴权、模型/运行时分发与每 Key 下载额度，不接收验证码或答案。本文解释内部顺序和持久状态；精确方法、响应矩阵与 CORS 见[HTTP 契约](../reference/model-worker-http.md)，配置与部署见[运维手册](../model-worker-ops.md)。
+Model Worker 负责 Key 鉴权、模型/运行时分发和每 Key 下载额度，不接收验证码或答案。本文解释组件、请求顺序和持久状态；方法与响应头见 [HTTP 契约](../reference/model-worker-http.md)，客户端事务见[缓存策略](../model-cache-strategy.md)，部署见[运维手册](../model-worker-ops.md)。
 
 ## 组件边界与目录
 
-```text
-apps/model-worker/
-├── src/
-│   ├── index.ts                 Worker fetch 入口与 Durable Object 导出
-│   ├── request-router.ts        路由、方法分支、处理流程编排
-│   ├── model-access.ts          Authorization Bearer 解析与 KV 授权
-│   ├── model-response.ts        响应头、CORS、缓存和错误响应
-│   ├── asset-integrity.ts       R2 元数据完整性预检
-│   ├── model-download-quota.ts 额度 Durable Object 与调用客户端
-│   ├── env.ts                   环境变量解析、校验和缓存
-│   ├── request-timeout.ts       KV/R2/DO 依赖超时
-│   ├── logger.ts                脱敏日志分类
-│   └── worker-types.ts          Cloudflare 绑定的最小接口
-├── test/                        Worker、DO、完整性和环境契约测试
-└── scripts/                     Wrangler 渲染、部署契约与配置校验
-```
+| `apps/model-worker/` 路径                 | 职责                                           |
+| ----------------------------------------- | ---------------------------------------------- |
+| `src/index.ts`                            | Worker fetch 入口、`ModelDownloadQuota` 类导出 |
+| `src/request-router.ts`                   | 路由匹配、方法分支和请求编排                   |
+| `src/model-access.ts`                     | Bearer 解析、规范化 Key 和 KV 授权             |
+| `src/model-response.ts`                   | 响应头、CORS、缓存与错误响应                   |
+| `src/asset-integrity.ts`                  | R2 长度和 SHA-256 元数据预检                   |
+| `src/model-download-quota.ts`             | 额度 Durable Object、状态校验及调用客户端      |
+| `src/env.ts`、`src/worker-types.ts`       | 配置解析、校验、缓存与最小绑定接口             |
+| `src/request-timeout.ts`、`src/logger.ts` | KV/R2/DO 超时与脱敏分类日志                    |
+| `test/`、`scripts/`                       | Worker 测试、配置渲染/校验和部署探测           |
 
-`packages/shared` 是浏览器端与服务端共同使用的纯契约层，不能依赖 DOM、扩展 API、GM API 或 Cloudflare API。入口 [`packages/shared/src/index.ts`](../../packages/shared/src/index.ts) 汇总答案代码、访问令牌、旧 ONNX 清单、ORT 清单和运行时 WASM 清单；包配置同时以显式 exports 公开经过调用者盘点的领域子路径。`apps/model-worker` 只能从该包消费名称、路径、资产身份和协议常量；R2、KV、Durable Object 与请求对象均留在 Worker 内部。
+Worker 只从 `packages/shared` 消费纯契约；R2、KV、DO 和请求对象留在 Worker 内部。shared 不依赖 DOM、扩展、GM 或 Cloudflare API，入口和领域子路径均使用显式 package exports。
 
 ## 请求入口与路由
 
-`src/index.ts` 的 `worker.fetch` 将请求直接交给 `handleRequest`，同时导出 `ModelDownloadQuota` 供 Wrangler 的 Durable Object 类绑定使用。`src/request-router.ts` 先调用 `readWorkerConfig`，再按完整 pathname 与配置值精确匹配四类路由：
+`worker.fetch` 委托 `handleRequest`：读取并校验配置，按完整 pathname 精确匹配旧 ONNX、ORT、额度或公开 WASM 路由，再处理 OPTIONS、方法限制和业务请求。未知路径返回 404，方法不符返回带 `Allow` 的 405；具体矩阵见 [HTTP 参考](../reference/model-worker-http.md#响应矩阵)。
 
-| 路由类别        | 默认路径来源                                          | 方法                     | 鉴权                                                            | 响应缓存/额度                                        |
-| --------------- | ----------------------------------------------------- | ------------------------ | --------------------------------------------------------------- | ---------------------------------------------------- |
-| 旧 ONNX 模型    | `DEFAULT_PUBLIC_MODEL_PATH`，默认 `/yolo26n-640.onnx` | `GET`、`HEAD`、`OPTIONS` | 模型 Key；无效 Key 由 `INVALID_KEY_MODE` 决定                   | `no-store`；仅真实 `GET` 在启用额度时预留回执        |
-| ORT 模型        | `ORT_MODEL_PUBLIC_PATH`，默认 `/yolo26n-640.ort`      | `GET`、`HEAD`、`OPTIONS` | 同上                                                            | `no-store`；与旧模型共用同一 Key 额度                |
-| 额度接口        | 默认 `/quota`                                         | `GET`、`POST`、`OPTIONS` | 必须是真实 Bearer Key，即使无效 Key 模式为 `decoy` 也不返回诱饵 | JSON `no-store`；`GET` 查询，`POST` 确认回执         |
-| 公开运行时 WASM | `ORT_RUNTIME_WASM_PUBLIC_PATH`，文件名由内容身份决定  | `GET`、`HEAD`、`OPTIONS` | 无                                                              | `public, max-age=31536000, immutable`，允许 `*` CORS |
-
-未匹配路径返回 404。OPTIONS 在业务处理前分支：模型和额度使用私有来源策略并声明对应方法/请求头，WASM 使用公开 `*` 策略。匹配路由但方法不允许时返回 405 和相应 `Allow`。路由顶层捕获异常，记录不含秘密的错误分类并返回通用 500；底层 KV、R2、DO 错误不会把 Key、摘要、对象身份或内部错误文本回显给客户端。
+OPTIONS 不做 Key/额度操作。模型和额度使用受限来源策略，WASM 成功响应和预检使用公开策略。顶层异常返回通用 500；日志只记路由和错误类别，不回显 Key、摘要、对象身份或底层错误文本。
 
 ## 鉴权与 Key 边界
 
-`src/model-access.ts` 只从 `Authorization` header 读取 `Bearer <token>`，不从 query string 获取 Key。请求 token 先经过 `normalizeModelAccessToken`，要求 64 位十六进制并转为小写 canonical token；`getModelAccessTokenLookupKeys` 再生成 canonical、原始混合大小写和历史大写变体的查询序列。KV 命中非空值即选择 `real`，否则根据配置返回 `decoy` 或 `forbidden`。
+`model-access.ts` 只读取 `Authorization: Bearer`。`normalizeModelAccessToken` 要求 64 位十六进制并转为小写；`getModelAccessTokenLookupKeys` 按 canonical、原始混合大小写和历史大写变体查询 KV，非空白标记才授权真实模型。query Key 不授权，也不作为无效 Bearer 的兜底。
 
-canonical token 的用途分开处理：KV 查询需要短期兼容历史大小写键，额度身份只使用 canonical token 的 SHA-256 摘要调用 `idFromName`。原始 Key、canonical Key、摘要和 KV 值都不得进入日志或响应。模型请求中的 query `key` 即使有效也不会授权真实对象；当 Authorization 无效时也不会回退到 query Key。
-
-额度接口始终要求真实 Bearer Key，不复用模型路由的诱饵响应。扩展远程模型下载在完整读取、校验并成功写入缓存后，才使用响应中暴露的回执调用 `POST /quota`；这条客户端时序由浏览器核心实现，Worker 只负责服务端预留和确认。
+KV 查询保留历史大小写兼容；额度身份始终以 canonical Key 的 SHA-256 调用 `idFromName`，每 Key 独占一个 SQLite-backed DO。原始 Key、canonical Key、摘要和 KV 值均不进入日志或响应。无效模型 Key 按 `INVALID_KEY_MODE` 返回诱饵或 403；额度接口始终要求真实 Key。
 
 ## 响应职责
 
-[model-response.ts](../../apps/model-worker/src/model-response.ts) 集中生成响应。模型、额度和公开 WASM 分别使用自己的 CORS 方法、允许头与来源策略；新路由不得合并成过宽的全局策略。模型及错误 no-store，公开内容寻址 WASM 可长期 immutable；HEAD/OPTIONS 不计额度。完整头字段与 400/403/405/409/429/500/503 含义由 [HTTP 矩阵](../reference/model-worker-http.md#响应矩阵)维护。
+[model-response.ts](../../apps/model-worker/src/model-response.ts) 集中生成响应。模型、额度和公开 WASM 各自声明 CORS 方法、允许头与来源策略，不合并成全局宽松策略。模型和错误响应保持 `no-store`，内容寻址 WASM 成功响应可长期 `immutable`。客户端须验证实际下载字节，不能把 Worker 的元数据检查当成正文校验。
 
 ## R2 对象完整性与响应顺序
 
-模型路由先完成 Key 决策，再选择真实对象键或 decoy 对象键。真实模型和公开 WASM 在把对象交给响应前调用 `hasExpectedR2ObjectIntegrity`：`R2Object.size` 必须等于 shared 清单中的 `byteLength`；如果 R2 记录了 SHA-256，则必须与清单匹配（大小写不敏感）；校验元数据读取异常直接失败关闭。既有对象缺少 R2 SHA-256 元数据时，Worker 允许继续，但浏览器下载器仍须校验实际字节。
+真实模型 GET 在额度开启时按以下顺序处理：
 
-真实模型 GET 在额度启用时先只读查询 DO status：已确认额度耗尽返回 429，查询失败返回 503，均不读取 R2。预检优先于对象检查，也不预留槽位；未耗尽的正常下载多一次 DO 查询，待确认槽位是否占满仍由后续 reserve 决定。
+1. 验证 Key，只读查询 DO status。已确认额度耗尽返回 429，查询失败返回 503，均不读取 R2；预检不占槽位，也不判断 pending 是否已满。
+2. 读取对应 R2 对象。`hasExpectedR2ObjectIntegrity` 要求长度精确匹配 shared；已有 SHA-256 元数据也须匹配，大小写不敏感。缺 SHA 元数据兼容既有对象，元数据读取异常则失败关闭。
+3. 对象缺失、完整性漂移或 GET 缺少 body 时返回通用 500，不回退到其他对象、不预留额度。
+4. 创建响应后执行 DO reserve，原子复核已确认数和 pending。成功才附加回执并交给客户端；拒绝返回 429/503。
 
-通过预检后，对象不存在、真实元数据漂移或 GET 对象缺少 body 都返回通用 500；公开 WASM 的对象与完整性错误也返回 500。完整性失败会先发起可读 body 的取消；不等待取消 Promise，同步抛错、拒绝或永不完成均不能阻塞 500 响应。模型 GET 创建响应后，只有真实模型、GET 且额度启用时才进入 DO reserve；reserve 仍原子复核已确认及待确认数量，拒绝时同样发起响应 body 取消并立即返回 429/503，不把模型正文交给客户端；底层资源最终释放取决于流实现，不能以等待清理为条件拖延拒绝响应。reserve 成功才附加回执并交给客户端。
+完整性或 reserve 失败时尽力取消已打开的 body，不等待取消 Promise，也不让清理抛错、拒绝或挂起覆盖原始错误。最终资源释放取决于流实现。
 
-资产契约导航：
-
-- 旧 ONNX：[`packages/shared/src/model.ts`](../../packages/shared/src/model.ts)
-- ORT 模型：[`packages/shared/src/ort-model.ts`](../../packages/shared/src/ort-model.ts)
-- ORT/WASM 路径与对象键：[`packages/shared/src/ort-assets.ts`](../../packages/shared/src/ort-assets.ts)
-- 内容寻址 WASM：[`packages/shared/src/ort-runtime.ts`](../../packages/shared/src/ort-runtime.ts)
-- Worker 环境默认值与绑定：[`apps/model-worker/wrangler.template.toml`](../../apps/model-worker/wrangler.template.toml)
-
-替换任一资产时，必须同步清单、Worker 模板/渲染器、R2 对象、客户端下载契约、测试和相关文档；不要在调用方复制长度或哈希。
+HEAD 只读元数据，真实 HEAD 和公开 WASM 同样执行完整性预检；HEAD、诱饵、WASM 和关闭额度的模型 GET 不调用 reserve。资产的精确身份与联动步骤见 [Runtime 专题](../onnx-runtime.md)。
 
 ## 额度 Durable Object：reserve/confirm 与 TTL 清理状态
 
-当前实现没有 `cancel` 端点，也没有客户端可调用的取消协议。未确认的预留由 TTL 到期清理；这只是存储清理机制，不能视为一次协议 cancel 或客户端回滚。DO 的状态按 canonical token 的 SHA-256 摘要隔离，每个身份独占一个 SQLite-backed Durable Object 实例。
-
-状态键是 `monthly-download-quota-v2`，状态结构为：
+状态键为 `monthly-download-quota-v2`。旧 v1 在正文到达客户端前计数，其无法验证的计数不迁入 v2。
 
 ```text
 {
   month: "YYYY-MM",
-  used: number,                         // 已确认下载数
-  pending: { receiptId: expiresAtMs },  // 未确认预留
-  confirmed: string[]                   // 已确认回执，保证幂等
+  used: number,                        // 已确认次数
+  pending: { receiptId: expiresAtMs }, // 未确认预留
+  confirmed: string[]                  // 已确认回执，保证幂等
 }
 ```
 
-状态只接受当前契约：月份格式有效，`used` 不超过 shared 的月上限，`confirmed.length === used`，回执必须是 32 位小写十六进制且不得重复，`pending + used` 不超过月上限。发现损坏状态会失败关闭并保留原始值，不自动修复或静默清零。
+状态校验要求月份有效、`confirmed.length === used`、`used + pending 数量 <= 5`，回执为不重复的 32 位小写十六进制。损坏状态失败关闭并保留原值，不静默清零。TTL 在请求读取状态时过滤过期预留，后续成功写入才持久化清理结果；没有客户端 `cancel` 端点。
 
 ```mermaid
 stateDiagram-v2
@@ -92,47 +71,45 @@ stateDiagram-v2
     Confirmed --> [*]: UTC 新月使用空状态
 ```
 
-上图没有客户端 cancel 状态；本地取消不撤销已经处理的确认。
-
 ### Reserve
 
-`POST /reserve` 在 DO 事务内先按当前时间清理已过期 pending。`used >= limit` 返回 `quota-exhausted`；已确认数加 pending 数达到上限返回 `reservations-full` 和最早过期时间；否则生成不重复的随机回执，将 `expiresAt = now + 10 分钟` 写入 pending。reserve 只占槽位，不增加 used，不计月度确认次数。
+内部 `POST /reserve` 在事务内读取有效状态：`used >= 5` 返回 `quota-exhausted`；`used + pending 数量 >= 5` 返回 `reservations-full` 和最早过期时间；否则生成唯一随机回执，写入十分钟有效期。reserve 只占槽位，不增加 `used`。
 
 ### Confirm
 
-`POST /confirm` 必须带合法回执 header，并在同一事务内处理。已在 `confirmed` 的回执返回 `confirmed=true, alreadyConfirmed=true`，不重复计数；仍在 pending 的回执被删除、`used` 加一并追加到 confirmed；未知、过期或月额度已满的回执返回 `confirmed=false`，不增加 used。顶层 `/quota` 将失败确认映射为 409，避免伪造成功。
+内部 `POST /confirm` 要求合法回执，在同一事务内处理：已确认回执返回 `confirmed=true, alreadyConfirmed=true`；有效 pending 被删除并使 `used` 加一、回执追加到 confirmed；未知、过期或额度已满返回 `confirmed=false`，顶层映射为 409。本地取消不能撤销服务端已处理的确认。
 
 ### Status 与月边界
 
-内部 `POST /status` 只读当前状态并返回 limit/used/remaining；它不创建持久状态。UTC 月份变化时使用空状态开始新月；旧月的 pending 和 confirmed 不迁移。未启用额度时，顶层 `/quota` 返回 `enabled=false`、`remaining=null`，不会访问 DO；格式正确的 POST 明确返回 409，缺失/畸形回执仍先返回 400。
+内部 `POST /status` 只读，不创建持久状态；返回上限、已用、剩余和距下个 UTC 月的秒数。进入新月后使用空状态，旧月 pending/confirmed 不迁移。关闭额度时顶层 `/quota` 不访问 DO，查询返回 `enabled=false` 和 `remaining=null`；确认的 400/409 规则见 HTTP 参考。
 
 ## Shared 契约导航
 
-| 模块             | 导出内容                                                 | 使用边界                             |
-| ---------------- | -------------------------------------------------------- | ------------------------------------ |
-| `answer.ts`      | `ANSWER_CODES`、`AnswerCode`、class id 映射              | 浏览器推理与答题，不进入 Worker 路由 |
-| `token.ts`       | 64 位十六进制验证、canonical 化、历史 KV lookup keys     | Worker 鉴权与浏览器 Key 设置         |
-| `model.ts`       | 旧 ONNX 文件名、版本、完整性、月度上限、回执 header/解析 | Worker、客户端下载与额度协议         |
-| `ort-model.ts`   | ORT 文件名与完整性                                       | ORT 模型下载和 R2 预检               |
-| `ort-runtime.ts` | 内容寻址 WASM 文件名、长度、SHA-256                      | 公开运行时下载和构建审计             |
-| `ort-assets.ts`  | ORT/WASM public path 与 R2 object key                    | Worker 配置默认值和客户端 URL        |
+| 模块                                                       | 内容与使用边界                            |
+| ---------------------------------------------------------- | ----------------------------------------- |
+| [answer.ts](../../packages/shared/src/answer.ts)           | 答案代码和 class id；只供浏览器推理与答题 |
+| [token.ts](../../packages/shared/src/token.ts)             | Key 验证、规范化及历史 KV lookup keys     |
+| [model.ts](../../packages/shared/src/model.ts)             | 旧 ONNX 身份、月上限、回执 header/解析    |
+| [ort-model.ts](../../packages/shared/src/ort-model.ts)     | ORT 模型文件名、长度和 SHA-256            |
+| [ort-runtime.ts](../../packages/shared/src/ort-runtime.ts) | 内容寻址 WASM 身份                        |
+| [ort-assets.ts](../../packages/shared/src/ort-assets.ts)   | ORT/WASM 公开路径和 R2 对象键             |
 
-Shared 目前按领域文件拆分，入口统一 re-export。资产身份是成组契约：源 ONNX 与其 ORT 构建需从同一导出重新生成，不能只改其中一个哈希或长度。仓库现有用户脚本/扩展构建器、完整性校验和发布脚本已经对实际模型、glue 与 WASM 执行长度和 SHA-256 校验；本页只导航这些既有门禁，不把 shared 常量测试误述为唯一的 artifact 审计。
+ONNX 与其 ORT 构建必须从同一导出一起再生；清单、Worker 模板、R2 对象、客户端下载、构建审计和文档同步更新。shared 常量测试不能代替实际模型、glue 和 WASM 的字节审计。
 
 ## 改动与测试矩阵
 
-| 改动                           | 最小验证                                                                                               | 必须补看的边界                                                    |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| 路由、HTTP 方法、CORS 或响应头 | `apps/model-worker/test/http-cors.test.ts`、`quota-http.test.ts`                                       | 两个受信 Origin、未知 Origin、无 Origin、OPTIONS/HEAD、404/405    |
-| Bearer 解析或 KV 兼容          | `apps/model-worker/test/http-cors.test.ts`、`quota-http.test.ts`、`packages/shared/test/token.test.ts` | query 不授权、大小写历史键、invalid-key `decoy/error`、无秘密错误 |
-| 资产长度/哈希/对象键           | `model-runtime-assets.test.ts`、`packages/shared/test/ort-assets.test.ts`                              | GET 与 HEAD、缺对象、缺 SHA 元数据、漂移失败关闭                  |
-| reserve/confirm/状态或月边界   | `model-download-quota.test.ts`、`quota-http.test.ts`                                                   | 并发、重复确认、TTL、UTC 月切换、跨模型共用额度、存储故障         |
-| 环境变量或 Wrangler 绑定       | `env.test.ts`、`scripts/*wrangler*.test.mjs`                                                           | 缺失值、路径/对象键冲突、DO 类/迁移保持、quota 开关               |
-| DO/依赖超时与错误脱敏          | `failure-timeout.test.ts`、`request-timeout.test.ts`、`model-download-quota.test.ts`                   | KV/R2/DO hang、取消 body、日志不含 token/摘要/对象身份            |
-| Shared 协议常量                | `packages/shared/test/*.test.ts` 及受影响 Worker 测试                                                  | 客户端 URL、Worker 默认值、文档漂移和构建产物                     |
+以下测试默认位于 `apps/model-worker/test/`：
 
-推荐验证顺序是先运行修改包的定向测试，再运行 `mise exec -- pnpm --filter @hv-pony-solver/model-worker test`、`mise exec -- pnpm --filter @hv-pony-solver/shared test`，最后执行根级 `mise exec -- pnpm check` 与 `git diff --check`。修改部署配置前，按运维手册用测试占位变量渲染 Wrangler 配置；不要把生产 Key、Cloudflare 凭据或真实对象标识写入测试。
+| 改动               | 定向测试与边界                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| 方法、CORS、Bearer | `http-cors.test.ts`、`quota-http.test.ts`、`packages/shared/test/token.test.ts`；受信/未知/无 Origin、query 不授权、大小写兼容、decoy/error |
+| 资产身份           | `model-runtime-assets.test.ts`、`packages/shared/test/ort-assets.test.ts`；GET/HEAD、缺对象/元数据、漂移失败关闭                            |
+| 额度状态           | `model-download-quota.test.ts`、`quota-http.test.ts`；并发、幂等、TTL、UTC 月切换、跨格式共用、存储故障                                     |
+| 配置/绑定          | `env.test.ts`、`apps/model-worker/scripts/*wrangler*.test.mjs`；缺值、路径冲突、DO 类/迁移、额度开关                                        |
+| 超时/脱敏          | `failure-timeout.test.ts`、`request-timeout.test.ts`；KV/R2/DO 挂起、body 取消、日志边界                                                    |
+
+先按[验证手册](../development/verification.md#model-worker-测试配置)备份生成配置并准备测试绑定，再运行定向测试、受影响包测试及根 `mise exec -- pnpm check`。精确命令见[命令参考](../development/commands.md)。
 
 ## 运维入口
 
-部署前后的 workflow、dry-run 与生产门禁见 [`docs/model-worker-ops.md`](../model-worker-ops.md)。本地配置渲染和部署脚本位于 `apps/model-worker/scripts/`，其中 `wrangler.template.toml` 是配置权威来源，生成的 `wrangler.toml` 和 `.wrangler/` 属于生成物。运维手册中的公开契约探测使用不带凭据和 body 的 OPTIONS/HEAD probe，真实模型鉴权与推理仍需单独验收；模型真实 body、Key、KV 值、R2 标识和 DO 身份不能进入日志或记录。
+[运维手册](../model-worker-ops.md)负责模板渲染、部署门禁、公开 OPTIONS/HEAD 探测和持久状态回滚。公开探测不证明真实模型鉴权或推理成功，这些须单独验收。

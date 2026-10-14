@@ -325,8 +325,65 @@ try {
   await bfcachePage.waitForTimeout(300)
   assert.equal(await bfcachePage.locator('#riddlesubmit').getAttribute('data-submit-count'), '1')
 
+  // JPX AJAX rounds import a parsed body into an overlay, submit via the
+  // original form event, then sweep the latest 100 page timer IDs.
+  currentHtml = '<!doctype html><html><body><div id="battle_main"></div></body></html>'
+  const jpxPage = await context.newPage()
+  await jpxPage.goto('https://hentaiverse.org/extension-jpx-fixture')
+  await jpxPage.locator('.ponyLog').waitFor({ state: 'attached' })
+  const detectsBeforeJpx = await serviceWorker.evaluate(() => globalThis.__fixtureDetectCount)
+  const successesBeforeJpx = await countSuccessHistory()
+  for (let round = 1; round <= 3; round += 1) {
+    await jpxPage.evaluate(
+      ({ html, round }) => {
+        const doc = new globalThis.DOMParser().parseFromString(html, 'text/html')
+        doc.querySelectorAll('script').forEach((script) => script.remove())
+        const overlay = globalThis.document.createElement('div')
+        overlay.id = 'riddle-panel'
+        overlay.appendChild(globalThis.document.importNode(doc.body, true))
+        globalThis.document.body.appendChild(overlay)
+        const form = overlay.querySelector('form')
+        form.id = 'riddleform'
+        const answers = [...form.querySelectorAll('input[name="riddleanswer[]"]')]
+        const submit = form.querySelector('#riddlesubmit')
+        answers.forEach((answer) => {
+          answer.addEventListener('change', () => {
+            const count = answers.filter((item) => item.checked).length
+            submit.disabled = count === 0 || count >= 4
+          })
+        })
+        form.addEventListener('submit', (event) => {
+          event.preventDefault()
+          globalThis.document.body.dataset.jpxSelected = String(answers.filter((answer) => answer.checked).length)
+          globalThis.document.body.dataset.jpxSubmissions = String(
+            Number(globalThis.document.body.dataset.jpxSubmissions || '0') + 1,
+          )
+          // Simulate the asynchronous AJAX response after the click completes.
+          globalThis.setTimeout(() => {
+            overlay.remove()
+            const timer = globalThis.setTimeout(() => {}, 0)
+            for (let id = timer; id > 0 && id > timer - 100; id -= 1) globalThis.clearInterval(id)
+            globalThis.document.dispatchEvent(new globalThis.Event('DOMContentLoaded'))
+            globalThis.document.body.dataset.jpxRound = String(round)
+          }, 0)
+        })
+        globalThis.document.dispatchEvent(new globalThis.Event('DOMContentLoaded'))
+      },
+      { html: captchaHtml({ nativeSubmit: true }), round },
+    )
+    await jpxPage.locator(`body[data-jpx-round="${round}"]`).waitFor({ state: 'attached', timeout: 15_000 })
+    assert.equal(await jpxPage.locator('body').getAttribute('data-jpx-submissions'), String(round))
+    assert.equal(await jpxPage.locator('body').getAttribute('data-jpx-selected'), '1')
+    assert.equal(await jpxPage.locator('#riddle-panel').count(), 0)
+    await jpxPage.waitForTimeout(300)
+    assert.equal(await serviceWorker.evaluate(() => globalThis.__fixtureDetectCount), detectsBeforeJpx + round)
+    assert.equal(await countSuccessHistory(), successesBeforeJpx + round)
+  }
+  assert.equal(jpxPage.url(), 'https://hentaiverse.org/extension-jpx-fixture')
+  await jpxPage.close()
+
   process.stdout.write(
-    'Chromium content fixture verified automatic/manual solve, one detect/submit, keyed history, disabled fieldset recovery, changed submitter action, excluded routes, and BFCache restore.\n',
+    'Chromium content fixture verified automatic/manual solve, one detect/submit, keyed history, disabled fieldset recovery, changed submitter action, excluded routes, BFCache restore, and three JPX AJAX rounds with timer cleanup.\n',
   )
 } finally {
   await context.close()

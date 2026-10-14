@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { URL } from 'node:url'
+import { inspect } from 'node:util'
 
 import { zipSync } from 'fflate'
 
@@ -302,6 +303,25 @@ test('publication requires canonical secret policy and exact provenance', () => 
   const absentInputs = validGateInputs()
   absentInputs.attestation = null
   assert.throws(() => validateReleaseGate(absentInputs), /attestation is absent/u)
+})
+
+test('invalid canonical publication URLs never retain protected input in an error cause', () => {
+  const inputs = validGateInputs()
+  const marker = 'PUBLIC_AUDIT_FIXTURE'
+  inputs.environment = {
+    PACKAGED_MODEL_URL: `https://invalid host.example/model.ort?access=${marker}`,
+    PACKAGED_MODEL_AUTH_REQUIRED: 'true',
+    PACKAGED_MODEL_BEARER_TOKEN: marker,
+  }
+  assert.throws(
+    () => validateReleaseGate(inputs),
+    (error) => {
+      assert.equal(error.message, 'PACKAGED_MODEL_URL is invalid')
+      assert.equal(Object.hasOwn(error, 'cause'), false)
+      assert.equal(inspect(error).includes(marker), false)
+      return true
+    },
+  )
 })
 
 test('verify-monorepo pins Firefox load tooling and binds Android evidence to the release revision', async () => {

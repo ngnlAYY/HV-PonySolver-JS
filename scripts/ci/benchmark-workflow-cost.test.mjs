@@ -36,7 +36,7 @@ test('publishes the exact remote extension ZIPs already exercised by the shared 
 
   assert.match(
     extensionJob,
-    /Transfer tested remote extension packages to Release job\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.publish_extension_release \}\}/u,
+    /Transfer tested remote extension packages to Release job\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main' && inputs\.publish_extension_release &&/u,
   )
   assert.match(extensionJob, /name: hv-pony-solver-extension-remote-tested/u)
   assert.match(extensionJob, /apps\/extension\/dist\/\*\.zip/u)
@@ -49,7 +49,7 @@ test('publishes the exact remote extension ZIPs already exercised by the shared 
 test('reruns canonical-model-only package tests after the canonical model download', async () => {
   const workflow = await readFile(new URL('.github/workflows/verify-monorepo.yml', repositoryRoot), 'utf8')
   const canonicalJob = workflow.match(
-    /\n {2}extension-canonical-packaged-e2e:[\s\S]*?(?=\n {2}firefox-android-142-release-gate:)/u,
+    /\n {2}extension-canonical-packaged-e2e:[\s\S]*?(?=\n {2}userscript-artifact:)/u,
   )?.[0]
   assert.ok(canonicalJob)
 

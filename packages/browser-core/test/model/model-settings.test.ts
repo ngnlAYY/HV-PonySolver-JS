@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { getModelAccessTokenLookupKeys, normalizeModelAccessToken } from '@hv-pony-solver/shared/token'
 
 import {
   MODEL_ACCESS_KEY_STORAGE_KEY,
@@ -25,14 +26,20 @@ function storage(): AsyncStringStorage & { values: Map<string, string> } {
 }
 
 describe('model access key settings', () => {
-  it('persists a trimmed and lowercased valid token', async () => {
-    const store = storage()
+  it.each([VALID_TOKEN, VALID_TOKEN.toUpperCase(), 'aB'.repeat(32)])(
+    'preserves valid token casing when saving',
+    async (token) => {
+      const store = storage()
 
-    await setModelAccessKey(store, `  ${VALID_TOKEN.toUpperCase()}  `)
+      await setModelAccessKey(store, `  ${token}  `)
 
-    expect(store.values.get(MODEL_ACCESS_KEY_STORAGE_KEY)).toBe(VALID_TOKEN)
-    await expect(getModelAccessKey(store)).resolves.toBe(VALID_TOKEN)
-  })
+      expect(store.values.get(MODEL_ACCESS_KEY_STORAGE_KEY)).toBe(token)
+      const saved = await getModelAccessKey(store)
+      expect(saved).toBe(token)
+      expect(getModelAccessTokenLookupKeys(saved)).toContain(token)
+      expect(normalizeModelAccessToken(saved)).toBe(token.toLowerCase())
+    },
+  )
 
   it('rejects keys that are not 64 hexadecimal characters', async () => {
     const store = storage()

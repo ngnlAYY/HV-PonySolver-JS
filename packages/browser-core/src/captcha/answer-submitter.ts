@@ -2,6 +2,7 @@ import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
 import { randDelay, shuffle, sleep } from '../utils/delay'
 import { captchaSelectors } from './captcha-selectors'
 import { getSubmissionAction, isSameOriginForm } from './captcha-target'
+import { readAnswerSettings } from './read-answer-settings'
 import type { DelayRange } from './timing-settings'
 
 export type SubmitErrorHandler = (message: string) => void
@@ -266,13 +267,17 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       return
     }
 
-    const [submitDelay, multiClickDelay] = await Promise.all([
-      this.getSubmitDelayRange(),
-      this.getMultiClickDelayRange(),
-    ])
-    if (!currentControls()) {
+    const delays = await readAnswerSettings(
+      () => Promise.all([this.getSubmitDelayRange(), this.getMultiClickDelayRange()]),
+      signal,
+    ).catch((error: unknown) => {
+      if (!currentControls()) return null
+      throw error
+    })
+    if (!delays || !currentControls()) {
       return
     }
+    const [submitDelay, multiClickDelay] = delays
 
     const manuallyChecked = new Set<number>()
     const previouslyAutomatic = new Map<number, number>()

@@ -2,7 +2,7 @@
 
 > 历史快照：数字、发现和通过结果仅代表原记录日期。当前目录与文档入口见[文档导航](../README.md)，文档重建依据见[决策记录](../decisions/implemented/process/2026-09-16-documentation-rebuild.md)。
 
-本页是 [2026-09-07 审计](2026-09-07-repository-audit.md)的范围明细。前半部分保留新增审计文档之前的目录和数字；[实施后盘点](#实施后盘点)记录提交 `ef5efc9` 的结构变化。长期维护说明不依赖这些快照数字。
+本页保留 [2026-09-07 审计](2026-09-07-repository-audit.md)前的目录与数字；[实施后盘点](#实施后盘点)对应 `ef5efc9`。两者均非当前工作区统计。
 
 ## 统计口径
 
@@ -109,7 +109,7 @@
 
 根配置核对了 `mise.toml`、`package.json`、pnpm workspace/lock、ESLint、Prettier、TypeScript、Vitest 和 `.gitignore`。工作区核对了各包清单、TS/Vitest/Playwright 配置、扩展 HTML/fixture 及 Worker 模板/渲染入口；CI 核对了仓库实际维护的两个 workflow。
 
-原有文档是根 README、AGENTS，以及 `docs/browser-extension.md`、`model-cache-strategy.md`、`model-worker-ops.md`、`onnx-runtime.md`。本轮新增内容在[文档导航](../README.md)中单独归组。
+审计前仅有根 README、AGENTS 和扩展、缓存、Worker 运维、Runtime 四篇专题。现有文档见[导航](../README.md)。
 
 `model/` 是固定本地输入，`other/` 是 Runtime 输出，`config/`、`dist/`、`coverage/`、`.wrangler/` 和索引属于生成物或工具状态。它们未作为平铺源码的重构目标，未读取其中的生产秘密来完成审计。第三方 Runtime 的许可证和压缩产物也不按手写代码风格检查。
 
@@ -132,7 +132,7 @@
 
 ## 复查文件列表
 
-在仓库根目录运行以下只读命令，可以列出当前自有维护文件。它反映运行时的工作区状态，因此本轮新增文档也会出现在结果中，数量不应再与审计前快照强行相等：
+以下命令在仓库根列出当前自有维护路径，不读取内容；数量反映执行时工作区，不与历史快照强行对齐：
 
 ```bash
 python3 - <<'PY'
@@ -149,4 +149,4 @@ for name in sorted(set(paths)):
 PY
 ```
 
-这条命令只用于清点路径，不读取文件内容或凭据，也不代表完成了行为审查。审计结论和实际运行的验证仍以[报告](2026-09-07-repository-audit.md#验证记录)为准。
+路径盘点不等于行为审查；当时的实际验证见[报告](2026-09-07-repository-audit.md#验证记录)。

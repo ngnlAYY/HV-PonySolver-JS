@@ -118,6 +118,70 @@ describe('findCaptchaTarget', () => {
 
     expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(false)
   })
+
+  it.each(['src', 'srcset', 'sizes'] as const)(
+    'invalidates changed image %s before currentSrc updates',
+    (attribute) => {
+      const master = appendCandidate({ imageSrc: '/captcha.png' })
+      const image = master.querySelector('img')!
+      image.srcset = '/captcha.png 1x'
+      Object.defineProperties(image, {
+        currentSrc: { value: new URL('/captcha.png', location.href).href },
+        complete: { value: true },
+      })
+      const initial = findCaptchaTarget()
+      expect(initial).not.toBeNull()
+      image.setAttribute(
+        attribute,
+        attribute === 'sizes' ? '100px' : attribute === 'src' ? '/next.png' : '/next.png 1x',
+      )
+      expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(false)
+    },
+  )
+
+  it('waits for responsive selection without falling back to src and recovers the plain src path', () => {
+    const master = appendCandidate({ imageSrc: '/captcha.png' })
+    const image = master.querySelector('img')!
+    image.srcset = '/next.png 1x'
+    expect(findCaptchaTarget()).toBeNull()
+    Object.defineProperty(image, 'currentSrc', { value: new URL('/captcha.png', location.href).href })
+    expect(findCaptchaTarget()).toBeNull()
+    image.removeAttribute('srcset')
+    expect(findCaptchaTarget()?.captchaKey).toBe(new URL('/captcha.png', location.href).href)
+  })
+
+  it.each(['srcset', 'sizes', 'media', 'type', 'replace', 'remove', 'reorder', 'picture'] as const)(
+    'invalidates changed picture source %s before currentSrc updates',
+    (change) => {
+      const master = appendCandidate({ imageSrc: '/captcha.png' })
+      const image = master.querySelector('img')!
+      const picture = document.createElement('picture')
+      const source = document.createElement('source')
+      source.srcset = '/captcha.png 1x'
+      const alternate = source.cloneNode(true)
+      image.replaceWith(picture)
+      picture.append(source, alternate, image)
+      Object.defineProperties(image, {
+        currentSrc: { value: new URL('/captcha.png', location.href).href },
+        complete: { value: true },
+      })
+      const initial = findCaptchaTarget()
+      expect(initial).not.toBeNull()
+      if (change === 'replace') source.replaceWith(source.cloneNode(true))
+      else if (change === 'remove') source.remove()
+      else if (change === 'reorder') picture.insertBefore(alternate, source)
+      else if (change === 'picture') {
+        const replacement = document.createElement('picture')
+        replacement.append(source, alternate, image)
+        picture.replaceWith(replacement)
+      } else
+        source.setAttribute(
+          change,
+          { srcset: '/next.png 1x', sizes: '100px', media: '(min-width: 1px)', type: 'image/webp' }[change],
+        )
+      expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(false)
+    },
+  )
 })
 
 describe('effective control snapshots', () => {

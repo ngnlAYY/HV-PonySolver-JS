@@ -1,8 +1,6 @@
 # 2026-09-07 审计优化实施记录
 
-历史记录：以下结果来自原实施记录，本次文档重建未重新执行其中的业务或浏览器验证。当前操作以[验证手册](../development/verification.md)为准。
-
-依据 [2026-09-07 审计](../audits/2026-09-07-repository-audit.md)与[目录方案](../development/directory-layout.md)实施。本页记录已经完成的范围、迁移过程和验证；目录、模块、文档及根配置改动已纳入本地提交 `ef5efc9`。长期维护步骤见[开发与验证](../development/verification.md)。
+> 历史记录：依据 [2026-09-07 审计](2026-09-07-repository-audit.md)实施，目录、模块、文档与根配置改动已纳入 `ef5efc9`。以下验证保持原时点，当前操作见[验证手册](../development/verification.md)。
 
 ## 目标与范围
 
@@ -26,7 +24,7 @@
 | 5    | 格式和文档门禁、接口说明          | 独立格式范围、失效链接回归、全部维护文档与漂移检查                           |
 | 6    | 集成验收                          | 完整 `pnpm check`、Action 固定、两个用户脚本 profile、对应扩展构建/E2E、diff |
 
-文件移动与行为修正分批进行，依赖前一批路径的工作等迁移完成后再展开。实施者与审阅者分开；集成时核对共享文件和原有未提交修改。
+移动与行为修正分批执行、独立审阅；集成时保留原有未提交修改。
 
 ## 回退与兼容分类
 
@@ -42,62 +40,69 @@
 
 逐文件映射如下；未列出的已有子目录文件只更新必要引用，不移动：
 
-| 迁移前路径                                                   | 迁移后路径                                                            |
-| ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| `apps/extension/scripts/build-extension.mjs`                 | `apps/extension/scripts/build/build-extension.mjs`                    |
-| `apps/extension/scripts/build-extension.test.mjs`            | `apps/extension/scripts/build/build-extension.test.mjs`               |
-| `apps/extension/scripts/build-packaged-fixture.mjs`          | `apps/extension/scripts/build/build-packaged-fixture.mjs`             |
-| `apps/extension/scripts/benchmark-compare.mjs`               | `apps/extension/scripts/benchmark/benchmark-compare.mjs`              |
-| `apps/extension/scripts/benchmark-contract.mjs`              | `apps/extension/scripts/benchmark/benchmark-contract.mjs`             |
-| `apps/extension/scripts/benchmark-contract.test.mjs`         | `apps/extension/scripts/benchmark/benchmark-contract.test.mjs`        |
-| `apps/extension/scripts/benchmark-product.mjs`               | `apps/extension/scripts/benchmark/benchmark-product.mjs`              |
-| `apps/extension/scripts/benchmark-runner.mjs`                | `apps/extension/scripts/benchmark/benchmark-runner.mjs`               |
-| `apps/extension/scripts/benchmark-runner.test.mjs`           | `apps/extension/scripts/benchmark/benchmark-runner.test.mjs`          |
-| `apps/extension/scripts/browser-support.mjs`                 | `apps/extension/scripts/browser/browser-support.mjs`                  |
-| `apps/extension/scripts/browser-support.test.mjs`            | `apps/extension/scripts/browser/browser-support.test.mjs`             |
-| `apps/extension/scripts/install-geckodriver.mjs`             | `apps/extension/scripts/browser/install-geckodriver.mjs`              |
-| `apps/extension/scripts/install-geckodriver.test.mjs`        | `apps/extension/scripts/browser/install-geckodriver.test.mjs`         |
-| `apps/extension/scripts/webdriver.test.mjs`                  | `apps/extension/scripts/browser/webdriver.test.mjs`                   |
-| `apps/extension/scripts/chromium-content-smoke.mjs`          | `apps/extension/scripts/e2e/chromium-content-smoke.mjs`               |
-| `apps/extension/scripts/chromium-load-smoke.mjs`             | `apps/extension/scripts/e2e/chromium-load-smoke.mjs`                  |
-| `apps/extension/scripts/chromium-load-smoke.test.mjs`        | `apps/extension/scripts/e2e/chromium-load-smoke.test.mjs`             |
-| `apps/extension/scripts/chromium-packaged-model-smoke.mjs`   | `apps/extension/scripts/e2e/chromium-packaged-model-smoke.mjs`        |
-| `apps/extension/scripts/firefox-load-smoke.mjs`              | `apps/extension/scripts/e2e/firefox-load-smoke.mjs`                   |
-| `apps/extension/scripts/firefox-packaged-model-smoke.mjs`    | `apps/extension/scripts/e2e/firefox-packaged-model-smoke.mjs`         |
-| `apps/extension/scripts/packaged-e2e-evidence.mjs`           | `apps/extension/scripts/e2e/packaged-e2e-evidence.mjs`                |
-| `apps/extension/scripts/packaged-smoke-artifact.mjs`         | `apps/extension/scripts/e2e/packaged-smoke-artifact.mjs`              |
-| `apps/extension/scripts/packaged-smoke-artifact.test.mjs`    | `apps/extension/scripts/e2e/packaged-smoke-artifact.test.mjs`         |
-| `apps/extension/scripts/download-canonical-model.mjs`        | `apps/extension/scripts/model/download-canonical-model.mjs`           |
-| `apps/extension/scripts/download-canonical-model.test.mjs`   | `apps/extension/scripts/model/download-canonical-model.test.mjs`      |
-| `apps/extension/scripts/generate-packaged-fixture.sh`        | `apps/extension/scripts/fixtures/generate-packaged-fixture.sh`        |
-| `apps/extension/scripts/requirements-lock.test.mjs`          | `apps/extension/scripts/fixtures/requirements-lock.test.mjs`          |
-| `apps/extension/scripts/write-packaged-fixture-identity.mjs` | `apps/extension/scripts/fixtures/write-packaged-fixture-identity.mjs` |
-| `apps/extension/scripts/release-gate.mjs`                    | `apps/extension/scripts/release/release-gate.mjs`                     |
-| `apps/extension/scripts/release-gate.test.mjs`               | `apps/extension/scripts/release/release-gate.test.mjs`                |
-| `scripts/check-architecture-boundaries.mjs`                  | `scripts/checks/check-architecture-boundaries.mjs`                    |
-| `scripts/check-architecture-boundaries.test.mjs`             | `scripts/checks/check-architecture-boundaries.test.mjs`               |
-| `scripts/check-browser-sinks.mjs`                            | `scripts/checks/check-browser-sinks.mjs`                              |
-| `scripts/check-browser-sinks.test.mjs`                       | `scripts/checks/check-browser-sinks.test.mjs`                         |
-| `scripts/check-bundle-budget.mjs`                            | `scripts/checks/check-bundle-budget.mjs`                              |
-| `scripts/check-bundle-budget.test.mjs`                       | `scripts/checks/check-bundle-budget.test.mjs`                         |
-| `scripts/assert-pinned-actions.mjs`                          | `scripts/ci/assert-pinned-actions.mjs`                                |
-| `scripts/assert-pinned-actions.test.mjs`                     | `scripts/ci/assert-pinned-actions.test.mjs`                           |
-| `scripts/benchmark-workflow-cost.test.mjs`                   | `scripts/ci/benchmark-workflow-cost.test.mjs`                         |
-| `scripts/node-version-contract.test.mjs`                     | `scripts/ci/node-version-contract.test.mjs`                           |
-| `scripts/workflow-security-contract.test.mjs`                | `scripts/ci/workflow-security-contract.test.mjs`                      |
-| `scripts/check-docs-drift.mjs`                               | `scripts/docs-drift/check-docs-drift.mjs`                             |
-| `scripts/check-docs-drift.test.mjs`                          | `scripts/docs-drift/check-docs-drift.test.mjs`                        |
-| `scripts/model-manifest.mjs`                                 | `scripts/model/model-manifest.mjs`                                    |
-| `scripts/model-manifest.test.mjs`                            | `scripts/model/model-manifest.test.mjs`                               |
-| `scripts/model-release-notes.mjs`                            | `scripts/model/model-release-notes.mjs`                               |
-| `scripts/model-release-notes.test.mjs`                       | `scripts/model/model-release-notes.test.mjs`                          |
-| `scripts/assert-clean-ort-source.mjs`                        | `scripts/ort-runtime/assert-clean-ort-source.mjs`                     |
-| `scripts/assert-clean-ort-source.test.mjs`                   | `scripts/ort-runtime/assert-clean-ort-source.test.mjs`                |
-| `scripts/build-minimal-ort-runtime.sh`                       | `scripts/ort-runtime/build-minimal-ort-runtime.sh`                    |
-| `scripts/build-minimal-ort-runtime.test.mjs`                 | `scripts/ort-runtime/build-minimal-ort-runtime.test.mjs`              |
-| `scripts/resolve-ort-build-root.mjs`                         | `scripts/ort-runtime/resolve-ort-build-root.mjs`                      |
-| `scripts/resolve-ort-build-root.test.mjs`                    | `scripts/ort-runtime/resolve-ort-build-root.test.mjs`                 |
-| `scripts/run-userscript-e2e.mjs`                             | `scripts/e2e/run-userscript-e2e.mjs`                                  |
+扩展脚本（两列均相对 `apps/extension/scripts/`）：
+
+| 迁移前                                | 迁移后                                         |
+| ------------------------------------- | ---------------------------------------------- |
+| `build-extension.mjs`                 | `build/build-extension.mjs`                    |
+| `build-extension.test.mjs`            | `build/build-extension.test.mjs`               |
+| `build-packaged-fixture.mjs`          | `build/build-packaged-fixture.mjs`             |
+| `benchmark-compare.mjs`               | `benchmark/benchmark-compare.mjs`              |
+| `benchmark-contract.mjs`              | `benchmark/benchmark-contract.mjs`             |
+| `benchmark-contract.test.mjs`         | `benchmark/benchmark-contract.test.mjs`        |
+| `benchmark-product.mjs`               | `benchmark/benchmark-product.mjs`              |
+| `benchmark-runner.mjs`                | `benchmark/benchmark-runner.mjs`               |
+| `benchmark-runner.test.mjs`           | `benchmark/benchmark-runner.test.mjs`          |
+| `browser-support.mjs`                 | `browser/browser-support.mjs`                  |
+| `browser-support.test.mjs`            | `browser/browser-support.test.mjs`             |
+| `install-geckodriver.mjs`             | `browser/install-geckodriver.mjs`              |
+| `install-geckodriver.test.mjs`        | `browser/install-geckodriver.test.mjs`         |
+| `webdriver.test.mjs`                  | `browser/webdriver.test.mjs`                   |
+| `chromium-content-smoke.mjs`          | `e2e/chromium-content-smoke.mjs`               |
+| `chromium-load-smoke.mjs`             | `e2e/chromium-load-smoke.mjs`                  |
+| `chromium-load-smoke.test.mjs`        | `e2e/chromium-load-smoke.test.mjs`             |
+| `chromium-packaged-model-smoke.mjs`   | `e2e/chromium-packaged-model-smoke.mjs`        |
+| `firefox-load-smoke.mjs`              | `e2e/firefox-load-smoke.mjs`                   |
+| `firefox-packaged-model-smoke.mjs`    | `e2e/firefox-packaged-model-smoke.mjs`         |
+| `packaged-e2e-evidence.mjs`           | `e2e/packaged-e2e-evidence.mjs`                |
+| `packaged-smoke-artifact.mjs`         | `e2e/packaged-smoke-artifact.mjs`              |
+| `packaged-smoke-artifact.test.mjs`    | `e2e/packaged-smoke-artifact.test.mjs`         |
+| `download-canonical-model.mjs`        | `model/download-canonical-model.mjs`           |
+| `download-canonical-model.test.mjs`   | `model/download-canonical-model.test.mjs`      |
+| `generate-packaged-fixture.sh`        | `fixtures/generate-packaged-fixture.sh`        |
+| `requirements-lock.test.mjs`          | `fixtures/requirements-lock.test.mjs`          |
+| `write-packaged-fixture-identity.mjs` | `fixtures/write-packaged-fixture-identity.mjs` |
+| `release-gate.mjs`                    | `release/release-gate.mjs`                     |
+| `release-gate.test.mjs`               | `release/release-gate.test.mjs`                |
+
+根脚本（两列均相对 `scripts/`）：
+
+| 迁移前                                   | 迁移后                                           |
+| ---------------------------------------- | ------------------------------------------------ |
+| `check-architecture-boundaries.mjs`      | `checks/check-architecture-boundaries.mjs`       |
+| `check-architecture-boundaries.test.mjs` | `checks/check-architecture-boundaries.test.mjs`  |
+| `check-browser-sinks.mjs`                | `checks/check-browser-sinks.mjs`                 |
+| `check-browser-sinks.test.mjs`           | `checks/check-browser-sinks.test.mjs`            |
+| `check-bundle-budget.mjs`                | `checks/check-bundle-budget.mjs`                 |
+| `check-bundle-budget.test.mjs`           | `checks/check-bundle-budget.test.mjs`            |
+| `assert-pinned-actions.mjs`              | `ci/assert-pinned-actions.mjs`                   |
+| `assert-pinned-actions.test.mjs`         | `ci/assert-pinned-actions.test.mjs`              |
+| `benchmark-workflow-cost.test.mjs`       | `ci/benchmark-workflow-cost.test.mjs`            |
+| `node-version-contract.test.mjs`         | `ci/node-version-contract.test.mjs`              |
+| `workflow-security-contract.test.mjs`    | `ci/workflow-security-contract.test.mjs`         |
+| `check-docs-drift.mjs`                   | `docs-drift/check-docs-drift.mjs`                |
+| `check-docs-drift.test.mjs`              | `docs-drift/check-docs-drift.test.mjs`           |
+| `model-manifest.mjs`                     | `model/model-manifest.mjs`                       |
+| `model-manifest.test.mjs`                | `model/model-manifest.test.mjs`                  |
+| `model-release-notes.mjs`                | `model/model-release-notes.mjs`                  |
+| `model-release-notes.test.mjs`           | `model/model-release-notes.test.mjs`             |
+| `assert-clean-ort-source.mjs`            | `ort-runtime/assert-clean-ort-source.mjs`        |
+| `assert-clean-ort-source.test.mjs`       | `ort-runtime/assert-clean-ort-source.test.mjs`   |
+| `build-minimal-ort-runtime.sh`           | `ort-runtime/build-minimal-ort-runtime.sh`       |
+| `build-minimal-ort-runtime.test.mjs`     | `ort-runtime/build-minimal-ort-runtime.test.mjs` |
+| `resolve-ort-build-root.mjs`             | `ort-runtime/resolve-ort-build-root.mjs`         |
+| `resolve-ort-build-root.test.mjs`        | `ort-runtime/resolve-ort-build-root.test.mjs`    |
+| `run-userscript-e2e.mjs`                 | `e2e/run-userscript-e2e.mjs`                     |
 
 迁移者负责本目录内 imports、`new URL`、fixture、根目录推导和包内测试发现；父代理负责根 package、跨工作区调用、两个 workflow、README、AGENTS 与维护文档引用。扩展 Node 测试固定使用 `node --test "scripts/**/*.test.mjs"`，由 Node 递归展开带引号的 glob，coverage 也使用相同递归集合并更新 artifact/release 的 include 路径。根 Node tests 同样保持带引号的 `scripts/**/*.test.mjs`。拆分前后保存并比较测试名集合和数量，原扩展 65 个 Node 测试与所有根测试必须全部出现；零匹配、少测或跳过既有用例均视为失败。
 
@@ -109,7 +114,7 @@
 
 ## 工作区保护与拆分边界
 
-已经保存本轮开始时的 status/diff，并备份了生成的 Worker 配置；测试期间仅使用占位绑定，结束后恢复原生成配置。已有用户改动只能保留或随文件迁移，不执行 reset、checkout、clean 或未经要求的提交。每批核对原有 diff，父代理集中编辑共享配置，避免并行覆盖。
+实施前保存 status/diff 和 Worker 配置；验证用占位绑定并恢复原配置，原有改动随迁移保留。共享配置集中编辑，各批复查差异以防覆盖。
 
 模块拆分必须先说明独立输入输出、状态所有者与清理责任；没有独立边界时保留组合入口。协议按 Port、Offscreen、图片负载分组，类型与 guard 靠近；基准按参数/矩阵、统计、结果校验与比较分组。模型缓存、Broker、Offscreen 的共享状态没有必要为了行数改成新框架。
 
@@ -117,7 +122,7 @@
 
 ## 完成标准
 
-两级脚本不再平铺混合职责文件，公开命令可用，实际代码引用和维护文档不指向被删除路径；资产身份、权限、消息和持久化行为保持；新增规则能够拒绝原先漏检的输入。记录通过的命令及环境限制，不把未运行的受保护鉴权、最低版本或 Android 验证描述为完成。
+验收要求：脚本按职责分组、引用和命令有效；资产、权限、消息、持久化不变；新增规则拒绝原漏检输入，记录真实验证与环境限制。
 
 ## 进度
 
@@ -172,4 +177,4 @@
 
 ## 后续维护边界
 
-上述通过数和浏览器版本属于实施时的验收记录。后续文档更新以当前源码、配置与命令为准，并单独运行格式、文档漂移、链接和相关回归；更新文档本身不会刷新这里的业务测试或浏览器证据。仍未执行的受保护鉴权、Chromium 116、Firefox Android 142 和生产发布保持原有独立门禁。
+后续文档整理不刷新本页的通过数或浏览器证据；受保护鉴权、Chromium 116、Firefox Android 142 和生产发布仍需独立验证。当前修改按[文档维护规则](../development/documentation.md)验收。

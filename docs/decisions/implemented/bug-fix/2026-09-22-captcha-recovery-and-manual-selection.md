@@ -10,13 +10,13 @@ Status: implemented
 
 保留模式将本轮人工变更身份覆盖到模型准备、图片读取、推理、设置读取及多选等待。初始裁剪不计算本轮已经手动取消的候选，每次自动勾选前再次核对，不能因旧自动标记或识别结果而恢复用户取消的选项。新一轮重新捕获身份，关闭保留模式继续由程序接管。
 
-App 在稳定的 documentElement 上观察目标相关 mutation，继续使用原有防抖、去重和目标快照。body 整体替换或暂时缺失后重新插入仍能触发扫描；已销毁的 App 不再响应。StatusPanel 独立维护原节点、状态与历史。
+App 在稳定的 documentElement 观察目标相关 mutation，保留防抖、去重和目标快照。body 替换或暂时缺失后重插仍触发扫描，销毁后不响应。StatusPanel 独立保留原节点、状态与历史。
 
 用户脚本以 GM Key 的实际存储提交驱动恢复。菜单保存、清除和留空清除成功后，先取消并等待旧的未完成模型初始化，再通知 CoreApp 恢复当前目标；已就绪会话继续使用。依赖组装层以提交修订号与销毁状态屏蔽旧回调，取消输入、验证失败或存储失败不触发恢复。HEAD 验证成功的提示只说明 Key 已验证并保存，不声称下载过模型。
 
 ## Existing record audit
 
-检索非归档决定中的答案、人工、body、面板、Key 和恢复。[面板挂载决定](2026-09-16-status-panel-remount.md)部分重叠：它解决显示节点恢复，本篇补足独立的答题扫描。已有 [BFCache 断连决定](2026-09-18-extension-port-disconnect-errors.md)处理扩展连接生命周期，不授权自动重放下载或 Key 操作，保持不变。
+检索非归档决定中的答案、人工、body、面板、Key 和恢复：[面板挂载](2026-09-16-status-panel-remount.md)部分重叠，本篇补足独立答题扫描；[BFCache 断连](2026-09-18-extension-port-disconnect-errors.md)仍约束扩展连接，不自动重放下载或 Key 操作，均保留。
 
 ## Alternatives considered
 
@@ -34,4 +34,4 @@ App 在稳定的 documentElement 上观察目标相关 mutation，继续使用�
 
 ## Consequences
 
-保留模式优先尊重本轮人工撤销，识别候选可能因此少于模型结果；程序不以数量目标为由恢复这些答案。观察范围扩大到 documentElement，但仍按验证码相关 mutation 过滤。GM 存储提交与恢复是两个阶段：恢复等待不会回滚已成功保存的 Key，应用销毁后也不撤销提交。
+尊重人工撤销可能使候选少于模型结果，数量目标不能推翻撤销。扩大观察至 documentElement 后仍过滤相关 mutation。GM 提交与恢复分阶段：恢复等待或应用销毁均不撤销已保存 Key。

@@ -1,65 +1,63 @@
 # 文档维护规则
 
-文档按读者任务组织，源码和测试定义可观察行为。文档要说明如何操作、为什么保持某个边界、改动如何验证；同一精确契约由明确的专题负责，其他页面给出摘要与链接。
+按读者任务组织文档，以源码和测试核对行为。同一精确契约只在所属专题维护，其他页面给摘要与链接；历史结果保留日期，不作为当前验证证据。
 
 ## 文档分工
 
-| 位置                             | 负责内容                                    | 更新触发                         |
-| -------------------------------- | ------------------------------------------- | -------------------------------- |
-| 根 README                        | 产品选择、最短构建、默认行为、导航          | 用户入口或公开行为变化           |
-| `usage/`                         | 用户脚本安装、设置、故障排查                | 控件、默认值、错误或使用流程变化 |
-| `architecture/`                  | 职责、数据归属、时序、取消和持久化边界      | 跨模块接口或状态所有权变化       |
-| `reference/`                     | 精确 HTTP 方法、头、状态码和鉴权            | 路由或协议变化                   |
-| `development/`                   | 开发、命令、验证、发布和文档维护            | 工具链、检查或交付流程变化       |
-| 四篇既有专题                     | 扩展产物、缓存确认、运行时资产、Worker 运维 | 对应领域契约变化，保留稳定路径   |
-| `decisions/<lifecycle>/<class>/` | 决定的动机、备选、代价与验证                | 非平凡决定或原决定理由翻转       |
-| `audits/`                        | 带日期的发现、方法、证据和未知项            | 新审计写新记录，不刷新旧结果     |
-| 根 AGENTS.md                     | 仓库强约束与交付规则                        | 目录、依赖、工具或关键不变量变化 |
+| 位置                             | 内容                               | 更新触发                     |
+| -------------------------------- | ---------------------------------- | ---------------------------- |
+| 根 README                        | 产品选择、最短构建、默认体验和入口 | 客户端入口或公开行为变化     |
+| `usage/`                         | 安装、设置、排错                   | 控件、默认值、错误和流程变化 |
+| `architecture/`                  | 职责、所有权、时序、取消与持久化   | 跨模块接口或状态变化         |
+| `reference/`                     | 精确 HTTP 方法、头、状态码、鉴权   | 协议变化                     |
+| `development/`                   | 开发、命令、验证、发布、文档规则   | 工具链或交付流程变化         |
+| 四篇既有专题                     | 扩展、缓存、Runtime、Worker 运维   | 对应契约变化，保持稳定路径   |
+| `decisions/<lifecycle>/<class>/` | 动机、决定、备选、代价与验证       | 非平凡决定或理由翻转         |
+| `audits/`                        | 带日期的发现、方法、证据与未知项   | 新审计另写，不刷新旧结果     |
+| 根 AGENTS                        | 开发与交付强约束                   | 目录、依赖、工具或不变量变化 |
 
-完整入口见[文档导航](../README.md)。原实施计划页只保留历史导航，具体记录在 audits；长期手册不记录一次性通过数、工作区 ahead 状态、PID 或声称未执行的验证。
+入口见[文档导航](../README.md)。实施计划页仅作历史导航；长期手册不堆积一次性通过数、ahead 状态、PID 或未执行的验证。
 
 ## 受保护契约归属
 
-[scripts/docs-drift/check-docs-drift.mjs](../../scripts/docs-drift/check-docs-drift.mjs) 对下列正文逐篇检查，不把全部文档拼成一个字符串。某专题缺失契约时，其他页面中的同名词不能替它通过门禁。
+[漂移检查](../../scripts/docs-drift/check-docs-drift.mjs)逐篇验证，不拼接全部正文；其他页面的同名词不能补足所属专题的缺项。
 
-| 契约                         | 文档归属                                                  | 源码依据                                            |
-| ---------------------------- | --------------------------------------------------------- | --------------------------------------------------- |
-| 工具版本、根检查链和命令     | [命令参考](commands.md)                                   | 根及工作区 package scripts、engines、packageManager |
-| 图片/输出/超时配置           | [浏览器架构](../architecture/browser-runtime.md)          | `inference-config.ts`                               |
-| 模型和 ORT 资产身份          | [Runtime 专题](../onnx-runtime.md)                        | shared 模型清单、`ONNX_RUNTIME_ASSETS`              |
-| 路由、Bearer、方法和响应头   | [HTTP 参考](../reference/model-worker-http.md)            | Worker router/access/response 源码                  |
-| 缓存及确认                   | [缓存专题](../model-cache-strategy.md)                    | Worker 事实与客户端确认契约                         |
-| 部署 secrets、dry-run 和发布 | [运维](../model-worker-ops.md)、[发布](releases.md)       | 手动部署 workflow                                   |
-| 依赖门禁和集中管理模块       | [整体架构](../architecture/overview.md)                   | 架构检查与权威模块                                  |
-| 扩展路径、权限和支持范围     | [扩展专题](../browser-extension.md)、根 README 的产品摘要 | 扩展包、browser-support、EXTENSION_PATHS            |
+| 契约                       | 所属文档                                             | 事实来源                                       |
+| -------------------------- | ---------------------------------------------------- | ---------------------------------------------- |
+| 工具版本、检查链、命令     | [命令参考](commands.md)                              | package scripts、engines、packageManager、mise |
+| 图片、输出、超时配置       | [浏览器架构](../architecture/browser-runtime.md)     | `inference-config.ts`                          |
+| 模型/ORT 资产身份          | [Runtime](../onnx-runtime.md)                        | shared 与 `ONNX_RUNTIME_ASSETS` 清单           |
+| 路由、Bearer、方法、响应头 | [HTTP 参考](../reference/model-worker-http.md)       | Worker router/access/response                  |
+| 缓存与确认                 | [缓存专题](../model-cache-strategy.md)               | Worker 与客户端事务契约                        |
+| secrets、dry-run、发布     | [运维](../model-worker-ops.md)、[发布](releases.md)  | 手动部署 workflow                              |
+| 依赖和权威模块             | [整体架构](../architecture/overview.md)              | 架构门禁与源码                                 |
+| 扩展路径、权限、支持范围   | [扩展专题](../browser-extension.md)、README 产品摘要 | 扩展包、browser-support、`EXTENSION_PATHS`     |
 
-[documentation-paths.mjs](../../scripts/docs-drift/documentation-paths.mjs) 列出需要校验复制命令的当前维护页；新增带命令的指南时同步加入。行内命令和 shell 代码块会按包清单检查，历史审计与决定记录不参与当前命令存在性校验。
+[documentation-paths.mjs](../../scripts/docs-drift/documentation-paths.mjs)列出当前命令维护页；新增带命令的指南须加入。校验按包清单核对行内命令与 shell 代码块，历史审计和决定不参与当前命令存在性检查。
 
-漂移检查包含结构提取和部分关键词检查，不等同全文语义证明。新增契约先写会拒绝实际漂移的回归，再扩展对应事实提取器；不要删除断言或把所有正文拼接来解决失败。
-
-运维中的 R2 上传示例另校验可复制命令本身：必须显式选择远程 R2，并按 `apps/model-worker` 的执行目录定位 `../../other/` 中的对应资产。周围说明不能补足命令缺失的 `--remote` 或错误的文件路径，也不允许额外参数覆盖远程选择。
+新增契约先写能拒绝实际漂移的回归，再扩展事实提取器；不删断言以适应正文。R2 上传直接检查复制命令：必须显式选远程 R2，并从 `apps/model-worker` 定位 `../../other/` 对应资产；相邻文字不能补足缺失的 `--remote`、错误路径或覆盖远程选择的额外参数。结构/关键词检查不能证明全文语义正确。
 
 ## 按修改类型同步
 
-| 修改                   | 同步范围                                                     |
-| ---------------------- | ------------------------------------------------------------ |
-| 默认值、模式、提示     | 使用说明、相关平台、设置/面板/答题测试                       |
-| 消息、超时、取消、存储 | 对应架构、扩展/缓存专题、协议/事务/并发测试                  |
-| 模型、WASM、glue       | 共享和 Runtime 清单、资产专题、Worker 模板、构建与完整性测试 |
-| HTTP 或额度            | 接口参考、服务架构、缓存、运维、漂移与 Worker 测试           |
-| 工具、命令、CI         | 命令参考、验证/发布手册、AGENTS、工具链与工作流测试          |
-| 目录或导出             | 导航、架构、目录页、所有引用、package exports、测试发现      |
-| 发布或部署             | 发布/扩展/运维手册、AGENTS、工作流门禁                       |
+| 修改                   | 同步范围                                                  |
+| ---------------------- | --------------------------------------------------------- |
+| 默认值、模式、提示     | 使用页、相关平台、设置/面板/答题测试                      |
+| 消息、超时、取消、存储 | 对应架构、扩展/缓存专题、协议/事务/并发测试               |
+| 模型、WASM、glue       | 共享/Runtime 清单、资产专题、Worker 模板、构建/完整性测试 |
+| HTTP、额度             | HTTP、服务架构、缓存、运维、漂移/Worker 测试              |
+| 工具、命令、CI         | 命令、验证/发布、AGENTS、工具链/工作流测试                |
+| 目录、导出             | 导航、架构、目录页、引用、exports、测试发现               |
+| 发布、部署             | 发布/扩展/运维、AGENTS、工作流门禁                        |
 
-README 只同步影响入口和默认体验的摘要。精确哈希与配置字段在所属专题展示，其他页面优先链接权威清单。历史审计中的旧值保留日期语境。
+README 只同步用户入口摘要；精确哈希、配置字段和协议矩阵留在权威专题。精简可合并复述，不删前提、失败路径、安全边界或未验证项；旧审计中的数字、版本、commit 和结论仍属于原验证时点。
 
 ## 决策笔记
 
-本仓库的可交付笔记根为 `docs/decisions/`：AGENTS 要求维护资料按 docs 主题归档，`.agents` 是被忽略的本地工具目录。采用 `write-notes-like-deepseek` 的生命周期/分类与格式；具体取舍见[重建决定](../decisions/implemented/process/2026-09-16-documentation-rebuild.md)。
+可交付笔记放在 `docs/decisions/`；`.agents` 是被忽略的本地工具目录。沿用 `write-notes-like-deepseek` 的生命周期、六类分类与结构，取舍见[重建决定](../decisions/implemented/process/2026-09-16-documentation-rebuild.md)。
 
-重要改动必须带决定记录或同步已有记录：行为、架构、跨文件契约、流程工具、测试策略、落盘/网络/配置格式都属于非平凡改动。纯排版、错字、样式或无跨文件影响的机械修改不立 Note。
+行为、架构、跨文件契约、工具流程、测试策略和落盘/网络/配置格式变化须更新已有决定或新增笔记；排版、错字和机械修改无需立 Note。路径为 `decisions/{proposed,implemented,rejected,archived}/{feature,bug-fix,simplification,architecture,process,testing}/yyyy-mm-dd-topic.md`，仅建使用的目录，不建 INDEX。
 
-路径为 `decisions/{proposed,implemented,rejected,archived}/{feature,bug-fix,simplification,architecture,process,testing}/yyyy-mm-dd-topic.md`，只创建实际使用的目录，不建 INDEX。前三行固定为标题、空行、状态；正文首节为 Problem，并且必须有 Alternatives considered。
+前三行固定为标题、空行、状态；首节必须是 Problem，并保留 Alternatives considered：
 
 ```markdown
 # Agent Note: 决定标题
@@ -68,42 +66,44 @@ Status: implemented
 
 ## Problem
 
-独立描述触发条件和问题。
+触发条件与问题。
 
 ## Decision
 
-用现在时说明当前决定、边界和原因。
+当前决定、边界和原因。
 
 ## Alternatives considered
 
-真实考虑的备选，先写其优势，再说明未选原因。
+真实备选的优势与未采用原因。
 
 ## Consequences
 
-收益、代价、上限和重新评估条件。
+收益、代价、上限与重新评估条件。
 ```
 
-新想法在 proposed 中写 Proposal、Acceptance criteria、Risks；落实时同批移到 implemented，改成 Decision，把计划和风险折入当前后果/验证。事实变化原地更新；决定或理由翻转时另写新篇并互链，不把旧理由改成相反意思。rejected 的 Status 行必须带原因；没有防坑价值的记录不保留。只归档已完成且参考价值低的 implemented，归档文件以 manifest 哈希封印，不修改旧封印。
-
-落笔前按关键词搜索所有活跃 lifecycle，明确无关、部分重叠、完全吸收或过时提案，并把处理结果记录在新篇。可使用：
+- proposed 写 Proposal、Acceptance criteria、Risks；实施同批移入 implemented，改为 Decision，将计划与风险折入后果/验证。
+- 事实变化原地更新，决定或理由翻转另写并互链。rejected 的 Status 行带原因，无防坑价值的记录不保留。
+- 落笔前检索活跃 lifecycle，记录无关、部分重叠、完全吸收或过时提案的处理；[笔记检查](../../scripts/docs-drift/verify-notes.mjs)验证结构，不能代替取舍审阅。
 
 ```bash
 rg --hidden --glob '!docs/decisions/archived/**' '机制名或关键词' docs/decisions/
 ```
 
-笔记结构和状态由[笔记校验入口](../../scripts/docs-drift/verify-notes.mjs)检查；取舍是否真实、理由是否充分和代价是否明确仍需审阅。归档时在 `Status: implemented` 后紧邻写入 `Archived: YYYY-MM-DD`，移动到 archived 的对应类别，再运行 `AGENT_NOTE_ROOT=docs/decisions mise exec -- node scripts/docs-drift/notes/verify-archived-agent-notes.ts --write` 追加封印。只允许新增封印，不能改写既有项。CI guardrails 使用完整 Git 历史，PR 比较 base SHA、push 比较 before SHA，不能使用本次 HEAD 冒充变更前状态；本地与无前后版本对的手动校验使用 HEAD。
+仅归档已完成且参考价值低的 implemented：在 Status 后紧邻加 `Archived: YYYY-MM-DD`，移入 archived 对应类别，再执行 `AGENT_NOTE_ROOT=docs/decisions mise exec -- node scripts/docs-drift/notes/verify-archived-agent-notes.ts --write` 追加封印；不改写既有封印。
 
-归档根、各级目录、Markdown 与 `manifest.json` 必须为实际目录或普通文件，拒绝符号链接。清单严格校验版本、归档内相对 Markdown 路径及 SHA-256 格式；每条封印独立读取并重算哈希，不能仅凭路径存在或扫描器发现来认定有效。缺失归档目录保持可选，但已有清单或路径异常时，`--write` 也必须失败且不能改写清单。
+归档根/目录/Markdown/manifest 必须为实际目录或普通文件，拒绝 symlink。清单严格检查版本、归档相对 Markdown 路径、SHA-256；逐条读取并重算，路径存在或扫描命中不等于有效。缺失归档目录可选，但已有清单或路径异常时 `--write` 必须失败且不改清单。
+
+CI guardrails 读取完整 Git 历史，PR 对比 base SHA，push 对比 before SHA，不用本次 HEAD 冒充变更前状态；本地及无前后版本对的手动校验使用 HEAD。
 
 ## 链接、示例与证据
 
-使用相对 Markdown 链接，文件路径必须存在；符号写在链接旁，不依赖易漂移行号。标题改名后检查所有入站锚点。命令写明执行目录、准备条件、产物与证明范围；不同构建互相覆盖时分别展示“构建 → 对应测试”，不要把所有命令拼成一个可误运行的流水线。
+使用相对 Markdown 链接；符号写在链接旁，不依赖易漂移行号。文件须存在，改标题后检查入站锚点。命令说明执行目录、前提、产物和证明范围；构建互相覆盖时分别展示“构建 → 对应测试”。
 
-离线测试、公开线上探测、受保护鉴权与真实发布分开说明。Key、Bearer、Cloudflare 凭据、真实绑定标识不进入例子、日志或文档。示例只使用清晰占位符或约定的测试绑定；输入秘密由受保护环境提供，不放入 CLI 参数。
+离线、公开探测、受保护鉴权和发布证据分别记录。示例只用明确占位符或约定测试绑定；Key、Bearer、凭据、真实绑定不进入文档、日志或 CLI 参数，由受保护环境提供。
 
 ## 验证文档修改
 
-在仓库根目录执行：
+仓库根执行：
 
 ```bash
 mise exec -- pnpm format:check
@@ -112,14 +112,14 @@ mise exec -- node --test "scripts/docs-drift/test/*.test.mjs"
 git diff --check
 ```
 
-`docs:check` 执行事实漂移、文件/目录/标题链接和笔记校验；测试对缺项、错误事实、无效来源提取与失效链接作故障注入。改动检查器还需运行 lint 与相关根级测试。
+`docs:check` 包含事实、链接、笔记校验；回归对缺项、错误事实、无效提取和失效链接作故障注入。修改检查器还需 lint 和相关根级测试。
 
-链接检查支持项目使用的内联 Markdown 链接，跳过 fenced code、行内代码、外部 URL 和声明的生成目录，复核符号链接真实目标；不存在或不可扫描的根失败。它不验证外部网站可用性，也不完整解析 reference-style/HTML 链接和所有 Markdown 扩展。
+链接门禁检查内联 Markdown 的文件、目录、标题及 symlink 真实目标，缺失/不可扫描根失败；跳过 fenced code、行内代码、外部 URL 和声明的生成目录。不验证外站，也不完整解析 reference-style/HTML 链接或全部 Markdown 扩展。
 
-Runtime 随附 README 不在默认格式/链接门禁内，修改后单独核对资产与相对路径，并执行：
+Runtime 随附 README 不在默认格式/链接门禁内，修改后另核对资产、相对路径，并运行：
 
 ```bash
 mise exec -- pnpm exec prettier --check --ignore-path /dev/null apps/userscript/vendor/onnxruntime/README.md
 ```
 
-这条 POSIX/Git Bash 命令只对指定 README 绕过忽略规则，不重新格式化第三方压缩资产。交付时列出实际通过项和未运行项，不把文档通过解释为业务、真实鉴权或线上部署通过。
+此 POSIX/Git Bash 命令只对指定 README 绕过忽略规则。交付列明实际通过与未运行项；文档通过不代表业务、真实鉴权或线上部署通过。

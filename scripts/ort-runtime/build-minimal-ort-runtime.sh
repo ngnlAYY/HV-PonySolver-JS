@@ -65,7 +65,8 @@ if [[ "$created_build_root" != "$BUILD_ROOT" ]]; then
   exit 1
 fi
 BUILD_ROOT_ID="$(stat -Lc '%d:%i' -- "$BUILD_ROOT")"
-exec {ORT_BUILD_LOCK_FD}>"$BUILD_ROOT/.build.lock"
+# Lock the verified directory inode without creating or truncating a lock file.
+exec {ORT_BUILD_LOCK_FD}<"$BUILD_ROOT"
 if ! flock -n "$ORT_BUILD_LOCK_FD"; then
   printf 'Another ORT build is already using %s\n' "$BUILD_ROOT" >&2
   exit 1
