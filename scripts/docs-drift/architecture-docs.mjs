@@ -49,6 +49,9 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
     '外层 fieldset',
     '首个 legend',
     '消费该次 Promise 拒绝',
+    '选择器属性 `id/name`',
+    '旧验证',
+    '异常关闭',
   ]) {
     if (!readme.includes(fact)) errors.push(`docs/architecture/browser-runtime.md must mention ${fact}`)
   }

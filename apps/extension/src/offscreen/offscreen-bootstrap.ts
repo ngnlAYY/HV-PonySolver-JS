@@ -84,7 +84,7 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
     }
     if (idleRetryAttempts >= MAX_OFFSCREEN_IDLE_NOTIFICATIONS) {
       // The service worker never confirmed this generation as closed. Stop
-      // waking it forever; the next request or claim restarts the heartbeat.
+      // waking it forever; only new activity starts a fresh retry budget.
       warn(`Offscreen 空闲通知连续 ${MAX_OFFSCREEN_IDLE_NOTIFICATIONS} 次未完成关闭，暂停心跳`)
       return
     }
@@ -203,12 +203,19 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
           activeRequests.delete(key)
         }
       }
-      if (activeRequests.size === 0 && idleGeneration === null) {
-        // A warm-idle timer armed by the previous epoch fires as a no-op, so
-        // the new owner must re-arm it — or an otherwise idle document is
-        // never reclaimed. An already-idle generation is kept for the claim
-        // response, which makes the claiming worker confirm and close it.
-        scheduleIdleNotification()
+      if (activeRequests.size === 0) {
+        if (idleGeneration === null) {
+          scheduleIdleNotification()
+        } else {
+          // 迁移通知所属 epoch，但保留同一空闲代际的次数与退避预算。
+          // claim 后的首次关闭仍可能失败，不能只依赖 claiming worker 关闭。
+          clearIdleTimer()
+          const generation = idleGeneration
+          idleTimeoutId = setTimeout(
+            () => sendIdleNotification(epoch, generation),
+            idleRetryDelayMs(Math.max(1, idleRetryAttempts)),
+          )
+        }
       }
     }
     const response: OffscreenClaimResponse = {

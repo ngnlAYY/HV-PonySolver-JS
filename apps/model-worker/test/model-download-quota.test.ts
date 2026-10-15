@@ -289,6 +289,18 @@ describe('ModelDownloadQuota', () => {
     }
   })
 
+  it.each([null, undefined, 1, false, {}, []])(
+    'rejects non-string successful reservation receipts: %j',
+    async (receiptId) => {
+      await expect(
+        reserveModelDownloadQuota(
+          responseQuotaNamespace(Response.json({ allowed: true, receiptId, retryAfterSeconds: 60 })),
+          'token',
+        ),
+      ).rejects.toThrow('invalid response')
+    },
+  )
+
   it('accepts valid internal reserve, confirmation, and status responses', async () => {
     await expect(
       reserveModelDownloadQuota(

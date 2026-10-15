@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, lstat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 import { parseRepoRootArgs } from '../lib/cli.mjs'
@@ -28,11 +28,18 @@ export function archiveBaseRef(environment, event) {
 
 export async function verifyNotes(repoRoot = defaultRepoRoot) {
   const noteRoot = resolve(repoRoot, 'docs/decisions')
-  if (!(await stat(noteRoot)).isDirectory()) throw new Error('docs/decisions must be a directory')
-  const event =
-    process.env.GITHUB_ACTIONS === 'true' && process.env.GITHUB_EVENT_PATH
-      ? JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8'))
-      : null
+  const noteRootStats = await lstat(noteRoot)
+  if (noteRootStats.isSymbolicLink()) throw new Error('docs/decisions must not be a symbolic link')
+  if (!noteRootStats.isDirectory()) throw new Error('docs/decisions must be a directory')
+  let event = null
+  if (process.env.GITHUB_ACTIONS === 'true' && process.env.GITHUB_EVENT_PATH) {
+    try {
+      event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8'))
+    } catch {
+      // CI 事件可包含私有值，解析错误不得把原始片段带入日志。
+      throw new Error('Notes archive check requires a readable JSON CI event')
+    }
+  }
   const baseline = archiveBaseRef(process.env, event)
   // An unavailable baseline must not turn a shallow checkout into an empty archive.
   execFileSync('git', ['rev-parse', '--verify', `${baseline}^{commit}`], { cwd: repoRoot, stdio: 'pipe' })

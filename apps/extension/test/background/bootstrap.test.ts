@@ -5,6 +5,7 @@ import type * as BrokerModule from '../../src/background/broker'
 import { InferenceHost } from '../../src/host/inference-host'
 import type { RuntimeMessageListener } from '../../src/platform/webextension'
 import { OFFSCREEN_MESSAGE_TYPE, PROTOCOL_VERSION, type HostResponse } from '../../src/protocol/messages'
+import { OFFSCREEN_CLAIM_TIMEOUT_MS } from '../../src/protocol/deadlines'
 
 const mocks = vi.hoisted(() => ({
   acquireOffscreenAdmission: vi.fn(),
@@ -248,6 +249,134 @@ describe('target-specific extension bootstraps', () => {
       requestId: 'prepare-cancel',
       ok: true,
     })
+  })
+
+  it('claims a document created after request cancellation so its idle timer can reclaim it', async () => {
+    vi.useFakeTimers()
+    let completeAdmission: (release: () => void) => void = () => {}
+    mocks.acquireOffscreenAdmission.mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          completeAdmission = resolve
+        }),
+    )
+    registerChromiumBackground()
+    await Promise.resolve()
+    const invoke = mocks.registerBroker.mock.calls[0]![0] as HostInvoker
+    const controller = new AbortController()
+    const pending = invoke(
+      { protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'cancel-creation' },
+      controller.signal,
+    )
+    controller.abort()
+    await expect(pending).rejects.toThrow('推理请求已取消')
+
+    registerOffscreenHost(() => ({ handle: vi.fn(), destroy: vi.fn() }) as never)
+    const offscreenListener = mocks.addRuntimeMessageListener.mock.calls.at(-1)![0] as RuntimeMessageListener
+    mocks.sendRuntimeMessage.mockImplementation((message: Record<string, unknown>) => {
+      if (message.operation === 'claim') return Promise.resolve(claim(offscreenListener, String(message.epoch)))
+      return Promise.resolve(undefined)
+    })
+    const release = vi.fn()
+    completeAdmission(release)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(release).toHaveBeenCalledTimes(1)
+    expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'claim')).toHaveLength(1)
+    expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'request')).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
+    expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'idle')).toHaveLength(1)
+    globalThis.dispatchEvent(new Event('pagehide'))
+    vi.useRealTimers()
+  })
+
+  it('does not cancel concurrent live work while claiming a late abandoned admission', async () => {
+    vi.useFakeTimers()
+    let completeAdmission: (release: () => void) => void = () => {}
+    mocks.acquireOffscreenAdmission.mockImplementationOnce(
+      () =>
+        new Promise<() => void>((resolve) => {
+          completeAdmission = resolve
+        }),
+    )
+    registerChromiumBackground()
+    const invoke = mocks.registerBroker.mock.calls[0]![0] as HostInvoker
+    const controller = new AbortController()
+    const cancelled = invoke({ protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'abandoned' }, controller.signal)
+    controller.abort()
+    await expect(cancelled).rejects.toThrow('推理请求已取消')
+
+    let finish = () => {}
+    let activeSignal: AbortSignal | undefined
+    const host = {
+      handle: vi.fn(
+        (request: { requestId: string }, signal: AbortSignal) =>
+          new Promise<HostResponse>((resolve) => {
+            activeSignal = signal
+            finish = () =>
+              resolve({ protocol: PROTOCOL_VERSION, type: 'result', requestId: request.requestId, ok: true })
+          }),
+      ),
+      destroy: vi.fn(),
+    }
+    registerOffscreenHost(() => host as never)
+    const offscreenListener = mocks.addRuntimeMessageListener.mock.calls.at(-1)![0] as RuntimeMessageListener
+    mocks.sendRuntimeMessage.mockImplementation((message: Record<string, unknown>) => {
+      if (message.operation === 'claim' || message.operation === 'request') {
+        return new Promise((resolve) => {
+          offscreenListener(message, serviceWorkerSender, resolve)
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+    const live = invoke(
+      { protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'live' },
+      new AbortController().signal,
+    )
+    await vi.advanceTimersByTimeAsync(0)
+    expect(host.handle).toHaveBeenCalledTimes(1)
+    const release = vi.fn()
+    completeAdmission(release)
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS * 2)
+
+    expect(release).toHaveBeenCalledTimes(1)
+    expect(activeSignal?.aborted).toBe(false)
+    expect(host.destroy).not.toHaveBeenCalled()
+    expect(mocks.closeOffscreenDocumentIfIdle).not.toHaveBeenCalled()
+    expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'request')).toHaveLength(1)
+    finish()
+    await expect(live).resolves.toMatchObject({ ok: true })
+    globalThis.dispatchEvent(new Event('pagehide'))
+    vi.useRealTimers()
+  })
+
+  it('bounds abandoned-document claims and releases admission on failure without replaying the request', async () => {
+    vi.useFakeTimers()
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let completeAdmission: (release: () => void) => void = () => {}
+    mocks.acquireOffscreenAdmission.mockImplementation(
+      () =>
+        new Promise<() => void>((resolve) => {
+          completeAdmission = resolve
+        }),
+    )
+    mocks.sendRuntimeMessage.mockReturnValue(new Promise(() => undefined))
+    registerChromiumBackground()
+    const invoke = mocks.registerBroker.mock.calls[0]![0] as HostInvoker
+    const controller = new AbortController()
+    const pending = invoke(
+      { protocol: PROTOCOL_VERSION, type: 'prepare', requestId: 'cancel-creation-timeout' },
+      controller.signal,
+    )
+    controller.abort()
+    await expect(pending).rejects.toThrow('推理请求已取消')
+    const release = vi.fn()
+    completeAdmission(release)
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_CLAIM_TIMEOUT_MS)
+    expect(release).toHaveBeenCalledTimes(1)
+    expect(warning).toHaveBeenCalled()
+    expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'request')).toHaveLength(0)
+    warning.mockRestore()
+    vi.useRealTimers()
   })
 
   it('releases admission when cancellation interrupts a hanging Offscreen claim', async () => {

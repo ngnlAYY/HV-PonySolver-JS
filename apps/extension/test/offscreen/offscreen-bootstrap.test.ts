@@ -131,6 +131,43 @@ describe('offscreen idle-notification backoff', () => {
     expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 
+  it('migrates an already-idle heartbeat to a new epoch without resetting its retry budget', async () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn')
+    registerOffscreenHost(() => ({ handle: vi.fn(), destroy: vi.fn() }) as never)
+    const listener = mocks.addRuntimeMessageListener.mock.calls[0]![0] as RuntimeMessageListener
+    listener({ type: OFFSCREEN_MESSAGE_TYPE, operation: 'claim', epoch: 'old-idle' }, serviceWorkerSender, vi.fn())
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_TIMEOUT_MS)
+    const generation = idleNotifications()[0]?.generation
+    expect(idleNotifications()).toHaveLength(1)
+
+    const claimed = vi.fn()
+    listener({ type: OFFSCREEN_MESSAGE_TYPE, operation: 'claim', epoch: 'new-idle' }, serviceWorkerSender, claimed)
+    expect(claimed).toHaveBeenCalledWith(expect.objectContaining({ idleGeneration: generation }))
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_NOTIFICATION_RETRY_BASE_MS - 1)
+    expect(idleNotifications()).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(idleNotifications()).toHaveLength(2)
+    expect(idleNotifications()[1]).toMatchObject({ epoch: 'new-idle', generation })
+
+    for (let index = 0; index < MAX_OFFSCREEN_IDLE_NOTIFICATIONS + 1; index += 1) {
+      listener(
+        { type: OFFSCREEN_MESSAGE_TYPE, operation: 'confirm-idle', epoch: 'new-idle', generation },
+        serviceWorkerSender,
+        vi.fn(),
+      )
+      await vi.advanceTimersByTimeAsync(OFFSCREEN_IDLE_NOTIFICATION_MAX_RETRY_MS)
+    }
+    expect(idleNotifications()).toHaveLength(MAX_OFFSCREEN_IDLE_NOTIFICATIONS)
+    expect(
+      idleNotifications()
+        .slice(1)
+        .every((message) => message.epoch === 'new-idle'),
+    ).toBe(true)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    globalThis.dispatchEvent(new Event('pagehide'))
+  })
+
   it('re-arms a fresh heartbeat for a later generation after giving up', async () => {
     vi.useFakeTimers()
     const warnSpy = vi.spyOn(console, 'warn')

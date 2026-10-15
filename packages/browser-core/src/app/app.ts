@@ -145,17 +145,21 @@ export class App {
   }
 
   private isCaptchaRelatedMutation(records: MutationRecord[]): boolean {
-    const captchaMaster = document.getElementById('riddlemaster')
+    // 当前选择器可能已被移除；旧活动目标仍须触发即时取消复核。
+    const captchaMasters = [document.getElementById('riddlemaster'), this.activeSolve?.target.master]
     for (const record of records) {
       const target = record.target
       if (
-        captchaMaster &&
-        (target === captchaMaster ||
-          captchaMaster.contains(target) ||
-          // 外层 fieldset 的 disabled、首个 legend 顺序同样影响控件有效禁用状态。
-          (target instanceof HTMLFieldSetElement &&
-            target.contains(captchaMaster) &&
-            (record.type === 'childList' || record.attributeName === 'disabled')))
+        captchaMasters.some(
+          (captchaMaster) =>
+            captchaMaster &&
+            (target === captchaMaster ||
+              captchaMaster.contains(target) ||
+              // 外层 fieldset 的 disabled、首个 legend 顺序同样影响控件有效禁用状态。
+              (target instanceof HTMLFieldSetElement &&
+                target.contains(captchaMaster) &&
+                (record.type === 'childList' || record.attributeName === 'disabled'))),
+        )
       ) {
         return true
       }
@@ -213,7 +217,7 @@ export class App {
     if (target) {
       this.observer.observe(target, {
         attributes: true,
-        attributeFilter: ['action', 'formaction', 'type', 'disabled', 'src', 'srcset', 'sizes', 'media'],
+        attributeFilter: ['id', 'name', 'action', 'formaction', 'type', 'disabled', 'src', 'srcset', 'sizes', 'media'],
         childList: true,
         subtree: true,
       })

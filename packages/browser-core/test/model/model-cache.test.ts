@@ -69,6 +69,7 @@ type TestDatabase = {
   close: () => void
   createObjectStore: () => IDBObjectStore
   onversionchange: ((event: IDBVersionChangeEvent) => void) | null
+  onclose: ((event: Event) => void) | null
   transaction: () => IDBTransaction
 }
 
@@ -137,6 +138,7 @@ function stubIndexedDb(
     close: vi.fn(),
     createObjectStore: vi.fn(),
     onversionchange: null,
+    onclose: null,
     transaction: vi.fn(() => {
       const transaction: TestTransaction = {
         abort: vi.fn(() => {
@@ -484,6 +486,26 @@ describe('ModelCache', () => {
     expect(database.close).toHaveBeenCalledTimes(1)
   })
 
+  it('reopens after an unexpected database close and ignores late close events from the old connection', async () => {
+    const old = stubIndexedDb()
+    const cache = new ModelCache(createStatusPanel())
+    await cache.getCached()
+    vi.mocked(old.database.transaction).mockImplementation(() => {
+      throw new DOMException('closed', 'InvalidStateError')
+    })
+
+    old.database.onclose?.(new Event('close'))
+    const replacement = stubIndexedDb()
+    const open = vi.spyOn(indexedDB, 'open')
+    await expect(cache.getCached()).resolves.toBeNull()
+    await cache.putCached(bufferFromBytes([1, 2, 3]), false, true)
+    expect(replacement.writes).toHaveLength(2)
+    old.database.onclose?.(new Event('close'))
+    expect(replacement.database.close).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalledTimes(1)
+    cache.close()
+  })
+
   it('aborts a pending cache read when its caller is cancelled', async () => {
     const { transactions } = stubIndexedDb({ deferTransactionCompletion: true })
     const cache = new ModelCache(createStatusPanel())
@@ -806,7 +828,7 @@ describe('ModelCache', () => {
     expect(transactions[0]!.abort).toHaveBeenCalledTimes(1)
   })
 
-  it('cancels a late quota confirmation when the cache closes independently', async () => {
+  it.each(['versionchange', 'close'])('cancels a late quota confirmation on database %s', async (event) => {
     const indexedDb = stubIndexedDb()
     const buffer = bufferFromBytes([1, 2, 3])
     let resolveConfirmation!: (response: Response) => void
@@ -825,7 +847,8 @@ describe('ModelCache', () => {
 
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1))
     expect(requestSignal?.aborted).toBe(false)
-    indexedDb.database.onversionchange?.(new Event('versionchange') as IDBVersionChangeEvent)
+    if (event === 'close') indexedDb.database.onclose?.(new Event('close'))
+    else indexedDb.database.onversionchange?.(new Event('versionchange') as IDBVersionChangeEvent)
 
     await expect(putPromise).rejects.toThrow('模型缓存操作已取消')
     expect(requestSignal?.aborted).toBe(true)

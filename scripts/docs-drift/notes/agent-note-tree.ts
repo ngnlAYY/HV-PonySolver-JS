@@ -3,8 +3,8 @@
  * Shared structural source of truth for the Agent Note tree.
  * Portable: resolves docs/decisions from cwd (or AGENT_NOTE_ROOT env).
  */
-import { readdirSync, existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readdirSync, existsSync, lstatSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 
 /** Recurse `dir` and return posix-relative `.md` paths prefixed with `prefix`. Node 18 compatible (no fs.globSync). */
 function listMd(dir: string, prefix: string): string[] {
@@ -20,8 +20,14 @@ function listMd(dir: string, prefix: string): string[] {
 }
 
 function resolveAgentNoteRoot(): string {
-  if (process.env.AGENT_NOTE_ROOT) return resolve(process.env.AGENT_NOTE_ROOT)
-  return resolve(process.cwd(), 'docs/decisions')
+  const root = resolve(process.env.AGENT_NOTE_ROOT || resolve(process.cwd(), 'docs/decisions'))
+  // 直接验证/封印入口也必须检查祖先，不能经链接走到仓库外后跳过 Git 基线。
+  for (let current = root; ; current = dirname(current)) {
+    const stats = lstatSync(current)
+    if (stats.isSymbolicLink()) throw new Error('Agent Note root and ancestors must not be symbolic links')
+    if (!stats.isDirectory()) throw new Error('Agent Note root and ancestors must be directories')
+    if (dirname(current) === current) return root
+  }
 }
 
 export const agentNoteRoot = resolveAgentNoteRoot()

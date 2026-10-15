@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, cp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, cp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,7 +10,6 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const workerDir = resolve(scriptDir, '..')
-const repoRoot = resolve(workerDir, '../..')
 const validKvNamespaceId = '0123456789abcdef0123456789abcdef'
 const validBucketName = 'bucket-prod'
 
@@ -26,23 +25,49 @@ test('package coverage runs the Model Worker deployment-script tests under Node 
   assert.match(coverageCommand, /scripts\/check-deployment-contract\.test\.mjs/u)
 })
 
-async function withTempWorker(callback) {
-  // Mirror the repository layout (apps/model-worker plus the shared scripts/lib) so the
-  // copied scripts keep resolving their cross-package imports.
+async function withTempWorker(callback, sourceWorkerDir = workerDir) {
+  // 仅复制渲染器需要的源码；不接触生成配置、环境文件或 .wrangler 本地状态。
   const tempRoot = await mkdtemp(join(tmpdir(), 'hv-pony-worker-config-'))
   const tempWorkerDir = join(tempRoot, 'apps/model-worker')
 
   try {
-    await cp(workerDir, tempWorkerDir, {
-      recursive: true,
-      filter: (source) => !source.includes('/node_modules/') && !source.includes('/coverage/'),
-    })
-    await cp(join(repoRoot, 'scripts/lib'), join(tempRoot, 'scripts/lib'), { recursive: true })
+    await mkdir(join(tempWorkerDir, 'scripts'), { recursive: true })
+    for (const file of [
+      'wrangler.template.toml',
+      'scripts/render-wrangler-config.mjs',
+      'scripts/wrangler-config-renderer.mjs',
+      'scripts/wrangler-config-guard.mjs',
+      'scripts/validate-wrangler-config.mjs',
+    ]) {
+      await cp(join(sourceWorkerDir, file), join(tempWorkerDir, file))
+    }
     return await callback(tempWorkerDir)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
 }
+
+test('configuration fixtures exclude generated config, environment files and local Worker state', async () => {
+  const source = await mkdtemp(join(tmpdir(), 'hv-worker-config-source-'))
+  try {
+    const files = [
+      'wrangler.template.toml',
+      'scripts/render-wrangler-config.mjs',
+      'scripts/wrangler-config-renderer.mjs',
+      'scripts/wrangler-config-guard.mjs',
+      'scripts/validate-wrangler-config.mjs',
+    ]
+    for (const file of [...files, 'wrangler.toml', '.env', '.wrangler/state/sentinel']) {
+      await mkdir(dirname(join(source, file)), { recursive: true })
+      await writeFile(join(source, file), 'public fixture sentinel')
+    }
+    await withTempWorker(async (tempWorkerDir) => {
+      assert.deepEqual((await readdir(tempWorkerDir, { recursive: true })).sort(), ['scripts', ...files].sort())
+    }, source)
+  } finally {
+    await rm(source, { recursive: true, force: true })
+  }
+})
 
 async function runRender(env, prepare) {
   return withTempWorker(async (tempWorkerDir) => {

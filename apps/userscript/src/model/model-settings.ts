@@ -16,17 +16,20 @@ export type ModelAccessKeyCommitted = () => void | Promise<void>
 // The model access key is a credential: it is stored only through GM storage,
 // never through the page-readable localStorage fallback.
 const modelAccessKeyStorage = sensitiveGmSettingsStorage
+let keyIntentGeneration = 0
 
 export function getModelAccessKey(): Promise<string> {
   return getCoreModelAccessKey(modelAccessKeyStorage)
 }
 
 export async function setModelAccessKey(value: string, onCommitted?: ModelAccessKeyCommitted): Promise<void> {
+  keyIntentGeneration += 1
   await setCoreModelAccessKey(modelAccessKeyStorage, value)
   await onCommitted?.()
 }
 
 export async function clearModelAccessKey(onCommitted?: ModelAccessKeyCommitted): Promise<void> {
+  keyIntentGeneration += 1
   await clearCoreModelAccessKey(modelAccessKeyStorage)
   await onCommitted?.()
 }
@@ -59,10 +62,13 @@ export async function setModelAccessKeyFromPrompt(
     alertUser('模型下载 Key 已保存')
     return
   }
+  // 验证尚未写入 GM；新的设置/清除必须阻止旧验证迟到后恢复已淘汰的 Key。
+  const generation = ++keyIntentGeneration
   alertUser('正在验证模型下载 Key，请稍候')
   try {
     await onVerify(accessKey)
   } catch (error) {
+    if (generation !== keyIntentGeneration) return
     if (error instanceof ModelDownloadQuotaExceededError) {
       await setModelAccessKey(accessKey, onCommitted)
       alertUser(error.message)
@@ -71,6 +77,7 @@ export async function setModelAccessKeyFromPrompt(
     alertUser(`模型下载 Key 验证失败: ${formatErrorMessage(error)}`)
     return
   }
+  if (generation !== keyIntentGeneration) return
   await setModelAccessKey(accessKey, onCommitted)
   alertUser('模型下载 Key 已验证并保存')
 }

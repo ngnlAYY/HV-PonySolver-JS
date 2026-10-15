@@ -96,7 +96,15 @@ function acquireForRequest(signal: AbortSignal): Promise<() => void> {
     admissionPromise.then(
       (release) => {
         if (settled) {
-          release()
+          // 创建不能撤销；迟到的新文档仍须 claim 以启动空闲回收，不重放原请求。
+          void claimOffscreenHost()
+            .finally(release)
+            .then((claim) => {
+              if (claim.idleGeneration !== null) return confirmAndCloseIdleGeneration(claim.idleGeneration)
+            })
+            .catch((error: unknown) => {
+              warn('回收已取消请求的 Offscreen 文档失败:', formatErrorMessage(error))
+            })
           return
         }
         finish(() => resolve(release))
@@ -159,9 +167,7 @@ export async function invokeOffscreenHost(request: HostRequest, signal: AbortSig
     releaseAdmission()
   }
   try {
-    if (signal.aborted) {
-      throw new Error('推理请求已取消')
-    }
+    // 准入结算与这里之间也可取消；共享 claim 仍启动，调用方等待仍立即取消。
     await claimOffscreenHost(signal)
     if (signal.aborted) {
       throw new Error('推理请求已取消')

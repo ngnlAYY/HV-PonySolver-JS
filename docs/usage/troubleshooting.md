@@ -11,7 +11,7 @@ mise exec -- pnpm --version
 mise exec -- pnpm install --frozen-lockfile
 ```
 
-项目固定 pnpm `12.3.0`。使用 `mise exec -- pnpm` 可明确选择仓库版本；若直接执行 `pnpm` 仍命中其他版本，请检查当前 shell 的 mise 激活配置。
+项目固定 pnpm `12.11.2`。使用 `mise exec -- pnpm` 可明确选择仓库版本；若直接执行 `pnpm` 仍命中其他版本，请检查当前 shell 的 mise 激活配置。
 
 ## 默认构建无法加载 ONNX Runtime
 

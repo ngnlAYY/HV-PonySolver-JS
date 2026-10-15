@@ -91,7 +91,7 @@ rg --hidden --glob '!docs/decisions/archived/**' '机制名或关键词' docs/de
 
 仅归档已完成且参考价值低的 implemented：在 Status 后紧邻加 `Archived: YYYY-MM-DD`，移入 archived 对应类别，再执行 `AGENT_NOTE_ROOT=docs/decisions mise exec -- node scripts/docs-drift/notes/verify-archived-agent-notes.ts --write` 追加封印；不改写既有封印。
 
-归档根/目录/Markdown/manifest 必须为实际目录或普通文件，拒绝 symlink。清单严格检查版本、归档相对 Markdown 路径、SHA-256；逐条读取并重算，路径存在或扫描命中不等于有效。缺失归档目录可选，但已有清单或路径异常时 `--write` 必须失败且不改清单。Git 仓库内直接验证/封印也先解析 `AGENT_NOTE_ARCHIVE_BASE_REF`（默认 HEAD）为可用 commit，再检查该树是否缺清单；无效引用、非 commit 或 Git 读取失败不能冒充首次封印。
+笔记根及其祖先、归档目录/Markdown/manifest 必须为实际目录或普通文件，拒绝 symlink。包装器和直接入口都检查路径，不能因链接走出仓库而把 Git 基线校验降为可选；CI 事件 JSON 解析失败只报告固定错误，不回显内容。清单严格检查版本、归档相对 Markdown 路径、SHA-256；逐条读取并重算，路径存在或扫描命中不等于有效。缺失归档目录可选，但已有清单或路径异常时 `--write` 必须失败且不改清单。Git 仓库内直接验证/封印也先解析 `AGENT_NOTE_ARCHIVE_BASE_REF`（默认 HEAD）为可用 commit，再检查该树是否缺清单；无效引用、非 commit 或 Git 读取失败不能冒充首次封印。
 
 CI guardrails 读取完整 Git 历史，PR 对比 base SHA，push 对比 before SHA，不用本次 HEAD 冒充变更前状态；本地及无前后版本对的手动校验使用 HEAD。
 

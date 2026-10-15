@@ -30,7 +30,7 @@ mise exec -- pnpm --filter @hv-pony-solver/model-worker typecheck
 mise exec -- pnpm --filter @hv-pony-solver/model-worker test
 ```
 
-普通测试不用生产 KV/R2 标识或 Key。`check:deployment` 是独立线上探测，需要明确目标环境和服务可达性，不能用占位绑定代替线上证据。部署 job 的 secrets、dry-run 和发布条件见[部署工作流](releases.md#model-worker-部署工作流)。仅审阅源码不需要渲染配置。
+配置渲染测试只按白名单复制模板和必需脚本，不递归复制生成的 `wrangler.toml`、环境文件或 `.wrangler/` 本地状态。普通测试不用生产 KV/R2 标识或 Key。`check:deployment` 是独立线上探测，需要明确目标环境和服务可达性，不能用占位绑定代替线上证据。部署 job 的 secrets、dry-run 和发布条件见[部署工作流](releases.md#model-worker-部署工作流)。仅审阅源码不需要渲染配置。
 
 ## 按修改区域选择验证
 

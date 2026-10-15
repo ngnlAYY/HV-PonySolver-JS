@@ -33,7 +33,7 @@ export class IndexedDbModelStore {
   private lifecycleController = new AbortController()
   private readonly activeTransactionAborts = new Set<() => void>()
 
-  constructor(private readonly onVersionChange?: () => void) {}
+  constructor(private readonly onConnectionInvalidated?: () => void) {}
 
   close(): void {
     this.generation += 1
@@ -147,14 +147,17 @@ export class IndexedDbModelStore {
         return
       }
       this.db = database
-      database.onversionchange = () => {
+      const invalidateConnection = (): void => {
         if (this.db === database) {
-          if (this.onVersionChange) this.onVersionChange()
+          if (this.onConnectionInvalidated) this.onConnectionInvalidated()
           else this.close()
         } else {
           database.close()
         }
       }
+      database.onversionchange = invalidateConnection
+      // 浏览器强制关闭不会触发 versionchange；同时失效事务、下载和确认生命周期。
+      database.onclose = invalidateConnection
       resolve(database)
     }
     request.onerror = () => reject(request.error || new Error('IndexedDB 打开失败'))

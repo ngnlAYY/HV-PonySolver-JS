@@ -132,7 +132,10 @@ function isQuotaReservation(value: unknown): value is ModelDownloadQuotaReservat
     return false
   }
   if (candidate.allowed === true) {
-    return normalizeModelDownloadReceiptId(candidate.receiptId) === candidate.receiptId
+    return (
+      typeof candidate.receiptId === 'string' &&
+      normalizeModelDownloadReceiptId(candidate.receiptId) === candidate.receiptId
+    )
   }
   return (
     candidate.allowed === false && (candidate.reason === 'quota-exhausted' || candidate.reason === 'reservations-full')

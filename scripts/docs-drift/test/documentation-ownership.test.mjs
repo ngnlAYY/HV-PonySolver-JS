@@ -26,6 +26,22 @@ for (const [path, term] of [
   })
 }
 
+test('browser lifecycle documentation cannot omit discovery, credential and connection recovery boundaries', async () => {
+  await withFixture(async (root) => {
+    const path = join(root, 'docs/architecture/browser-runtime.md')
+    let source = await readFile(path, 'utf8')
+    const facts = ['选择器属性 `id/name`', '旧验证', '异常关闭']
+    for (const fact of facts) {
+      assert.ok(source.includes(fact))
+      source = source.replaceAll(fact, 'missing-lifecycle-boundary')
+    }
+    await writeFile(path, source)
+    const result = await runCheck(root)
+    assert.notEqual(result.exitCode, 0)
+    for (const fact of facts) assert.ok(result.stderr.includes(fact))
+  })
+})
+
 test('CLI fails closed when the HTTP reference is missing', async () => {
   await withFixture(
     async (root) => {

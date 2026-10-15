@@ -4,7 +4,7 @@ import { App } from '../../src/app/app'
 import type { AppDependencies, SolverService } from '../../src/app/app-dependencies'
 import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 import { CaptchaSolver } from '../../src/captcha/captcha-solver'
-import type { CaptchaTarget } from '../../src/captcha/captcha-target'
+import { findCaptchaTarget, type CaptchaTarget } from '../../src/captcha/captcha-target'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
 import { PermanentModelError } from '../../src/model/permanent-model-error'
@@ -134,6 +134,76 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(1)
     expect(harness.trigger.mock.calls[0]?.[0]?.captchaKey).toContain('/first-body.png')
   })
+
+  it.each(['form', 'image', 'master'])(
+    'discovers a captcha completed only by its %s selector attribute',
+    async (kind) => {
+      const captcha = appendCaptcha()
+      const element =
+        kind === 'form'
+          ? captcha.querySelector('form')
+          : kind === 'image'
+            ? captcha.querySelector('#riddleimage')
+            : captcha
+      const attribute = kind === 'form' ? 'name' : 'id'
+      const original = element?.getAttribute(attribute)
+      expect(original).toBeTruthy()
+      element?.removeAttribute(attribute)
+      const harness = createHarness()
+      apps.push(harness.app)
+      harness.app.init()
+      await settleDom()
+      expect(harness.detector.prepare).not.toHaveBeenCalled()
+
+      element?.setAttribute(attribute, original ?? '')
+      await settleDom()
+
+      expect(findCaptchaTarget()).not.toBeNull()
+      expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(['form', 'image', 'master'])(
+    'cancels preparation immediately when the %s selector disappears',
+    async (kind) => {
+      const captcha = appendCaptcha()
+      const element =
+        kind === 'form'
+          ? captcha.querySelector('form')
+          : kind === 'image'
+            ? captcha.querySelector('#riddleimage')
+            : captcha
+      const attribute = kind === 'form' ? 'name' : 'id'
+      const original = element?.getAttribute(attribute)
+      const detector = createDetector()
+      let finish = () => {}
+      vi.mocked(detector.prepare).mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve
+          }),
+      )
+      const harness = createHarness({ detector })
+      apps.push(harness.app)
+      harness.app.init()
+      await settleDom()
+      const signal = vi.mocked(detector.prepare).mock.calls[0]?.[0]
+      expect(signal?.aborted).toBe(false)
+
+      element?.removeAttribute(attribute)
+      await Promise.resolve()
+      expect(signal?.aborted).toBe(true)
+      element?.setAttribute(attribute, original ?? '')
+      await settleDom()
+      expect(detector.prepare).toHaveBeenCalledTimes(2)
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+      finish()
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it('solves an existing captcha once and ignores unrelated mutations after handling', async () => {
     const captcha = appendCaptcha('/captcha.png')

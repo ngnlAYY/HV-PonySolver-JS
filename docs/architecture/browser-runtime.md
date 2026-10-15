@@ -32,7 +32,7 @@ App
 
 ## 验证码生命周期与取消
 
-[App](../../packages/browser-core/src/app/app.ts) 在 documentElement 上观察验证码相关变化，以启动延迟和 MutationObserver 防抖调度扫描，覆盖 body 替换和暂时缺失。扫描与面板各自维护观察器；App 保存当前、失败和准备中的目标，在销毁、切页或 Key 变化时取消旧任务或推进凭据修订号。
+[App](../../packages/browser-core/src/app/app.ts) 在 documentElement 上观察验证码相关变化，以启动延迟和 MutationObserver 防抖调度扫描，覆盖 body 替换和暂时缺失。验证码选择器属性 `id/name` 的补齐会补扫；移除时还按旧活动目标判断相关性，先取消再防抖。扫描与面板各自维护观察器；App 保存当前、失败和准备中的目标，在销毁、切页或 Key 变化时取消旧任务或推进凭据修订号。
 
 JPX 的 `AjaxRound` 会批量清除页面定时器，留下失效的待扫描句柄。每次相关 mutation 都重挂定时器，保留基于 `performance.now()` 的原扫描截止时间；已过期则立即排队，不再等待完整 100ms，持续变化也不延后截止时间。无关 mutation 不重挂，去重、失败冷却与销毁约束不变；这不是全页定时器保护或轮询恢复。
 
@@ -96,9 +96,9 @@ sequenceDiagram
 
 核心[下载器](../../packages/browser-core/src/model/model-downloader.ts) 负责 Bearer、重定向拒绝、状态、有界读取、完整性及回执；用户脚本[适配器](../../apps/userscript/src/model/model-downloader.ts) 只提供 Key 并组合调用方/超时信号。
 
-[ModelCache](../../packages/browser-core/src/model/model-cache.ts) 编排读取、共享下载、写入与确认；[IndexedDB store](../../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务，[record](../../packages/browser-core/src/model/model-cache-record.ts) 校验记录，[shared downloads](../../packages/browser-core/src/model/shared-model-downloads.ts) 合并并发下载。带回执的模型与待确认元数据同事务落盘，确认并更新匹配元数据后才允许后续缓存命中；无回执不确认。关闭或 `versionchange` 取消数据库操作与共享下载。
+[ModelCache](../../packages/browser-core/src/model/model-cache.ts) 编排读取、共享下载、写入与确认；[IndexedDB store](../../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务，[record](../../packages/browser-core/src/model/model-cache-record.ts) 校验记录，[shared downloads](../../packages/browser-core/src/model/shared-model-downloads.ts) 合并并发下载。带回执的模型与待确认元数据同事务落盘，确认并更新匹配元数据后才允许后续缓存命中；无回执不确认。关闭、`versionchange` 或数据库异常关闭事件 `close` 取消数据库操作与共享下载，并使未完成确认失效。连接被清除后下次操作重新打开，旧连接迟到事件不影响新连接。
 
-用户脚本 Key 经 [model-settings.ts](../../apps/userscript/src/model/model-settings.ts) 存入 [sensitiveGmSettingsStorage](../../apps/userscript/src/userscript/gm-storage.ts)，GM 不可用时拒绝降级到页面存储。实际提交后才通知组装层，取消并等待旧 prepare 后恢复 App；已就绪会话复用，并发按修订号取最新。取消输入、验证/存储失败或销毁后的迟到回调不恢复。
+用户脚本 Key 经 [model-settings.ts](../../apps/userscript/src/model/model-settings.ts) 存入 [sensitiveGmSettingsStorage](../../apps/userscript/src/userscript/gm-storage.ts)，GM 不可用时拒绝降级到页面存储。新的设置/清除按意图代次淘汰尚未写入的旧验证，验证结算后再次核对；取消输入不淘汰原操作，已发起的 GM 写入仍按真实提交结算。实际提交后才通知组装层，取消并等待旧 prepare 后恢复 App；已就绪会话复用，并发按修订号取最新。取消输入、验证/存储失败或销毁后的迟到回调不恢复。
 
 保存和读取只去除 Key 首尾空白，保留验证过的原始大小写，以兼容历史 KV 条目；额度身份仍由服务端规范化。已经丢失大小写的旧存储值无法反推，需重新输入原 Key。
 

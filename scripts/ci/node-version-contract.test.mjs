@@ -5,7 +5,7 @@ import { test } from 'node:test'
 
 const repoRoot = resolve(import.meta.dirname, '../..')
 const expectedNodeVersion = '24.15.0'
-const expectedPnpmVersion = '12.3.0'
+const expectedPnpmVersion = '12.11.2'
 
 const rootImporterDependencyPattern = /^ {6}(?:"([^"]+)"|'([^']+)'|([^:\s]+)):\s*$/u
 

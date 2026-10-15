@@ -108,6 +108,17 @@ test('missing decision root or unavailable archive baseline fails closed', async
   })
 })
 
+test('malformed CI event input fails without echoing its contents', async () => {
+  await fixture(async (root) => {
+    const eventPath = join(root, 'event.json')
+    await writeFile(eventPath, '{public-invalid-event-sentinel')
+    const result = run(root, { GITHUB_ACTIONS: 'true', GITHUB_EVENT_PATH: eventPath })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /readable JSON CI event/u)
+    assert.doesNotMatch(result.stderr, /public-invalid-event-sentinel/u)
+  })
+})
+
 test('archive seals reject edits even when the new seal is recomputed', async () => {
   await fixture(async (root) => {
     const { archive, manifest } = await createSealedArchive(root)
@@ -186,6 +197,34 @@ for (const linkedPart of ['root', 'directory', 'note', 'manifest']) {
       assert.notEqual(written.status, 0)
       assert.match(written.stderr, /symbolic link/u)
       assert.equal(await readFile(manifest, 'utf8'), originalManifest)
+    })
+  })
+}
+
+for (const linkedPart of ['docs', 'decisions']) {
+  test(`notes gate and direct sealing reject a linked ${linkedPart} root outside the repository`, async () => {
+    await fixture(async (root) => {
+      const { archive, manifest } = await createSealedArchive(root)
+      const external = await mkdtemp(join(tmpdir(), 'hv-notes-external-'))
+      try {
+        const source = join(root, linkedPart === 'docs' ? 'docs' : 'docs/decisions')
+        const target = join(external, 'notes')
+        await rename(source, target)
+        await symlink(target, source, 'dir')
+        const changed = `${archived}\nChanged after sealing.\n`
+        await writeFile(archive, changed)
+        const recomputed = JSON.stringify({ version: 1, files: { [archiveKey]: seal(changed) } })
+        await writeFile(manifest, recomputed)
+
+        for (const result of [run(root), runArchiveWriter(root)]) {
+          assert.notEqual(result.status, 0)
+          assert.match(result.stderr, /symbolic link/u)
+          assert.doesNotMatch(result.stderr, /append-only check skipped/u)
+        }
+        assert.equal(await readFile(manifest, 'utf8'), recomputed)
+      } finally {
+        await rm(external, { recursive: true, force: true })
+      }
     })
   })
 }

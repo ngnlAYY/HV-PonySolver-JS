@@ -116,6 +116,82 @@ describe('model settings', () => {
     expect(alert).toHaveBeenLastCalledWith('模型下载 Key 已验证并保存')
   })
 
+  it.each(['verified', 'quota', 'rejected'])(
+    'ignores a late %s verification after clearing the Key',
+    async (outcome) => {
+      const { ModelDownloadQuotaExceededError } = await import('@hv-pony-solver/browser-core')
+      const { clearSavedModelAccessKey, setModelAccessKeyFromPrompt } = await import('../../src/model/model-settings')
+      const store = new Map<string, string>()
+      const alert = vi.fn()
+      const onCommitted = vi.fn()
+      vi.stubGlobal('prompt', () => VALID_TOKEN)
+      vi.stubGlobal('alert', alert)
+      vi.stubGlobal('GM_setValue', async (key: string, value: string) => {
+        store.set(key, value)
+      })
+      vi.stubGlobal('GM_deleteValue', async (key: string) => {
+        store.delete(key)
+      })
+      let settle = () => {}
+      const verification = new Promise<void>((resolve, reject) => {
+        settle =
+          outcome === 'verified'
+            ? resolve
+            : () => reject(outcome === 'quota' ? new ModelDownloadQuotaExceededError(60) : new Error('HTTP 403'))
+      })
+      const pending = setModelAccessKeyFromPrompt(() => verification, onCommitted)
+
+      await clearSavedModelAccessKey(onCommitted)
+      alert.mockClear()
+      onCommitted.mockClear()
+      settle()
+      await pending
+
+      expect(store.size).toBe(0)
+      expect(alert).not.toHaveBeenCalled()
+      expect(onCommitted).not.toHaveBeenCalled()
+    },
+  )
+
+  it('does not let an older verification overwrite a newer saved Key', async () => {
+    const { setModelAccessKeyFromPrompt } = await import('../../src/model/model-settings')
+    const setValue = vi.fn(async () => undefined)
+    const prompt = vi.fn().mockReturnValueOnce(VALID_TOKEN).mockReturnValueOnce('cD'.repeat(32))
+    vi.stubGlobal('prompt', prompt)
+    vi.stubGlobal('alert', vi.fn())
+    vi.stubGlobal('GM_setValue', setValue)
+    let finish = () => {}
+    const verification = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const older = setModelAccessKeyFromPrompt(() => verification)
+    await setModelAccessKeyFromPrompt(async () => undefined)
+
+    finish()
+    await older
+
+    expect(setValue).toHaveBeenCalledExactlyOnceWith(STORAGE_KEY, 'cD'.repeat(32))
+  })
+
+  it('keeps a pending verification when a later prompt is cancelled', async () => {
+    const { setModelAccessKeyFromPrompt } = await import('../../src/model/model-settings')
+    const setValue = vi.fn(async () => undefined)
+    vi.stubGlobal('prompt', vi.fn().mockReturnValueOnce(VALID_TOKEN).mockReturnValueOnce(null))
+    vi.stubGlobal('alert', vi.fn())
+    vi.stubGlobal('GM_setValue', setValue)
+    let finish = () => {}
+    const verification = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const older = setModelAccessKeyFromPrompt(() => verification)
+    await setModelAccessKeyFromPrompt(async () => undefined)
+
+    finish()
+    await older
+
+    expect(setValue).toHaveBeenCalledExactlyOnceWith(STORAGE_KEY, VALID_TOKEN)
+  })
+
   it('uses GM storage when available', async () => {
     const getValue = vi.fn(async () => 'gm-key')
     const setValue = vi.fn(async () => undefined)

@@ -16,7 +16,7 @@
 
 ## 从源码构建
 
-在仓库根目录准备 [mise.toml](mise.toml) 固定的 Node.js `24.15.0` 和 pnpm `12.3.0`：
+在仓库根目录准备 [mise.toml](mise.toml) 固定的 Node.js `24.15.0` 和 pnpm `12.11.2`：
 
 ```bash
 mise trust
@@ -46,7 +46,7 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 ## 默认行为
 
 - `auto` 识别、勾选后延迟点击原生提交按钮；`manual` 只记录结果。默认开启失败随机答案，扩展设置页可关闭。
-- 保留手动勾选。合计超过 4 项时只裁剪自动项，目标至多 3 项；本轮手动取消的项不会被勾回。目标、图片选源或外层 fieldset 的有效禁用状态变化会先取消旧轮次，新验证码不必等待旧初始化或设置读取完成；取消或控件失效后不再点击或提交。
+- 保留手动勾选。合计超过 4 项时只裁剪自动项，目标至多 3 项；本轮手动取消的项不会被勾回。验证码 `id/name` 补齐会补扫；目标、图片选源或外层 fieldset 的有效禁用状态变化会先取消旧轮次，新验证码不必等待旧初始化或设置读取完成；取消或控件失效后不再点击或提交。
 - 面板默认 `top=155, left=1240`，显示最近 5 条记录，仅在存在 `div#csp` 时可见；隐藏面板不停止识别。
 - 启动时 body 暂缺，或 AADB 等局部切页移除面板、替换 body 后，等待挂载并继续扫描，保留面板状态和历史，仍遵守可见性设置；销毁后不恢复。JPX `AjaxRound` 清除扫描定时器后，后续验证码相关 DOM 变化会恢复扫描，每题仍只提交一次。
 
@@ -56,7 +56,7 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 
 当前客户端使用 `.ort`，服务端保留旧 `.onnx` 路由。远程 Key 只通过 `Authorization: Bearer` 发送，不进入 URL、日志或产物；扩展内容脚本不接收 Key 或模型字节。内置模型扩展不读取旧 Key，也不保留远程下载能力；安装包中的模型可被提取，完整性校验不提供保密性。
 
-模型校验长度和 SHA-256 后写入 IndexedDB。额度默认按每 Key、每 UTC 自然月最多 5 次**已确认缓存下载**计算；查询、Key 验证和有效缓存命中不计次，关闭额度时显示无限制。详见[缓存与计次](docs/model-cache-strategy.md)。
+用户脚本新设置或清除 Key 会淘汰尚未写入的旧验证，迟到验证不会恢复旧 Key。模型校验长度和 SHA-256 后写入 IndexedDB，连接异常关闭后下次操作重新打开。额度默认按每 Key、每 UTC 自然月最多 5 次**已确认缓存下载**计算；查询、Key 验证和有效缓存命中不计次，关闭额度时显示无限制。详见[缓存与计次](docs/model-cache-strategy.md)。
 
 用户脚本两个 Runtime profile 不自动回退；“内置精简运行时”仍需下载模型和 WASM。资产身份见[Runtime 专题](docs/onnx-runtime.md)，扩展权限与消息边界见[扩展专题](docs/browser-extension.md#permission-matrix)。
 
