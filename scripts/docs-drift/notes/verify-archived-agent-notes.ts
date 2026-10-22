@@ -1,16 +1,16 @@
 // Adapted from the write-notes-like-deepseek skill; project entry: ../verify-notes.mjs.
 /**
  * Verify frozen archived Agent Notes: exact head layout, manifest.json seals,
- * append-only extension vs a git baseline (skipped gracefully without git).
+ * append-only extension vs a git baseline (skipped gracefully outside git repositories).
  * Usage:
  *   npx tsx scripts/verify-archived-agent-notes.ts          # verify only
  *   npx tsx scripts/verify-archived-agent-notes.ts --write  # verify, then seal unsealed files
  * Env: AGENT_NOTE_ARCHIVE_BASE_REF (default HEAD) — git ref the manifest is compared against.
  */
 import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { agentNoteRoot } from './agent-note-tree.ts'
 
 const isWrite = process.argv.includes('--write')
@@ -181,17 +181,42 @@ for (const [key, seal] of Object.entries(manifest.files)) {
   }
 }
 
-// --- append-only vs git baseline (skipped without git)
+// --- append-only vs git baseline (skipped only outside git repositories)
 const repoRoot = (() => {
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    const result = spawnSync('git', ['rev-parse', '--show-toplevel'], {
       cwd: agentNoteRoot,
       encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C' },
       stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim()
+    })
+    if (!result.error && result.status === 0 && result.stdout.trim() !== '') {
+      return result.stdout.trim()
+    }
+    // Only Git's fixed non-repository diagnostic may skip the baseline. Never
+    // expose stderr: configuration failures can contain environment values.
+    const diagnostic = result.stderr?.trim() ?? ''
+    const outsideRepository =
+      diagnostic === 'fatal: not a git repository (or any of the parent directories): .git' ||
+      /^fatal: not a git repository \(or any parent up to mount point [^\r\n]+\)\r?\nStopping at filesystem boundary \(GIT_DISCOVERY_ACROSS_FILESYSTEM not set\)\.$/u.test(
+        diagnostic,
+      )
+    if (!result.error && result.status === 128 && result.stdout === '' && outsideRepository) {
+      for (let current = agentNoteRoot; ; current = dirname(current)) {
+        // Unreadable or damaged metadata can produce the same Git diagnostic.
+        // Its presence, or an inaccessible ancestor, must still fail closed.
+        if (lstatSync(join(current, '.git'), { throwIfNoEntry: false })) break
+        if (dirname(current) === current) {
+          warnings.push('not a git repository — append-only check skipped (seal hashes still verified against disk)')
+          return null
+        }
+      }
+    }
   } catch {
-    return null
+    // Discovery and filesystem failures share the fixed, non-sensitive error.
   }
+  fail('archive Git repository discovery failed; append-only baseline cannot be skipped')
+  return null
 })()
 if (repoRoot) {
   const baseRef = process.env.AGENT_NOTE_ARCHIVE_BASE_REF || 'HEAD'
@@ -223,8 +248,6 @@ if (repoRoot) {
       }
     }
   }
-} else {
-  warnings.push('not a git repository — append-only check skipped (seal hashes still verified against disk)')
 }
 
 if (errors.length) {

@@ -128,7 +128,7 @@ git diff --check
 
 纯文档至少运行 `mise exec -- pnpm format:check`、`mise exec -- pnpm docs:check`、`mise exec -- node --test "scripts/docs-drift/test/*.test.mjs"` 和 `git diff --check`。vendor Runtime README 不在默认门禁范围，单独检查方式见[文档维护](documentation.md#验证文档修改)。修改检查器再运行 lint 和对应 Node 回归。
 
-格式来自根 `package.json`，忽略范围来自 `.gitignore` 与 `.prettierignore`；只对改动文件运行 Prettier `--write`。Action pin 检查要求完整 SHA/digest 及当前 checkout 步骤的凭据配置，对不支持的相关语法失败关闭；它并非通用 YAML 解析器。
+格式来自根 `package.json`，忽略范围来自 `.gitignore` 与 `.prettierignore`；只对改动文件运行 Prettier `--write`。Action pin 检查要求完整 SHA/digest 及当前 checkout 步骤的凭据配置；显式 flow mapping 键一律拒绝，即使引用已固定 SHA，也不支持 `{ ? uses : … }`，避免复杂键静默跳过。普通 flow、显式 block 键和 quoted 键按各自边界校验，其他不能可靠识别的相关语法失败关闭；它并非通用 YAML 解析器。浏览器危险调用检查将 `Function()` 与 `new Function()` 同归为 `Function` 并拒绝。Release 回归执行实际工作流 shell，以本地 GitHub API 替身验证已有标签和服务故障都不会发布到旧提交，不使用真实凭据或创建远端标签。
 
 ## 验证记录格式
 

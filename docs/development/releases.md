@@ -43,6 +43,6 @@ dry-run 只证明可以生成部署包；Wrangler 部署成功也不能证明 R2
 
 ## 发布审阅与交付证据
 
-用户脚本和扩展分别取各自 `package.json` 版本，不联动升级内部私有包。扩展 Release 标签为 `extension-v<扩展版本>`，校验实际 ZIP、SHA-256、artifact 元数据与目标 commit 后发布；已有标签会失败。它不执行浏览器商店提交或签名，也不提供 Firefox Android 证据。
+用户脚本和扩展分别取各自 `package.json` 版本，不联动升级内部私有包。扩展 Release 标签为 `extension-v<扩展版本>`，校验实际 ZIP、SHA-256、artifact 元数据与目标 commit 后，通过 GitHub Git references API 原子创建绑定本次 `GITHUB_SHA` 的新标签，再用 `gh release create --verify-tag` 发布。已有标签、API 拒绝或网络失败立即中止，不把标签查询失败解释为不存在，也不自动改绑已有标签。若标签已创建而后续发布失败，标签会保留，须由维护者核对后处理，不自动删除重试。它不执行浏览器商店提交或签名，也不提供 Firefox Android 证据。
 
 CodeQL 成功表示分析执行完成；修复告警后还须等待目标分支新分析，核对分析结果与告警实例。交付记录 run URL、commit、产物身份、通过门禁和 skipped/未运行项，不把“已触发”写成“已通过”。仅在明确授权时 commit、push、发布或部署；推送前确认远程没有未整合提交。

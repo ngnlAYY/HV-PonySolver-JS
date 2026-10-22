@@ -99,6 +99,48 @@ test('parseModelManifest allows trailing comments after MODEL_VERSION', () => {
   assert.equal(manifest.byteLength, 3)
 })
 
+test('parseModelManifest preserves object literal boundaries through comments and const assertions', () => {
+  for (const suffix of [
+    ' /* trailing object comment */;',
+    ' /* object comment */\nexport const NEXT = 1',
+    ' /* object comment */ as /* assertion comment */ const // trailing assertion comment\nexport type Next = number',
+  ]) {
+    const manifest = parseModelManifest(
+      `export const MODEL_INTEGRITY = { byteLength: 3, sha256: '${sha256}' }${suffix}`,
+      { requireVersion: false },
+    )
+    assert.deepEqual(manifest, { version: null, byteLength: 3, sha256: sha256.toLowerCase() })
+  }
+})
+
+test('parseModelManifest rejects runtime evaluation after the integrity object initializer', () => {
+  const actual = `{ byteLength: 4, sha256: '${'b'.repeat(64)}' }`
+  const object = `{ byteLength: 3, sha256: '${sha256}', actual: ${actual} }`
+  for (const suffix of [
+    '.actual',
+    "['actual']",
+    '\n/* continued selection */ .actual',
+    '\n["actual"]',
+    ` || ${actual}`,
+    ` && ${actual}`,
+    ` ?? ${actual}`,
+    ` ? ${actual} : ${actual}`,
+    ' + 1',
+    '()',
+    ` as const\n/* continued expression */ || ${actual}`,
+  ]) {
+    assert.throws(
+      () =>
+        parseModelManifest(`export const MODEL_INTEGRITY = ${object}${suffix}`, {
+          requireVersion: false,
+          sourcePath: 'fixture/model.ts',
+        }),
+      /Invalid MODEL_INTEGRITY in fixture\/model\.ts: unexpected token after literal value/,
+      suffix,
+    )
+  }
+})
+
 test('parseModelManifest rejects continued MODEL_VERSION expressions', () => {
   assert.throws(
     () =>
@@ -234,7 +276,7 @@ test('parseModelManifest rejects invalid sha256 values', () => {
   )
 })
 
-test('readModelManifest reads manifests from the configured repo root and relative path', async () => {
+test('readModelManifest validates full initializers from the configured repo root and relative path', async () => {
   const repoRoot = await mkdtemp(join(tmpdir(), 'hv-pony-model-manifest-'))
   const relativePath = 'fixtures/model.ts'
   const manifestPath = join(repoRoot, relativePath)
@@ -253,6 +295,20 @@ test('readModelManifest reads manifests from the configured repo root and relati
     assert.equal(manifest.version, 'fixture-model')
     assert.equal(manifest.byteLength, 3)
     assert.equal(manifest.sha256, sha256.toLowerCase())
+
+    await writeFile(
+      manifestPath,
+      `export const MODEL_VERSION = 'fixture-model'
+       export const MODEL_INTEGRITY = {
+         byteLength: 3,
+         sha256: '${sha256}',
+         actual: { byteLength: 4, sha256: '${'b'.repeat(64)}' },
+       }.actual`,
+    )
+    await assert.rejects(
+      readModelManifest(repoRoot, { relativePath }),
+      /Invalid MODEL_INTEGRITY .*unexpected token after literal value/,
+    )
   } finally {
     await rm(repoRoot, { recursive: true, force: true })
   }

@@ -62,8 +62,8 @@ function findSinkKinds(source, fileName = 'browser-sink-source.ts') {
   function visit(node) {
     if (isInnerHtmlAssignment(node)) {
       sinks.push('innerHTML')
-    } else if (isNewFunctionCall(node)) {
-      sinks.push('new Function')
+    } else if (isFunctionConstructorCall(node)) {
+      sinks.push('Function')
     } else if (isImportScriptsCall(node)) {
       sinks.push('importScripts')
     }
@@ -107,8 +107,12 @@ function isInnerHtmlTarget(node) {
   )
 }
 
-function isNewFunctionCall(node) {
-  return ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function'
+function isFunctionConstructorCall(node) {
+  return (
+    (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === 'Function'
+  )
 }
 
 function isImportScriptsCall(node) {

@@ -94,6 +94,70 @@ test('rejects mutable actions declared with an explicit YAML mapping key', async
   assert.match(result.stderr, /actions\/checkout@v7/)
 })
 
+test('validates inline explicit block action keys, including quoted and escaped forms', async () => {
+  for (const key of ['uses', '"uses"', "'uses'", '"\\u0075ses"']) {
+    const mutable = await runChecker('actions/checkout@v4', `? ${key}:`)
+    assert.notEqual(mutable.status, 0, mutable.stdout)
+    assert.match(mutable.stderr, /actions\/checkout@v4/)
+
+    const valid = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps:
+      - ? ${key}: actions/checkout@${'a'.repeat(40)}
+        with:
+          persist-credentials: false
+`)
+    assert.equal(valid.status, 0, valid.stderr)
+
+    const missingCredentials = await runChecker(`actions/checkout@${'a'.repeat(40)}`, `? ${key}:`)
+    assert.notEqual(missingCredentials.status, 0, missingCredentials.stdout)
+    assert.match(missingCredentials.stderr, /persist-credentials/)
+  }
+})
+
+test('fails closed for explicit flow action keys, including otherwise pinned and safe actions', async () => {
+  for (const key of ['uses', '"uses"', "'uses'", '"\\u0075ses"']) {
+    for (const revision of ['v4', 'a'.repeat(40)]) {
+      const result = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps: [{ ? ${key} : actions/checkout@${revision}, with: { persist-credentials: false } }]
+`)
+      assert.notEqual(result.status, 0, result.stdout)
+      assert.match(result.stderr, /unsupported.*explicit flow mapping key/)
+    }
+  }
+})
+
+test('fails closed for multiline explicit flow keys and explicit checkout input keys', async () => {
+  for (const steps of [
+    `[{ ? uses
+      : owner/action@${'a'.repeat(40)} }]`,
+    `[{
+      ? "uses": owner/action@${'a'.repeat(40)}
+    }]`,
+    `[{ ?
+      uses : owner/action@${'a'.repeat(40)}
+    }]`,
+    `[{ uses: actions/checkout@${'a'.repeat(40)}, ? with : { persist-credentials: false } }]`,
+    `[{ uses: actions/checkout@${'a'.repeat(40)}, with: { ? persist-credentials : false } }]`,
+  ]) {
+    const result = await runCheckerWithWorkflow(`jobs:\n  verify:\n    steps: ${steps}\n`)
+    assert.notEqual(result.status, 0, result.stdout)
+    assert.match(result.stderr, /unsupported.*explicit flow mapping key/)
+  }
+})
+
+test('checks actions beside unsupported explicit flow mappings on the same line', async () => {
+  const result = await runCheckerWithWorkflow(`jobs:
+  verify:
+    steps: [{ ? uses : owner/first@${'a'.repeat(40)} }, { "uses": "owner/second@main" }, { uses: owner/third@main }]
+`)
+  assert.notEqual(result.status, 0, result.stdout)
+  assert.match(result.stderr, /unsupported.*explicit flow mapping key/)
+  assert.match(result.stderr, /owner\/second@main/)
+  assert.match(result.stderr, /owner\/third@main/)
+})
+
 test('rejects checkout steps that omit persist-credentials', async () => {
   const result = await runCheckerWithWorkflow(
     `jobs:\n  verify:\n    steps:\n      - uses: actions/checkout@${'a'.repeat(40)}\n`,
@@ -138,9 +202,10 @@ test('ignores action-like text in quoted strings, comments, and shell block scal
       - name: 'a description, uses: owner/decoy@main'
         run: |
           echo '{ uses: owner/shell@main }'
+          echo '{ ? uses : owner/explicit-shell@main }'
           uses: owner/plain-shell@main
-      - name: "another description, uses: owner/quoted@main"
-        uses: owner/real@${'a'.repeat(40)} # { uses: owner/comment@main }
+      - name: "another description, uses: owner/quoted@main; { ? uses : owner/explicit-quoted@main }"
+        uses: owner/real@${'a'.repeat(40)} # { uses: owner/comment@main }, { ? uses : owner/explicit-comment@main }
 `)
   assert.equal(result.status, 0, result.stderr)
 })
@@ -222,6 +287,7 @@ test('ignores uses-like tokens inside legal plain scalar values', async () => {
   verify:
     steps:
       - ${field}: echo {uses:owner/decoy@main}
+      - ${field}: echo {? uses:owner/explicit-decoy@main}
         uses: owner/real@${'a'.repeat(40)}
 `)
     assert.equal(result.status, 0, result.stderr)

@@ -96,7 +96,7 @@ it.each(['verify-key', 'clear-key'] as const)(
     }
     const client = new RemoteDetectorClient(panel, () => app.recoverAfterModelCredentialsChanged())
     const otherClient = new RemoteDetectorClient(panel)
-    const trigger = vi.fn(async () => ({ handled: true, captchaKey: null }))
+    const trigger = vi.fn(async () => ({ handled: true, captchaKey: null, failure: null }))
     const app = new App({ panel, detector: client, solver: { isBusy: false, trigger } })
     app.init()
     const warmups = [

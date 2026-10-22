@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const workflowsDirectory = join(repositoryRoot, '.github', 'workflows')
 const externalActionKeyPattern =
-  /(?:^[ \t]*(?:-[ \t]*)?|[{,][ \t]*)(?:(?:"uses"|'uses')[ \t]*:|uses[ \t]*:(?=[ \t]|$))[ \t]*/g
+  /(?:^[ \t]*(?:-[ \t]*)?|[{,][ \t]*)(?:\?[ \t]+)?(?:(?:"uses"|'uses')[ \t]*:|uses[ \t]*:(?=[ \t]|$))[ \t]*/g
 const explicitExternalActionKeyPattern = /^[ \t]*(?:-[ \t]*)?\?[ \t]*(?:"uses"|'uses'|uses)[ \t]*(?:#.*)?$/
 const withMappingKeyPattern = /^[ \t]*(?:(?:"with"|'with')[ \t]*:|with[ \t]*:(?=[ \t]|$))[ \t]*(.*)$/
 const credentialMappingKeyPattern =
@@ -58,6 +58,15 @@ function codeMask(line, state = { quote: null, flowDepth: 0 }) {
       state.flowDepth += 1
     } else if (character === '}' || character === ']') {
       state.flowDepth -= 1
+    } else if (
+      character === '?' &&
+      state.flowDepth > 0 &&
+      /(?:^|\{|\[|,)[ \t]*$/u.test(line.slice(0, index)) &&
+      (index + 1 === line.length || /\s/u.test(line[index + 1]))
+    ) {
+      // Explicit flow keys may span lines or contain complex keys. Reject them
+      // rather than letting an unrecognized uses/with key bypass either policy.
+      state.unsupported = true
     } else if (character === ':') {
       const start = index + 1 + (line.slice(index + 1).match(/^[ \t]*/u)?.[0].length ?? 0)
       const first = line[start]
@@ -140,7 +149,7 @@ function decodeQuotedScalar(token) {
 
 function normalizeMappingKeys(lines, workflowName) {
   const masks = workflowCodeMasks(lines, (index) => {
-    violations.push(`${workflowName}:${index + 1}: unsupported YAML anchor, alias, or tag`)
+    violations.push(`${workflowName}:${index + 1}: unsupported YAML anchor, alias, tag, or explicit flow mapping key`)
   })
   return lines.map((line, index) => {
     const replacements = []

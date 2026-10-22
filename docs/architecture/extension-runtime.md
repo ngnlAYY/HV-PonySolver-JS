@@ -70,11 +70,15 @@ Chromium service worker 不持有推理会话。[chromium-bootstrap.ts](../../ap
 
 Key 使用 [indexeddb-string-storage.ts](../../apps/extension/src/host/indexeddb-string-storage.ts) 的独立 IndexedDB，不回显、不进入内容脚本。原生事务 commit 独立于请求取消结算：即使调用方已取消，仍驱动 Host 取消并等待共享 Detector 的旧初始化，覆盖静默预热与所有 Port；就绪会话继续复用。提交前回滚不通知，Host 关闭后的迟到回调不恢复同步。
 
+成功打开的连接对异常 `close` 与 `versionchange` 共用身份检查：取消旧代际未决事务、丢弃坏连接，下次操作重新打开。旧连接迟到事件只关闭旧连接，不影响新连接。失效前已报告的 commit 不回滚；失效后的旧事务迟到完成不再通知，调用方取消仍按原取消语义结算。
+
 Firefox 注入回调、Chromium Offscreen 发送严格来源校验的 runtime 消息，均不依赖原请求成功响应。Broker 广播并持久化凭证修订号，让内容页在后台重启或 Key 修复后重新准备；广播不包含 Key。
 
 ### 设置页并发操作
 
 [ordinary-settings.ts](../../apps/extension/src/options/ordinary-settings.ts) 管理普通字段加载、解析、脏状态与串行保存。远程操作按代际取消旧请求；验证/清除成功只清空点击后未编辑的输入，重新输入同样文字也保留。仅额度查询在 Port 瞬断后重连一次，其他操作不自动重放；页面销毁取消未完成操作。
+
+首次加载成功前，字段编辑身份独立于当前值差异：已触发 `input/change` 的 select 或 checkbox 即使改回 HTML 初始值，也不会被迟到快照覆盖。应用快照前与加载失败时仍比较控件值，捕获无事件的程序化编辑；失败重试保留已观察到的编辑身份，只加载未编辑字段。加载成功后清除临时身份，以持久化快照及实际保存成功值为 baseline 计算 dirty，改回 baseline 不写入。
 
 ## 取消、断连和恢复
 
@@ -92,18 +96,19 @@ BFCache 的 `pagehide.persisted` 销毁应用并取消工作，`pageshow.persist
 
 ## 测试与证据对应关系
 
-| 目标                                 | 对应测试/脚本                                                                                                                     | 能证明什么                                                                |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| 协议 guard、消息大小和结果形状       | `test/protocol/messages.test.ts`                                                                                                  | 聚合入口及拆分后的 Port/Offscreen/image guard 不会放行未知消息            |
-| 请求取消、超时、断连                 | `test/protocol/request-lifecycle.test.ts`, `test/content/remote-detector-client.test.ts`, `test/background/broker.test.ts`        | 单请求结算和 Port 级隔离                                                  |
-| Chromium epoch、Offscreen 接管/回收  | `test/background/chromium-offscreen.test.ts`, `test/offscreen/offscreen-bootstrap.test.ts`, `test/background/bootstrap.test.ts`   | service worker 重启及空闲生命周期                                         |
-| Host、模型缓存和资产校验             | `test/host/*.test.ts`, `test/options/*.test.ts`                                                                                   | 远程/内置组装、Key 存储、完整性与设置行为                                 |
-| 内容存储镜像和页面生命周期           | `test/content/storage-mirror.test.ts`, `test/content/content-runtime.test.ts`                                                     | 快照合并、写入校正、pagehide/pageshow                                     |
-| 构建隔离、清单、包体和可重复归档     | `scripts/build/build-extension.test.mjs`, `scripts/e2e/packaged-smoke-artifact.test.mjs`, `scripts/release/release-gate.test.mjs` | 产物结构和发布门禁的静态契约                                              |
-| 基准参数、统计、结果校验、比较和 CSV | `scripts/benchmark/benchmark-contract.test.mjs`, `scripts/benchmark/benchmark-runner.test.mjs`                                    | 聚合入口导出、参数矩阵、统计口径、结果 schema、比较接受条件和可导出的 CSV |
-| 真实浏览器内容链路                   | `scripts/e2e/chromium-content-smoke.mjs`                                                                                          | 本地 fixture 的 DOM、消息和原生提交                                       |
-| 远程生产加载/鉴权                    | `scripts/e2e/chromium-load-smoke.mjs`, `scripts/e2e/firefox-load-smoke.mjs`                                                       | load-only 或受保护 Key 的明确边界；缺少 Key 时不声称鉴权通过              |
-| 内置模型双浏览器推理                 | `scripts/e2e/chromium-packaged-model-smoke.mjs`, `scripts/e2e/firefox-packaged-model-smoke.mjs`                                   | 包内模型、会话重建和 fixture oracle                                       |
+| 目标                                 | 对应测试/脚本                                                                                                                     | 能证明什么                                                                     |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 协议 guard、消息大小和结果形状       | `test/protocol/messages.test.ts`                                                                                                  | 聚合入口及拆分后的 Port/Offscreen/image guard 不会放行未知消息                 |
+| 请求取消、超时、断连                 | `test/protocol/request-lifecycle.test.ts`, `test/content/remote-detector-client.test.ts`, `test/background/broker.test.ts`        | 单请求结算和 Port 级隔离                                                       |
+| Chromium epoch、Offscreen 接管/回收  | `test/background/chromium-offscreen.test.ts`, `test/offscreen/offscreen-bootstrap.test.ts`, `test/background/bootstrap.test.ts`   | service worker 重启及空闲生命周期                                              |
+| Host、模型缓存和资产校验             | `test/host/*.test.ts`, `test/options/*.test.ts`                                                                                   | 远程/内置组装、Key 存储、完整性与设置行为                                      |
+| Key 连接异常关闭与普通设置首次加载   | `test/host/indexeddb-string-storage.test.ts`, `test/options/ordinary-settings.test.ts`                                            | 连接身份隔离、未决事务取消、提交边界，以及编辑保留、失败重试和按 baseline 保存 |
+| 内容存储镜像和页面生命周期           | `test/content/storage-mirror.test.ts`, `test/content/content-runtime.test.ts`                                                     | 快照合并、写入校正、pagehide/pageshow                                          |
+| 构建隔离、清单、包体和可重复归档     | `scripts/build/build-extension.test.mjs`, `scripts/e2e/packaged-smoke-artifact.test.mjs`, `scripts/release/release-gate.test.mjs` | 产物结构和发布门禁的静态契约                                                   |
+| 基准参数、统计、结果校验、比较和 CSV | `scripts/benchmark/benchmark-contract.test.mjs`, `scripts/benchmark/benchmark-runner.test.mjs`                                    | 聚合入口导出、参数矩阵、统计口径、结果 schema、比较接受条件和可导出的 CSV      |
+| 真实浏览器内容链路                   | `scripts/e2e/chromium-content-smoke.mjs`                                                                                          | 本地 fixture 的 DOM、消息和原生提交                                            |
+| 远程生产加载/鉴权                    | `scripts/e2e/chromium-load-smoke.mjs`, `scripts/e2e/firefox-load-smoke.mjs`                                                       | load-only 或受保护 Key 的明确边界；缺少 Key 时不声称鉴权通过                   |
+| 内置模型双浏览器推理                 | `scripts/e2e/chromium-packaged-model-smoke.mjs`, `scripts/e2e/firefox-packaged-model-smoke.mjs`                                   | 包内模型、会话重建和 fixture oracle                                            |
 
 单元测试、构建审计和真实浏览器 smoke 证明的是不同边界，不能相互替代。最低版本、Firefox Android、商店发布和线上 Worker/R2 状态仍按 [`docs/browser-extension.md`](../browser-extension.md) 的发布矩阵单独验收。
 

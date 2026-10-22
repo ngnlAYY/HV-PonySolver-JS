@@ -329,7 +329,7 @@ export class App {
       this.recoverFailedTargetAfterSubmitEnabled(target)
       if (
         this.transientSuppressionAt !== null &&
-        Date.now() - this.transientSuppressionAt >= TRANSIENT_FAILURE_RETRY_AFTER_MS &&
+        performance.now() - this.transientSuppressionAt >= TRANSIENT_FAILURE_RETRY_AFTER_MS &&
         isSameCaptchaTarget(target, this.lastCaptchaTarget)
       ) {
         // The host outage behind a transient-failure suppression may have
@@ -340,7 +340,7 @@ export class App {
       }
       if (
         this.solverFailureSuppressionAt !== null &&
-        Date.now() - this.solverFailureSuppressionAt >= SOLVER_FAILURE_RETRY_AFTER_MS &&
+        performance.now() - this.solverFailureSuppressionAt >= SOLVER_FAILURE_RETRY_AFTER_MS &&
         isSameCaptchaTarget(target, this.lastCaptchaTarget)
       ) {
         this.lastCaptchaTarget = null
@@ -364,7 +364,7 @@ export class App {
         if (failedTarget) {
           this.failedCaptchaTarget = failedTarget
           this.lastCaptchaTarget = failedTarget
-          this.transientSuppressionAt = prepareResult === 'transient-failure' ? Date.now() : null
+          this.transientSuppressionAt = prepareResult === 'transient-failure' ? performance.now() : null
         }
         return
       }
@@ -375,10 +375,10 @@ export class App {
       const currentTarget = this.currentTargetSnapshot(target, signal)
       if (result.handled && currentTarget) {
         this.lastCaptchaTarget = currentTarget
-      } else if (!result.handled && result.captchaKey === target.captchaKey && currentTarget) {
+      } else if (result.failure !== null && result.captchaKey === target.captchaKey && currentTarget) {
         this.lastCaptchaTarget = currentTarget
         this.failedCaptchaTarget = currentTarget
-        this.solverFailureSuppressionAt = Date.now()
+        this.solverFailureSuppressionAt = result.failure === 'transient' ? performance.now() : null
       }
     } catch (error) {
       const failedTarget = target ? this.currentTargetSnapshot(target, signal) : null
@@ -386,11 +386,20 @@ export class App {
         this.lastCaptchaTarget = failedTarget
         this.failedCaptchaTarget = failedTarget
         this.transientSuppressionAt = null
-        this.solverFailureSuppressionAt = Date.now()
+        this.solverFailureSuppressionAt = performance.now()
         warn('处理验证码失败:', formatErrorMessage(error))
       }
     } finally {
       if (this.activeSolve === activeSolve) {
+        // pushState/replaceState 不产生 mutation；旧轮次结算后接手当前有效目标，
+        // 但不为缺失目标排队，避免无效页面上的微任务自旋。
+        this.cancelStaleSolve()
+        if (!this.destroyed && activeSolve) {
+          const currentTarget = findCaptchaTarget()
+          if (currentTarget && !isSameCaptchaTarget(activeSolve.target, currentTarget)) {
+            this.pendingScan = true
+          }
+        }
         this.activeSolve = null
       }
       this.scheduledScan = false

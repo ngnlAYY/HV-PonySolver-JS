@@ -152,6 +152,108 @@ test('the direct archive writer rejects an unavailable or non-commit baseline wi
   })
 })
 
+test('the direct archive writer fails closed on Git discovery errors without leaking diagnostics', async () => {
+  await fixture(async (root) => {
+    const { archive, manifest } = await createSealedArchive(root)
+    const changed = `${archived}\nChanged after sealing.\n`
+    await writeFile(archive, changed)
+    const recomputed = JSON.stringify({ version: 1, files: { [archiveKey]: seal(changed) } })
+    await writeFile(manifest, recomputed)
+    const invalidConfig = { GIT_CONFIG_COUNT: 'public-invalid-git-config-sentinel' }
+    for (const extra of [
+      invalidConfig,
+      { GIT_DIR: join(root, 'public-invalid-git-directory-sentinel') },
+      { PATH: join(root, 'public-unavailable-git-sentinel') },
+    ]) {
+      const result = runArchiveWriter(root, extra)
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /archive Git repository discovery failed/u)
+      assert.doesNotMatch(
+        result.stdout + result.stderr,
+        /public-(?:invalid|unavailable)-git|GIT_CONFIG_COUNT|append-only check skipped/u,
+      )
+      assert.equal(await readFile(manifest, 'utf8'), recomputed)
+    }
+
+    await rm(manifest)
+    const unsealed = runArchiveWriter(root, invalidConfig)
+    assert.equal(unsealed.status, 1)
+    assert.match(unsealed.stderr, /archive Git repository discovery failed/u)
+    await assert.rejects(readFile(manifest), { code: 'ENOENT' })
+  })
+})
+
+test('a non-repository Git diagnostic does not bypass damaged repository metadata', async () => {
+  await fixture(async (root) => {
+    const { archive, manifest } = await createSealedArchive(root)
+    const changed = `${archived}\nChanged after sealing.\n`
+    await writeFile(archive, changed)
+    const recomputed = JSON.stringify({ version: 1, files: { [archiveKey]: seal(changed) } })
+    await writeFile(manifest, recomputed)
+    await rename(join(root, '.git'), join(root, 'saved-git-metadata'))
+    await mkdir(join(root, '.git'))
+
+    const result = runArchiveWriter(root)
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /archive Git repository discovery failed/u)
+    assert.doesNotMatch(result.stderr, /append-only check skipped/u)
+    assert.equal(await readFile(manifest, 'utf8'), recomputed)
+  })
+})
+
+test('the direct archive writer seals and appends ordinary notes outside Git repositories', async () => {
+  await fixture(async (root) => {
+    await rm(join(root, '.git'), { recursive: true })
+    const archive = join(root, 'docs/decisions', archiveKey)
+    const manifest = join(root, 'docs/decisions/archived/manifest.json')
+    await mkdir(dirname(archive), { recursive: true })
+    await writeFile(archive, archived)
+    const first = runArchiveWriter(root)
+    assert.equal(first.status, 0, first.stderr)
+    assert.match(first.stderr, /not a git repository — append-only check skipped/u)
+    assert.deepEqual(JSON.parse(await readFile(manifest, 'utf8')), {
+      version: 1,
+      files: { [archiveKey]: seal(archived) },
+    })
+
+    const extraKey = 'archived/process/2026-09-16-extra.md'
+    await writeFile(join(root, 'docs/decisions', extraKey), archived)
+    const appended = runArchiveWriter(root)
+    assert.equal(appended.status, 0, appended.stderr)
+    assert.deepEqual(JSON.parse(await readFile(manifest, 'utf8')), {
+      version: 1,
+      files: { [archiveKey]: seal(archived), [extraKey]: seal(archived) },
+    })
+  })
+})
+
+test('filesystem-boundary discovery permits sealing only when Git metadata is absent', async () => {
+  await fixture(async (root) => {
+    const archive = join(root, 'docs/decisions', archiveKey)
+    const manifest = join(root, 'docs/decisions/archived/manifest.json')
+    await mkdir(dirname(archive), { recursive: true })
+    await writeFile(archive, archived)
+    const commandDirectory = join(root, 'public-git-fixture')
+    await mkdir(commandDirectory)
+    await writeFile(
+      join(commandDirectory, 'git'),
+      "#!/bin/sh\nprintf '%s\\n' 'fatal: not a git repository (or any parent up to mount point /public-fixture-mount)' 'Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).' >&2\nexit 128\n",
+      { mode: 0o700 },
+    )
+    const metadataPresent = runArchiveWriter(root, { PATH: commandDirectory })
+    assert.equal(metadataPresent.status, 1)
+    await assert.rejects(readFile(manifest), { code: 'ENOENT' })
+
+    await rm(join(root, '.git'), { recursive: true })
+    const outside = runArchiveWriter(root, { PATH: commandDirectory })
+    assert.equal(outside.status, 0, outside.stderr)
+    assert.deepEqual(JSON.parse(await readFile(manifest, 'utf8')), {
+      version: 1,
+      files: { [archiveKey]: seal(archived) },
+    })
+  })
+})
+
 test('an optional empty archive passes and write mode only appends seals for ordinary notes', async () => {
   await fixture(async (root) => {
     assert.equal(run(root).status, 0)

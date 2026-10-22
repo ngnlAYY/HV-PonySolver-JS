@@ -138,7 +138,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(answerSubmitter.submit).toHaveBeenCalledWith(
       expect.any(HTMLFormElement),
       ['RA'],
@@ -172,7 +172,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
     expect(panel.addManualResult).not.toHaveBeenCalled()
   })
@@ -184,7 +184,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'transient' })
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: '获取图片' })
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: expect.stringMatching(/^图片获取完成 \d+ms$/) })
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: '推理请求中' })
@@ -220,7 +220,7 @@ describe('CaptchaSolver random fallback', () => {
       const solver = new RandomCaptchaSolver(panel, detector, imageLoader, answerSubmitter, async () => 'auto')
       const result = await solver.trigger()
 
-      expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+      expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
       expect(panel.addRandomFailure).toHaveBeenCalledWith(submittedPony, expect.any(Number))
     } finally {
       vi.doUnmock('../../src/captcha/solver-config')

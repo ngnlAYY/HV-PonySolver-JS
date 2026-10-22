@@ -155,7 +155,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(answerSubmitter.submit).toHaveBeenCalledWith(
       expect.any(HTMLFormElement),
       ['RA'],
@@ -203,7 +203,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(detector.detect).toHaveBeenCalledTimes(1)
     expect(submitClick).toHaveBeenCalledTimes(1)
     expect(panel.addSuccess).toHaveBeenCalledTimes(1)
@@ -269,7 +269,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(imageLoader.get).toHaveBeenCalledWith('http://localhost:3000/captcha.png', undefined)
     expect(detector.detect).toHaveBeenCalledTimes(1)
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
@@ -300,7 +300,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
     expect(panel.addManualResult).not.toHaveBeenCalled()
     expect(panel.setStatus).not.toHaveBeenCalledWith({ inference: expect.stringMatching(/^完成 /) })
@@ -328,7 +328,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
   })
 
@@ -350,7 +350,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
     expect(panel.addSuccess).not.toHaveBeenCalled()
     expect(panel.addManualResult).not.toHaveBeenCalled()
@@ -442,7 +442,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
     expect(panel.addManualResult).not.toHaveBeenCalled()
   })
@@ -459,7 +459,7 @@ describe('CaptchaSolver', () => {
       await vi.runAllTimersAsync()
       const result = await resultPromise
 
-      expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+      expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'transient' })
       expect(imageLoader.get).toHaveBeenCalledTimes(3)
       expectPanelError(panel, '图片获取失败: Error: 网络断开')
       expect(panel.addError).toHaveBeenCalledTimes(1)
@@ -481,7 +481,7 @@ describe('CaptchaSolver', () => {
       await vi.runAllTimersAsync()
       const result = await resultPromise
 
-      expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+      expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'transient' })
       expect(detector.detect).toHaveBeenCalledTimes(3)
       expectPanelError(panel, '推理失败: 模型离线')
       expect(panel.addError).toHaveBeenCalledTimes(1)
@@ -498,7 +498,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'permanent' })
     expect(detector.detect).toHaveBeenCalledTimes(1)
     expectPanelError(panel, '推理失败: 模型 Key 无效或已失效，请在设置中重新验证 Key')
     expect(panel.addError).toHaveBeenCalledTimes(1)
@@ -578,27 +578,31 @@ describe('CaptchaSolver', () => {
     }
   })
 
-  it('does not retry or record an error when inference is cancelled', async () => {
-    appendCaptcha()
-    const abortController = new AbortController()
-    const detector = createDetector(
-      vi.fn(async () => {
-        abortController.abort()
-        throw new Error('cancelled inference')
-      }),
-    )
-    const { solver, panel, answerSubmitter } = createSolver({
-      detector,
-      getAbortSignal: () => abortController.signal,
-    })
+  it.each([new Error('cancelled inference'), new ModelAccessKeyRejectedError()])(
+    'does not retry or record an error when inference is cancelled before %s',
+    async (error) => {
+      appendCaptcha()
+      const abortController = new AbortController()
+      const detector = createDetector(
+        vi.fn(async () => {
+          abortController.abort()
+          throw error
+        }),
+      )
+      const { solver, panel, answerSubmitter } = createSolver({
+        detector,
+        getAbortSignal: () => abortController.signal,
+      })
 
-    const result = await solver.trigger()
+      const result = await solver.trigger()
 
-    expect(result.handled).toBe(false)
-    expect(detector.detect).toHaveBeenCalledTimes(1)
-    expect(panel.addError).not.toHaveBeenCalled()
-    expect(answerSubmitter.submit).not.toHaveBeenCalled()
-  })
+      expect(result.handled).toBe(false)
+      expect(result.failure).toBeNull()
+      expect(detector.detect).toHaveBeenCalledTimes(1)
+      expect(panel.addError).not.toHaveBeenCalled()
+      expect(answerSubmitter.submit).not.toHaveBeenCalled()
+    },
+  )
 
   it('does not retry or record an error when navigation makes an image failure stale', async () => {
     appendCaptcha()
@@ -613,6 +617,7 @@ describe('CaptchaSolver', () => {
     const result = await solver.trigger()
 
     expect(result.handled).toBe(false)
+    expect(result.failure).toBeNull()
     expect(imageLoader.get).toHaveBeenCalledTimes(1)
     expect(detector.detect).not.toHaveBeenCalled()
     expect(panel.addError).not.toHaveBeenCalled()
@@ -625,7 +630,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'transient' })
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: '获取图片' })
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: expect.stringMatching(/^图片获取完成 \d+ms$/) })
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: '推理请求中' })
@@ -650,7 +655,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(panel.setStatus).toHaveBeenCalledWith({ inference: '获取图片' })
     expect(panel.setStatus).not.toHaveBeenCalledWith({ inference: expect.stringMatching(/^图片获取完成 \d+ms$/) })
     expect(panel.addError).not.toHaveBeenCalled()
@@ -665,7 +670,7 @@ describe('CaptchaSolver', () => {
 
     const result = await solver.trigger()
 
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'transient' })
     expectPanelError(panel, '识别失败: 无可提交答案')
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
   })
@@ -707,7 +712,7 @@ describe('CaptchaSolver random fallback', () => {
 
       const result = await solver.trigger()
 
-      expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+      expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'transient' })
       expect(answerSubmitter.submit).not.toHaveBeenCalled()
       expect(panel.addRandomFailure).not.toHaveBeenCalled()
       expectPanelError(panel, '识别失败: 无可提交答案')
@@ -737,7 +742,7 @@ describe('CaptchaSolver random fallback', () => {
       const solver = new RandomCaptchaSolver(panel, detector, imageLoader, answerSubmitter, async () => 'auto')
       const result = await solver.trigger()
 
-      expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+      expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
       expect(panel.addRandomFailure).toHaveBeenCalledWith(submittedPony, expect.any(Number))
     } finally {
       vi.doUnmock('../../src/captcha/solver-config')

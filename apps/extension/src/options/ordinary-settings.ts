@@ -202,6 +202,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
   const initialValues = new Map<OrdinaryField, string>()
   const baselineValues = new Map<OrdinaryField, string>()
   const dirtyFields = new Set<OrdinaryField>()
+  const editedBeforeLoad = new Set<OrdinaryField>()
   for (const field of ordinaryFields) {
     initialValues.set(field, fields[field].read())
   }
@@ -220,11 +221,18 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
         dirtyFields.delete(field)
       } else {
         dirtyFields.add(field)
+        if (!loaded) {
+          editedBeforeLoad.add(field)
+        }
       }
     }
   }
 
   function markDirty(field: OrdinaryField): void {
+    // 首次快照到达前，改回 HTML 初始值仍代表用户选择，不能仅按值差异判断。
+    if (!loaded) {
+      editedBeforeLoad.add(field)
+    }
     const referenceValues = loaded ? baselineValues : initialValues
     if (fields[field].read() === referenceValues.get(field)) {
       dirtyFields.delete(field)
@@ -385,11 +393,12 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
         for (const field of ordinaryFields) {
           const value = nextValues[field]
           baselineValues.set(field, value)
-          if (!dirtyFields.has(field)) {
+          if (!editedBeforeLoad.has(field)) {
             fields[field].write(value)
           }
         }
         loaded = true
+        editedBeforeLoad.clear()
         syncDirtyFields()
       } catch (error) {
         syncDirtyFields()

@@ -46,17 +46,18 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 ## 默认行为
 
 - `auto` 识别、勾选后延迟点击原生提交按钮；`manual` 只记录结果。默认开启失败随机答案，扩展设置页可关闭。
-- 保留手动勾选。合计超过 4 项时只裁剪自动项，目标至多 3 项；本轮手动取消的项不会被勾回。验证码 `id/name` 补齐会补扫；目标、图片选源或外层 fieldset 的有效禁用状态变化会先取消旧轮次，新验证码不必等待旧初始化或设置读取完成；取消或控件失效后不再点击或提交。
+- 保留手动勾选。合计超过 4 项时只裁剪自动项，目标至多 3 项；本轮手动取消的项不会被勾回。验证码 `id/name` 补齐会补扫；目标、图片选源或外层 fieldset 的有效禁用状态变化会先取消旧轮次，新验证码不必等待旧初始化或设置读取完成；取消或控件失效后不再点击或提交。处理中仅 URL 变化时，旧轮次结束后也会接手当前有效目标，无需额外 DOM 变化。
 - 面板默认 `top=155, left=1240`，显示最近 5 条记录，仅在存在 `div#csp` 时可见；隐藏面板不停止识别。
 - 启动时 body 暂缺，或 AADB 等局部切页移除面板、替换 body 后，等待挂载并继续扫描，保留面板状态和历史，仍遵守可见性设置；销毁后不恢复。JPX `AjaxRound` 清除扫描定时器后，后续验证码相关 DOM 变化会恢复扫描，每题仍只提交一次。
+- 普通失败按同页单调时钟冷却 30 秒，不受系统校时影响；准备和识别阶段的永久模型错误均保持抑制，直到目标或已提交凭据变化。
 
-设置范围、提交复核与历史耗时见[设置与行为](docs/usage/settings.md)；加载、Key、额度、面板和页面切换问题见[故障排查](docs/usage/troubleshooting.md)。
+设置范围、提交复核与历史耗时见[设置与行为](docs/usage/settings.md)；扩展设置加载前已编辑的字段不会被迟到快照覆盖。加载、Key、额度、面板和页面切换问题见[故障排查](docs/usage/troubleshooting.md)。
 
 ## 模型与隐私
 
 当前客户端使用 `.ort`，服务端保留旧 `.onnx` 路由。远程 Key 只通过 `Authorization: Bearer` 发送，不进入 URL、日志或产物；扩展内容脚本不接收 Key 或模型字节。内置模型扩展不读取旧 Key，也不保留远程下载能力；安装包中的模型可被提取，完整性校验不提供保密性。
 
-用户脚本新设置或清除 Key 会淘汰尚未写入的旧验证，迟到验证不会恢复旧 Key。模型校验长度和 SHA-256 后写入 IndexedDB，连接异常关闭后下次操作重新打开。额度默认按每 Key、每 UTC 自然月最多 5 次**已确认缓存下载**计算；查询、Key 验证和有效缓存命中不计次，关闭额度时显示无限制。详见[缓存与计次](docs/model-cache-strategy.md)。
+用户脚本新设置或清除 Key 会淘汰尚未写入的旧验证，迟到验证不会恢复旧 Key。模型校验长度和 SHA-256 后写入 IndexedDB，模型缓存与扩展 Key 数据库连接异常关闭后，下次操作重新打开。额度默认按每 Key、每 UTC 自然月最多 5 次**已确认缓存下载**计算；查询、Key 验证和有效缓存命中不计次，关闭额度时显示无限制。详见[缓存与计次](docs/model-cache-strategy.md)。
 
 用户脚本两个 Runtime profile 不自动回退；“内置精简运行时”仍需下载模型和 WASM。资产身份见[Runtime 专题](docs/onnx-runtime.md)，扩展权限与消息边界见[扩展专题](docs/browser-extension.md#permission-matrix)。
 
@@ -69,4 +70,4 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 - [HTTP 契约](docs/reference/model-worker-http.md)、[CI 与发布](docs/development/releases.md)、[Worker 运维](docs/model-worker-ops.md)
 - [文档维护与检查](docs/development/documentation.md#验证文档修改)
 
-完整检查为 `mise exec -- pnpm check`，先按[验证手册](docs/development/verification.md#model-worker-测试配置)备份并准备 Worker 测试配置。工作区以覆盖率模式执行一次，根级工具测试通过 `test:root` 单独执行，不重复普通工作区测试；覆盖率门槛不变。普通检查和构建不发布产品；commit、push、artifact、Release 和部署需明确授权。本地通过不代表远程鉴权、最低版本或 Android 验收完成。
+完整检查为 `mise exec -- pnpm check`，先按[验证手册](docs/development/verification.md#model-worker-测试配置)备份并准备 Worker 测试配置。工作区以覆盖率模式执行一次，根级工具测试通过 `test:root` 单独执行，不重复普通工作区测试；覆盖率门槛不变。普通检查和构建不发布产品；commit、push、artifact、Release 和部署需明确授权。扩展 Release 先原子创建绑定本次提交的新标签，已有标签或 API 失败即停止。本地通过不代表远程鉴权、最低版本或 Android 验收完成。

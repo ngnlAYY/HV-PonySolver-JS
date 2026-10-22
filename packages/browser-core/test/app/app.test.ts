@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../../src/app/app'
 import type { AppDependencies, SolverService } from '../../src/app/app-dependencies'
 import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
-import { CaptchaSolver } from '../../src/captcha/captcha-solver'
+import { CaptchaSolver, type SolveResult } from '../../src/captcha/captcha-solver'
 import { findCaptchaTarget, type CaptchaTarget } from '../../src/captcha/captcha-target'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
@@ -45,9 +45,10 @@ function createHarness(overrides: Partial<AppDependencies> = {}) {
   const panel = overrides.panel ?? createPanel()
   const detector = overrides.detector ?? createDetector()
   let busy = false
-  const trigger = vi.fn(async (target?: CaptchaTarget) => ({
+  const trigger = vi.fn(async (target?: CaptchaTarget): Promise<SolveResult> => ({
     handled: true,
     captchaKey: target?.captchaKey ?? null,
+    failure: null,
   }))
   const solver: SolverService = overrides.solver ?? {
     get isBusy() {
@@ -592,28 +593,79 @@ describe('App', () => {
     },
   )
 
-  it('suppresses repeated solver failures for the same captcha during the cooldown', async () => {
-    const captcha = appendCaptcha('/captcha.png')
-    const harness = createHarness()
-    harness.trigger.mockImplementation(async (target?: CaptchaTarget) => ({
-      handled: false,
-      captchaKey: target?.captchaKey ?? null,
-    }))
-    apps.push(harness.app)
+  it.each([
+    { stage: 'preparation', clockShift: -86_400_000 },
+    { stage: 'preparation', clockShift: 86_400_000 },
+    { stage: 'solving', clockShift: -86_400_000 },
+    { stage: 'solving', clockShift: 86_400_000 },
+  ] as const)(
+    'keeps the $stage cooldown monotonic when the wall clock shifts by $clockShift ms',
+    async ({ stage, clockShift }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
+      const captcha = appendCaptcha('/cooldown.png')
+      const click = vi.spyOn(captcha.submitButton, 'click').mockImplementation(() => undefined)
+      const panel = createPanel()
+      const detector = createDetector()
+      const detection: YoloParseResult = {
+        success: true,
+        ponies: ['TS'],
+        confidences: { TS: 0.9 },
+        detections: [],
+        candidates: [],
+      }
+      vi.mocked(detector.detect).mockResolvedValue(detection)
+      const failingOperation = stage === 'preparation' ? detector.prepare : detector.detect
+      vi.mocked(failingOperation).mockRejectedValue(new Error('temporary host failure'))
+      const solver = new CaptchaSolver(
+        panel,
+        detector,
+        { get: async () => new Blob(['captcha']) },
+        new AnswerSubmitter(
+          async () => [0, 0],
+          async () => [0, 0],
+        ),
+        async () => 'auto',
+      )
+      const { app } = createHarness({ panel, detector, solver })
+      apps.push(app)
+      app.init()
+      await settleDom()
+      expect(failingOperation).toHaveBeenCalledTimes(3)
+      expect(click).not.toHaveBeenCalled()
+      const suppressedAt = performance.now()
+      const errors = vi.mocked(panel.addError).mock.calls.length
 
-    harness.app.init()
-    await settleDom()
-    expect(harness.trigger).toHaveBeenCalledTimes(1)
+      vi.setSystemTime(Date.now() + clockShift)
+      captcha.appendChild(document.createElement('span'))
+      await settleDom()
+      expect(failingOperation).toHaveBeenCalledTimes(3)
+      expect(panel.addError).toHaveBeenCalledTimes(errors)
 
-    captcha.appendChild(document.createElement('span'))
-    await settleDom()
-    expect(harness.trigger).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(29_799)
+      captcha.appendChild(document.createElement('span'))
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(100)
+      expect(performance.now() - suppressedAt).toBe(29_999)
+      expect(failingOperation).toHaveBeenCalledTimes(3)
+      expect(click).not.toHaveBeenCalled()
 
-    vi.setSystemTime(Date.now() + 30_000)
-    captcha.appendChild(document.createElement('strong'))
-    await settleDom()
-    expect(harness.trigger).toHaveBeenCalledTimes(2)
-  })
+      vi.mocked(detector.prepare).mockResolvedValue(undefined)
+      vi.mocked(detector.detect).mockResolvedValue(detection)
+      await vi.advanceTimersByTimeAsync(901)
+      captcha.appendChild(document.createElement('strong'))
+      await settleDom()
+      expect(performance.now() - suppressedAt).toBe(31_000)
+      expect(failingOperation).toHaveBeenCalledTimes(4)
+      expect(click).toHaveBeenCalledTimes(1)
+      expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+      expect(panel.addError).toHaveBeenCalledTimes(errors)
+
+      captcha.appendChild(document.createElement('span'))
+      await settleDom()
+      expect(failingOperation).toHaveBeenCalledTimes(4)
+      expect(click).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it('waits for a complete captcha target and reacts to nested captcha mutations', async () => {
     const harness = createHarness()
@@ -635,13 +687,14 @@ describe('App', () => {
 
   it('queues a same-URL replacement while a solve is running and never reuses target identity', async () => {
     let resolveFirst: (() => void) | undefined
-    const firstResult = new Promise<{ handled: boolean; captchaKey: string }>((resolve) => {
-      resolveFirst = () => resolve({ handled: false, captchaKey: 'http://localhost:3000/captcha.png' })
+    const firstResult = new Promise<SolveResult>((resolve) => {
+      resolveFirst = () => resolve({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     })
     const harness = createHarness()
     harness.trigger.mockReturnValueOnce(firstResult).mockImplementation(async (target?: CaptchaTarget) => ({
       handled: true,
       captchaKey: target?.captchaKey ?? null,
+      failure: null,
     }))
     apps.push(harness.app)
     harness.app.init()
@@ -805,31 +858,105 @@ describe('App', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('does not accept a solve completed after a URL-only navigation', async () => {
-    let resolveFirst: ((result: { handled: boolean; captchaKey: string | null }) => void) | undefined
-    const firstResult = new Promise<{ handled: boolean; captchaKey: string | null }>((resolve) => {
-      resolveFirst = resolve
-    })
+  it('does not accept a solve completed after a URL-only navigation and rescans the current target', async () => {
+    const { promise: firstResult, resolve: resolveFirst } = Promise.withResolvers<SolveResult>()
     const harness = createHarness()
-    harness.trigger.mockReturnValueOnce(firstResult).mockImplementation(async (target?: CaptchaTarget) => ({
-      handled: true,
-      captchaKey: target?.captchaKey ?? null,
-    }))
+    harness.trigger.mockReturnValueOnce(firstResult)
     apps.push(harness.app)
-
     harness.app.init()
     const captcha = appendCaptcha('/captcha.png')
     await settleDom()
     expect(harness.trigger).toHaveBeenCalledTimes(1)
 
-    history.pushState(null, '', '/next')
-    resolveFirst?.({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    history.replaceState(null, '', '/next')
+    resolveFirst({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+    expect(harness.trigger.mock.calls[1]?.[0]?.pageUrl).toBe('http://localhost:3000/next')
 
     captcha.appendChild(document.createElement('span'))
     await settleDom()
-
     expect(harness.trigger).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    'model preparation',
+    'image loading',
+    'inference',
+    'answer mode',
+    'submit settings',
+    'multi-click settings',
+    'submit delay',
+  ] as const)('takes over a URL-only navigation after pending %s settles without another mutation', async (stage) => {
+    const captcha = appendCaptcha('/url-only.png')
+    const submissionUrls: string[] = []
+    const click = vi.spyOn(captcha.submitButton, 'click').mockImplementation(() => {
+      submissionUrls.push(location.href)
+    })
+    const panel = createPanel()
+    const detector = createDetector()
+    const gate = Promise.withResolvers<void>()
+    let paused = false
+    const pauseStage = async (candidate: string): Promise<void> => {
+      if (stage === candidate && !paused) {
+        paused = true
+        await gate.promise
+      }
+    }
+    vi.mocked(detector.prepare).mockImplementation(async () => pauseStage('model preparation'))
+    vi.mocked(detector.detect).mockImplementation(async () => {
+      await pauseStage('inference')
+      return { success: true, ponies: ['TS'], confidences: { TS: 0.9 }, detections: [], candidates: [] }
+    })
+    const submitDelay = vi.fn(async (): Promise<readonly [number, number]> => {
+      await pauseStage('submit settings')
+      return stage === 'submit delay' && submitDelay.mock.calls.length === 1 ? [1_000, 1_000] : [0, 0]
+    })
+    const solver = new CaptchaSolver(
+      panel,
+      detector,
+      {
+        get: async () => {
+          await pauseStage('image loading')
+          return new Blob(['captcha'])
+        },
+      },
+      new AnswerSubmitter(submitDelay, async () => {
+        await pauseStage('multi-click settings')
+        return [0, 0]
+      }),
+      async () => {
+        await pauseStage('answer mode')
+        return 'auto'
+      },
+    )
+    const { app } = createHarness({ panel, detector, solver })
+    apps.push(app)
+    app.init()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(paused || (stage === 'submit delay' && submitDelay.mock.calls.length === 1)).toBe(true)
+    expect(click).not.toHaveBeenCalled()
+    const oldSignal = app.getAbortSignal()
+
+    history.pushState(null, '', '/next')
+    gate.resolve()
+    await settleDom()
+
+    expect(oldSignal?.aborted).toBe(true)
+    expect(app.getAbortSignal()).not.toBe(oldSignal)
+    expect(detector.prepare).toHaveBeenCalledTimes(2)
+    expect(detector.detect).toHaveBeenCalledTimes(stage === 'model preparation' || stage === 'image loading' ? 1 : 2)
+    expect(submissionUrls).toEqual(['http://localhost:3000/next'])
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+    expect(panel.addError).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
+    expect(detector.prepare).toHaveBeenCalledTimes(2)
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(panel.addSuccess).toHaveBeenCalledTimes(1)
   })
 
   it.each(['load', 'error'])(
@@ -962,6 +1089,7 @@ describe('App', () => {
     harness.trigger.mockImplementation(async (target?: CaptchaTarget) => ({
       handled: !fieldset.disabled,
       captchaKey: target?.captchaKey ?? null,
+      failure: fieldset.disabled ? 'transient' : null,
     }))
     apps.push(harness.app)
     harness.app.init()
@@ -1011,6 +1139,7 @@ describe('App', () => {
     harness.trigger.mockImplementation(async (target?: CaptchaTarget) => ({
       handled: false,
       captchaKey: target?.captchaKey ?? null,
+      failure: 'transient',
     }))
     apps.push(harness.app)
     harness.app.init()
@@ -1042,7 +1171,7 @@ describe('App', () => {
         if (failure === 'exception') {
           throw new Error('solver failed')
         }
-        return { handled: false, captchaKey: target?.captchaKey ?? null }
+        return { handled: false, captchaKey: target?.captchaKey ?? null, failure: 'transient' }
       })
       apps.push(harness.app)
 
@@ -1096,12 +1225,81 @@ describe('App', () => {
 
     submit.disabled = false
     await settleDom()
+    await vi.advanceTimersByTimeAsync(31_000)
+    captcha.appendChild(document.createElement('span'))
+    await settleDom()
 
     expect(harness.detector.prepare).toHaveBeenCalledTimes(1)
     expect(harness.trigger).not.toHaveBeenCalled()
   })
 
+  it.each(['target', 'committed credentials'] as const)(
+    'keeps a real detect permanent failure suppressed until %s changes',
+    async (recovery) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
+      const captcha = appendCaptcha('/permanent-detect.png')
+      captcha.submitButton.disabled = true
+      const click = vi.spyOn(captcha.submitButton, 'click').mockImplementation(() => undefined)
+      const panel = createPanel()
+      const detector = createDetector()
+      vi.mocked(detector.detect).mockRejectedValue(new PermanentModelError('模型 Key 无效'))
+      const solver = new CaptchaSolver(
+        panel,
+        detector,
+        { get: async () => new Blob(['captcha']) },
+        new AnswerSubmitter(
+          async () => [0, 0],
+          async () => [0, 0],
+        ),
+        async () => 'auto',
+      )
+      const { app } = createHarness({ panel, detector, solver })
+      apps.push(app)
+      app.init()
+      await settleDom()
+      expect(detector.prepare).toHaveBeenCalledTimes(1)
+      expect(detector.detect).toHaveBeenCalledTimes(1)
+      expect(panel.addError).toHaveBeenCalledTimes(1)
+      expect(click).not.toHaveBeenCalled()
+
+      captcha.submitButton.disabled = false
+      await settleDom()
+      expect(detector.detect).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(31_000)
+      captcha.appendChild(document.createElement('span'))
+      await settleDom()
+      expect(detector.prepare).toHaveBeenCalledTimes(1)
+      expect(detector.detect).toHaveBeenCalledTimes(1)
+      expect(panel.addError).toHaveBeenCalledTimes(1)
+
+      vi.mocked(detector.detect).mockResolvedValue({
+        success: true,
+        ponies: ['TS'],
+        confidences: { TS: 0.9 },
+        detections: [],
+        candidates: [],
+      })
+      if (recovery === 'target') {
+        captcha.querySelector('img')!.src = '/recovered-detect.png'
+      } else {
+        app.recoverAfterModelCredentialsChanged()
+      }
+      await settleDom()
+      expect(detector.prepare).toHaveBeenCalledTimes(2)
+      expect(detector.detect).toHaveBeenCalledTimes(2)
+      expect(click).toHaveBeenCalledTimes(1)
+      expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+      expect(panel.addError).toHaveBeenCalledTimes(1)
+
+      captcha.appendChild(document.createElement('span'))
+      await settleDom()
+      expect(detector.detect).toHaveBeenCalledTimes(2)
+      expect(click).toHaveBeenCalledTimes(1)
+    },
+  )
+
   it('keeps a transient prepare failure suppressed through submit readiness until its retry window expires', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] })
     const captcha = appendCaptcha('/captcha.png')
     const submit = captcha.querySelector<HTMLInputElement>('#riddlesubmit')!
     submit.disabled = true
@@ -1122,7 +1320,7 @@ describe('App', () => {
     expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
     expect(harness.trigger).not.toHaveBeenCalled()
 
-    vi.setSystemTime(Date.now() + 30_000)
+    await vi.advanceTimersByTimeAsync(30_000)
     captcha.appendChild(document.createElement('span'))
     await Promise.resolve()
     await vi.advanceTimersByTimeAsync(1_100)
@@ -1340,14 +1538,15 @@ describe('App', () => {
   })
 
   it('cancels and retries an active solve after model credentials change', async () => {
-    let resolveFirst: ((result: { handled: boolean; captchaKey: string | null }) => void) | undefined
-    const firstResult = new Promise<{ handled: boolean; captchaKey: string | null }>((resolve) => {
+    let resolveFirst: ((result: SolveResult) => void) | undefined
+    const firstResult = new Promise<SolveResult>((resolve) => {
       resolveFirst = resolve
     })
     const harness = createHarness()
     harness.trigger.mockReturnValueOnce(firstResult).mockImplementation(async (target?: CaptchaTarget) => ({
       handled: true,
       captchaKey: target?.captchaKey ?? null,
+      failure: null,
     }))
     apps.push(harness.app)
 
@@ -1362,7 +1561,7 @@ describe('App', () => {
     expect(oldSignal?.aborted).toBe(true)
     expect(harness.app.getAbortSignal()).not.toBe(oldSignal)
 
-    resolveFirst?.({ handled: true, captchaKey: 'http://localhost:3000/captcha.png' })
+    resolveFirst?.({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     await settleDom()
 
     expect(harness.trigger).toHaveBeenCalledTimes(2)
@@ -1389,6 +1588,7 @@ describe('App', () => {
       return {
         handled: signal?.aborted !== true,
         captchaKey: target?.captchaKey ?? null,
+        failure: null,
       }
     })
     const solver: SolverService = { isBusy: false, trigger }
@@ -1490,24 +1690,6 @@ describe('App', () => {
     await settleDom()
 
     expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
-    expect(harness.trigger).not.toHaveBeenCalled()
-  })
-
-  it('retries a transient-failure suppression once its expiry passes', async () => {
-    const captcha = appendCaptcha('/captcha.png')
-    const harness = createHarness()
-    vi.mocked(harness.detector.prepare).mockRejectedValue(new Error('host down'))
-    apps.push(harness.app)
-
-    harness.app.init()
-    await settleDom()
-    expect(harness.detector.prepare).toHaveBeenCalledTimes(3)
-
-    vi.setSystemTime(Date.now() + 31_000)
-    captcha.appendChild(document.createElement('span'))
-    await settleDom()
-
-    expect(harness.detector.prepare).toHaveBeenCalledTimes(6)
     expect(harness.trigger).not.toHaveBeenCalled()
   })
 

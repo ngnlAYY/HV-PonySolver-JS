@@ -46,6 +46,7 @@ function installIndexedDb(
     close: vi.fn(),
     createObjectStore: vi.fn(),
     objectStoreNames: { contains: vi.fn(() => options.storeExists ?? true) },
+    onclose: null,
     onversionchange: null,
     transaction: vi.fn(() => {
       const transaction: TestTransaction = {
@@ -324,19 +325,80 @@ describe('IndexedDbStringStorage', () => {
     expect(database.close).toHaveBeenCalledTimes(1)
   })
 
-  it('closes automatically on version change and reopens for later operations', async () => {
-    const first = installIndexedDb({ getValue: 'first' })
-    const storage = new IndexedDbStringStorage()
-    const firstRead = storage.get('key')
-    complete(await waitForTransaction(first.transactions))
-    await expect(firstRead).resolves.toBe('first')
+  it.each(['close', 'versionchange'] as const)(
+    'reopens after %s and ignores late events from the old connection',
+    async (eventType) => {
+      const first = installIndexedDb({ getValue: 'first' })
+      const storage = new IndexedDbStringStorage()
+      const firstRead = storage.get('key')
+      complete(await waitForTransaction(first.transactions))
+      await expect(firstRead).resolves.toBe('first')
 
-    first.database.onversionchange?.(new Event('versionchange') as IDBVersionChangeEvent)
-    await vi.waitFor(() => expect(first.database.close).toHaveBeenCalled())
+      const onInvalidation = eventType === 'close' ? 'onclose' : 'onversionchange'
+      first.database[onInvalidation]?.(new Event(eventType) as IDBVersionChangeEvent)
+      expect(first.database.close).toHaveBeenCalledTimes(1)
 
-    const second = installIndexedDb({ getValue: 'second' })
-    const secondRead = storage.get('key')
-    complete(await waitForTransaction(second.transactions))
-    await expect(secondRead).resolves.toBe('second')
-  })
+      const second = installIndexedDb({ getValue: 'second' })
+      const secondRead = storage.get('key')
+      const secondTransaction = await waitForTransaction(second.transactions)
+      first.database.onclose?.(new Event('close'))
+      first.database.onversionchange?.(new Event('versionchange') as IDBVersionChangeEvent)
+      expect(second.database.close).not.toHaveBeenCalled()
+      expect(secondTransaction.abort).not.toHaveBeenCalled()
+      complete(secondTransaction)
+      await expect(secondRead).resolves.toBe('second')
+
+      const nextWrite = storage.set('key', 'next')
+      complete(await waitForTransaction(second.transactions, 1))
+      await expect(nextWrite).resolves.toBeUndefined()
+      expect(first.database.transaction).toHaveBeenCalledTimes(1)
+      expect(second.database.transaction).toHaveBeenCalledTimes(2)
+      expect(indexedDB.open).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(['close', 'versionchange'] as const)(
+    'cancels pending reads, writes and removals on %s without reporting stale commits',
+    async (eventType) => {
+      const { database, transactions } = installIndexedDb({ getValue: 'stored' })
+      const storage = new IndexedDbStringStorage()
+      const committed = vi.fn()
+      const read = storage.get('key')
+      const write = storage.set('key', 'next', undefined, committed)
+      const removal = storage.remove('key', undefined, committed)
+      await vi.waitFor(() => expect(transactions).toHaveLength(3))
+      const rejected = [read, write, removal].map((operation) => expect(operation).rejects.toThrow('已关闭'))
+
+      const onInvalidation = eventType === 'close' ? 'onclose' : 'onversionchange'
+      database[onInvalidation]?.(new Event(eventType) as IDBVersionChangeEvent)
+
+      await Promise.all(rejected)
+      for (const transaction of transactions) {
+        expect(transaction.abort).toHaveBeenCalledTimes(1)
+        complete(transaction)
+      }
+      expect(committed).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each(['close', 'versionchange'] as const)(
+    'preserves a durable commit when %s invalidates its pending caller continuation',
+    async (eventType) => {
+      const { database, transactions } = installIndexedDb()
+      const storage = new IndexedDbStringStorage()
+      const committed = vi.fn()
+      const pending = storage.set('key', 'next', undefined, committed)
+      const transaction = await waitForTransaction(transactions)
+
+      complete(transaction)
+      const onInvalidation = eventType === 'close' ? 'onclose' : 'onversionchange'
+      database[onInvalidation]?.(new Event(eventType) as IDBVersionChangeEvent)
+
+      await expect(pending).rejects.toThrow('已关闭')
+      expect(transaction.abort).not.toHaveBeenCalled()
+      expect(committed).toHaveBeenCalledTimes(1)
+      complete(transaction)
+      expect(committed).toHaveBeenCalledTimes(1)
+    },
+  )
 })

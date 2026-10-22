@@ -181,13 +181,16 @@ export class IndexedDbStringStorage implements AsyncStringStorage {
         return
       }
       this.database = database
-      database.onversionchange = () => {
+      const invalidateConnection = (): void => {
         if (this.database === database) {
           void this.close()
         } else {
           database.close()
         }
       }
+      database.onversionchange = invalidateConnection
+      // 浏览器强制关闭不触发 versionchange；旧代际事务也必须取消，后续操作才能重新打开。
+      database.onclose = invalidateConnection
       resolve(database)
     }
     request.onerror = () => reject(request.error ?? new Error('无法打开扩展 Key 数据库'))

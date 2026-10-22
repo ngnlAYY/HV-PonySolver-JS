@@ -59,21 +59,95 @@ describe('ordinary options settings lifecycle', () => {
     const saveButton = document.querySelector<HTMLButtonElement>('button[type="submit"]')
     const answerMode = optionsElement<HTMLSelectElement>('answer-mode')
     const submitDelay = optionsElement<HTMLInputElement>('submit-delay')
+    const panelPosition = optionsElement<HTMLInputElement>('panel-position')
 
     const load = controller.load()
     expect(saveButton?.disabled).toBe(true)
     answerMode.value = 'manual'
     answerMode.dispatchEvent(new Event('change', { bubbles: true }))
+    panelPosition.value = '10,20'
     resolveLoad?.({
       [ANSWER_MODE_STORAGE_KEY]: 'auto',
       [SUBMIT_DELAY_STORAGE_KEY]: '2400-2600',
+      [PANEL_POSITION_STORAGE_KEY]: '30,40',
     })
     await load
 
     expect(answerMode.value).toBe('manual')
     expect(submitDelay.value).toBe('2400-2600')
+    expect(panelPosition.value).toBe('10,20')
     expect(saveButton?.disabled).toBe(false)
   })
+
+  it.each([false, true])(
+    'preserves initial-value select and checkbox edits before load completes (retry: %s)',
+    async (failFirstLoad) => {
+      // Import after vi.resetModules() so each case uses an isolated mocked platform module graph.
+      const { installOrdinarySettingsController } = await import('../../src/options/ordinary-settings')
+      const controller = installOrdinarySettingsController({ set: vi.fn() })
+      const answerMode = optionsElement<HTMLSelectElement>('answer-mode')
+      const compact = optionsElement<HTMLInputElement>('panel-compact')
+      const submitDelay = optionsElement<HTMLInputElement>('submit-delay')
+      const requireCsp = optionsElement<HTMLInputElement>('panel-require-csp')
+      const saveButton = document.querySelector<HTMLButtonElement>('button[type="submit"]')
+      const storedValues = {
+        [ANSWER_MODE_STORAGE_KEY]: 'manual',
+        [PANEL_COMPACT_MODE_STORAGE_KEY]: '1',
+        [SUBMIT_DELAY_STORAGE_KEY]: '2400-2600',
+        [PANEL_CSP_VISIBILITY_STORAGE_KEY]: '0',
+      }
+      platformMocks.storageGetAll.mockReturnValueOnce(
+        failFirstLoad ? Promise.reject(new Error('load failed')) : Promise.resolve(storedValues),
+      )
+
+      const load = controller.load()
+      answerMode.value = 'manual'
+      answerMode.dispatchEvent(new Event('change', { bubbles: true }))
+      answerMode.value = 'auto'
+      answerMode.dispatchEvent(new Event('change', { bubbles: true }))
+      compact.checked = true
+      compact.dispatchEvent(new Event('input', { bubbles: true }))
+      compact.checked = false
+      compact.dispatchEvent(new Event('input', { bubbles: true }))
+
+      if (failFirstLoad) {
+        await expect(load).rejects.toThrow('load failed')
+        expect(saveButton?.disabled).toBe(true)
+        submitForm()
+        expect(platformMocks.storageSet).not.toHaveBeenCalled()
+        platformMocks.storageGetAll.mockResolvedValueOnce(storedValues)
+        await controller.load()
+      } else {
+        await load
+      }
+
+      expect(answerMode.value).toBe('auto')
+      expect(compact.checked).toBe(false)
+      expect(submitDelay.value).toBe('2400-2600')
+      expect(requireCsp.checked).toBe(false)
+      expect(saveButton?.disabled).toBe(false)
+      answerMode.value = 'manual'
+      answerMode.dispatchEvent(new Event('change', { bubbles: true }))
+      compact.checked = true
+      compact.dispatchEvent(new Event('input', { bubbles: true }))
+      submitForm()
+      expect(saveButton?.disabled).toBe(false)
+      await Promise.resolve()
+      expect(platformMocks.storageSet).not.toHaveBeenCalled()
+
+      answerMode.value = 'auto'
+      answerMode.dispatchEvent(new Event('change', { bubbles: true }))
+      compact.checked = false
+      compact.dispatchEvent(new Event('input', { bubbles: true }))
+      submitForm()
+
+      await vi.waitFor(() => expect(platformMocks.storageSet).toHaveBeenCalledTimes(1))
+      expect(platformMocks.storageSet).toHaveBeenCalledWith({
+        [ANSWER_MODE_STORAGE_KEY]: 'auto',
+        [PANEL_COMPACT_MODE_STORAGE_KEY]: '0',
+      })
+    },
+  )
 
   it('writes only dirty fields after another options page changes an unedited field', async () => {
     await installAndLoad({

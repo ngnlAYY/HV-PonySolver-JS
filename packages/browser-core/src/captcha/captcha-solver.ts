@@ -53,6 +53,8 @@ async function retryTransient<T>(
 export type SolveResult = Readonly<{
   handled: boolean
   captchaKey: string | null
+  /** 取消或过期不算失败；永久模型错误须交给 App 保持目标级抑制。 */
+  failure: 'transient' | 'permanent' | null
 }>
 
 export class CaptchaSolver {
@@ -83,7 +85,7 @@ export class CaptchaSolver {
     answerSelection?: AnswerSelectionSnapshot,
   ): Promise<SolveResult> {
     if (this.busy) {
-      return Promise.resolve({ handled: false, captchaKey: null })
+      return Promise.resolve({ handled: false, captchaKey: null, failure: null })
     }
     this.busy = true
     return this.solve(target, startedAt, signal, answerSelection).finally(() => {
@@ -100,11 +102,15 @@ export class CaptchaSolver {
     const selectionSnapshot = answerSelection ?? (target ? this.captureAnswerSelection(target) : undefined)
     const elapsed = (): number => Math.round(performance.now() - startedAt)
     let captchaKey: string | null = null
-    const result = (handled: boolean): SolveResult => ({ handled, captchaKey })
     const isCurrent = (): boolean =>
       signal?.aborted !== true && target !== null && isSameCaptchaTarget(target, findCaptchaTarget())
     const canRecordError = (): boolean =>
       signal?.aborted !== true && (target === null || isSameCaptchaTarget(target, findCaptchaTarget()))
+    const result = (handled: boolean, failure: SolveResult['failure'] = 'transient'): SolveResult => ({
+      handled,
+      captchaKey,
+      failure: handled || !canRecordError() ? null : failure,
+    })
     const failSubmit = (message: string): void => {
       if (!canRecordError()) {
         return
@@ -162,7 +168,7 @@ export class CaptchaSolver {
       }
       if (detectionOutcome.state === 'failed') {
         failSubmit(`推理失败: ${formatErrorMessage(detectionOutcome.error)}`)
-        return result(false)
+        return result(false, isPermanentModelError(detectionOutcome.error) ? 'permanent' : 'transient')
       }
       const detectionResult: YoloParseResult = detectionOutcome.value
       const detectionElapsed = Math.round(performance.now() - detectionStartedAt)

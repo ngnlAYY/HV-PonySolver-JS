@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -56,6 +58,81 @@ function workflowStepBlock(source, name) {
     }
   }
   return lines.slice(start, end).join('\n')
+}
+
+function workflowStepScript(step) {
+  const lines = step.split('\n')
+  const start = lines.findIndex((line) => line.trim() === 'run: |')
+  assert.notEqual(start, -1, 'workflow step must provide a shell script')
+  const indentation = (lines[start].match(/^\s*/u)?.[0].length ?? 0) + 2
+  return lines
+    .slice(start + 1)
+    .map((line) => line.slice(indentation))
+    .join('\n')
+}
+
+async function runReleasePublication(t, initialState) {
+  const root = await mkdtemp(join(tmpdir(), 'hv-release-tag-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const statePath = join(root, 'state.json')
+  const fixturePath = join(root, 'gh.mjs')
+  await writeFile(statePath, JSON.stringify(initialState))
+  await writeFile(
+    fixturePath,
+    String.raw`
+import { readFileSync, writeFileSync } from 'node:fs'
+const statePath = process.env.RELEASE_TEST_STATE
+const state = JSON.parse(readFileSync(statePath, 'utf8'))
+const args = process.argv.slice(2)
+const save = () => writeFileSync(statePath, JSON.stringify(state))
+const fail = () => process.exit(1)
+const value = (name) => args[args.indexOf(name) + 1]
+if (args[0] === 'api') {
+  if (state.apiFailure) fail()
+  if (value('--method') !== 'POST') process.exit(state.tagCommit ? 0 : 1)
+  if (!args.includes('/repos/' + process.env.GITHUB_REPOSITORY + '/git/refs')) fail()
+  const fields = Object.fromEntries(args.flatMap((arg, index) => {
+    if (!['--raw-field', '-f'].includes(arg)) return []
+    const field = args[index + 1]
+    const separator = field.indexOf('=')
+    return [[field.slice(0, separator), field.slice(separator + 1)]]
+  }))
+  if (fields.ref !== 'refs/tags/' + process.env.RELEASE_TAG || !fields.sha || state.tagCommit) fail()
+  state.tagCommit = fields.sha
+  save()
+} else if (args[0] === 'release' && args[1] === 'create') {
+  state.releaseAttempted = true
+  save()
+  if (state.releaseFailure) fail()
+  if (!state.tagCommit && args.includes('--verify-tag')) fail()
+  state.tagCommit ??= value('--target')
+  state.releaseCommit = state.tagCommit
+  save()
+} else fail()
+`,
+  )
+  const workflow = await readFile(join(repoRoot, '.github', 'workflows', 'verify-monorepo.yml'), 'utf8')
+  const script = workflowStepScript(workflowStepBlock(workflow, 'Publish GitHub Release'))
+  const result = spawnSync(
+    'bash',
+    ['-e', '-o', 'pipefail', '-c', 'gh() { "$RELEASE_TEST_NODE" "$RELEASE_TEST_GH" "$@"; }\n' + script],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GH_TOKEN: '',
+        GITHUB_REPOSITORY: 'fixture/extension',
+        GITHUB_SHA: 'b'.repeat(40),
+        RELEASE_TAG: 'extension-v0.1.1',
+        RELEASE_VERSION: '0.1.1',
+        RELEASE_TEST_NODE: process.execPath,
+        RELEASE_TEST_GH: fixturePath,
+        RELEASE_TEST_STATE: statePath,
+      },
+    },
+  )
+  return { result, state: JSON.parse(await readFile(statePath, 'utf8')) }
 }
 
 function workflowNeeds(job) {
@@ -355,4 +432,32 @@ test('repository jobs have bounded execution and superseded CI runs are cancelle
     'utf8',
   )
   assert.match(workflowJobBlock(deployWorkflow, 'deploy'), /^ {4}timeout-minutes:\s*[1-9][0-9]*\s*$/mu)
+})
+
+test('release publication binds the new tag and release to the verified commit', async (t) => {
+  const { result, state } = await runReleasePublication(t, {})
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(state.tagCommit, 'b'.repeat(40))
+  assert.equal(state.releaseCommit, 'b'.repeat(40))
+})
+
+for (const [label, apiFailure] of [
+  ['an existing tag', false],
+  ['a failed GitHub API request', true],
+]) {
+  test(`release publication stops on ${label} without publishing against the old commit`, async (t) => {
+    const oldCommit = 'a'.repeat(40)
+    const { result, state } = await runReleasePublication(t, { tagCommit: oldCommit, apiFailure })
+    assert.notEqual(result.status, 0)
+    assert.equal(state.tagCommit, oldCommit)
+    assert.equal(state.releaseAttempted, undefined)
+    assert.equal(state.releaseCommit, undefined)
+  })
+}
+
+test('a failed release creation preserves the newly bound tag for manual recovery', async (t) => {
+  const { result, state } = await runReleasePublication(t, { releaseFailure: true })
+  assert.notEqual(result.status, 0)
+  assert.equal(state.tagCommit, 'b'.repeat(40))
+  assert.equal(state.releaseCommit, undefined)
 })

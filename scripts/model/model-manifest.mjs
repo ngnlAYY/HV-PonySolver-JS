@@ -71,7 +71,11 @@ function readObjectAssignmentSource(source, name, sourcePath) {
     return null
   }
   const objectEnd = findMatchingBrace(source, objectStart)
-  return objectEnd === -1 ? null : source.slice(objectStart, objectEnd + 1)
+  if (objectEnd === -1) {
+    return null
+  }
+  assertAssignmentTerminator(source, objectEnd + 1, name, sourcePath)
+  return source.slice(objectStart, objectEnd + 1)
 }
 
 function findAssignmentValueStart(source, name) {
@@ -229,7 +233,15 @@ function assertPropertyTerminator(source, valueEnd, displayName, sourcePath) {
 }
 
 function assertAssignmentTerminator(source, valueEnd, displayName, sourcePath) {
-  const boundary = readAssignmentBoundary(source, valueEnd)
+  let boundary = readAssignmentBoundary(source, valueEnd)
+  if (identifierAt(source, boundary.index, 'as')) {
+    const assertionStart = skipWhitespaceAndComments(source, boundary.index + 'as'.length)
+    if (identifierAt(source, assertionStart, 'const')) {
+      // A const assertion changes only the type; any runtime suffix still
+      // belongs to the initializer and must pass the same boundary check.
+      boundary = readAssignmentBoundary(source, assertionStart + 'const'.length)
+    }
+  }
   if (boundary.char === undefined || boundary.char === ';') {
     return
   }
