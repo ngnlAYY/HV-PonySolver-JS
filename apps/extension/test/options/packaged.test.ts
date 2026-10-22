@@ -13,7 +13,7 @@ import { installOptionsPageMarkup, optionsElement } from './options-page-fixture
 
 const platformMocks = vi.hoisted(() => ({
   runtimeConnect: vi.fn(),
-  storageGetAll: vi.fn(),
+  storageGet: vi.fn(),
   storageRemove: vi.fn(),
   storageSet: vi.fn(),
 }))
@@ -43,7 +43,7 @@ vi.mock('../../src/protocol/messages', () => {
 beforeEach(() => {
   vi.resetModules()
   platformMocks.runtimeConnect.mockReset()
-  platformMocks.storageGetAll.mockReset().mockResolvedValue({
+  platformMocks.storageGet.mockReset().mockResolvedValue({
     // A local-storage sentinel must be ignored just like a dormant Key from an older artifact.
     hvPonySolverModelAccessKey: 'legacy-key-must-remain-dormant',
   })
@@ -72,7 +72,7 @@ describe('packaged options entry', () => {
     })
 
     await import('../../src/options/packaged')
-    await vi.waitFor(() => expect(platformMocks.storageGetAll).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(platformMocks.storageGet).toHaveBeenCalledTimes(1))
 
     expect(optionsElement<HTMLFieldSetElement>('model-key-fieldset').disabled).toBe(true)
     const hint = optionsElement<HTMLParagraphElement>('packaged-model-hint')
@@ -89,7 +89,7 @@ describe('packaged options entry', () => {
 
   it('keeps ordinary Save enabled and stores only ordinary settings', async () => {
     await import('../../src/options/packaged')
-    await vi.waitFor(() => expect(platformMocks.storageGetAll).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(platformMocks.storageGet).toHaveBeenCalledTimes(1))
 
     const saveButton = document.querySelector<HTMLButtonElement>('button[type="submit"]')
     expect(saveButton?.disabled).toBe(false)
@@ -122,7 +122,7 @@ describe('packaged options entry', () => {
   })
 
   it('renders hostile storage errors as text', async () => {
-    platformMocks.storageGetAll.mockRejectedValueOnce(new Error('<img src=x onerror=alert(1)>'))
+    platformMocks.storageGet.mockRejectedValueOnce(new Error('<img src=x onerror=alert(1)>'))
 
     await import('../../src/options/packaged')
 

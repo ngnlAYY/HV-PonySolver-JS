@@ -28,7 +28,7 @@ import {
 } from '@hv-pony-solver/browser-core/status-panel/panel-settings'
 import { formatErrorMessage } from '@hv-pony-solver/browser-core/utils/errors'
 
-import { storageGetAll, storageSet } from '../platform/webextension'
+import { storageGet, storageSet } from '../platform/webextension'
 
 export type OptionsStatus = Readonly<{
   set(message: string, isError?: boolean): void
@@ -199,6 +199,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
       },
     },
   }
+  const storageKeys = ordinaryFields.map((field) => fields[field].storageKey)
   const initialValues = new Map<OrdinaryField, string>()
   const baselineValues = new Map<OrdinaryField, string>()
   const dirtyFields = new Set<OrdinaryField>()
@@ -399,7 +400,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
       }
       loading = true
       try {
-        const values = await storageGetAll()
+        const values = await storageGet(storageKeys)
         // Catch programmatic edits as well as input/change events before applying storage.
         syncDirtyFields()
         const nextValues = loadedValues(values)

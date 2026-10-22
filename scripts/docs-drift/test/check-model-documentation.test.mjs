@@ -6,7 +6,7 @@ import { readFile, runCheck, withFixture, writeFile } from './fixtures.mjs'
 for (const [document, facts] of [
   // 每篇专题保留负向覆盖；不为同一 includes 分支逐一重跑整仓文档扫描。
   ['docs/architecture/browser-runtime.md', ['取消不等待防抖', '外层 fieldset']],
-  ['docs/model-cache-strategy.md', ['永久错误']],
+  ['docs/model-cache-strategy.md', ['16 KiB']],
   ['docs/onnx-runtime.md', ['Content-Length']],
 ]) {
   for (const fact of facts) {

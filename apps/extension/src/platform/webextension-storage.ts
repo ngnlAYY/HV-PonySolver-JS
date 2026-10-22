@@ -1,12 +1,12 @@
 import { callbackError, resolveRawExtensionApi, type StorageChanges } from './webextension-api'
 
-export async function storageGetAll(): Promise<Record<string, unknown>> {
+export async function storageGet(keys: string[] | null): Promise<Record<string, unknown>> {
   const { api, promiseStyle } = resolveRawExtensionApi()
   if (promiseStyle) {
-    return api.storage.local.get(null) as Promise<Record<string, unknown>>
+    return api.storage.local.get(keys) as Promise<Record<string, unknown>>
   }
   return new Promise((resolve, reject) => {
-    api.storage.local.get(null, (items) => {
+    api.storage.local.get(keys, (items) => {
       const error = callbackError(api.runtime)
       if (error) {
         reject(error)

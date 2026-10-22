@@ -17,6 +17,14 @@ export type ModelAccessKeyCommitted = () => void | Promise<void>
 // never through the page-readable localStorage fallback.
 const modelAccessKeyStorage = sensitiveGmSettingsStorage
 let keyIntentGeneration = 0
+let keyMutationTail: Promise<void> = Promise.resolve()
+
+function commitKeyMutation(mutate: () => Promise<void>): Promise<void> {
+  // GM 写入不可撤销；后续设置/清除必须等旧写入结算，不能让旧值迟到覆盖新意图。
+  const committed = keyMutationTail.then(mutate)
+  keyMutationTail = committed.catch(() => undefined)
+  return committed
+}
 
 export function getModelAccessKey(): Promise<string> {
   return getCoreModelAccessKey(modelAccessKeyStorage)
@@ -24,13 +32,13 @@ export function getModelAccessKey(): Promise<string> {
 
 export async function setModelAccessKey(value: string, onCommitted?: ModelAccessKeyCommitted): Promise<void> {
   keyIntentGeneration += 1
-  await setCoreModelAccessKey(modelAccessKeyStorage, value)
+  await commitKeyMutation(() => setCoreModelAccessKey(modelAccessKeyStorage, value))
   await onCommitted?.()
 }
 
 export async function clearModelAccessKey(onCommitted?: ModelAccessKeyCommitted): Promise<void> {
   keyIntentGeneration += 1
-  await clearCoreModelAccessKey(modelAccessKeyStorage)
+  await commitKeyMutation(() => clearCoreModelAccessKey(modelAccessKeyStorage))
   await onCommitted?.()
 }
 

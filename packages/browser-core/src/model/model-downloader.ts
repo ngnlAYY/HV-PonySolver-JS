@@ -26,6 +26,8 @@ export type ModelDownloadEnvironment = Readonly<{
 
 export { copyModelDownloadConfirmation } from './model-download-confirmation-store'
 
+const MODEL_JSON_RESPONSE_MAX_BYTES = 16 * 1024
+
 type DownloadDeadline = Readonly<{
   signal: AbortSignal
   run<T>(operation: () => T | PromiseLike<T>): Promise<T>
@@ -85,6 +87,40 @@ function createDownloadDeadline(
       clearTimeout(timeoutId)
       callerSignal?.removeEventListener('abort', abortFromCaller)
     },
+  }
+}
+
+async function fetchModelResponse(deadline: DownloadDeadline, request: () => Promise<Response>): Promise<Response> {
+  deadline.throwIfExpired()
+  const pendingResponse = request()
+  try {
+    const response = await deadline.runPromise(pendingResponse)
+    deadline.throwIfExpired()
+    return response
+  } catch (error) {
+    // 取消只结束等待；不响应信号的 fetch 迟到返回时仍须释放正文。
+    void pendingResponse.then((response) => cancelByteStream(response.body, error)).catch(() => undefined)
+    throw error
+  }
+}
+
+async function readModelJsonResponse(response: Response, deadline: DownloadDeadline, label: string): Promise<unknown> {
+  if (!response.body) {
+    throw new Error(`${label}响应正文不可用`)
+  }
+  const bytes = await readBoundedByteStream(response.body, {
+    expectedByteLength: null,
+    maxByteLength: MODEL_JSON_RESPONSE_MAX_BYTES,
+    sizeError: () => new Error(`${label}响应超过大小限制`),
+    wait: deadline.runPromise,
+  })
+  deadline.throwIfExpired()
+  try {
+    const value: unknown = JSON.parse(new TextDecoder().decode(bytes))
+    return value
+  } catch {
+    // 原生 JSON 解析错误可能包含响应正文，不向界面或日志透传。
+    throw new Error(`${label}响应格式无效`)
   }
 }
 
@@ -196,7 +232,7 @@ export async function confirmCachedModelDownload(buffer: ArrayBuffer, signal?: A
   }
   const deadline = createDownloadDeadline(signal, '模型下载缓存确认', inferenceTimeoutConfig.modelProbeTimeoutMs)
   try {
-    const response = await deadline.run(() =>
+    const response = await fetchModelResponse(deadline, () =>
       confirmation.fetchImpl(
         getQuotaUrl(),
         createModelConfirmationInit(deadline.signal, confirmation.accessKey, confirmation.receiptId),
@@ -216,7 +252,7 @@ export async function confirmCachedModelDownload(buffer: ArrayBuffer, signal?: A
       }
       throw new Error(`模型已缓存，但下载次数确认失败: HTTP ${response.status}`)
     }
-    const value: unknown = await deadline.run(() => response.json())
+    const value = await readModelJsonResponse(response, deadline, '模型下载缓存确认')
     if (typeof value !== 'object' || value === null || (value as { confirmed?: unknown }).confirmed !== true) {
       throw new Error('模型已缓存，但下载次数确认响应无效')
     }
@@ -308,7 +344,7 @@ export async function downloadModel(
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
     const fetchImpl = resolveFetchImplementation(environment.fetchImpl)
-    const response = await deadline.run(() =>
+    const response = await fetchModelResponse(deadline, () =>
       fetchImpl(getModelUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
     if (!response.ok) {
@@ -426,7 +462,7 @@ export async function queryModelDownloadQuota(
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
     const fetchImpl = resolveFetchImplementation(environment.fetchImpl)
-    const response = await deadline.run(() =>
+    const response = await fetchModelResponse(deadline, () =>
       fetchImpl(getQuotaUrl(), createModelFetchInit(deadline.signal, accessKey)),
     )
     if (!response.ok) {
@@ -440,7 +476,7 @@ export async function queryModelDownloadQuota(
       }
       throw new Error(`模型下载次数查询失败: HTTP ${response.status}`)
     }
-    const value: unknown = await deadline.run(() => response.json())
+    const value = await readModelJsonResponse(response, deadline, '模型下载次数查询')
     deadline.throwIfExpired()
     return parseQuotaStatus(value)
   } finally {
@@ -475,7 +511,7 @@ export async function probeModelAccessKey(
       getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
     )
     const fetchImpl = resolveFetchImplementation(environment.fetchImpl)
-    const response = await deadline.run(() =>
+    const response = await fetchModelResponse(deadline, () =>
       fetchImpl(getModelUrl(), createModelProbeInit(deadline.signal, accessKey)),
     )
     cancelByteStream(response.body)

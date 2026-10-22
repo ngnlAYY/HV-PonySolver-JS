@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { setImmediate } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
 import { browserSupport } from './browser-support.mjs'
@@ -111,6 +113,43 @@ test('geckodriver downloader streams bounded bytes with the fixed URL and hash',
   assert.ok(requestOptions.signal instanceof globalThis.AbortSignal)
 })
 
+test('geckodriver hashes the received bytes when the stream reuses a large backing buffer', async () => {
+  const expected = Uint8Array.from({ length: 65_538 }, (_, index) => index % 251)
+  const expectedHash = createHash('sha256').update(expected).digest('hex')
+  for (const declared of [false, true]) {
+    const chunk = new Uint8Array(1024 * 1024).subarray(0, expected.byteLength / 2)
+    let offset = 0
+    const body = new globalThis.ReadableStream(
+      {
+        pull(controller) {
+          if (offset === expected.byteLength) {
+            chunk.fill(255)
+            controller.close()
+            return
+          }
+          chunk.set(expected.subarray(offset, offset + chunk.byteLength))
+          offset += chunk.byteLength
+          controller.enqueue(chunk)
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    await assert.rejects(
+      fetchGeckodriverArchive({
+        fetchImpl: async () =>
+          new globalThis.Response(body, {
+            headers: declared ? { 'content-length': String(expected.byteLength) } : undefined,
+          }),
+        maxBytes: expected.byteLength + 1,
+      }),
+      (error) =>
+        error.message ===
+        `geckodriver archive SHA-256 mismatch: expected ${browserSupport.geckodriver.linuxArchiveSha256}, received ${expectedHash}`,
+    )
+    assert.equal(body.locked, false)
+  }
+})
+
 test('geckodriver downloader rejects declared and streamed oversize bodies', async () => {
   let fetchCalled = false
   await assert.rejects(
@@ -197,6 +236,35 @@ test('geckodriver deadline aborts ignored fetches and hanging body streams', { t
   )
   assert.equal(bodySignal.aborted, true)
   assert.equal(bodyCancelled, true)
+})
+
+test('geckodriver cancels a late response without waiting for stream cleanup', async () => {
+  const started = Promise.withResolvers()
+  const response = Promise.withResolvers()
+  const controller = new globalThis.AbortController()
+  let cancelled = 0
+  const body = new globalThis.ReadableStream({
+    cancel() {
+      cancelled += 1
+      return new Promise(() => undefined)
+    },
+  })
+  const download = fetchGeckodriverArchive({
+    signal: controller.signal,
+    fetchImpl: () => {
+      started.resolve()
+      return response.promise
+    },
+  })
+  await started.promise
+  const reason = new Error('fixture download cancelled')
+  const rejected = assert.rejects(download, (error) => error === reason)
+  controller.abort(reason)
+  await rejected
+  response.resolve(new globalThis.Response(body))
+  await setImmediate()
+  assert.equal(cancelled, 1)
+  assert.equal(body.locked, false)
 })
 
 test('geckodriver downloader reports HTTP, missing-body, and stream errors', async () => {

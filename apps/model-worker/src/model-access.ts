@@ -27,14 +27,22 @@ function getRequestAccessToken(request: Request): string | null {
   return match?.[1] ?? null
 }
 
-async function hasAuthorizedLookupKey(keyStore: ModelKeyStore, lookupKeys: readonly string[]): Promise<boolean> {
-  for (const lookupKey of lookupKeys) {
-    const marker = await keyStore.get(lookupKey)
-    if (marker !== null && marker.trim().length > 0) {
-      return true
+function hasAuthorizedLookupKey(keyStore: ModelKeyStore, lookupKeys: readonly string[]): Promise<boolean> {
+  let timedOut = false
+  const operation = (async () => {
+    for (const lookupKey of lookupKeys) {
+      const marker = await keyStore.get(lookupKey)
+      // KV cannot abort an in-flight read; do not start legacy lookups after the deadline.
+      if (timedOut) return false
+      if (marker !== null && marker.trim().length > 0) {
+        return true
+      }
     }
-  }
-  return false
+    return false
+  })()
+  return withModelWorkerDependencyTimeout(operation, 'KV', () => {
+    timedOut = true
+  })
 }
 
 export async function selectModelAccess(
@@ -52,7 +60,7 @@ export async function selectModelAccess(
     return { decision: invalidAccessDecision(invalidKeyMode), canonicalToken }
   }
 
-  if (await withModelWorkerDependencyTimeout(hasAuthorizedLookupKey(keyStore, lookupKeys), 'KV')) {
+  if (await hasAuthorizedLookupKey(keyStore, lookupKeys)) {
     return { decision: 'real', canonicalToken }
   }
 

@@ -23,10 +23,12 @@ vi.mock('../../src/platform/webextension', async (importOriginal) => {
 import {
   BROKER_DEFAULT_TIMEOUT_MS,
   BROKER_DETECT_TIMEOUT_MS,
+  MAX_GLOBAL_CLEAR_KEY_REQUESTS,
   MAX_GLOBAL_DETECT_REQUESTS,
   MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS,
   MAX_GLOBAL_QUERY_MODEL_QUOTA_REQUESTS,
   MAX_GLOBAL_VERIFY_KEY_REQUESTS,
+  MAX_PORT_CLEAR_KEY_REQUESTS,
   MAX_PORT_DETECT_REQUESTS,
   MAX_PORT_DOWNLOAD_MODEL_REQUESTS,
   MAX_PORT_PREPARE_REQUESTS,
@@ -92,6 +94,14 @@ function verifyKeyRequest(index: number): Record<string, unknown> {
     type: 'verify-key',
     requestId: `verify-${index}`,
     candidateKey: index.toString(16).padStart(64, '0'),
+  }
+}
+
+function clearKeyRequest(index: number): Record<string, unknown> {
+  return {
+    protocol: PROTOCOL_VERSION,
+    type: 'clear-key',
+    requestId: `clear-${index}`,
   }
 }
 
@@ -583,7 +593,72 @@ describe('broker queue and privilege boundaries', () => {
     }
   })
 
-  it('aborts and releases a timed-out verify entry even when the Host never settles', async () => {
+  it('bounds clear intents independently and holds disconnected capacity until Host settlement', async () => {
+    vi.useFakeTimers()
+    const pending = new Map<string, Readonly<{ resolve: (response: HostResponse) => void; signal: AbortSignal }>>()
+    const invokeHost = vi.fn(
+      (request: HostRequest, signal: AbortSignal) =>
+        new Promise<HostResponse>((resolve) => {
+          pending.set(request.requestId, { resolve, signal })
+        }),
+    )
+    registerBroker(invokeHost)
+    const clients = Array.from({ length: MAX_GLOBAL_CLEAR_KEY_REQUESTS + 1 }, () =>
+      port(OPTIONS_PORT_NAME, {
+        id: 'extension-id',
+        url: 'moz-extension://extension-id/options/options.html',
+      }),
+    )
+    for (const client of clients) {
+      platformMocks.connectListener?.(client)
+    }
+
+    clients[0]!.emitMessage(verifyKeyRequest(0))
+    clients[0]!.emitMessage(clearKeyRequest(0))
+    expect(MAX_PORT_CLEAR_KEY_REQUESTS).toBe(1)
+    expect(invokeHost).toHaveBeenCalledTimes(2)
+    clients[0]!.emitMessage(clearKeyRequest(100))
+    expect(clients[0]!.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'clear-100', ok: false, error: expect.stringContaining('繁忙') }),
+    )
+    expect(invokeHost).toHaveBeenCalledTimes(2)
+    for (let index = 1; index < MAX_GLOBAL_CLEAR_KEY_REQUESTS; index += 1) {
+      clients[index]!.emitMessage(clearKeyRequest(index))
+    }
+    clients[MAX_GLOBAL_CLEAR_KEY_REQUESTS]!.emitMessage(clearKeyRequest(200))
+    expect(clients[MAX_GLOBAL_CLEAR_KEY_REQUESTS]!.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'clear-200', ok: false, error: expect.stringContaining('繁忙') }),
+    )
+    expect(invokeHost).toHaveBeenCalledTimes(MAX_GLOBAL_CLEAR_KEY_REQUESTS + 1)
+
+    clients[0]!.emitDisconnect()
+    expect(pending.get('clear-0')?.signal.aborted).toBe(true)
+    clients[MAX_GLOBAL_CLEAR_KEY_REQUESTS]!.emitMessage(clearKeyRequest(201))
+    expect(clients[MAX_GLOBAL_CLEAR_KEY_REQUESTS]!.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'clear-201', ok: false, error: expect.stringContaining('繁忙') }),
+    )
+    expect(invokeHost).toHaveBeenCalledTimes(MAX_GLOBAL_CLEAR_KEY_REQUESTS + 1)
+
+    pending.get('clear-0')?.resolve({
+      protocol: PROTOCOL_VERSION,
+      type: 'result',
+      requestId: 'clear-0',
+      ok: true,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    clients[MAX_GLOBAL_CLEAR_KEY_REQUESTS]!.emitMessage(clearKeyRequest(202))
+    expect(invokeHost).toHaveBeenCalledTimes(MAX_GLOBAL_CLEAR_KEY_REQUESTS + 2)
+    expect(clients[0]!.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ requestId: 'clear-0' }))
+
+    for (const [requestId, entry] of pending) {
+      entry.resolve({ protocol: PROTOCOL_VERSION, type: 'result', requestId, ok: true })
+    }
+  })
+
+  it.each([
+    ['verify-key', verifyKeyRequest],
+    ['clear-key', clearKeyRequest],
+  ] as const)('aborts and releases a timed-out %s entry even when the Host never settles', async (_type, request) => {
     vi.useFakeTimers()
     let receivedSignal: AbortSignal | undefined
     const invokeHost = vi.fn(
@@ -598,15 +673,20 @@ describe('broker queue and privilege boundaries', () => {
       url: 'moz-extension://extension-id/options/options.html',
     })
     platformMocks.connectListener?.(client)
-    client.emitMessage(verifyKeyRequest(300))
+    const firstRequest = request(300)
+    client.emitMessage(firstRequest)
 
     await vi.advanceTimersByTimeAsync(BROKER_DEFAULT_TIMEOUT_MS)
 
     expect(receivedSignal?.aborted).toBe(true)
     expect(client.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: 'verify-300', ok: false, error: expect.stringContaining('超时') }),
+      expect.objectContaining({
+        requestId: firstRequest.requestId,
+        ok: false,
+        error: expect.stringContaining('超时'),
+      }),
     )
-    client.emitMessage(verifyKeyRequest(301))
+    client.emitMessage(request(301))
     expect(invokeHost).toHaveBeenCalledTimes(2)
   })
 

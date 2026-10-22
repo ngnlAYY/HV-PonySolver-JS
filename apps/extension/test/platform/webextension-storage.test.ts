@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   addStorageChangeListener,
-  storageGetAll,
+  storageGet,
   storageRemove,
   storageSet,
 } from '../../src/platform/webextension-storage'
@@ -22,7 +22,7 @@ describe('webextension storage adapter', () => {
     vi.stubGlobal('browser', api)
     const listener = vi.fn()
 
-    expect(await storageGetAll()).toEqual({ answer: 42 })
+    expect(await storageGet(null)).toEqual({ answer: 42 })
     await storageSet({ answer: 43 })
     await storageRemove('answer')
     const unregister = addStorageChangeListener(listener)
@@ -59,7 +59,7 @@ describe('webextension storage adapter', () => {
     })
     vi.stubGlobal('chrome', api)
 
-    await expect(storageGetAll()).rejects.toThrow('storage read failed')
+    await expect(storageGet(['answer'])).rejects.toThrow('storage read failed')
   })
 
   it('rejects Chromium callback removals when runtime.lastError is set', async () => {

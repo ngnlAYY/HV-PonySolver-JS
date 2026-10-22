@@ -8,6 +8,7 @@ type MockWorkerMessage = {
 
 function receiveTransferredMessage(message: MockWorkerMessage, transfer: Transferable[] = []): MockWorkerMessage {
   if (message.modelBuffer instanceof ArrayBuffer && transfer.includes(message.modelBuffer)) {
+    // Node 的 structuredClone 返回宿主 realm 缓冲；复制保留测试 realm 的 ArrayBuffer 身份。
     const workerBytes = new Uint8Array(message.modelBuffer.byteLength)
     workerBytes.set(new Uint8Array(message.modelBuffer))
     structuredClone(message.modelBuffer, { transfer: [message.modelBuffer] })

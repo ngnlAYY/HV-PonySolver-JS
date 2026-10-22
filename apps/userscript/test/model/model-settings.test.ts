@@ -7,6 +7,7 @@ const VALID_TOKEN_LOWER = VALID_TOKEN.toLowerCase()
 
 describe('model settings', () => {
   beforeEach(() => {
+    // Import after resetModules so each case owns fresh Key intent and write-queue state.
     vi.resetModules()
     vi.restoreAllMocks()
     localStorage.clear()
@@ -37,6 +38,101 @@ describe('model settings', () => {
     await setModelAccessKey(`  ${VALID_TOKEN}  `)
 
     expect(setValue).toHaveBeenCalledWith(STORAGE_KEY, VALID_TOKEN)
+  })
+
+  it.each(['save', 'clear'])('keeps the latest %s after older GM writes settle', async (latest) => {
+    const { clearModelAccessKey, getModelAccessKey, setModelAccessKey } = await import('../../src/model/model-settings')
+    const firstCommit = Promise.withResolvers<void>()
+    const store = new Map<string, string>()
+    const onCommitted = vi.fn()
+    const setValue = vi
+      .fn(async (key: string, value: string) => {
+        store.set(key, value)
+      })
+      .mockImplementationOnce(async (key, value) => {
+        await firstCommit.promise
+        store.set(key, value)
+      })
+    const deleteValue = vi.fn(async (key: string) => {
+      store.delete(key)
+    })
+    vi.stubGlobal('GM', {
+      getValue: async (key: string, fallback: string) => store.get(key) ?? fallback,
+      setValue,
+      deleteValue,
+    })
+
+    const older = setModelAccessKey(VALID_TOKEN, onCommitted)
+    await vi.waitFor(() => expect(setValue).toHaveBeenCalledTimes(1))
+    const middle = setModelAccessKey('cD'.repeat(32), onCommitted)
+    const newest =
+      latest === 'save' ? setModelAccessKey('eF'.repeat(32), onCommitted) : clearModelAccessKey(onCommitted)
+    expect(onCommitted).not.toHaveBeenCalled()
+    expect(setValue).toHaveBeenCalledTimes(1)
+    expect(deleteValue).not.toHaveBeenCalled()
+
+    firstCommit.resolve()
+    await Promise.all([older, middle, newest])
+
+    await expect(getModelAccessKey()).resolves.toBe(latest === 'save' ? 'eF'.repeat(32) : '')
+    expect(onCommitted).toHaveBeenCalledTimes(3)
+  })
+
+  it('continues a queued clear after an older GM write rejects', async () => {
+    const { clearModelAccessKey, getModelAccessKey, setModelAccessKey } = await import('../../src/model/model-settings')
+    const firstCommit = Promise.withResolvers<void>()
+    const store = new Map([[STORAGE_KEY, VALID_TOKEN_LOWER]])
+    const onCommitted = vi.fn()
+    const setValue = vi.fn(() => firstCommit.promise)
+    vi.stubGlobal('GM', {
+      getValue: async (key: string, fallback: string) => store.get(key) ?? fallback,
+      setValue,
+      deleteValue: async (key: string) => {
+        store.delete(key)
+      },
+    })
+
+    const older = setModelAccessKey(VALID_TOKEN, onCommitted)
+    const rejected = expect(older).rejects.toThrow('GM write failed')
+    await vi.waitFor(() => expect(setValue).toHaveBeenCalledTimes(1))
+    const clearing = clearModelAccessKey(onCommitted)
+    firstCommit.reject(new Error('GM write failed'))
+    await rejected
+    await clearing
+
+    await expect(getModelAccessKey()).resolves.toBe('')
+    expect(onCommitted).toHaveBeenCalledOnce()
+  })
+
+  it.each(['resolve', 'reject'])('does not block later writes while a commit callback waits to %s', async (outcome) => {
+    const { clearModelAccessKey, getModelAccessKey, setModelAccessKey } = await import('../../src/model/model-settings')
+    const callback = Promise.withResolvers<void>()
+    const store = new Map<string, string>()
+    const onCommitted = vi.fn(() => callback.promise)
+    vi.stubGlobal('GM', {
+      getValue: async (key: string, fallback: string) => store.get(key) ?? fallback,
+      setValue: async (key: string, value: string) => {
+        store.set(key, value)
+      },
+      deleteValue: async (key: string) => {
+        store.delete(key)
+      },
+    })
+
+    const saving = setModelAccessKey(VALID_TOKEN, onCommitted)
+    const settled =
+      outcome === 'resolve'
+        ? expect(saving).resolves.toBeUndefined()
+        : expect(saving).rejects.toThrow('recovery failed')
+    await vi.waitFor(() => expect(onCommitted).toHaveBeenCalledOnce())
+    await clearModelAccessKey()
+    await expect(getModelAccessKey()).resolves.toBe('')
+
+    if (outcome === 'resolve') callback.resolve()
+    else callback.reject(new Error('recovery failed'))
+    await settled
+    await setModelAccessKey('cD'.repeat(32))
+    await expect(getModelAccessKey()).resolves.toBe('cD'.repeat(32))
   })
 
   it('saves a prompted key immediately when verification is not configured', async () => {

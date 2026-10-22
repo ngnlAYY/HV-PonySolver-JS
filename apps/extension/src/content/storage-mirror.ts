@@ -8,7 +8,7 @@ import {
 
 import {
   addStorageChangeListener,
-  storageGetAll,
+  storageGet,
   storageRemove,
   storageSet,
   type StorageChanges,
@@ -81,7 +81,7 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
         mirror.applyChanges(changes)
       })
 
-      const stored = await raceAbort(storageGetAll(), controller.signal)
+      const stored = await raceAbort(storageGet(null), controller.signal)
       mirror.finishInitialization(stored)
       return mirror
     } catch (error) {

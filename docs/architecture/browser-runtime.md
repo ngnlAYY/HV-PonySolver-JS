@@ -34,6 +34,8 @@ App
 
 [App](../../packages/browser-core/src/app/app.ts) 在 documentElement 上观察验证码相关变化，以启动延迟和 MutationObserver 防抖调度扫描，覆盖 body 替换和暂时缺失。验证码选择器属性 `id/name` 的补齐会补扫；移除时还按旧活动目标判断相关性，先取消再防抖。扫描与面板各自维护观察器；App 保存当前、失败和准备中的目标，在销毁、切页或 Key 变化时取消旧任务或推进凭据修订号。
 
+mutation 按其目标的最近验证码容器定位候选，不依赖文档中第一个同 ID 节点。前方残留的不完整容器不能遮挡后续验证码的属性/子节点补齐、action 更新或外层 fieldset 恢复；旧活动容器仍参与即时取消判断。
+
 JPX 的 `AjaxRound` 会批量清除页面定时器，留下失效的待扫描句柄。每次相关 mutation 都重挂定时器，保留基于 `performance.now()` 的原扫描截止时间；已过期则立即排队，不再等待完整 100ms，持续变化也不延后截止时间。无关 mutation 不重挂，去重、失败冷却与销毁约束不变；这不是全页定时器保护或轮询恢复。
 
 目标变化或移除时，取消不等待防抖：先比较完整 `CaptchaTarget` 并取消旧信号，再扫描最新目标。`prepareTarget()` 通过 `raceAbort` 释放等待，底层准备 Promise 迟到结算不能阻塞新轮次、重试旧目标或写入旧结果。无关子节点变化和提交按钮启用不取消同一目标的初始化，已完成目标仍去重。外层 fieldset 的 disabled 变化及直接子节点变化也进入复核，以覆盖继承禁用和首个 legend 顺序变化；只有有效控件状态变化才取消，重新启用会补扫失败目标。
@@ -85,6 +87,8 @@ sequenceDiagram
 
 [OnnxWorkerClient](../../packages/browser-core/src/inference/onnx-worker-client.ts) 管理初始化共享、串行检测、超时恢复、会话重建和销毁，`WorkerFactory` 由平台注入。取消立即移除未开始项并释放图片；活动项完成或取消宽限到期终止后才执行下一项。销毁立即拒绝全部排队项。
 
+最后一个准备 owner 取消后，新 `prepare()` 或 `detect()` 若恰在旧代际退场期间到达，先可取消地等待退场，再共享或启动当前准备；不继承旧调用方的取消。新调用自身取消或客户端销毁时，不再读取模型或创建 Worker。
+
 [Worker 入口](../../packages/browser-core/src/inference/onnx-worker-entry.ts) 验证 `unknown` 请求，初始化 Runtime，复用 OffscreenCanvas/CHW 缓冲并执行 WASM 推理；[request bridge](../../packages/browser-core/src/inference/worker-request-bridge.ts) 验证结构化响应、管理 request id 与超时。
 
 用户脚本的 [onnx-worker-client.ts](../../apps/userscript/src/inference/onnx-worker-client.ts) 注入 [blob-worker.ts](../../apps/userscript/src/inference/blob-worker.ts) 创建的 Worker，并把构建时内联的脚本文本交给它。两个入口分别是：
@@ -102,7 +106,11 @@ sequenceDiagram
 
 [ModelCache](../../packages/browser-core/src/model/model-cache.ts) 编排读取、共享下载、写入与确认；[IndexedDB store](../../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务，[record](../../packages/browser-core/src/model/model-cache-record.ts) 校验记录，[shared downloads](../../packages/browser-core/src/model/shared-model-downloads.ts) 合并并发下载。带回执的模型与待确认元数据同事务落盘，确认并更新匹配元数据后才允许后续缓存命中；无回执不确认。关闭、`versionchange` 或数据库异常关闭事件 `close` 取消数据库操作与共享下载，并使未完成确认失效。连接被清除后下次操作重新打开，旧连接迟到事件不影响新连接。
 
-用户脚本 Key 经 [model-settings.ts](../../apps/userscript/src/model/model-settings.ts) 存入 [sensitiveGmSettingsStorage](../../apps/userscript/src/userscript/gm-storage.ts)，GM 不可用时拒绝降级到页面存储。新的设置/清除按意图代次淘汰尚未写入的旧验证，验证结算后再次核对；取消输入不淘汰原操作，已发起的 GM 写入仍按真实提交结算。实际提交后才通知组装层，取消并等待旧 prepare 后恢复 App；已就绪会话复用，并发按修订号取最新。取消输入、验证/存储失败或销毁后的迟到回调不恢复。
+用户脚本 Key 经 [model-settings.ts](../../apps/userscript/src/model/model-settings.ts) 存入 [sensitiveGmSettingsStorage](../../apps/userscript/src/userscript/gm-storage.ts)，GM 不可用时拒绝降级到页面存储。
+
+- 意图代次阻止尚未写入的旧验证迟到提交，取消输入不淘汰原操作。
+- 同页设置/清除共用写入尾链，等待已发起的 GM 操作真实结算；前次失败不阻断后续写入。提交回调位于尾链之外，不能卡住新写入。不提供跨标签事务，也不跳过永久挂起的旧写入。
+- 实际提交后才通知组装层，取消并等待旧 prepare 后恢复 App；已就绪会话复用，并发按修订号取最新。取消输入、验证/存储失败或销毁后的迟到回调不恢复。
 
 保存和读取只去除 Key 首尾空白，保留验证过的原始大小写，以兼容历史 KV 条目；额度身份仍由服务端规范化。已经丢失大小写的旧存储值无法反推，需重新输入原 Key。
 
@@ -117,6 +125,8 @@ sequenceDiagram
 面板观察器独立于 csp 开关，观察 documentElement 下 body 及子节点。首次初始化也允许 body 缺失，先注册观察、等待插入，不因面板尚未挂载而中止 App 启动。AADB 等脚本移除 `.ponyLog` 后挂回原节点，不重建应用或重读历史。渲染先复核挂载，再命中缓存或消费自身 mutation，避免遗漏外部移除。destroy 断开观察并清空引用，迟到回调不能复活面板。
 
 [HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 在写入前分配每世界的正安全整数 `sequence`：本实例已分配与当前可见序号的最大值加一，失败可留空洞，重建后从已保存记录恢复。独立键按序号、时间戳、稳定 key 排序裁剪；未互相可见的并发写可同序号，再以后二者排序。非法序号视为损坏，上限耗尽走保存失败通道。无序号旧记录按原时间戳读取，非枚举旧数组保留原顺序；显示用 `timestamp`/`time` 不单调化，旧数据不重写。
+
+历史文本各自仍限 1024 个 UTF-16 code unit、每世界仍读 50 条。JSON 防御上限按三个文本字段最坏六字符转义加结构余量计算：单条 19456 字符、双世界旧根 1946624 字符，避免合法引号、反斜杠或控制字符记录被自行裁剪。精确值归 [answer-history-config.ts](../../packages/browser-core/src/persistence/answer-history-config.ts)。追加后的旧根清理只读取一次；读取失败不证明损坏，不删除有效根，也不把已经提交的独立键追加改报失败。
 
 App 在 `prepareTarget()` 前用 `performance.now()` 取开始时间，与手动变更快照经 `SolverService.trigger(target, startedAt, signal, answerSelection)` 传给 Solver。历史 `elapsed` 含准备与重试，自动模式截至提交点击，手动模式截至结果记录；不含扫描前加载/防抖或提交后响应。Solver 独立统计图片获取和识别耗时，仅当前目标可写“完成 Nms”。OnnxWorkerClient 初始化/推理及扩展 RemoteDetectorClient 初始化往返也用单调时钟，统一整数毫秒；历史时刻用 `Date.now()`，旧值不补算。回归须覆盖重试、校时、目标重置、取消与 DOM 替换。
 

@@ -292,6 +292,37 @@ test('canonical deadline aborts a hanging body and the same signal bounds hashin
   await assert.rejects(hashPromise, /hash cancelled/u)
 })
 
+test('canonical downloader cancels a late response without waiting for stream cleanup', async () => {
+  const started = Promise.withResolvers()
+  const response = Promise.withResolvers()
+  const controller = new globalThis.AbortController()
+  let cancelled = 0
+  const body = new globalThis.ReadableStream({
+    cancel() {
+      cancelled += 1
+      return new Promise(() => undefined)
+    },
+  })
+  const download = fetchCanonicalModel({
+    identity,
+    url: 'https://models.example/canonical.ort',
+    signal: controller.signal,
+    fetchImpl: () => {
+      started.resolve()
+      return response.promise
+    },
+  })
+  await started.promise
+  const reason = new Error('fixture download cancelled')
+  const rejected = assert.rejects(download, (error) => error === reason)
+  controller.abort(reason)
+  await rejected
+  response.resolve(new globalThis.Response(body))
+  await new Promise(setImmediate)
+  assert.equal(cancelled, 1)
+  assert.equal(body.locked, false)
+})
+
 test('canonical downloader writes verified bytes atomically', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'hv-canonical-model-'))
   const destination = path.join(root, 'model', identity.filename)

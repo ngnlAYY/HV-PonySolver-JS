@@ -44,6 +44,8 @@ export const MAX_PORT_PREPARE_REQUESTS = 2
 export const MAX_GLOBAL_PREPARE_REQUESTS = 4
 export const MAX_PORT_VERIFY_KEY_REQUESTS = 1
 export const MAX_GLOBAL_VERIFY_KEY_REQUESTS = 2
+export const MAX_PORT_CLEAR_KEY_REQUESTS = 1
+export const MAX_GLOBAL_CLEAR_KEY_REQUESTS = 2
 export const MAX_PORT_DOWNLOAD_MODEL_REQUESTS = 1
 export const MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS = 2
 export const MAX_PORT_QUERY_MODEL_QUOTA_REQUESTS = 1
@@ -131,6 +133,7 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
   let globalDetectRequests = 0
   let globalPrepareRequests = 0
   let globalVerifyKeyRequests = 0
+  let globalClearKeyRequests = 0
   let globalDownloadModelRequests = 0
   let globalQueryModelQuotaRequests = 0
   let latestHostStatus: HostStatusUpdate = {}
@@ -196,12 +199,13 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
     let portDetectRequests = 0
     let portPrepareRequests = 0
     let portVerifyKeyRequests = 0
+    let portClearKeyRequests = 0
     let portDownloadModelRequests = 0
     let portQueryModelQuotaRequests = 0
     type RequestEntry = {
       readonly requestId: string
       readonly controller: AbortController
-      readonly kind: 'detect' | 'prepare' | 'verify-key' | 'download-model' | 'query-model-quota' | 'other'
+      readonly kind: HostRequest['type']
       released: boolean
     }
     const entries = new Map<string, RequestEntry>()
@@ -258,6 +262,9 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       } else if (entry.kind === 'verify-key') {
         portVerifyKeyRequests -= 1
         globalVerifyKeyRequests -= 1
+      } else if (entry.kind === 'clear-key') {
+        portClearKeyRequests -= 1
+        globalClearKeyRequests -= 1
       } else if (entry.kind === 'download-model') {
         portDownloadModelRequests -= 1
         globalDownloadModelRequests -= 1
@@ -330,6 +337,13 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         return
       }
       if (
+        message.type === 'clear-key' &&
+        (portClearKeyRequests >= MAX_PORT_CLEAR_KEY_REQUESTS || globalClearKeyRequests >= MAX_GLOBAL_CLEAR_KEY_REQUESTS)
+      ) {
+        post(errorResponse(message.requestId, '模型 Key 清除队列繁忙，请稍后重试'))
+        return
+      }
+      if (
         message.type === 'download-model' &&
         (portDownloadModelRequests >= MAX_PORT_DOWNLOAD_MODEL_REQUESTS ||
           globalDownloadModelRequests >= MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS)
@@ -345,18 +359,10 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         post(errorResponse(message.requestId, '模型下载次数查询队列繁忙，请稍后重试'))
         return
       }
-      const kind =
-        message.type === 'detect' ||
-        message.type === 'prepare' ||
-        message.type === 'verify-key' ||
-        message.type === 'download-model' ||
-        message.type === 'query-model-quota'
-          ? message.type
-          : 'other'
       const entry: RequestEntry = {
         requestId: message.requestId,
         controller: new AbortController(),
-        kind,
+        kind: message.type,
         released: false,
       }
       entries.set(entry.requestId, entry)
@@ -369,6 +375,9 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       } else if (entry.kind === 'verify-key') {
         portVerifyKeyRequests += 1
         globalVerifyKeyRequests += 1
+      } else if (entry.kind === 'clear-key') {
+        portClearKeyRequests += 1
+        globalClearKeyRequests += 1
       } else if (entry.kind === 'download-model') {
         portDownloadModelRequests += 1
         globalDownloadModelRequests += 1

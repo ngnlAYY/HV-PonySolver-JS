@@ -35,7 +35,7 @@ import {
   readResponseBody,
   type StoredObject,
 } from './helpers/model-worker-fixture'
-import { authorizedModelRequest } from './helpers/model-worker-test-support'
+import { MIXED_CASE_ACCESS_TOKEN, authorizedModelRequest } from './helpers/model-worker-test-support'
 
 describe('failure-timeout', () => {
   it('returns 500 text when the selected R2 object is missing', async () => {
@@ -189,6 +189,39 @@ describe('failure-timeout', () => {
         expect(response.status).toBe(500)
         expect(await response.text()).toBe('Internal Server Error')
       }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([null, '   ', '1'])('stops KV lookups after the deadline despite a late %j marker', async (marker) => {
+    vi.useFakeTimers()
+    try {
+      const fixture = createModelFixture()
+      const env = createEnv(fixture)
+      let resolveMarker: ((value: string | null) => void) | undefined
+      const get = vi.fn<ModelKeyStore['get']>().mockResolvedValue('1')
+      get.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveMarker = resolve
+          }),
+      )
+      env.MODEL_KEYS = { get }
+      const pending = fetchWorker(authorizedModelRequest(fixture, 'GET', MIXED_CASE_ACCESS_TOKEN), env)
+
+      await vi.advanceTimersByTimeAsync(MODEL_WORKER_DEPENDENCY_TIMEOUT_MS)
+      const response = await pending
+      expect(response.status).toBe(500)
+      expect(await response.text()).toBe('Internal Server Error')
+      expect(get).toHaveBeenCalledOnce()
+
+      resolveMarker?.(marker)
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(get).toHaveBeenCalledOnce()
+      expect((env.MODEL_BUCKET as MockR2Bucket).requestedKeys).toEqual([])
+      expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedPaths).toEqual([])
     } finally {
       vi.useRealTimers()
     }

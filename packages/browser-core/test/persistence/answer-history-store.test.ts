@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { HISTORY_ENTRY_PREFIX, HISTORY_KEY, HISTORY_MAX } from '../../src/persistence/answer-history-config'
+import {
+  HISTORY_ENTRY_MAX_LENGTH,
+  HISTORY_ENTRY_PREFIX,
+  HISTORY_KEY,
+  HISTORY_MAX,
+  HISTORY_ROOT_MAX_LENGTH,
+  HISTORY_TEXT_MAX_LENGTH,
+} from '../../src/persistence/answer-history-config'
 import { HistoryStore } from '../../src/persistence/answer-history-store'
 import type { HistoryRecord } from '../../src/persistence/answer-history-types'
 import type { EnumerableTextStorage } from '../../src/platform/storage'
@@ -322,6 +329,45 @@ describe('HistoryStore', () => {
     expect(persisted).toMatchObject({ message: oversizedMessage.slice(0, 1_024) })
   })
 
+  it.each(['\u0000', '"', '\\', '\ud800'])('preserves bounded text requiring JSON escaping (%j)', async (character) => {
+    const storage = new MemoryEnumerableStorage()
+    const store = new HistoryStore(storage, () => 'escaped')
+    const text = character.repeat(HISTORY_TEXT_MAX_LENGTH)
+    const mutation = store.add('main', {
+      type: 'random',
+      answers: text,
+      message: text,
+      time: text,
+      elapsed: Number.MAX_VALUE,
+      timestamp: Number.MIN_VALUE,
+    })
+
+    await expect(mutation.persisted).resolves.toEqual(mutation.records)
+    expect(new HistoryStore(storage).get('main')).toEqual(mutation.records)
+    expect(storage.values.size).toBe(1)
+  })
+
+  it('reads both full legacy worlds when bounded fields need maximum JSON escaping', () => {
+    const text = '\u0000'.repeat(HISTORY_TEXT_MAX_LENGTH)
+    const record: HistoryRecord = { type: 'random', answers: text, message: text, time: text, elapsed: 1 }
+    const records = Array.from({ length: HISTORY_MAX }, () => record)
+    localStorage.setItem(HISTORY_KEY, JSON.stringify({ main: records, isekai: records }))
+    const store = new HistoryStore(localStorage)
+
+    expect(store.get('main')).toEqual(records)
+    expect(store.get('isekai')).toEqual(records)
+  })
+
+  it.each(['entry', 'root'] as const)('still rejects oversized serialized history %s values', (kind) => {
+    const storage = new MemoryEnumerableStorage()
+    const key = kind === 'entry' ? `${HISTORY_ENTRY_PREFIX}main:oversized` : HISTORY_KEY
+    const limit = kind === 'entry' ? HISTORY_ENTRY_MAX_LENGTH : HISTORY_ROOT_MAX_LENGTH
+    const raw = JSON.stringify(kind === 'entry' ? validSuccessRecord : { main: [validSuccessRecord] })
+    storage.values.set(key, raw.padEnd(limit + 1, ' '))
+
+    expect(new HistoryStore(storage).get('main')).toEqual([])
+  })
+
   it('uses individual keys for enumerable storage and removes a corrupted legacy root', async () => {
     const storage = new MemoryEnumerableStorage()
     storage.values.set(HISTORY_KEY, '{bad json')
@@ -365,6 +411,27 @@ describe('HistoryStore', () => {
     expect(storage.values.has(`${HISTORY_ENTRY_PREFIX}main:new-record`)).toBe(true)
     expect(vi.mocked(globalThis.console.warn).mock.calls.flat().join(' ')).toContain('清理损坏记录失败')
     expect(vi.mocked(globalThis.console.warn).mock.calls.flat().join(' ')).toContain('清理过期记录失败')
+  })
+
+  it.each([1, 2])('preserves durable history when legacy read %s after append fails', async (failureAt) => {
+    const storage = new MemoryEnumerableStorage()
+    const legacy = JSON.stringify({ main: [validManualRecord] })
+    storage.values.set(HISTORY_KEY, legacy)
+    const entryKey = `${HISTORY_ENTRY_PREFIX}main:new-record`
+    let readsAfterAppend = 0
+    storage.getItem = (key) => {
+      if (key === HISTORY_KEY && storage.values.has(entryKey) && ++readsAfterAppend === failureAt) {
+        throw new Error('snapshot unavailable')
+      }
+      return storage.values.get(key) ?? null
+    }
+    const store = new HistoryStore(storage, () => 'new-record')
+
+    await expect(store.add('main', { type: 'success', answers: 'new', elapsed: 12 }).persisted).resolves.toContainEqual(
+      expect.objectContaining({ answers: 'new' }),
+    )
+    expect(storage.values.get(HISTORY_KEY)).toBe(legacy)
+    expect(store.get('main')).toContainEqual(validManualRecord)
   })
 
   it('detects only strictly valid legacy or keyed history across both worlds', () => {

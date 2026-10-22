@@ -92,7 +92,7 @@ function createDeadlineSignal(callerSignal, timeoutMs, label) {
   }
 }
 
-function awaitWithSignal(operation, signal, label) {
+function awaitWithSignal(operation, signal, label, onAbortedValue) {
   throwIfAborted(signal, label)
   return new Promise((resolve, reject) => {
     const abort = () => {
@@ -105,6 +105,11 @@ function awaitWithSignal(operation, signal, label) {
       .then(
         (value) => {
           signal.removeEventListener('abort', abort)
+          if (signal.aborted) {
+            onAbortedValue?.(value)
+            reject(abortError(signal, label))
+            return
+          }
           resolve(value)
         },
         (error) => {
@@ -135,6 +140,7 @@ function cancelReader(reader) {
 }
 
 async function readBoundedBody(response, identity, signal) {
+  if (signal.aborted) cancelBody(response)
   throwIfAborted(signal, 'Canonical model download')
   const declaredLength = response.headers.get('content-length')
   if (declaredLength !== null) {
@@ -232,6 +238,7 @@ export async function fetchCanonicalModel(options = {}) {
           }),
         deadline.signal,
         'Canonical model download',
+        cancelBody,
       )
     } catch {
       throwIfAborted(deadline.signal, 'Canonical model download')

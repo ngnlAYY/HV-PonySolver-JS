@@ -308,20 +308,12 @@ export class HistoryStore {
   }
 
   private async repairCorruptedLegacyRoot(storage: EnumerableTextStorage): Promise<void> {
-    const raw = storage.getItem(HISTORY_KEY)
-    if (raw === null) {
-      return
-    }
     try {
-      if (this.readLegacyRoot() !== null) {
-        return
+      if (this.readLegacyRoot() === null) {
+        await storage.removeItem(HISTORY_KEY)
       }
-    } catch {
-      // The keyed history is already durable; remove only the unusable legacy value.
-    }
-    try {
-      await storage.removeItem(HISTORY_KEY)
     } catch (error) {
+      // 读取失败不证明旧根已损坏，也不改变新独立键已经提交的结果。
       warn('清理损坏记录失败:', formatErrorMessage(error))
     }
   }

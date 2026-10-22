@@ -33,10 +33,8 @@ export function createAppDependencies(
     await detector.cancelPendingPreparation()
     if (!disposed && revision === credentialsRevision) recoverAfterModelCredentialsChanged?.()
   }
-  // A HEAD probe settles Key validity without spending a monthly download:
-  // the Worker only meters GET, so verification no longer downloads the model
-  // or writes the cache. An invalid Key surfaces through the core rejected-Key
-  // copy rendered by the settings menu.
+  // HEAD validates the Key without reserving a download receipt or writing the cache.
+  // Rejected keys use the shared error shown by the settings menu.
   const verifyModelAccessKey = async (candidateKey: string): Promise<void> => {
     const normalizedKey = candidateKey.trim()
     const probe = await probeModelAccessKey(undefined, { accessKeyOverride: normalizedKey })

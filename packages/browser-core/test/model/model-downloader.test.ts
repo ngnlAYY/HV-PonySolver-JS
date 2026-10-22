@@ -34,6 +34,25 @@ function getFetchCall(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit
   return [url, init]
 }
 
+function requestModelJson(
+  operation: 'quota' | 'confirmation',
+  response: Response,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response)
+  if (operation === 'quota') {
+    return queryModelDownloadQuota(signal, {}, { fetchImpl })
+  }
+  fetchImpl.mockResolvedValueOnce(
+    new Response(new Uint8Array([1, 2, 3]), {
+      headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: RECEIPT_ID },
+    }),
+  )
+  return downloadCoreModel(undefined, { integrity: TEST_INTEGRITY }, { fetchImpl }).then((buffer) =>
+    confirmCachedModelDownload(buffer, signal),
+  )
+}
+
 describe('downloadModel', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -296,6 +315,121 @@ describe('downloadModel', () => {
       await completed
       expect(cancel).toHaveBeenCalledOnce()
       expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
+  it.each(['download', 'quota', 'probe', 'confirmation'] as const)(
+    'cancels late %s response bodies after caller abort and timeout without waiting for cleanup',
+    async (operation) => {
+      vi.useFakeTimers()
+      for (const ending of ['abort', 'timeout'] as const) {
+        const fetchImpl = vi.fn<typeof fetch>()
+        let buffer: ArrayBuffer | undefined
+        if (operation === 'confirmation') {
+          fetchImpl.mockResolvedValueOnce(
+            new Response(new Uint8Array([1, 2, 3]), {
+              headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: RECEIPT_ID },
+            }),
+          )
+          buffer = await downloadCoreModel(undefined, { integrity: TEST_INTEGRITY }, { fetchImpl })
+        }
+        const started = Promise.withResolvers<void>()
+        const pendingResponse = Promise.withResolvers<Response>()
+        fetchImpl.mockImplementationOnce(() => {
+          started.resolve()
+          return pendingResponse.promise
+        })
+        const controller = new AbortController()
+        const options = { integrity: TEST_INTEGRITY }
+        const result = buffer
+          ? confirmCachedModelDownload(buffer, controller.signal)
+          : operation === 'quota'
+            ? queryModelDownloadQuota(controller.signal, options, { fetchImpl })
+            : operation === 'probe'
+              ? probeModelAccessKey(controller.signal, options, { fetchImpl })
+              : downloadCoreModel(controller.signal, options, { fetchImpl })
+        const rejection = expect(result).rejects.toThrow(ending === 'abort' ? '已取消' : '超时')
+        await started.promise
+        if (ending === 'abort') controller.abort()
+        else await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelDownloadTimeoutMs)
+        await rejection
+
+        const cancel = vi.fn(() => new Promise<void>(() => undefined))
+        const body = new ReadableStream<Uint8Array>({ cancel })
+        pendingResponse.resolve(new Response(body))
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(cancel).toHaveBeenCalledOnce()
+        expect(body.locked).toBe(false)
+        expect(vi.getTimerCount()).toBe(0)
+      }
+    },
+  )
+
+  it.each(['quota', 'confirmation'] as const)(
+    'cancels and unlocks an unfinished %s JSON body after abort and timeout',
+    async (operation) => {
+      vi.useFakeTimers()
+      for (const ending of ['abort', 'timeout'] as const) {
+        const reading = Promise.withResolvers<void>()
+        const cancel = vi.fn(() => new Promise<void>(() => undefined))
+        const body = new ReadableStream<Uint8Array>({ pull: () => reading.resolve(), cancel }, { highWaterMark: 0 })
+        const controller = new AbortController()
+        const result = requestModelJson(operation, new Response(body), controller.signal)
+        const rejection = expect(result).rejects.toThrow(ending === 'abort' ? '已取消' : '超时')
+        await reading.promise
+        expect(body.locked).toBe(true)
+        if (ending === 'abort') controller.abort()
+        else await vi.advanceTimersByTimeAsync(inferenceTimeoutConfig.modelProbeTimeoutMs)
+        await rejection
+
+        expect(cancel).toHaveBeenCalledOnce()
+        expect(body.locked).toBe(false)
+        expect(vi.getTimerCount()).toBe(0)
+      }
+    },
+  )
+
+  it.each(['quota', 'confirmation'] as const)(
+    'bounds an oversized %s JSON body without waiting for cleanup',
+    async (operation) => {
+      const cancel = vi.fn(() => new Promise<void>(() => undefined))
+      const body = new ReadableStream<Uint8Array>(
+        { pull: (controller) => controller.enqueue(new Uint8Array(16 * 1024 + 1)), cancel },
+        { highWaterMark: 0 },
+      )
+
+      await expect(requestModelJson(operation, new Response(body))).rejects.toThrow('响应超过大小限制')
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(body.locked).toBe(false)
+    },
+  )
+
+  it.each(['quota', 'confirmation'] as const)(
+    'accepts BOM-prefixed %s JSON at the 16 KiB boundary',
+    async (operation) => {
+      const value =
+        operation === 'quota'
+          ? { enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null }
+          : { confirmed: true }
+      const bytes = new Uint8Array(16 * 1024).fill(0x20)
+      bytes.set(new TextEncoder().encode(`\uFEFF${JSON.stringify(value)}`))
+      const response = new Response(bytes)
+
+      await expect(requestModelJson(operation, response)).resolves.toEqual(operation === 'quota' ? value : undefined)
+      expect(response.body?.locked).toBe(false)
+    },
+  )
+
+  it.each(['quota', 'confirmation'] as const)(
+    'rejects absent or malformed %s JSON without exposing response text',
+    async (operation) => {
+      const response = new Response('{"protected-fixture":}')
+      const result = requestModelJson(operation, response)
+
+      await expect(result).rejects.toThrow('响应格式无效')
+      await expect(result).rejects.not.toThrow('protected-fixture')
+      await expect(requestModelJson(operation, new Response(null))).rejects.toThrow('响应正文不可用')
     },
   )
 

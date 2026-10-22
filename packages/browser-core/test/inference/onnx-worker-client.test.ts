@@ -400,6 +400,66 @@ describe('OnnxWorkerClient', () => {
     expect(modelCache.getCached).toHaveBeenCalledTimes(2)
   })
 
+  it.each(['prepare', 'detect'] as const)(
+    'starts a same-turn replacement %s after the last preparation owner cancels',
+    async (operation) => {
+      stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+      const getCached = vi
+        .fn()
+        .mockImplementationOnce(() => new Promise<ArrayBuffer | null>(() => {}))
+        .mockResolvedValue(new ArrayBuffer(8))
+      const client = new OnnxWorkerClient({ getCached, download: vi.fn(), putCached: vi.fn() }, createMockPanel())
+      const controller = new AbortController()
+      const abandoned = client.prepare(controller.signal)
+      const cancellation = expect(abandoned).rejects.toThrow('推理请求已取消')
+      try {
+        controller.abort()
+        const replacement = operation === 'prepare' ? client.prepare() : client.detect(new Blob(['current']))
+        const shared = client.prepare()
+        await cancellation
+        if (operation === 'prepare') {
+          await expect(replacement).resolves.toBeUndefined()
+        } else {
+          await expect(replacement).resolves.toMatchObject({ success: true })
+        }
+        await shared
+        expect(getCached).toHaveBeenCalledTimes(2)
+        expect(SuccessfulWorker.instances).toHaveLength(1)
+      } finally {
+        client.destroy()
+      }
+    },
+  )
+
+  it.each(['cancel', 'destroy'] as const)(
+    'does not start replacement preparation after %s while waiting for teardown',
+    async (action) => {
+      stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+      const getCached = vi.fn(() => new Promise<ArrayBuffer | null>(() => {}))
+      const panel = createMockPanel()
+      const client = new OnnxWorkerClient({ getCached, download: vi.fn(), putCached: vi.fn() }, panel)
+      const previousController = new AbortController()
+      const replacementController = new AbortController()
+      const abandoned = client.prepare(previousController.signal)
+      const previousCancellation = expect(abandoned).rejects.toThrow('推理请求已取消')
+      try {
+        previousController.abort()
+        const replacement = client.prepare(replacementController.signal)
+        const replacementCancellation = expect(replacement).rejects.toThrow(
+          action === 'cancel' ? '推理请求已取消' : 'Worker 已关闭',
+        )
+        if (action === 'cancel') replacementController.abort()
+        else client.destroy()
+        await Promise.all([previousCancellation, replacementCancellation])
+        expect(getCached).toHaveBeenCalledTimes(1)
+        expect(SuccessfulWorker.instances).toHaveLength(0)
+        expect(panel.setSessionReady).not.toHaveBeenCalled()
+      } finally {
+        client.destroy()
+      }
+    },
+  )
+
   it('bounds uncooperative shared initialization and permits a fresh retry', async () => {
     vi.useFakeTimers()
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)

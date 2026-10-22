@@ -5,6 +5,7 @@ import {
   MULTI_CLICK_DELAY_STORAGE_KEY,
   PANEL_COMPACT_MODE_STORAGE_KEY,
   PANEL_CSP_VISIBILITY_STORAGE_KEY,
+  PANEL_HISTORY_LIMIT_STORAGE_KEY,
   PANEL_POSITION_STORAGE_KEY,
   PRESERVE_CHECKED_ANSWERS_STORAGE_KEY,
   RANDOM_ON_FAIL_STORAGE_KEY,
@@ -14,7 +15,7 @@ import {
 import { installOptionsPageMarkup, optionsElement } from './options-page-fixture'
 
 const platformMocks = vi.hoisted(() => ({
-  storageGetAll: vi.fn(),
+  storageGet: vi.fn(),
   storageSet: vi.fn(),
 }))
 
@@ -27,7 +28,11 @@ function submitForm(): void {
 }
 
 async function installAndLoad(values: Record<string, unknown> = {}): Promise<ReturnType<typeof vi.fn>> {
-  platformMocks.storageGetAll.mockResolvedValueOnce(values)
+  platformMocks.storageGet.mockImplementationOnce(async (keys: string[] | null) =>
+    keys === null
+      ? values
+      : Object.fromEntries(keys.filter((key) => Object.hasOwn(values, key)).map((key) => [key, values[key]])),
+  )
   const { installOrdinarySettingsController } = await import('../../src/options/ordinary-settings')
   const status = vi.fn()
   const controller = installOrdinarySettingsController({ set: status })
@@ -37,7 +42,7 @@ async function installAndLoad(values: Record<string, unknown> = {}): Promise<Ret
 
 beforeEach(() => {
   vi.resetModules()
-  platformMocks.storageGetAll.mockReset().mockResolvedValue({})
+  platformMocks.storageGet.mockReset().mockResolvedValue({})
   platformMocks.storageSet.mockReset().mockResolvedValue(undefined)
   installOptionsPageMarkup()
 })
@@ -47,9 +52,36 @@ afterEach(() => {
 })
 
 describe('ordinary options settings lifecycle', () => {
+  it('loads every ordinary field from a selected storage snapshot without making it dirty', async () => {
+    const status = await installAndLoad({
+      [ANSWER_MODE_STORAGE_KEY]: 'manual',
+      [SUBMIT_DELAY_STORAGE_KEY]: '2400-2600',
+      [MULTI_CLICK_DELAY_STORAGE_KEY]: '50',
+      [PANEL_POSITION_STORAGE_KEY]: '10,20',
+      [PANEL_COMPACT_MODE_STORAGE_KEY]: '1',
+      [PANEL_CSP_VISIBILITY_STORAGE_KEY]: '0',
+      [RANDOM_ON_FAIL_STORAGE_KEY]: '0',
+      [PRESERVE_CHECKED_ANSWERS_STORAGE_KEY]: '0',
+      [PANEL_HISTORY_LIMIT_STORAGE_KEY]: '8',
+    })
+
+    expect(optionsElement<HTMLSelectElement>('answer-mode').value).toBe('manual')
+    expect(optionsElement<HTMLInputElement>('submit-delay').value).toBe('2400-2600')
+    expect(optionsElement<HTMLInputElement>('multi-click-delay').value).toBe('50')
+    expect(optionsElement<HTMLInputElement>('panel-position').value).toBe('10,20')
+    expect(optionsElement<HTMLInputElement>('panel-compact').checked).toBe(true)
+    expect(optionsElement<HTMLInputElement>('panel-require-csp').checked).toBe(false)
+    expect(optionsElement<HTMLInputElement>('random-on-fail').checked).toBe(false)
+    expect(optionsElement<HTMLInputElement>('preserve-checked-answers').checked).toBe(false)
+    expect(optionsElement<HTMLInputElement>('history-limit').value).toBe('8')
+    submitForm()
+    expect(status).toHaveBeenLastCalledWith('设置未修改')
+    expect(platformMocks.storageSet).not.toHaveBeenCalled()
+  })
+
   it('keeps Save disabled during a slow load and preserves edits made before it completes', async () => {
     let resolveLoad: ((values: Record<string, unknown>) => void) | undefined
-    platformMocks.storageGetAll.mockReturnValueOnce(
+    platformMocks.storageGet.mockReturnValueOnce(
       new Promise<Record<string, unknown>>((resolve) => {
         resolveLoad = resolve
       }),
@@ -96,7 +128,7 @@ describe('ordinary options settings lifecycle', () => {
         [SUBMIT_DELAY_STORAGE_KEY]: '2400-2600',
         [PANEL_CSP_VISIBILITY_STORAGE_KEY]: '0',
       }
-      platformMocks.storageGetAll.mockReturnValueOnce(
+      platformMocks.storageGet.mockReturnValueOnce(
         failFirstLoad ? Promise.reject(new Error('load failed')) : Promise.resolve(storedValues),
       )
 
@@ -115,7 +147,7 @@ describe('ordinary options settings lifecycle', () => {
         expect(saveButton?.disabled).toBe(true)
         submitForm()
         expect(platformMocks.storageSet).not.toHaveBeenCalled()
-        platformMocks.storageGetAll.mockResolvedValueOnce(storedValues)
+        platformMocks.storageGet.mockResolvedValueOnce(storedValues)
         await controller.load()
       } else {
         await load

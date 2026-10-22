@@ -165,6 +165,36 @@ describe('App', () => {
     },
   )
 
+  it.each(['form name', 'nested children'] as const)(
+    'discovers a later captcha completed by %s behind an incomplete same-ID candidate',
+    async (completion) => {
+      const incomplete = document.createElement('div')
+      incomplete.id = 'riddlemaster'
+      document.body.appendChild(incomplete)
+      const captcha = appendCaptcha('/later-captcha.png')
+      const form = captcha.querySelector('form')!
+      const children = Array.from(captcha.childNodes)
+      if (completion === 'form name') form.removeAttribute('name')
+      else captcha.replaceChildren()
+      const harness = createHarness()
+      apps.push(harness.app)
+      harness.app.init()
+      await settleDom()
+      expect(harness.trigger).not.toHaveBeenCalled()
+
+      if (completion === 'form name') form.name = 'riddleform'
+      else captcha.append(...children)
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+      expect(harness.trigger.mock.calls[0]?.[0]?.master).toBe(captcha)
+
+      form.action = '/next-submit'
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(2)
+      expect(harness.trigger.mock.calls[1]?.[0]?.formAction).toBe('http://localhost:3000/next-submit')
+    },
+  )
+
   it.each(['form', 'image', 'master'])(
     'cancels preparation immediately when the %s selector disappears',
     async (kind) => {
@@ -1178,6 +1208,36 @@ describe('App', () => {
     fieldset.disabled = false
     await settleDom()
     expect(harness.trigger).toHaveBeenCalledTimes(2)
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers a later captcha when its outer fieldset is enabled behind an incomplete same-ID candidate', async () => {
+    const incomplete = document.createElement('div')
+    incomplete.id = 'riddlemaster'
+    document.body.appendChild(incomplete)
+    const captcha = appendCaptcha('/later-fieldset.png')
+    const fieldset = document.createElement('fieldset')
+    fieldset.disabled = true
+    fieldset.append(captcha)
+    document.body.append(fieldset)
+    const harness = createHarness()
+    harness.trigger.mockImplementation(async (target?: CaptchaTarget) => ({
+      handled: !fieldset.disabled,
+      captchaKey: target?.captchaKey ?? null,
+      failure: fieldset.disabled ? 'transient' : null,
+    }))
+    apps.push(harness.app)
+    harness.app.init()
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(1)
+
+    fieldset.disabled = false
+    await settleDom()
+    expect(harness.trigger).toHaveBeenCalledTimes(2)
+    expect(harness.trigger.mock.calls[1]?.[0]?.master).toBe(captcha)
+
+    captcha.appendChild(document.createElement('span'))
     await settleDom()
     expect(harness.trigger).toHaveBeenCalledTimes(2)
   })

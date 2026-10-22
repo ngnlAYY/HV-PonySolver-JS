@@ -193,6 +193,7 @@ function checkModelCacheStrategyDocs(cacheDoc, facts) {
     'MODEL_DOWNLOAD_QUOTA_ENABLED=false',
     'ModelAccessKeyRejectedError',
     '永久错误',
+    '16 KiB',
     '`429`',
     '`503`',
   ]

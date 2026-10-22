@@ -42,6 +42,8 @@
 
 [Broker](../../apps/extension/src/background/broker.ts) 在监听消息前校验扩展 ID、实际 `sender.url` 与 Port 名称，再校验 schema/request id 并按端口与后台代际限流。它不以 `sender.tab.url` 兜底；`sender.origin`、`frameId` 与 HTTPS origin 的规则见[来源边界](../browser-extension.md#runtime-architecture)。每个 Host 调用绑定 `AbortSignal`，断连、取消或超时终止对应请求。单向状态广播不结算请求；凭证版本同时广播与持久化，供下一代内容脚本恢复。
 
+设置 Port 的 `clear-key` 与验证/下载各自限流：每 Port 最多一个清除、后台全局最多两个。清除仍可抢占验证；取消或断连不立即释放槽位，须等 Host 返回或 Broker 期限结算。实际 Key 存储另有打开/事务超时；若注入的依赖永久忽略取消和超时，Broker 限流不保证其内部尾链绝对有界。
+
 Chromium service worker 不持有推理会话。[chromium-bootstrap.ts](../../apps/extension/src/background/chromium-bootstrap.ts) 每次启动生成 epoch 并接管匹配的 Offscreen context；[chromium-offscreen.ts](../../apps/extension/src/background/chromium-offscreen.ts) 管理创建、准入与空闲关闭。[Offscreen 入口](../../apps/extension/src/offscreen/offscreen-bootstrap.ts) 校验来源/epoch，维护活动请求、取消历史和空闲通知退避，销毁时终止 Host。Firefox 的 [bootstrap](../../apps/extension/src/background/firefox-bootstrap.ts) 在 background script 直接持有 Host。
 
 [InferenceHost](../../apps/extension/src/host/inference-host.ts) 解码图片后调用 Detector，模型管理意图通过串行尾链执行，新代际取消旧操作；销毁终止 Detector、模型操作和底层资源。[Worker 入口](../../apps/extension/src/host/inference-worker-entry.ts) 构建为 `runtime/inference-worker.js`。
@@ -77,6 +79,8 @@ Firefox 注入回调、Chromium Offscreen 发送严格来源校验的 runtime �
 ### 设置页并发操作
 
 [ordinary-settings.ts](../../apps/extension/src/options/ordinary-settings.ts) 管理普通字段加载、解析、脏状态与串行保存。远程操作按代际取消旧请求；验证/清除成功只清空点击后未编辑的输入，重新输入同样文字也保留。仅额度查询在 Port 瞬断后重连一次，其他操作不自动重放；页面销毁取消未完成操作。
+
+普通设置从已有字段元数据生成九个存储键，只读取这些键，不克隆历史和无关 `storage.local` 数据。内容镜像仍需完整命名空间快照，显式使用全量读取；两者不共用隐式的“读全部”入口。
 
 首次加载成功前，字段编辑身份独立于当前值差异：已触发 `input/change` 的 select 或 checkbox 即使改回 HTML 初始值，也不会被迟到快照覆盖。应用快照前与加载失败时仍比较控件值，捕获无事件的程序化编辑；失败重试保留已观察到的编辑身份，只加载未编辑字段。
 

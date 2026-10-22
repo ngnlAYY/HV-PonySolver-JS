@@ -28,7 +28,7 @@
 
 ## 决策与历史
 
-[文档重建决定](decisions/implemented/process/2026-09-16-documentation-rebuild.md)说明契约归属与稳定路径。最新审计取舍见[取消收尾、静态校验与 CI 恢复](decisions/implemented/bug-fix/2026-10-22-audit-cancellation-and-ci.md)；其余记录按主题检索 [decisions](decisions/)，原验证结果保留各自日期含义。
+[文档重建决定](decisions/implemented/process/2026-09-16-documentation-rebuild.md)说明契约归属与稳定路径。最新复审见[取消交接、凭据顺序与有界读取](decisions/implemented/bug-fix/2026-10-22-audit-resource-and-ordering.md)；同日较早的[取消收尾、静态校验与 CI 恢复](decisions/implemented/bug-fix/2026-10-22-audit-cancellation-and-ci.md)保留原证据。其余记录按主题检索 [decisions](decisions/)，原验证结果保留各自日期含义。
 
 | 历史记录                                                                 | 内容                                                                         |
 | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |

@@ -144,7 +144,7 @@ function createDeadlineSignal(callerSignal, timeoutMs, label) {
   }
 }
 
-function awaitWithSignal(operation, signal, label) {
+function awaitWithSignal(operation, signal, label, onAbortedValue) {
   throwIfAborted(signal, label)
   return new Promise((resolve, reject) => {
     const abort = () => {
@@ -157,6 +157,11 @@ function awaitWithSignal(operation, signal, label) {
       .then(
         (value) => {
           signal.removeEventListener('abort', abort)
+          if (signal.aborted) {
+            onAbortedValue?.(value)
+            reject(abortError(signal, label))
+            return
+          }
           resolve(value)
         },
         (error) => {
@@ -190,6 +195,7 @@ async function readBoundedArchiveBody(response, maxBytes, signal) {
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new RangeError('geckodriver archive byte limit must be a positive safe integer')
   }
+  if (signal.aborted) cancelBody(response)
   throwIfAborted(signal, 'geckodriver download')
   const declaredLengthText = response.headers.get('content-length')
   let declaredLength = null
@@ -209,7 +215,7 @@ async function readBoundedArchiveBody(response, maxBytes, signal) {
   }
 
   const reader = response.body.getReader()
-  const chunks = []
+  let bytes = new Uint8Array(declaredLength ?? Math.min(64 * 1024, maxBytes))
   let total = 0
   let complete = false
   try {
@@ -235,11 +241,14 @@ async function readBoundedArchiveBody(response, maxBytes, signal) {
       if (total > maxBytes) {
         throw new Error(`geckodriver archive exceeds ${maxBytes} bytes: received at least ${total}`)
       }
-      chunks.push(chunk)
+      if (total > bytes.byteLength) {
+        const grown = new Uint8Array(Math.min(maxBytes, Math.max(total, bytes.byteLength * 2)))
+        grown.set(bytes)
+        bytes = grown
+      }
+      // Snapshot before the next read can reuse a chunk or retain its oversized backing buffer.
+      bytes.set(chunk, total - chunk.byteLength)
     }
-  } catch (error) {
-    cancelReader(reader)
-    throw error
   } finally {
     if (!complete) {
       cancelReader(reader)
@@ -257,13 +266,7 @@ async function readBoundedArchiveBody(response, maxBytes, signal) {
   if (declaredLength !== null && total !== declaredLength) {
     throw new Error(`geckodriver archive Content-Length mismatch: declared ${declaredLength}, received ${total}`)
   }
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return bytes
+  return bytes.subarray(0, total)
 }
 
 async function sha256WithSignal(bytes, signal) {
@@ -306,6 +309,7 @@ async function fetchGeckodriverResponse(options, signal) {
           }),
         signal,
         'geckodriver download',
+        cancelBody,
       )
     } catch (error) {
       if (signal.aborted) {

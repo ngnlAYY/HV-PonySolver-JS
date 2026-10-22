@@ -109,7 +109,7 @@ Broker 在监听消息或调用 Host 前校验本扩展 ID 与实际 `sender.url
 
 有历史时静默预热，首次安装按需加载，不提前消耗下载槽位。非静默 prepare/detect 活动期间，Host 阶段与断连消息才更新模型/会话状态；推理耗时由内容侧统计。
 
-每个内容 Port 最多保留两个 detect 和两个并行 prepare；后台全局最多六个 detect、四个 prepare。这些计数随后台代际重置，不是整个浏览器会话的永久限额。取消只影响指定请求；尚未开始的 detect 立即从队列移除并释放图片，运行中的请求结算或终止后才执行下一项。
+每个内容 Port 最多保留两个 detect 和两个并行 prepare；后台全局最多六个 detect、四个 prepare。设置 Port 的清除 Key 另限每 Port 一个、后台全局两个，仍可抢占验证；取消或断连后，等 Host 返回或 Broker 超时结算才释放槽位。这些计数随后台代际重置，不是整个浏览器会话的永久限额。取消只影响指定请求；尚未开始的 detect 立即从队列移除并释放图片，运行中的请求结算或终止后才执行下一项。
 
 Offscreen claim 仅在同一 epoch/contextId 复用，等待者共享握手、独立取消；失败、超时、文档替换或后台重启后重新 claim，每次启动安排空闲回收。Firefox 直接持有 Host，不声明 `background.persistent`。细节见[扩展运行时](architecture/extension-runtime.md)。
 
@@ -201,6 +201,8 @@ mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 内置证据 schema 2 绑定 archive 名称/长度/SHA-256、解压树哈希、模型、浏览器版本、成功结果类型、checkbox index 与 confidence。fixture 必须匹配 oracle，随机兜底无效；Chromium 加载受测 ZIP 解压树，Firefox 直接安装该 ZIP。
 
 `REQUIRE_EXACT_MINIMUM_BROWSER=true` 要求真正运行 Chromium 116 或 Firefox Desktop 140，高版本不能替代。Chromium 116 在 Xvfb 下使用 `PACKAGED_E2E_HEADLESS=false`，该变量只接受 true/false。Firefox 需要 geckodriver（或 `GECKODRIVER_PATH`）及 openssl，并清理自建证书、代理和会话。CI 固定 geckodriver `0.37.1` 与压缩包 SHA-256；安装器在 60 秒总期限内最多尝试三次，仅重试网络和 HTTP 408/429/5xx，归档、哈希、路径或版本错误直接失败。
+
+geckodriver 下载按声明长度预分配自有缓冲，未知长度在上限内倍增并即时复制；不保留可被流源复用的分块或大 backing buffer。它与 canonical 下载器均清理取消后迟到的响应正文，不等待可能挂起的取消 Promise，原错误和既有重试预算不变。
 
 ### Firefox Android 142 external release gate
 

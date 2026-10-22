@@ -8,7 +8,7 @@ type MessageListener = (message: unknown) => void
 
 const platformMocks = vi.hoisted(() => ({
   runtimeConnect: vi.fn(),
-  storageGetAll: vi.fn(),
+  storageGet: vi.fn(),
   storageRemove: vi.fn(),
   storageSet: vi.fn(),
 }))
@@ -94,7 +94,7 @@ beforeEach(() => {
   vi.useRealTimers()
   vi.resetModules()
   platformMocks.runtimeConnect.mockReset().mockImplementation(() => successfulHostPort())
-  platformMocks.storageGetAll.mockReset().mockResolvedValue({})
+  platformMocks.storageGet.mockReset().mockResolvedValue({})
   platformMocks.storageRemove.mockReset().mockResolvedValue(undefined)
   platformMocks.storageSet.mockReset().mockResolvedValue(undefined)
   installOptionsPageMarkup()
@@ -534,7 +534,7 @@ describe('default remote options entry', () => {
   })
 
   it('reports ordinary-settings load failures without reading or exposing a Key', async () => {
-    platformMocks.storageGetAll.mockRejectedValueOnce(new Error('设置读取失败'))
+    platformMocks.storageGet.mockRejectedValueOnce(new Error('设置读取失败'))
 
     await import('../../src/options/main')
 

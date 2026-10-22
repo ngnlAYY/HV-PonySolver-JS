@@ -71,6 +71,15 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
 
   async prepare(signal?: AbortSignal, options?: Readonly<{ silent?: boolean }>): Promise<void> {
     this.assertRequestActive(signal)
+    // A new caller must not inherit the last owner's cancellation during teardown.
+    while (this.preparation?.controller.signal.aborted) {
+      await raceAbort(
+        this.preparation.promise.catch(() => undefined),
+        signal,
+        () => new Error('推理请求已取消'),
+      )
+      this.assertRequestActive(signal)
+    }
     if (this.worker && this.ready) {
       return
     }

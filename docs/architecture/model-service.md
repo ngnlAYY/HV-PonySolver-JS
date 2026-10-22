@@ -30,6 +30,8 @@ OPTIONS 不做 Key/额度操作。模型和额度使用受限来源策略，WASM
 
 KV 查询保留历史大小写兼容；额度身份始终以 canonical Key 的 SHA-256 调用 `idFromName`，每 Key 独占一个 SQLite-backed DO。原始 Key、canonical Key、摘要和 KV 值均不进入日志或响应。无效模型 Key 按 `INVALID_KEY_MODE` 返回诱饵或 403；额度接口始终要求真实 Key。
 
+历史大小写查询共用一个 KV 总期限。已发起的 KV 读取无法撤销，但期限结束后，迟到结果不得再启动下一候选、R2 读取或额度操作；不为每个候选重置期限。
+
 ## 响应职责
 
 [model-response.ts](../../apps/model-worker/src/model-response.ts) 集中生成响应。模型、额度和公开 WASM 各自声明 CORS 方法、允许头与来源策略，不合并成全局宽松策略。模型和错误响应保持 `no-store`，内容寻址 WASM 成功响应可长期 `immutable`。客户端须验证实际下载字节，不能把 Worker 的元数据检查当成正文校验。
