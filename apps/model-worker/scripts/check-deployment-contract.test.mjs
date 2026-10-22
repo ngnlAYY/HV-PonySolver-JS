@@ -384,6 +384,66 @@ test('无响应的请求按超时边界终止并耗尽有限重试', async () =>
   assert.deepEqual(delays, [0])
 })
 
+for (const cleanup of ['hang', 'reject', 'throw']) {
+  test(`丢弃错误探测正文，${cleanup} 取消不覆盖契约错误`, async () => {
+    let cancellations = 0
+    const response = fixtureResponse(405, {})
+    Object.defineProperty(response, 'body', {
+      value: {
+        cancel() {
+          cancellations += 1
+          if (cleanup === 'throw') throw new Error('cleanup failed')
+          return cleanup === 'reject' ? Promise.reject(new Error('cleanup failed')) : new Promise(() => {})
+        },
+      },
+    })
+
+    await assert.rejects(
+      checkDeploymentContract({
+        modelUrl: MODEL_URL,
+        invalidKeyMode: 'decoy',
+        probeId: PROBE_ID,
+        attempts: 1,
+        requestTimeoutMs: 20,
+        fetchImpl: async () => response,
+      }),
+      /status mismatch; expected=204 actual=405/,
+    )
+    assert.equal(cancellations, 1)
+  })
+}
+
+test('探测超时后仍取消不响应 abort 的迟到正文', async () => {
+  const { promise, resolve } = Promise.withResolvers()
+  let cancellations = 0
+
+  await assert.rejects(
+    checkDeploymentContract({
+      modelUrl: MODEL_URL,
+      invalidKeyMode: 'decoy',
+      probeId: PROBE_ID,
+      attempts: 1,
+      requestTimeoutMs: 5,
+      fetchImpl: () => promise,
+    }),
+    /network request timed out after 5ms/,
+  )
+  const response = new globalThis.Response(
+    new globalThis.ReadableStream({
+      cancel() {
+        cancellations += 1
+        return new Promise(() => {})
+      },
+    }),
+    { status: 405 },
+  )
+  resolve(response)
+  await promise
+
+  assert.equal(cancellations, 1)
+  assert.equal(response.bodyUsed, true)
+})
+
 test('probe URL 保留原 query、替换旧 probe 并安全编码', () => {
   const url = new URL(createProbeUrl(`${MODEL_URL}?channel=stable&deployment_check=old`, PROBE_ID))
 

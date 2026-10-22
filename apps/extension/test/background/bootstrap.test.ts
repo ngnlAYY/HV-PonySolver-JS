@@ -1,10 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import type { HostInvoker } from '../../src/background/broker'
 import type * as BrokerModule from '../../src/background/broker'
 import { InferenceHost } from '../../src/host/inference-host'
 import type { RuntimeMessageListener } from '../../src/platform/webextension'
-import { OFFSCREEN_MESSAGE_TYPE, PROTOCOL_VERSION, type HostResponse } from '../../src/protocol/messages'
+import {
+  OFFSCREEN_MESSAGE_TYPE,
+  PROTOCOL_VERSION,
+  type HostRequest,
+  type HostResponse,
+} from '../../src/protocol/messages'
 import { OFFSCREEN_CLAIM_TIMEOUT_MS } from '../../src/protocol/deadlines'
 
 const mocks = vi.hoisted(() => ({
@@ -42,6 +47,8 @@ vi.mock('../../src/platform/webextension', () => ({
 import { registerChromiumBackground } from '../../src/background/chromium-bootstrap'
 import { registerFirefoxBackground } from '../../src/background/firefox-bootstrap'
 import {
+  MAX_OFFSCREEN_CLEAR_KEY_REQUESTS,
+  MAX_OFFSCREEN_KEY_REQUESTS,
   MAX_OFFSCREEN_PREPARE_REQUESTS,
   OFFSCREEN_IDLE_TIMEOUT_MS,
   registerOffscreenHost,
@@ -634,6 +641,122 @@ describe('target-specific extension bootstraps', () => {
     expect(overflowResponse).toHaveBeenCalledWith(
       expect.objectContaining({ ok: false, error: expect.stringContaining('繁忙') }),
     )
+  })
+
+  it.each(['verify-key', 'download-model', 'query-model-quota'] as const)(
+    'admits clear separately so it supersedes a full Offscreen %s queue',
+    async (type) => {
+      let finishOperation: (() => void) | undefined
+      const commits: string[] = []
+      const manageModel = vi.fn(async (signal: AbortSignal) => {
+        await new Promise<void>((resolve) => {
+          finishOperation = resolve
+        })
+        if (!signal.aborted) commits.push('model-operation')
+        return undefined
+      })
+      const host = new InferenceHost({
+        detector: { prepare: vi.fn(), detect: vi.fn(), destroy: vi.fn() },
+        verifyKey: (_candidateKey, signal) => manageModel(signal),
+        downloadModel: manageModel,
+        queryModelQuota: manageModel,
+        clearKey: async () => {
+          commits.push('clear')
+        },
+      })
+      registerOffscreenHost(() => host)
+      const listener = mocks.addRuntimeMessageListener.mock.calls[0]![0] as RuntimeMessageListener
+      const epoch = 'epoch-clear-priority'
+      claim(listener, epoch)
+      const send = (request: HostRequest, response: (message: unknown) => void): boolean | void =>
+        listener(
+          { type: OFFSCREEN_MESSAGE_TYPE, operation: 'request', epoch, requestId: request.requestId, request },
+          serviceWorkerSender,
+          response,
+        )
+      const responses: Mock[] = []
+      for (let index = 0; index <= MAX_OFFSCREEN_KEY_REQUESTS; index += 1) {
+        const response = vi.fn()
+        const request: HostRequest =
+          type === 'verify-key'
+            ? { protocol: PROTOCOL_VERSION, type, requestId: `manage-${index}`, candidateKey: 'a'.repeat(64) }
+            : { protocol: PROTOCOL_VERSION, type, requestId: `manage-${index}` }
+        const accepted = send(request, response)
+        if (index === MAX_OFFSCREEN_KEY_REQUESTS) {
+          expect(accepted).toBe(false)
+          expect(response).toHaveBeenCalledWith(
+            expect.objectContaining({ ok: false, error: expect.stringContaining('繁忙') }),
+          )
+        } else {
+          expect(accepted).toBe(true)
+          responses.push(response)
+        }
+        if (index === 0) await vi.waitFor(() => expect(finishOperation).toBeTypeOf('function'))
+      }
+      const clearResponse = vi.fn()
+      expect(send({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'priority-clear' }, clearResponse)).toBe(
+        true,
+      )
+      finishOperation?.()
+      await vi.waitFor(() => expect(clearResponse).toHaveBeenCalledWith(expect.objectContaining({ ok: true })))
+      for (const response of responses) {
+        expect(response).toHaveBeenCalledWith(expect.objectContaining({ ok: false }))
+      }
+      expect(manageModel).toHaveBeenCalledTimes(1)
+      expect(commits).toEqual(['clear'])
+      globalThis.dispatchEvent(new Event('pagehide'))
+    },
+  )
+
+  it('holds the independent Offscreen clear capacity until cancelled Host work settles', async () => {
+    const pending = new Map<string, { resolve(response: HostResponse): void; signal: AbortSignal }>()
+    const host = {
+      handle: vi.fn(
+        (request: HostRequest, signal: AbortSignal) =>
+          new Promise<HostResponse>((resolve) => pending.set(request.requestId, { resolve, signal })),
+      ),
+      destroy: vi.fn(),
+    }
+    registerOffscreenHost(() => host as never)
+    const listener = mocks.addRuntimeMessageListener.mock.calls[0]![0] as RuntimeMessageListener
+    const epoch = 'epoch-clear-capacity'
+    claim(listener, epoch)
+    const send = (requestId: string, response: (message: unknown) => void): boolean | void =>
+      listener(
+        {
+          type: OFFSCREEN_MESSAGE_TYPE,
+          operation: 'request',
+          epoch,
+          requestId,
+          request: { protocol: PROTOCOL_VERSION, type: 'clear-key', requestId },
+        },
+        serviceWorkerSender,
+        response,
+      )
+    const firstResponse = vi.fn()
+    for (let index = 0; index < MAX_OFFSCREEN_CLEAR_KEY_REQUESTS; index += 1) {
+      expect(send(`clear-${index}`, index === 0 ? firstResponse : vi.fn())).toBe(true)
+    }
+    await vi.waitFor(() => expect(pending.size).toBe(MAX_OFFSCREEN_CLEAR_KEY_REQUESTS))
+    listener(
+      { type: OFFSCREEN_MESSAGE_TYPE, operation: 'cancel', epoch, requestId: 'clear-0' },
+      serviceWorkerSender,
+      vi.fn(),
+    )
+    expect(pending.get('clear-0')?.signal.aborted).toBe(true)
+    const overflowResponse = vi.fn()
+    expect(send('clear-overflow', overflowResponse)).toBe(false)
+    expect(overflowResponse).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false, error: expect.stringContaining('繁忙') }),
+    )
+    pending.get('clear-0')?.resolve({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'clear-0', ok: true })
+    await vi.waitFor(() => expect(firstResponse).toHaveBeenCalledWith(expect.objectContaining({ ok: false })))
+    expect(send('clear-replacement', vi.fn())).toBe(true)
+    await vi.waitFor(() => expect(pending.has('clear-replacement')).toBe(true))
+    for (const [requestId, entry] of pending) {
+      entry.resolve({ protocol: PROTOCOL_VERSION, type: 'result', requestId, ok: true })
+    }
+    globalThis.dispatchEvent(new Event('pagehide'))
   })
 
   it('releases old-epoch capacity immediately when a new Offscreen owner claims it', async () => {

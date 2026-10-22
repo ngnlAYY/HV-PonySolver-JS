@@ -109,7 +109,7 @@ Broker 在监听消息或调用 Host 前校验本扩展 ID 与实际 `sender.url
 
 有历史时静默预热，首次安装按需加载，不提前消耗下载槽位。非静默 prepare/detect 活动期间，Host 阶段与断连消息才更新模型/会话状态；推理耗时由内容侧统计。
 
-每个内容 Port 最多保留两个 detect 和两个并行 prepare；后台全局最多六个 detect、四个 prepare。设置 Port 的清除 Key 另限每 Port 一个、后台全局两个，仍可抢占验证；取消或断连后，等 Host 返回或 Broker 超时结算才释放槽位。这些计数随后台代际重置，不是整个浏览器会话的永久限额。取消只影响指定请求；尚未开始的 detect 立即从队列移除并释放图片，运行中的请求结算或终止后才执行下一项。
+每个内容 Port 最多保留两个 detect 和两个并行 prepare；后台全局最多六个 detect、四个 prepare。设置 Port 的清除 Key 另限每 Port 一个、后台全局两个。Chromium Offscreen 也独立保留两个清除槽位，不与验证、下载、额度查询的两个普通槽位争用，确保普通池满时仍可抢占。取消或断连不立即释放容量，具体结算边界见[扩展运行时](architecture/extension-runtime.md#一次识别请求的生命周期)。这些计数随后台代际重置，不是整个浏览器会话的永久限额。取消只影响指定请求；尚未开始的 detect 立即从队列移除并释放图片，运行中的请求结算或终止后才执行下一项。
 
 Offscreen claim 仅在同一 epoch/contextId 复用，等待者共享握手、独立取消；失败、超时、文档替换或后台重启后重新 claim，每次启动安排空闲回收。Firefox 直接持有 Host，不声明 `background.persistent`。细节见[扩展运行时](architecture/extension-runtime.md)。
 

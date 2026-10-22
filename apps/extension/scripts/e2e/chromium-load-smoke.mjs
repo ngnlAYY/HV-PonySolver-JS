@@ -165,7 +165,6 @@ export async function runRemoteChromiumSmoke(args = process.argv.slice(2), envir
   const unpackedPath = path.join(extensionRoot, 'dist', 'chromium')
   const executablePath =
     environment.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined)
-  const profilePath = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-profile-'))
 
   await access(path.join(unpackedPath, 'manifest.json'))
   const buildManifest = await readJsonFile(path.join(unpackedPath, 'build-manifest.json'), 'Chromium build manifest')
@@ -173,6 +172,7 @@ export async function runRemoteChromiumSmoke(args = process.argv.slice(2), envir
     throw new Error('Chromium remote smoke requires a Chromium remote-model build')
   }
 
+  const profilePath = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-profile-'))
   let context
   try {
     context = await chromium.launchPersistentContext(profilePath, {

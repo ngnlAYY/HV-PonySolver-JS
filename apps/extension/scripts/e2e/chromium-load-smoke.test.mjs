@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { spawnSync } from 'node:child_process'
+import { copyFile, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { JSDOM } from 'jsdom'
 
@@ -80,6 +84,81 @@ test('remote smoke requires one explicit non-ambiguous mode', () => {
     assert.throws(() => resolveRemoteSmokeMode(args, {}), /Usage:/u)
   }
 })
+
+async function createSmokeFixture(context) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'hv-chromium-smoke-cleanup-'))
+  context.after(() => rm(root, { recursive: true, force: true }))
+  const extensionRoot = fileURLToPath(new globalThis.URL('../../', import.meta.url))
+  for (const file of [
+    'scripts/e2e/chromium-load-smoke.mjs',
+    'scripts/e2e/chromium-content-smoke.mjs',
+    'scripts/browser/browser-support.mjs',
+    'src/platform/extension-paths.ts',
+  ]) {
+    await mkdir(path.dirname(path.join(root, file)), { recursive: true })
+    await copyFile(path.join(extensionRoot, file), path.join(root, file))
+  }
+  await symlink(path.join(extensionRoot, 'node_modules'), path.join(root, 'node_modules'), 'dir')
+  const temporaryDirectory = path.join(root, 'temporary')
+  await mkdir(temporaryDirectory)
+  return {
+    root,
+    temporaryDirectory,
+    run(script, args = []) {
+      return spawnSync(process.execPath, [path.join(root, 'scripts/e2e', script), ...args], {
+        encoding: 'utf8',
+        timeout: 15_000,
+        env: {
+          ...process.env,
+          TMPDIR: temporaryDirectory,
+          CHROMIUM_PATH: path.join(root, 'missing-chromium'),
+          KvKey: '',
+          DEBUG: '',
+          PWDEBUG: '',
+        },
+      })
+    },
+  }
+}
+
+for (const failure of ['missing manifest', 'wrong model mode']) {
+  test(`remote smoke leaves no profile after ${failure}`, async (context) => {
+    const fixture = await createSmokeFixture(context)
+    if (failure === 'wrong model mode') {
+      const target = path.join(fixture.root, 'dist/chromium')
+      await mkdir(target, { recursive: true })
+      await writeFile(path.join(target, 'manifest.json'), '{}')
+      await writeFile(
+        path.join(target, 'build-manifest.json'),
+        JSON.stringify({ target: 'chromium', modelDelivery: 'packaged' }),
+      )
+    }
+    const result = fixture.run('chromium-load-smoke.mjs', ['--load-only'])
+    assert.equal(result.status, 1, result.stderr)
+    assert.match(result.stderr, failure === 'missing manifest' ? /ENOENT/u : /requires a Chromium remote-model build/u)
+    assert.deepEqual(await readdir(fixture.temporaryDirectory), [])
+  })
+}
+
+for (const failure of ['build', 'launch']) {
+  test(`content smoke removes temporary files after ${failure} failure`, async (context) => {
+    const fixture = await createSmokeFixture(context)
+    await mkdir(path.join(fixture.root, 'scripts/build'), { recursive: true })
+    await writeFile(
+      path.join(fixture.root, 'scripts/build/build-extension.mjs'),
+      failure === 'build'
+        ? 'export async function buildExtensions() { throw new Error("fixture build failure") }'
+        : 'export async function buildExtensions() {}',
+    )
+    const result = fixture.run('chromium-content-smoke.mjs')
+    assert.equal(result.status, 1, result.stderr)
+    assert.match(result.stderr, failure === 'build' ? /fixture build failure/u : /missing-chromium/u)
+    const ownedDirectories = (await readdir(fixture.temporaryDirectory)).filter((name) =>
+      name.startsWith('hv-pony-extension-'),
+    )
+    assert.deepEqual(ownedDirectories, [])
+  })
+}
 
 function verificationPage(context, outcome) {
   const dom = new JSDOM('<p id="status">设置已保存</p><button id="cancel-key-op" disabled></button>')

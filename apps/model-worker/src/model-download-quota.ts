@@ -19,6 +19,8 @@ const STATUS_PATH = '/status'
 const INTERNAL_RESERVE_URL = `https://model-download-quota.internal${RESERVE_PATH}`
 const INTERNAL_CONFIRM_URL = `https://model-download-quota.internal${CONFIRM_PATH}`
 const INTERNAL_STATUS_URL = `https://model-download-quota.internal${STATUS_PATH}`
+const QUOTA_RESPONSE_MAX_BYTES = 16 * 1024
+const INVALID_QUOTA_RESPONSE_MESSAGE = 'Model download quota service returned an invalid response'
 export const MODEL_DOWNLOAD_RESERVATION_TTL_MS = 10 * 60 * 1_000
 
 const UTC_MONTH_KEY_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/
@@ -338,6 +340,16 @@ async function requestQuotaService<T>(
 ): Promise<T> {
   const stub = await quotaStub(namespace, canonicalToken)
   const controller = new AbortController()
+  let bodyToCancel: Pick<ReadableStream<Uint8Array>, 'cancel'> | null = null
+  const cancelBody = (): void => {
+    const body = bodyToCancel
+    bodyToCancel = null
+    try {
+      void body?.cancel().catch(() => undefined)
+    } catch {
+      // Cleanup must not delay or replace the dependency failure, even when cancellation fails.
+    }
+  }
   const operation = (async () => {
     const response = await stub.fetch(
       new Request(url, {
@@ -346,16 +358,59 @@ async function requestQuotaService<T>(
         signal: controller.signal,
       }),
     )
-    if (!response.ok) {
+    bodyToCancel = response.body
+    if (controller.signal.aborted || !response.ok) {
+      // A stub may ignore abort and return a body after the caller has already timed out.
+      cancelBody()
       throw new Error('Model download quota service failed')
     }
-    const result: unknown = await response.json()
-    if (!validate(result)) {
-      throw new Error('Model download quota service returned an invalid response')
+    if (!response.body) {
+      throw new Error(INVALID_QUOTA_RESPONSE_MESSAGE)
     }
-    return result
+    const reader = response.body.getReader()
+    bodyToCancel = reader
+    try {
+      const decoder = new TextDecoder()
+      let text = ''
+      let byteLength = 0
+      while (true) {
+        const { done, value } = await reader.read()
+        controller.signal.throwIfAborted()
+        if (done) break
+        byteLength += value.byteLength
+        if (byteLength > QUOTA_RESPONSE_MAX_BYTES) {
+          throw new Error('Model download quota response exceeds size limit')
+        }
+        // Decode before the next read can reuse a chunk or retain its backing buffer.
+        text += decoder.decode(value, { stream: true })
+      }
+      let result: unknown
+      try {
+        result = JSON.parse(text + decoder.decode())
+      } catch {
+        // Native JSON errors may include response text; do not expose dependency data.
+        throw new Error(INVALID_QUOTA_RESPONSE_MESSAGE)
+      }
+      if (!validate(result)) {
+        throw new Error(INVALID_QUOTA_RESPONSE_MESSAGE)
+      }
+      return result
+    } catch (error) {
+      cancelBody()
+      throw error
+    } finally {
+      bodyToCancel = null
+      try {
+        reader.releaseLock()
+      } catch {
+        // A failed cancellation can leave an interrupted read pending.
+      }
+    }
   })()
-  return withModelWorkerDependencyTimeout(operation, 'quota request', () => controller.abort())
+  return withModelWorkerDependencyTimeout(operation, 'quota request', () => {
+    controller.abort()
+    cancelBody()
+  })
 }
 
 export async function reserveModelDownloadQuota(

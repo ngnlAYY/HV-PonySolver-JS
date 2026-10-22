@@ -42,7 +42,7 @@
 
 [Broker](../../apps/extension/src/background/broker.ts) 在监听消息前校验扩展 ID、实际 `sender.url` 与 Port 名称，再校验 schema/request id 并按端口与后台代际限流。它不以 `sender.tab.url` 兜底；`sender.origin`、`frameId` 与 HTTPS origin 的规则见[来源边界](../browser-extension.md#runtime-architecture)。每个 Host 调用绑定 `AbortSignal`，断连、取消或超时终止对应请求。单向状态广播不结算请求；凭证版本同时广播与持久化，供下一代内容脚本恢复。
 
-设置 Port 的 `clear-key` 与验证/下载各自限流：每 Port 最多一个清除、后台全局最多两个。清除仍可抢占验证；取消或断连不立即释放槽位，须等 Host 返回或 Broker 期限结算。实际 Key 存储另有打开/事务超时；若注入的依赖永久忽略取消和超时，Broker 限流不保证其内部尾链绝对有界。
+设置 Port 的 `clear-key` 与验证/下载各自限流：每 Port 最多一个清除、后台全局最多两个。Chromium Offscreen 同样保留两个独立清除槽位，验证、下载和额度查询共用另外两个普通槽位；普通池饱和不能阻止清除抢占旧意图。取消或断连不立即释放槽位：Broker 等 Host 返回或自身期限结算，Offscreen 等 Host 实际结算。实际 Key 存储另有打开/事务超时；若注入的依赖永久忽略取消和超时，Broker 限流不保证其内部尾链绝对有界。
 
 Chromium service worker 不持有推理会话。[chromium-bootstrap.ts](../../apps/extension/src/background/chromium-bootstrap.ts) 每次启动生成 epoch 并接管匹配的 Offscreen context；[chromium-offscreen.ts](../../apps/extension/src/background/chromium-offscreen.ts) 管理创建、准入与空闲关闭。[Offscreen 入口](../../apps/extension/src/offscreen/offscreen-bootstrap.ts) 校验来源/epoch，维护活动请求、取消历史和空闲通知退避，销毁时终止 Host。Firefox 的 [bootstrap](../../apps/extension/src/background/firefox-bootstrap.ts) 在 background script 直接持有 Host。
 

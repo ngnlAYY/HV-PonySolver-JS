@@ -40,7 +40,7 @@ function hasConstLiteralTerminator(source, literalEnd) {
   if (!identifierAt(source, suffixStart.index, 'as') && !identifierAt(source, suffixStart.index, 'satisfies')) {
     return false
   }
-  return hasTypeOnlyStringInitializer(source, literalEnd)
+  return hasTypeOnlyLiteralInitializer(source, literalEnd)
 }
 
 function readConstLiteralBoundary(source, startIndex) {
@@ -76,7 +76,7 @@ function isStatementStart(source, index) {
   )
 }
 
-function hasTypeOnlyStringInitializer(source, literalEnd) {
+function hasTypeOnlyLiteralInitializer(source, literalEnd) {
   // satisfies 后可继续运算；必须检查整个 initializer，不能把行尾当类型边界。
   const sourceFile = parseTypeScriptSource(source)
   if (sourceFile.parseDiagnostics.length > 0) return false
@@ -88,7 +88,12 @@ function hasTypeOnlyStringInitializer(source, literalEnd) {
       while (typeScriptParser.isAsExpression(initializer) || typeScriptParser.isSatisfiesExpression(initializer)) {
         initializer = initializer.expression
       }
-      if (typeScriptParser.isStringLiteral(initializer) && initializer.end === literalEnd) return true
+      if (
+        (typeScriptParser.isStringLiteral(initializer) || typeScriptParser.isRegularExpressionLiteral(initializer)) &&
+        initializer.end === literalEnd
+      ) {
+        return true
+      }
     }
   }
   return false
@@ -354,7 +359,8 @@ function readConstRegexLiteral(source, constantName) {
     return null
   }
   const literalEnd = readRegexLiteralEnd(source, valueStart)
-  return literalEnd === valueStart ? null : source.slice(valueStart, literalEnd)
+  if (literalEnd === valueStart || !hasConstLiteralTerminator(source, literalEnd)) return null
+  return source.slice(valueStart, literalEnd)
 }
 
 function parseStringLiteral(source, valueStart) {

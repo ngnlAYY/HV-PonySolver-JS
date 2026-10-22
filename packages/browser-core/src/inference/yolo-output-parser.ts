@@ -29,9 +29,9 @@ function insertTopDetection(classIds: number[], confidences: number[], classId: 
 }
 
 /** Parallel top-N arrays fed by insertTopDetection always stay equally long. */
-function buildDetections(classIds: number[], confidences: number[]): Detection[] {
+function buildDetections(classIds: number[], confidences: number[], count: number = classIds.length): Detection[] {
   const detections: Detection[] = []
-  for (let i = 0; i < classIds.length; i += 1) {
+  for (let i = 0; i < count; i += 1) {
     const classId = classIds[i]
     const confidence = confidences[i]
     if (classId === undefined || confidence === undefined) {
@@ -46,45 +46,23 @@ function buildDetections(classIds: number[], confidences: number[]): Detection[]
 }
 
 type RankingAccumulator = {
-  detectionClassIds: number[]
-  detectionConfidences: number[]
   candidateClassIds: number[]
   candidateConfidences: number[]
-  bestClassId: number
-  bestConfidence: number
 }
 
 function createRankingAccumulator(): RankingAccumulator {
   return {
-    detectionClassIds: [],
-    detectionConfidences: [],
     candidateClassIds: [],
     candidateConfidences: [],
-    bestClassId: -1,
-    bestConfidence: Number.NEGATIVE_INFINITY,
-  }
-}
-
-function accumulateRow(state: RankingAccumulator, classId: number, confidence: number): void {
-  insertTopDetection(state.candidateClassIds, state.candidateConfidences, classId, confidence)
-
-  if (confidence > state.bestConfidence) {
-    state.bestConfidence = confidence
-    state.bestClassId = classId
-  }
-
-  if (confidence >= confidenceThreshold) {
-    insertTopDetection(state.detectionClassIds, state.detectionConfidences, classId, confidence)
   }
 }
 
 function finalizeRanking(state: RankingAccumulator): YoloParseResult {
-  if (state.detectionClassIds.length === 0 && state.bestConfidence !== Number.NEGATIVE_INFINITY) {
-    state.detectionClassIds.push(state.bestClassId)
-    state.detectionConfidences.push(state.bestConfidence)
-  }
-
-  const detections = buildDetections(state.detectionClassIds, state.detectionConfidences)
+  // Both lists rank the same rows, so threshold detections are a prefix of the
+  // top candidates. Compare raw confidences before rounding the public result.
+  const belowThreshold = state.candidateConfidences.findIndex((confidence) => confidence < confidenceThreshold)
+  const detectionCount = belowThreshold === -1 ? state.candidateClassIds.length : Math.max(1, belowThreshold)
+  const detections = buildDetections(state.candidateClassIds, state.candidateConfidences, detectionCount)
   const candidates = buildDetections(state.candidateClassIds, state.candidateConfidences)
 
   const ponies: AnswerCode[] = []
@@ -174,7 +152,7 @@ export function parseYoloOutputTensor(output: YoloOutputTensor): YoloParseResult
     if (classId === undefined || !Number.isInteger(classId) || !answerCodeForClassId(classId)) {
       throw new Error(`模型输出第 ${rowIndex + 1} 行类别无效`)
     }
-    accumulateRow(state, classId, confidence)
+    insertTopDetection(state.candidateClassIds, state.candidateConfidences, classId, confidence)
   }
   return finalizeRanking(state)
 }
@@ -201,7 +179,7 @@ export function parseYoloOutput(data: Float32Array): YoloParseResult {
       continue
     }
 
-    accumulateRow(state, classId, confidence)
+    insertTopDetection(state.candidateClassIds, state.candidateConfidences, classId, confidence)
   }
 
   return finalizeRanking(state)

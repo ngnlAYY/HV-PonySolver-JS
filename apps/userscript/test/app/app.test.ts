@@ -99,6 +99,56 @@ describe('App', () => {
     )
   })
 
+  it('does not revive the entry when DOMContentLoaded arrives after terminal pagehide', async () => {
+    const readyState = vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
+    try {
+      // The entry starts on import, so readiness must be installed first.
+      await import('../../src/main')
+      expect(registerSettingsMenu).not.toHaveBeenCalled()
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }))
+      document.dispatchEvent(new Event('DOMContentLoaded'))
+      appendCaptcha('/late-startup.png')
+      await vi.runAllTimersAsync()
+
+      expect(document.querySelector('.ponyLog')).toBeNull()
+      expect(registerSettingsMenu).not.toHaveBeenCalled()
+      expect(prepare).not.toHaveBeenCalled()
+      expect(destroyDetector).toHaveBeenCalledOnce()
+      expect(modelClose).toHaveBeenCalledOnce()
+    } finally {
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }))
+      readyState.mockRestore()
+    }
+  })
+
+  it.each(['loading', 'interactive', 'complete'] as const)(
+    'preserves the %s entry across persisted pagehide and disposes it once on terminal pagehide',
+    async (state) => {
+      const readyState = vi.spyOn(document, 'readyState', 'get').mockReturnValue(state)
+      try {
+        // Re-import the side-effect entry after setting this document's readiness.
+        await import('../../src/main')
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
+        document.dispatchEvent(new Event('DOMContentLoaded'))
+        await vi.runAllTimersAsync()
+
+        expect(document.querySelectorAll('.ponyLog')).toHaveLength(1)
+        expect(registerSettingsMenu).toHaveBeenCalledOnce()
+        expect(destroyDetector).not.toHaveBeenCalled()
+        expect(modelClose).not.toHaveBeenCalled()
+
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }))
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }))
+        expect(document.querySelector('.ponyLog')).toBeNull()
+        expect(destroyDetector).toHaveBeenCalledOnce()
+        expect(modelClose).toHaveBeenCalledOnce()
+      } finally {
+        window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }))
+        readyState.mockRestore()
+      }
+    },
+  )
+
   it('verifies the model access key through an unmetered HEAD probe without downloading', async () => {
     const { App } = await import('../../src/app/app')
     const app = new App()

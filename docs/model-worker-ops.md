@@ -115,7 +115,7 @@ MODEL_WORKER_PROBE_ID=manual-$(date +%s) \
 mise exec -- pnpm --filter @hv-pony-solver/model-worker check:deployment
 ```
 
-检查器对 `https://hentaiverse.org`、`https://alt.hentaiverse.org` 分别发送无 Authorization 的模型 OPTIONS/HEAD，并对 WASM 发 HEAD；不下载正文。HEAD 请求 identity 编码，避免边缘压缩移除原始长度。每个请求默认 10 秒超时，共最多 5 轮，失败间隔 7.5 秒（总等待间隔 30 秒，请求本身耗时另计）。
+检查器对 `https://hentaiverse.org`、`https://alt.hentaiverse.org` 分别发送无 Authorization 的模型 OPTIONS/HEAD，并对 WASM 发 HEAD；只检查响应头，不读取正文。意外正文及超时后迟到的正文均尽力取消，不等待清理，也不让清理失败替代契约错误。HEAD 请求 identity 编码，避免边缘压缩移除原始长度。每个请求默认 10 秒超时，共最多 5 轮，失败间隔 7.5 秒（总等待间隔 30 秒，请求本身耗时另计）。
 
 URL、Origin 配置和网络异常只输出固定类别及请求上下文，不回显输入、底层错误或 cause。配置渲染中的本地 `main` 路径按字面保留，`$&` 等字符不作替换表达式展开。
 

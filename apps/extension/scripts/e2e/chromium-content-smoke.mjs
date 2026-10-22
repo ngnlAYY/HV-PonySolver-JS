@@ -12,7 +12,7 @@ import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 import { buildExtensions } from '../build/build-extension.mjs'
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-fixture-'))
-const profilePath = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-fixture-profile-'))
+const profilePath = path.join(temporaryRoot, 'profile')
 const unpackedPath = path.join(temporaryRoot, 'chromium')
 const executablePath = process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined)
 const transparentPng = Buffer.from(
@@ -111,15 +111,15 @@ function installCaptcha() {
   })
 }
 
-await buildExtensions({ outputRoot: temporaryRoot, targets: ['chromium'], fixtureHost: true })
-const context = await chromium.launchPersistentContext(profilePath, {
-  ...(executablePath ? { executablePath } : {}),
-  headless: true,
-  ignoreDefaultArgs: ['--disable-back-forward-cache'],
-  args: [`--disable-extensions-except=${unpackedPath}`, `--load-extension=${unpackedPath}`],
-})
-
+let context
 try {
+  await buildExtensions({ outputRoot: temporaryRoot, targets: ['chromium'], fixtureHost: true })
+  context = await chromium.launchPersistentContext(profilePath, {
+    ...(executablePath ? { executablePath } : {}),
+    headless: true,
+    ignoreDefaultArgs: ['--disable-back-forward-cache'],
+    args: [`--disable-extensions-except=${unpackedPath}`, `--load-extension=${unpackedPath}`],
+  })
   let serviceWorker = context.serviceWorkers()[0]
   serviceWorker ??= await context.waitForEvent('serviceworker', { timeout: 15_000 })
   const extensionId = new globalThis.URL(serviceWorker.url()).host
@@ -386,9 +386,9 @@ try {
     'Chromium content fixture verified automatic/manual solve, one detect/submit, keyed history, disabled fieldset recovery, changed submitter action, excluded routes, BFCache restore, and three JPX AJAX rounds with timer cleanup.\n',
   )
 } finally {
-  await context.close()
-  await Promise.all([
-    rm(temporaryRoot, { recursive: true, force: true }),
-    rm(profilePath, { recursive: true, force: true }),
-  ])
+  try {
+    await context?.close()
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true })
+  }
 }

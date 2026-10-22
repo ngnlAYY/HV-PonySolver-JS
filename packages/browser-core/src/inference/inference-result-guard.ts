@@ -26,6 +26,17 @@ function isDetection(value: unknown): value is Detection {
   )
 }
 
+function isDetectionList(value: unknown): value is Detection[] {
+  if (!Array.isArray(value) || value.length > yoloOutputConfig.maxDetections) {
+    return false
+  }
+  // Structured clone preserves sparse arrays; every() would skip missing items.
+  for (const detection of value) {
+    if (!isDetection(detection)) return false
+  }
+  return true
+}
+
 /** Strict validator for inference results crossing Worker or extension boundaries. */
 export function isYoloParseResult(value: unknown): value is YoloParseResult {
   if (
@@ -59,12 +70,5 @@ export function isYoloParseResult(value: unknown): value is YoloParseResult {
       return false
     }
   }
-  return (
-    Array.isArray(value.detections) &&
-    value.detections.length <= yoloOutputConfig.maxDetections &&
-    value.detections.every(isDetection) &&
-    Array.isArray(value.candidates) &&
-    value.candidates.length <= yoloOutputConfig.maxDetections &&
-    value.candidates.every(isDetection)
-  )
+  return isDetectionList(value.detections) && isDetectionList(value.candidates)
 }

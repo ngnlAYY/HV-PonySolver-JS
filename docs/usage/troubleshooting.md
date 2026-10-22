@@ -21,22 +21,24 @@ mise exec -- pnpm install --frozen-lockfile
 
 ## 精简 WASM 初始化失败
 
-用户脚本先按 [Runtime 清单](../onnx-runtime.md)核对 R2 对象键与 `PUBLIC_RUNTIME_WASM_PATH`、实际长度、SHA-256、无重定向和 `Content-Type: application/wasm`。
+先区分资产来源，避免用扩展加载成功代替 WASM 初始化证据：
 
-本地先运行：
+- 用户脚本 bundled：按 [Runtime 清单](../onnx-runtime.md)核对 R2 对象键、`PUBLIC_RUNTIME_WASM_PATH`、长度、SHA-256、无重定向和 `Content-Type: application/wasm`。
+- 扩展：只读取包内 `runtime/ort-wasm-simd-<sha256>.wasm`，不从 R2 下载 WASM。Emscripten import/link 错误首先核对定制 glue 与 WASM 是否匹配，并完整重建产物。
+
+本地精简 glue 校验：
 
 ```bash
 mise exec -- pnpm verify:onnx-runtime
 ```
 
-扩展版还应运行：
+默认不检查 WASM；设置 `ORT_RUNTIME_WASM_FILE` 为待核对的本地文件才会一并校验。该命令不执行推理。扩展 `load-only` 也只验证加载和设置页，不能证明 WASM 初始化成功。需要执行证据时，按[扩展验收](../browser-extension.md#validation-and-release-evidence)选择：
 
-```bash
-mise exec -- pnpm --filter @hv-pony-solver/extension build
-mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:chromium:load-only
-```
+- 已有 canonical 模型：构建 packaged 并运行双浏览器推理。
+- 没有 canonical 模型：运行确定性 packaged fixture，验证运行时链路，不据此判断正式模型准确率。
+- 排查远程鉴权与下载：仅在受保护环境明确启用 authenticated 验收；不要把 Key 放入命令行或日志。
 
-扩展不从 R2 下载 WASM；它读取包内 `runtime/ort-wasm-simd-<sha256>.wasm`。若出现 Emscripten import/link 错误，优先确认构建器使用的定制 glue 与包内 WASM 哈希是一对匹配资产。
+切换构建模式会覆盖 `apps/extension/dist/`，验收命令必须对应当前产物。
 
 ## 内置模型扩展构建失败
 

@@ -284,6 +284,30 @@ describe('failure-timeout', () => {
     expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedPaths).toEqual(['/status'])
   })
 
+  it('rejects oversized quota preflight JSON before opening an R2 body', async () => {
+    const fixture = createModelFixture()
+    const quotaBody = JSON.stringify({
+      limit: 5,
+      used: 0,
+      remaining: 5,
+      retryAfterSeconds: 60,
+    })
+    const env = createEnv(fixture, {
+      keyValues: new Map([[fixture.validKey, '1']]),
+      quotaNamespace: {
+        idFromName: (name) => ({ toString: () => name }) as DurableObjectId,
+        get: () => ({ fetch: async () => new Response(quotaBody + ' '.repeat(16 * 1024)) }),
+      },
+    })
+
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)
+
+    expect(response.status).toBe(503)
+    expect(response.headers.get('retry-after')).toBe('5')
+    expect(await response.text()).toBe('Service Unavailable')
+    expect((env.MODEL_BUCKET as MockR2Bucket).requestedKeys).toEqual([])
+  })
+
   it('keeps the reserve failure cleanup path after quota preflight succeeds', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {

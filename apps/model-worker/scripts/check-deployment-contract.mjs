@@ -179,7 +179,16 @@ async function fetchForContract(fetchImpl, url, init, context, requestTimeoutMs)
   })
 
   try {
-    return await Promise.race([fetchImpl(url, { ...init, signal: controller.signal }), timeout])
+    const responsePromise = Promise.resolve(fetchImpl(url, { ...init, signal: controller.signal })).then((response) => {
+      // Probes inspect headers only. Release unexpected bodies and late responses without reading them.
+      try {
+        void response.body?.cancel().catch(() => undefined)
+      } catch {
+        // Cleanup must not hide a contract mismatch or extend the request deadline.
+      }
+      return response
+    })
+    return await Promise.race([responsePromise, timeout])
   } catch {
     if (controller.signal.aborted) {
       throw timeoutError

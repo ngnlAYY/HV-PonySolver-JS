@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { TextDecoder, isDeepStrictEqual } from 'node:util'
-import { chromium } from '@playwright/test'
+import { chromium, firefox } from '@playwright/test'
 import { unzipSync } from 'fflate'
 
 import {
@@ -404,33 +404,26 @@ async function configureInvocationPage(browser) {
   }
 }
 
-async function launchChromium() {
-  const executablePath = process.env.CHROMIUM_PATH || process.env.CHROME_PATH || undefined
-  const browser = await chromium.launch({ executablePath, headless: true })
-  const version = browser.version()
-  assertSupportedBrowserVersion('chromium', version)
-  return {
-    browserVersion: version,
-    newInvocation: () => configureInvocationPage(browser),
-    close: () => browser.close(),
+async function launchBrowser(name) {
+  const browserType = name === 'chromium' ? chromium : firefox
+  const executablePath =
+    name === 'chromium'
+      ? process.env.CHROMIUM_PATH || process.env.CHROME_PATH || undefined
+      : process.env.FIREFOX_EXECUTABLE_PATH || undefined
+  const browser = await browserType.launch({ executablePath, headless: true })
+  try {
+    const version = browser.version()
+    assertSupportedBrowserVersion(name, version)
+    return {
+      browserVersion: version,
+      newInvocation: () => configureInvocationPage(browser),
+      close: () => browser.close(),
+    }
+  } catch (error) {
+    // The caller cannot own this browser until version validation returns a session.
+    await browser.close().catch(() => undefined)
+    throw error
   }
-}
-
-async function launchFirefox() {
-  const { firefox } = await import('@playwright/test')
-  const executablePath = process.env.FIREFOX_EXECUTABLE_PATH || undefined
-  const browser = await firefox.launch({ executablePath, headless: true })
-  const version = browser.version()
-  assertSupportedBrowserVersion('firefox', version)
-  return {
-    browserVersion: version,
-    newInvocation: () => configureInvocationPage(browser),
-    close: () => browser.close(),
-  }
-}
-
-async function launchBrowser(browser) {
-  return browser === 'chromium' ? launchChromium() : launchFirefox()
 }
 
 async function executeBrowserSample(adapter, scenario) {

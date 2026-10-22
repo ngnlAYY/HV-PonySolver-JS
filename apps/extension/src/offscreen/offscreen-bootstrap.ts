@@ -35,6 +35,7 @@ export const MAX_OFFSCREEN_IDLE_NOTIFICATIONS = 10
 export const MAX_OFFSCREEN_DETECT_REQUESTS = 6
 export const MAX_OFFSCREEN_PREPARE_REQUESTS = 4
 export const MAX_OFFSCREEN_KEY_REQUESTS = 2
+export const MAX_OFFSCREEN_CLEAR_KEY_REQUESTS = 2
 
 const CANCEL_HISTORY_LIMIT = 256
 
@@ -42,7 +43,7 @@ type ActiveOffscreenRequest = Readonly<{
   controller: AbortController
   epoch: string
   hostRequestId: string
-  kind: 'detect' | 'prepare' | 'key'
+  kind: 'detect' | 'prepare' | 'key' | 'clear-key'
 }>
 
 function requestKey(epoch: string, requestId: string): string {
@@ -299,13 +300,17 @@ export function registerOffscreenHost(hostFactory: OffscreenInferenceHostFactory
       kind = 'detect'
     } else if (message.request.type === 'prepare') {
       kind = 'prepare'
+    } else if (message.request.type === 'clear-key') {
+      // 清除须独立准入，才能在普通模型管理队列已满时抢占旧意图。
+      kind = 'clear-key'
     } else {
       kind = 'key'
     }
     const atCapacity =
       (kind === 'detect' && countKind(kind) >= MAX_OFFSCREEN_DETECT_REQUESTS) ||
       (kind === 'prepare' && countKind(kind) >= MAX_OFFSCREEN_PREPARE_REQUESTS) ||
-      (kind === 'key' && countKind(kind) >= MAX_OFFSCREEN_KEY_REQUESTS)
+      (kind === 'key' && countKind(kind) >= MAX_OFFSCREEN_KEY_REQUESTS) ||
+      (kind === 'clear-key' && countKind(kind) >= MAX_OFFSCREEN_CLEAR_KEY_REQUESTS)
     if (atCapacity) {
       sendResponse(errorResponse(message.request.requestId, 'Offscreen 推理队列繁忙，请稍后重试'))
       return false

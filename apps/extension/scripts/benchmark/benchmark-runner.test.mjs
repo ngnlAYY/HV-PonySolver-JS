@@ -6,9 +6,10 @@ import path from 'node:path'
 import test from 'node:test'
 import { TextEncoder } from 'node:util'
 
+import { chromium, firefox } from '@playwright/test'
 import { zipSync } from 'fflate'
 
-import { estimateBenchmarkBudget, findArtifactIdentity, parseArguments } from './benchmark-runner.mjs'
+import { estimateBenchmarkBudget, findArtifactIdentity, main, parseArguments } from './benchmark-runner.mjs'
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -136,3 +137,28 @@ test('reduced benchmark sampling rejects one sample and accepts the bootstrap mi
   assert.throws(() => parseArguments(['--quick', '--samples', '1']), /at least 2 measured samples/u)
   assert.equal(parseArguments(['--ci', '--samples', '2']).samples, 2)
 })
+
+for (const [name, browserType, version] of [
+  ['chromium', chromium, '115.0'],
+  ['firefox', firefox, '139.0'],
+]) {
+  for (const closeFails of [false, true]) {
+    test(`closes rejected ${name} before session ownership transfers, close failure: ${closeFails}`, async (context) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'hv-benchmark-rejected-browser-'))
+      context.after(() => rm(root, { recursive: true, force: true }))
+      let closed = false
+      context.mock.method(browserType, 'launch', async () => ({
+        version: () => version,
+        async close() {
+          closed = true
+          if (closeFails) throw new Error('fixture browser close failed')
+        },
+      }))
+      await assert.rejects(
+        main(['--quick', '--browser', name, '--artifact-root', root, '--output-dir', root]),
+        new RegExp(`${name} ${version} is below the supported major`, 'u'),
+      )
+      assert.equal(closed, true)
+    })
+  }
+}

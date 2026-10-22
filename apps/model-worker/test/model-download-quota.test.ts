@@ -25,7 +25,7 @@ function createQuotaStub(): DurableObjectStub<ModelDownloadQuota> {
   return quotaNamespace.getByName(crypto.randomUUID())
 }
 
-function responseQuotaNamespace(response: Response): ModelDownloadQuotaNamespace {
+function responseQuotaNamespace(response: Response | Promise<Response>): ModelDownloadQuotaNamespace {
   return {
     idFromName: (name) => ({ toString: () => name }) as DurableObjectId,
     get: () => ({ fetch: async () => response }),
@@ -336,6 +336,124 @@ describe('ModelDownloadQuota', () => {
         'token',
       ),
     ).resolves.toMatchObject({ used: 2 })
+  })
+
+  it('accepts a fragmented UTF-8 quota response at the 16 KiB byte limit', async () => {
+    const status = {
+      limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+      used: 0,
+      remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+      retryAfterSeconds: 60,
+      note: 'é',
+    }
+    const bytes = new Uint8Array(16 * 1024).fill(32)
+    bytes.set(new TextEncoder().encode(JSON.stringify(status)))
+    const split = bytes.indexOf(0xc3) + 1
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes.subarray(0, split))
+        controller.enqueue(bytes.subarray(split))
+        controller.close()
+      },
+    })
+
+    await expect(readModelDownloadQuota(responseQuotaNamespace(new Response(body)), 'token')).resolves.toEqual(status)
+    expect(body.locked).toBe(false)
+  })
+
+  it.each([undefined, '1'])('bounds quota bytes despite Content-Length %j and hanging cancellation', async (length) => {
+    vi.useFakeTimers()
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            JSON.stringify({
+              limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+              used: 0,
+              remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT,
+              retryAfterSeconds: 60,
+              note: 'é'.repeat(9 * 1024),
+            }),
+          ),
+        )
+      },
+      cancel,
+    })
+    const response = new Response(body, length === undefined ? {} : { headers: { 'content-length': length } })
+    const pending = readModelDownloadQuota(responseQuotaNamespace(response), 'token').catch((error: unknown) => error)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(await pending).toMatchObject({ message: 'Model download quota response exceeds size limit' })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+  })
+
+  it.each(['hang', 'reject', 'throw'] as const)(
+    'discards failed quota bodies without letting %s cancellation replace the HTTP error',
+    async (cleanup) => {
+      const cancel = vi.fn(() => {
+        if (cleanup === 'throw') throw new Error('cleanup failed')
+        return cleanup === 'reject' ? Promise.reject(new Error('cleanup failed')) : new Promise<void>(() => undefined)
+      })
+      const body = new ReadableStream<Uint8Array>()
+      vi.spyOn(body, 'cancel').mockImplementation(cancel)
+
+      await expect(
+        readModelDownloadQuota(responseQuotaNamespace(new Response(body, { status: 503 })), 'token'),
+      ).rejects.toThrow('quota service failed')
+      expect(cancel).toHaveBeenCalledOnce()
+    },
+  )
+
+  it.each([null, 'synthetic-private-quota-response'])(
+    'rejects invalid quota JSON without exposing its body',
+    async (body) => {
+      const error = await readModelDownloadQuota(responseQuotaNamespace(new Response(body)), 'token').catch(
+        (failure: unknown) => failure,
+      )
+
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toMatchObject({ message: 'Model download quota service returned an invalid response' })
+      expect(error).not.toHaveProperty('cause')
+    },
+  )
+
+  it('cancels and unlocks a quota body stalled past the request deadline', async () => {
+    vi.useFakeTimers()
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    const pending = readModelDownloadQuota(responseQuotaNamespace(new Response(body)), 'token').catch(
+      (error: unknown) => error,
+    )
+
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(await pending).toMatchObject({ message: 'quota request dependency timed out' })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+  })
+
+  it.each([200, 503])('cancels an unread late quota response with status %i', async (status) => {
+    vi.useFakeTimers()
+    // Worker type declarations target ES2022, which does not include Promise.withResolvers().
+    let resolveResponse: ((response: Response) => void) | undefined
+    const response = new Promise<Response>((resolve) => {
+      resolveResponse = resolve
+    })
+    const pending = readModelDownloadQuota(responseQuotaNamespace(response), 'token').catch((error: unknown) => error)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(await pending).toMatchObject({ message: 'quota request dependency timed out' })
+
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    resolveResponse?.(new Response(body, { status }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
   })
 
   it('aborts hanging internal quota requests after their deadline', async () => {

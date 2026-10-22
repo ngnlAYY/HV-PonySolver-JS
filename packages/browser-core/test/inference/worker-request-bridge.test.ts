@@ -150,6 +150,29 @@ describe('WorkerRequestBridge', () => {
     expect(onFailure).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['detections', 'candidates'])(
+    'rejects sparse %s instead of accepting an incomplete result',
+    async (field) => {
+      const worker = new ManualWorker()
+      const onFailure = vi.fn()
+      const bridge = new WorkerRequestBridge(worker as unknown as Worker, onFailure)
+      const promise = bridge.post({ type: 'detect', imageBlob: new Blob() })
+      const sparse = [{ class_id: 0, confidence: 0.9 }]
+      sparse.length = 2
+
+      worker.onmessage?.({
+        data: {
+          type: 'response',
+          requestId: 1,
+          result: { ...detectResult, [field]: sparse },
+        },
+      } as MessageEvent)
+
+      await expect(promise).rejects.toMatchObject({ message: 'ONNX Worker 返回无效消息', fatal: true })
+      expect(onFailure).toHaveBeenCalledTimes(1)
+    },
+  )
+
   it('ignores unknown request ids', async () => {
     const worker = new ManualWorker()
     const bridge = new WorkerRequestBridge(worker as unknown as Worker, () => undefined)

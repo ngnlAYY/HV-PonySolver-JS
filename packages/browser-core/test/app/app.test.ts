@@ -1145,6 +1145,44 @@ describe('App', () => {
   )
 
   it.each(['answer', 'submit'] as const)(
+    'cancels preparation when an external duplicate ID changes the %s form owner',
+    async (kind) => {
+      const captcha = appendCaptcha('/external-form-owner.png')
+      const form = captcha.querySelector('form')!
+      form.id = 'captcha-form'
+      const control = captcha.querySelector<HTMLInputElement>(
+        kind === 'answer' ? 'input[name="riddleanswer[]"]' : '#riddlesubmit',
+      )!
+      control.setAttribute('form', form.id)
+      const harness = createHarness()
+      const oldPreparation = Promise.withResolvers<void>()
+      vi.mocked(harness.detector.prepare).mockReturnValueOnce(oldPreparation.promise)
+      apps.push(harness.app)
+      harness.app.init()
+      await settleDom()
+      const oldSignal = harness.app.getAbortSignal()
+
+      const external = document.createElement(kind === 'answer' ? 'div' : 'form')
+      external.id = form.id
+      document.body.prepend(external)
+      await Promise.resolve()
+      expect(control.form).not.toBe(form)
+      expect(oldSignal?.aborted).toBe(true)
+      expect(harness.trigger).not.toHaveBeenCalled()
+
+      external.id = 'unrelated-form'
+      await settleDom()
+      expect(control.form).toBe(form)
+      expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+      oldPreparation.resolve()
+      external.id = 'still-unrelated-form'
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(['answer', 'submit'] as const)(
     'retries a failed captcha when only the %s form association is restored',
     async (kind) => {
       const captcha = appendCaptcha('/restored-form-owner.png')
@@ -1187,6 +1225,67 @@ describe('App', () => {
       expect(panel.addError).toHaveBeenCalledTimes(1)
     },
   )
+
+  it.each([
+    { kind: 'answer', recovery: 'removal' },
+    { kind: 'submit', recovery: 'removal' },
+    { kind: 'answer', recovery: 'rename' },
+    { kind: 'submit', recovery: 'rename' },
+    { kind: 'answer', recovery: 'reorder' },
+    { kind: 'submit', recovery: 'reorder' },
+  ] as const)('retries when external $recovery restores the $kind form owner', async ({ kind, recovery }) => {
+    const captcha = appendCaptcha('/external-form-recovery.png')
+    const form = captcha.querySelector('form')!
+    form.id = 'captcha-form'
+    const control = captcha.querySelector<HTMLInputElement>(
+      kind === 'answer' ? 'input[name="riddleanswer[]"]' : '#riddlesubmit',
+    )!
+    control.setAttribute('form', form.id)
+    const external = document.createElement('div')
+    external.id = form.id
+    document.body.prepend(external)
+    const click = vi.spyOn(captcha.submitButton, 'click').mockImplementation(() => undefined)
+    const panel = createPanel()
+    const detector = createDetector()
+    vi.mocked(detector.detect).mockResolvedValue({
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.9 },
+      detections: [],
+      candidates: [],
+    })
+    const solver = new CaptchaSolver(
+      panel,
+      detector,
+      { get: async () => new Blob(['captcha']) },
+      new AnswerSubmitter(
+        async () => [0, 0],
+        async () => [0, 0],
+      ),
+      async () => 'auto',
+    )
+    const { app } = createHarness({ panel, detector, solver })
+    apps.push(app)
+    app.init()
+    await settleDom()
+    expect(control.form).toBeNull()
+    expect(panel.addError).toHaveBeenCalledWith('答案控件不可用', expect.any(Number))
+    expect(click).not.toHaveBeenCalled()
+
+    if (recovery === 'removal') external.remove()
+    else if (recovery === 'rename') external.id = 'unrelated-form'
+    else document.body.appendChild(external)
+    await settleDom()
+    expect(control.form).toBe(form)
+    expect(detector.prepare).toHaveBeenCalledTimes(2)
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+    expect(panel.addError).toHaveBeenCalledTimes(1)
+
+    external.remove()
+    await settleDom()
+    expect(click).toHaveBeenCalledTimes(1)
+  })
 
   it('rescans a suppressed initially disabled captcha when only its outer fieldset becomes enabled', async () => {
     const captcha = appendCaptcha('/initially-disabled.png')

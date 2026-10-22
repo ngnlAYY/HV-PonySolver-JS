@@ -507,6 +507,20 @@ if (false) {
   })
 })
 
+test('rejects a Bearer regex prefix when the initializer selects a different authentication scheme', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const source = await readFile(accessPath, 'utf8')
+    const literal = '/^Bearer\\s+([^\\s]+)$/i'
+    assert.ok(source.includes(literal))
+    await writeFile(accessPath, source.replace(literal, `${literal} && /^Token\\s+([^\\s]+)$/i`))
+
+    const result = await runCheck(fixtureRoot)
+    assert.notEqual(result.exitCode, 0)
+    assert.match(result.stderr, /apps\/model-worker\/src\/model-access\.ts.*Authorization: Bearer/s)
+  })
+})
+
 test('fails clearly when stale top-level Bearer pattern is unused by token parser', async () => {
   await withFixture(async (fixtureRoot) => {
     const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')

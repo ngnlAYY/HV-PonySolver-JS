@@ -162,11 +162,10 @@ function stripInlineCode(line) {
   })
 }
 
-async function checkDocument(repoRoot, filePath, source) {
+async function checkDocument(repoRoot, filePath, readDocument) {
   const errors = []
-  const lines = stripFencedCode(source)
+  const { lines } = await readDocument(filePath)
   const sourceLabel = relativeDisplay(repoRoot, filePath)
-  const anchorsByFile = new Map([[filePath, headingAnchors(lines)]])
   const addError = (lineNumber, destination, reason) => {
     errors.push(`${sourceLabel}:${lineNumber}: link "${destination}" ${reason}`)
   }
@@ -222,15 +221,12 @@ async function checkDocument(repoRoot, filePath, source) {
       if (extname(canonicalTargetPath).toLowerCase() !== '.md') {
         continue
       }
-      let targetAnchors = anchorsByFile.get(canonicalTargetPath)
-      if (!targetAnchors) {
-        try {
-          targetAnchors = headingAnchors(stripFencedCode(await readFile(canonicalTargetPath, 'utf8')))
-          anchorsByFile.set(canonicalTargetPath, targetAnchors)
-        } catch {
-          addError(index + 1, destination, 'target cannot be read')
-          continue
-        }
+      let targetAnchors
+      try {
+        targetAnchors = (await readDocument(canonicalTargetPath)).anchors
+      } catch {
+        addError(index + 1, destination, 'target cannot be read')
+        continue
       }
       if (!targetAnchors.has(decodedFragment.toLocaleLowerCase())) {
         addError(index + 1, destination, 'references a missing anchor')
@@ -252,11 +248,25 @@ async function checkDocumentationLinks(repoRoot) {
       `${relativeDisplay(resolvedRoot, resolvedRoot)}: unable to scan documentation directory (${error instanceof Error ? error.message : String(error)})`,
     ]
   }
+  // Shared targets and source documents use one snapshot per invocation, never a cross-run cache.
+  const documents = new Map()
+  const readDocument = (filePath) => {
+    if (!documents.has(filePath)) {
+      documents.set(
+        filePath,
+        readFile(filePath, 'utf8').then((source) => {
+          const lines = stripFencedCode(source)
+          return { lines, anchors: headingAnchors(lines) }
+        }),
+      )
+    }
+    return documents.get(filePath)
+  }
   const collection = await collectDocumentationFiles(canonicalRoot)
   errors.push(...collection.errors)
   for (const filePath of collection.files) {
     try {
-      errors.push(...(await checkDocument(canonicalRoot, filePath, await readFile(filePath, 'utf8'))))
+      errors.push(...(await checkDocument(canonicalRoot, filePath, readDocument)))
     } catch (error) {
       errors.push(`${relativeDisplay(canonicalRoot, filePath)}: unable to read documentation (${String(error)})`)
     }

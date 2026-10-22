@@ -173,7 +173,15 @@ export class App {
         }
       }
     }
-    return false
+    // 外部同 ID 节点的插入、移除或改名也会改变显式 form 归属，
+    // 即使 mutation 不在验证码内；只复核原控件，避免无关变更触发全页扫描。
+    const trackedTarget = this.activeSolve?.target ?? this.failedCaptchaTarget ?? this.lastCaptchaTarget
+    if (!trackedTarget?.master.isConnected || !trackedTarget.form.isConnected) return false
+    const { controls } = trackedTarget
+    return (
+      controls.answers.some((answer, index) => answer.form !== controls.answerForms[index]) ||
+      (controls.submit?.form ?? null) !== controls.submitForm
+    )
   }
 
   private isCaptchaNode(node: Node): boolean {

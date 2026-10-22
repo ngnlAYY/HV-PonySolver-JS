@@ -186,6 +186,44 @@ describe('parseYoloOutputTensor', () => {
     })
   })
 
+  it('selects threshold detections before rounding public confidences', () => {
+    const data = new Float32Array([...yoloRow(0.29999998, 0), ...yoloRow(0.30000001, 1), ...yoloRow(0.1, 2)])
+
+    expect(parseYoloOutputTensor({ data, dims: [1, 3, 6] })).toEqual({
+      success: true,
+      ponies: ['RA'],
+      confidences: { RA: 0.3 },
+      detections: [{ class_id: 1, confidence: 0.3 }],
+      candidates: [
+        { class_id: 1, confidence: 0.3 },
+        { class_id: 0, confidence: 0.3 },
+        { class_id: 2, confidence: 0.1 },
+      ],
+    })
+  })
+
+  it('preserves input order for confidence ties at the top-candidate boundary', () => {
+    const rows = Array.from({ length: yoloOutputConfig.maxDetections + 2 }, (_, index) => yoloRow(0.8, index % 6))
+    const expected = rows.slice(0, yoloOutputConfig.maxDetections).map((row) => ({
+      class_id: row[yoloOutputConfig.classIndex],
+      confidence: 0.8,
+    }))
+    const result = parseYoloOutputTensor({ data: new Float32Array(rows.flat()), dims: [1, rows.length, 6] })
+
+    expect(result.detections).toEqual(expected)
+    expect(result.candidates).toEqual(expected)
+    expect(result.ponies).toEqual(['TS', 'RA', 'FS', 'RD', 'PP', 'AJ'])
+  })
+
+  it('validates rows that cannot enter either top-candidate list', () => {
+    const rows = Array.from({ length: yoloOutputConfig.maxDetections }, () => yoloRow(0.9, 0))
+    rows.push([Number.NaN, 0, 0, 0, 0.1, 1])
+
+    expect(() => parseYoloOutputTensor({ data: new Float32Array(rows.flat()), dims: [1, rows.length, 6] })).toThrow(
+      '包含无效数值',
+    )
+  })
+
   it.each([
     { dims: [1, 1, 5], data: new Float32Array(6), message: '模型输出维度无效' },
     { dims: [1, 6], data: new Float32Array(5), message: '模型输出数据长度与维度不匹配' },

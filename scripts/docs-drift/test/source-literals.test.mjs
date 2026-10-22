@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { readConstStringLiteral, readFunctionBodySource } from '../source-literals.mjs'
+import { readConstRegexLiteral, readConstStringLiteral, readFunctionBodySource } from '../source-literals.mjs'
 
 for (const expression of [
   "'no-store' as const",
@@ -25,6 +25,34 @@ for (const expression of [
 ]) {
   test(`rejects a non-literal initializer after type syntax: ${expression}`, () => {
     assert.equal(readConstStringLiteral(`const CACHE_CONTROL = ${expression}`, 'CACHE_CONTROL'), null)
+  })
+}
+
+for (const suffix of [
+  '',
+  ';',
+  '\nconst next = true',
+  ' as RegExp',
+  ' satisfies RegExp',
+  ' as RegExp satisfies RegExp',
+]) {
+  test(`accepts a complete regex initializer with type-only suffix: ${JSON.stringify(suffix)}`, () => {
+    const literal = '/^Bearer\\s+([^\\s]+)$/i'
+    assert.equal(readConstRegexLiteral(`const PATTERN = ${literal}${suffix}`, 'PATTERN'), literal)
+  })
+}
+
+for (const suffix of [
+  ' && /^Token\\s+([^\\s]+)$/i',
+  '.compile("^Token")',
+  ' ? /^Token/ : /^Other/',
+  '\n  && /^Token/',
+  ' as RegExp && /^Token/',
+  ' satisfies RegExp && /^Token/',
+  ' satisfies',
+]) {
+  test(`rejects a regex prefix of a runtime initializer: ${JSON.stringify(suffix)}`, () => {
+    assert.equal(readConstRegexLiteral(`const PATTERN = /^Bearer\\s+([^\\s]+)$/i${suffix}`, 'PATTERN'), null)
   })
 }
 

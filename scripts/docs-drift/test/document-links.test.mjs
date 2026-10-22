@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
@@ -113,4 +113,24 @@ test('accepts a repository root passed through a symlink', async () => {
   await symlink(root, alias, 'dir')
 
   assert.deepEqual(await checkDocumentationLinks(alias), [])
+})
+
+test('shared document snapshots refresh between checks and report every referring document', async (context) => {
+  const root = await createFixture({
+    'README.md': '[shared](docs/shared.md#shared)\n',
+    'docs/guide.md': '[shared](shared.md#shared)\n',
+    'docs/shared.md': '# Shared\n',
+  })
+  context.after(() => rm(root, { recursive: true, force: true }))
+  assert.deepEqual(await checkDocumentationLinks(root), [])
+
+  await writeFile(join(root, 'docs/shared.md'), '# Changed\n')
+  const errors = await checkDocumentationLinks(root)
+  assert.equal(errors.length, 2)
+  assert.ok(errors.some((error) => error.startsWith('README.md:1:') && error.includes('missing anchor')))
+  assert.ok(errors.some((error) => error.startsWith('docs/guide.md:1:') && error.includes('missing anchor')))
+
+  await writeFile(join(root, 'README.md'), '[shared](docs/shared.md#changed)\n')
+  await writeFile(join(root, 'docs/guide.md'), '[shared](shared.md#changed)\n')
+  assert.deepEqual(await checkDocumentationLinks(root), [])
 })

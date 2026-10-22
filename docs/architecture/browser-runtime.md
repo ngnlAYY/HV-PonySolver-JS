@@ -14,7 +14,7 @@
 
 ## 组装路径
 
-用户脚本 [main.ts](../../apps/userscript/src/main.ts) 在 DOM 就绪后初始化，非 BFCache 的 `pagehide` 销毁应用。入口 App 继承[核心 App](../../packages/browser-core/src/app/app.ts)，接入 `createAppDependencies` 的信号所有者。
+用户脚本 [main.ts](../../apps/userscript/src/main.ts) 在 DOM 就绪后初始化。非 BFCache 的 `pagehide` 先移除未执行的 DOM 就绪回调与生命周期监听，再销毁应用，迟到的 `DOMContentLoaded` 不得重新启动；persisted 离开保持现有实例。入口 App 继承[核心 App](../../packages/browser-core/src/app/app.ts)，接入 `createAppDependencies` 的信号所有者。
 
 依赖组装位于 [apps/userscript/src/app/app-dependencies.ts](../../apps/userscript/src/app/app-dependencies.ts)：
 
@@ -74,6 +74,8 @@ sequenceDiagram
 
 `CaptchaTarget` 在模型准备前捕获解析后的 `form.action`、原生提交控件的实际 action、类型及答案/提交控件的实际 `.form`。`App` 和 `CaptchaSolver` 贯穿准备、图片、推理、提交阶段用 `isSameCaptchaTarget` 复核；相对与绝对写法解析到同一 URL 时等价。`form` 属性使控件失联或换归属时立即取消，恢复关联后补扫；显式关联仍指向原表单时不重启。取消、超时或新目标使旧任务停止点击。
 
+显式 `form` 关联还受验证码容器外同 ID 节点影响。外部节点插入、移除、改名或重排后，复核已跟踪控件的实际 `.form`；归属改变即取消旧准备或恢复扫描。已脱离页面的旧目标不因此触发无关扫描。
+
 [AnswerSubmitter](../../packages/browser-core/src/captcha/answer-submitter.ts) 在开始、等待后及每次点击前后复核地址、checkbox 数量/类型/身份、所属表单、连接与有效禁用状态；`formaction` 不能绕过同源检查，`fieldset` 继承禁用包含首个 `legend` 例外。手动模式只记录结果，随机兜底由 [CaptchaSolver](../../packages/browser-core/src/captcha/captcha-solver.ts) 配置。
 
 保留答案依靠 WeakMap 与 `change` 监听维护归属：
@@ -90,6 +92,8 @@ sequenceDiagram
 最后一个准备 owner 取消后，新 `prepare()` 或 `detect()` 若恰在旧代际退场期间到达，先可取消地等待退场，再共享或启动当前准备；不继承旧调用方的取消。新调用自身取消或客户端销毁时，不再读取模型或创建 Worker。
 
 [Worker 入口](../../packages/browser-core/src/inference/onnx-worker-entry.ts) 验证 `unknown` 请求，初始化 Runtime，复用 OffscreenCanvas/CHW 缓冲并执行 WASM 推理；[request bridge](../../packages/browser-core/src/inference/worker-request-bridge.ts) 验证结构化响应、管理 request id 与超时。
+
+候选列表只维护一次有界 top-N 排名；检测列表取原始置信度满足阈值的前缀，保留最高分兜底与稳定同分顺序。阈值判断先于展示舍入，低排名行仍完整校验。结构化响应逐项检查 `detections`/`candidates`，拒绝 structured clone 保留的稀疏数组。
 
 用户脚本的 [onnx-worker-client.ts](../../apps/userscript/src/inference/onnx-worker-client.ts) 注入 [blob-worker.ts](../../apps/userscript/src/inference/blob-worker.ts) 创建的 Worker，并把构建时内联的脚本文本交给它。两个入口分别是：
 
@@ -152,15 +156,7 @@ App 在 `prepareTarget()` 前用 `performance.now()` 取开始时间，与手动
 | 面板和历史               | 两个包的 `test/status-panel` 与 `test/persistence`                                         | csp 可见性、重新挂载、异步设置和持久化失败        |
 | 构建/metadata/资产       | `apps/userscript/scripts/*test.mjs`、`apps/userscript/test/userscript-build-smoke.test.ts` | 构建产物审计和包体预算                            |
 
-常用验证命令：
-
-```bash
-mise exec -- pnpm --filter @hv-pony-solver/browser-core test
-mise exec -- pnpm --filter @hv-pony-solver/userscript test
-mise exec -- pnpm --filter @hv-pony-solver/browser-core typecheck
-mise exec -- pnpm --filter @hv-pony-solver/userscript typecheck
-mise exec -- pnpm docs:check
-```
+定向命令与完整检查统一见[验证手册](../development/verification.md#按修改区域选择验证)；包含 Worker 的检查先准备测试绑定，用户脚本 Runtime 变更分别验证 external/bundled，不能用后一份产物替代前一份。
 
 上述测试主要证明模拟 DOM、Worker、Fetch、存储和构建门禁；它们不自动证明真实页面、真实 GM 管理器、真实远程模型鉴权或浏览器多引擎兼容性。涉及这些边界时，在报告中单独列出已运行的 E2E 和未覆盖项。
 
