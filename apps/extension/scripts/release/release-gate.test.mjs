@@ -237,6 +237,19 @@ test('desktop evidence must use schema 2 and bind the complete tested archive', 
   assert.throws(() => validateReleaseGate(inputs), /does not match the release archive byteLength/u)
 })
 
+test('desktop evidence requires a positive safe-integer extracted file count', () => {
+  for (const fileCount of [undefined, null, 0, -1, 1.5, '12', Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () =>
+        createCanonicalAttestation({
+          chromium: evidence('chromium', { tree: { sha256: '3'.repeat(64), fileCount } }),
+          firefox: evidence('firefox'),
+        }),
+      /no verified extracted-tree identity/u,
+    )
+  }
+})
+
 test('Firefox Android evidence is mandatory, exact-major, and archive-bound', () => {
   const firefoxArtifact = artifact('firefox')
   assert.equal(validateFirefoxAndroidEvidence(androidEvidence(), firefoxArtifact), true)

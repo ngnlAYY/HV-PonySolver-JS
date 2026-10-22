@@ -109,7 +109,11 @@ function validateCanonicalBrowserEvidence(record, target) {
   }
   assertExactCanonicalIdentity(record.model, label)
   assertArchiveIdentity(record.archive, label)
-  if (!/^[a-f0-9]{64}$/u.test(record.tree?.sha256 ?? '') || record.tree?.fileCount < 1) {
+  if (
+    !/^[a-f0-9]{64}$/u.test(record.tree?.sha256 ?? '') ||
+    !Number.isSafeInteger(record.tree?.fileCount) ||
+    record.tree.fileCount < 1
+  ) {
     throw new Error(`${label} has no verified extracted-tree identity`)
   }
   assertSupportedBrowserVersion(target, record.browserVersion)

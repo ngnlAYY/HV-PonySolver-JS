@@ -217,7 +217,19 @@ export class App {
     if (target) {
       this.observer.observe(target, {
         attributes: true,
-        attributeFilter: ['id', 'name', 'action', 'formaction', 'type', 'disabled', 'src', 'srcset', 'sizes', 'media'],
+        attributeFilter: [
+          'id',
+          'name',
+          'form',
+          'action',
+          'formaction',
+          'type',
+          'disabled',
+          'src',
+          'srcset',
+          'sizes',
+          'media',
+        ],
         childList: true,
         subtree: true,
       })

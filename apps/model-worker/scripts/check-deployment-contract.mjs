@@ -106,11 +106,11 @@ function validateOrigins(origins) {
     let url
     try {
       url = new URL(origin)
-    } catch (error) {
-      throw new Error(`Invalid Origin: ${origin}`, { cause: error })
+    } catch {
+      throw new Error('Invalid Origin')
     }
     if (url.protocol !== 'https:' || url.origin !== origin || url.pathname !== '/' || url.search || url.hash) {
-      throw new Error(`Invalid Origin: ${origin}`)
+      throw new Error('Invalid Origin')
     }
   }
   return origins
@@ -130,8 +130,8 @@ function createProbeUrl(modelUrl, probeId) {
   let url
   try {
     url = new URL(modelUrl)
-  } catch (error) {
-    throw new Error(`Invalid modelUrl: ${modelUrl}`, { cause: error })
+  } catch {
+    throw new Error('Invalid modelUrl')
   }
   if (url.protocol !== 'https:' || url.username || url.password || url.hash) {
     throw new Error('modelUrl must be an HTTPS URL without credentials or fragment')
@@ -180,13 +180,12 @@ async function fetchForContract(fetchImpl, url, init, context, requestTimeoutMs)
 
   try {
     return await Promise.race([fetchImpl(url, { ...init, signal: controller.signal }), timeout])
-  } catch (error) {
-    if (error === timeoutError) {
+  } catch {
+    if (controller.signal.aborted) {
       throw timeoutError
     }
-    throw new Error(`${context}: network request failed: ${error instanceof Error ? error.message : String(error)}`, {
-      cause: error,
-    })
+    // Fetch errors can embed the configured URL or other protected input in their message and cause.
+    throw new Error(`${context}: network request failed`)
   } finally {
     cancelTimeout(timeoutId)
   }

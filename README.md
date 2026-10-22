@@ -46,12 +46,12 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 ## 默认行为
 
 - `auto` 识别、勾选后延迟点击原生提交按钮；`manual` 只记录结果。默认开启失败随机答案，扩展设置页可关闭。
-- 保留手动勾选。合计超过 4 项时只裁剪自动项，目标至多 3 项；本轮手动取消的项不会被勾回。验证码 `id/name` 补齐会补扫；目标、图片选源或外层 fieldset 的有效禁用状态变化会先取消旧轮次，新验证码不必等待旧初始化或设置读取完成；取消或控件失效后不再点击或提交。处理中仅 URL 变化时，旧轮次结束后也会接手当前有效目标，无需额外 DOM 变化。
+- 保留手动勾选。合计超过 4 项时只裁剪自动项，目标至多 3 项；本轮手动取消的项不会被勾回。验证码 `id/name` 补齐会补扫；目标、图片选源、控件实际 form 归属或外层 fieldset 的有效禁用状态变化会先取消旧轮次，新验证码不必等待旧初始化或设置读取完成。取消或控件失效后不再点击或提交；仅 URL 变化时，旧轮次结束后也会接手当前有效目标。
 - 面板默认 `top=155, left=1240`，显示最近 5 条记录，仅在存在 `div#csp` 时可见；隐藏面板不停止识别。
 - 启动时 body 暂缺，或 AADB 等局部切页移除面板、替换 body 后，等待挂载并继续扫描，保留面板状态和历史，仍遵守可见性设置；销毁后不恢复。JPX `AjaxRound` 清除扫描定时器后，后续验证码相关 DOM 变化会恢复扫描，每题仍只提交一次。
 - 普通失败按同页单调时钟冷却 30 秒，不受系统校时影响；准备和识别阶段的永久模型错误均保持抑制，直到目标或已提交凭据变化。
 
-设置范围、提交复核与历史耗时见[设置与行为](docs/usage/settings.md)；扩展设置加载前已编辑的字段不会被迟到快照覆盖。加载、Key、额度、面板和页面切换问题见[故障排查](docs/usage/troubleshooting.md)。
+完整规则见[设置与行为](docs/usage/settings.md)。扩展设置加载不覆盖已编辑字段；保存期间再次提交的值按最新意图串行处理，包括改回原值。加载、Key、额度、面板和页面切换问题见[故障排查](docs/usage/troubleshooting.md)。
 
 ## 模型与隐私
 
@@ -70,4 +70,6 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 - [HTTP 契约](docs/reference/model-worker-http.md)、[CI 与发布](docs/development/releases.md)、[Worker 运维](docs/model-worker-ops.md)
 - [文档维护与检查](docs/development/documentation.md#验证文档修改)
 
-完整检查为 `mise exec -- pnpm check`，先按[验证手册](docs/development/verification.md#model-worker-测试配置)备份并准备 Worker 测试配置。工作区以覆盖率模式执行一次，根级工具测试通过 `test:root` 单独执行，不重复普通工作区测试；覆盖率门槛不变。普通检查和构建不发布产品；commit、push、artifact、Release 和部署需明确授权。扩展 Release 先原子创建绑定本次提交的新标签，已有标签或 API 失败即停止。本地通过不代表远程鉴权、最低版本或 Android 验收完成。
+完整检查为 `mise exec -- pnpm check`，先按[验证手册](docs/development/verification.md#model-worker-测试配置)备份并准备 Worker 测试配置。工作区覆盖率与根级 `test:root` 各执行一次，不重复普通工作区测试；覆盖率门槛不变。
+
+普通检查和构建不发布产品；commit、push、artifact、Release 和部署需明确授权。CodeQL 需要仓库可用的 Code Scanning；依赖漏洞与平台权限失败分别处理，不跳过安全门禁。详见[CI 故障定位](docs/development/releases.md#ci-故障定位)。本地通过不代表远程鉴权、最低版本或 Android 验收完成。

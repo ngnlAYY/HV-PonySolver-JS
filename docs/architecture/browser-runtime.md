@@ -70,7 +70,7 @@ sequenceDiagram
     Solver->>Panel: 状态与历史
 ```
 
-`CaptchaTarget` 在模型准备前捕获解析后的 `form.action`、原生提交控件的实际 action 与类型。`App` 和 `CaptchaSolver` 贯穿准备、图片、推理、提交阶段用 `isSameCaptchaTarget` 复核；相对与绝对写法解析到同一 URL 时等价。取消、超时或新目标使旧任务停止点击。
+`CaptchaTarget` 在模型准备前捕获解析后的 `form.action`、原生提交控件的实际 action、类型及答案/提交控件的实际 `.form`。`App` 和 `CaptchaSolver` 贯穿准备、图片、推理、提交阶段用 `isSameCaptchaTarget` 复核；相对与绝对写法解析到同一 URL 时等价。`form` 属性使控件失联或换归属时立即取消，恢复关联后补扫；显式关联仍指向原表单时不重启。取消、超时或新目标使旧任务停止点击。
 
 [AnswerSubmitter](../../packages/browser-core/src/captcha/answer-submitter.ts) 在开始、等待后及每次点击前后复核地址、checkbox 数量/类型/身份、所属表单、连接与有效禁用状态；`formaction` 不能绕过同源检查，`fieldset` 继承禁用包含首个 `legend` 例外。手动模式只记录结果，随机兜底由 [CaptchaSolver](../../packages/browser-core/src/captcha/captcha-solver.ts) 配置。
 
@@ -96,9 +96,9 @@ sequenceDiagram
 
 ## 模型下载、缓存和存储
 
-图片、模型与 Runtime 共用 `readBoundedByteStream`：已知长度分配最终缓冲，未知长度在上限内倍增并即时复制，结束只返回实际字节，不积累分块或外部大缓冲视图。增长/裁剪时新旧缓冲可能并存，字节上限不是进程内存上限。HTTP/头校验失败后尽力清理流，不等待取消 Promise；清理抛错、拒绝或挂起不能阻塞图片回退或覆盖原始错误。
+图片、模型与 Runtime 共用 `readBoundedByteStream`：已知长度分配最终缓冲，未知长度在上限内倍增并即时复制，结束只返回实际字节，不积累分块或外部大缓冲视图。增长/裁剪时新旧缓冲可能并存，字节上限不是进程内存上限。HTTP/头校验失败后尽力清理流，不等待取消 Promise；清理抛错、拒绝或挂起不能阻塞图片回退或覆盖原始错误。图片 fetch 忽略取消、在超时或取消后迟到返回时，也须取消无人消费的正文。
 
-核心[下载器](../../packages/browser-core/src/model/model-downloader.ts) 负责 Bearer、重定向拒绝、状态、有界读取、完整性及回执；用户脚本[适配器](../../apps/userscript/src/model/model-downloader.ts) 只提供 Key 并组合调用方/超时信号。
+核心[下载器](../../packages/browser-core/src/model/model-downloader.ts) 统一管理调用方取消和截止时间，覆盖凭据读取、Bearer 请求、重定向拒绝、有界读取、完整性及回执；用户脚本[适配器](../../apps/userscript/src/model/model-downloader.ts) 只提供 GM Key 与原取消信号，不再重复包装信号、Response 或字节流。
 
 [ModelCache](../../packages/browser-core/src/model/model-cache.ts) 编排读取、共享下载、写入与确认；[IndexedDB store](../../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务，[record](../../packages/browser-core/src/model/model-cache-record.ts) 校验记录，[shared downloads](../../packages/browser-core/src/model/shared-model-downloads.ts) 合并并发下载。带回执的模型与待确认元数据同事务落盘，确认并更新匹配元数据后才允许后续缓存命中；无回执不确认。关闭、`versionchange` 或数据库异常关闭事件 `close` 取消数据库操作与共享下载，并使未完成确认失效。连接被清除后下次操作重新打开，旧连接迟到事件不影响新连接。
 

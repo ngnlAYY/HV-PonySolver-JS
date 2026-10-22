@@ -13,6 +13,8 @@
 
 工作区职责见[整体架构](../architecture/overview.md)。新增跨包导入、移动目录或修改 package export 后运行 `architecture:check`；类型边界同时检查 `import type`、`import('…').Type` 与 `typeof import('…')`。
 
+源码边界与危险调用门禁覆盖 `.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs`。静态模板 import、`require`、TypeScript import-equals 与类型导入同样受依赖方向约束；全局或静态 computed 的危险调用不能绕过检查。CLI 缺少受保护源码目录时失败关闭。
+
 ## Model Worker 测试配置
 
 包含 Worker 的测试或构建（包括根 `pnpm check`）前准备占位绑定。`apps/model-worker/wrangler.toml` 是生成物；已有自定义配置时，先在仓库外备份，验证后按字节恢复，禁止输出其中的绑定或凭据。不要手改或提交生成配置，权威来源是 [wrangler.template.toml](../../apps/model-worker/wrangler.template.toml) 和渲染器。

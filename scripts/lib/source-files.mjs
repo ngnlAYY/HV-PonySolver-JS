@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 
-const DEFAULT_SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.ts', '.tsx'])
+const DEFAULT_SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.mts', '.cts', '.tsx'])
 // Shared ignore list so every scanner skips build output, dependencies, and VCS metadata.
 const IGNORED_DIRECTORY_NAMES = new Set(['.git', 'coverage', 'dist', 'node_modules'])
 

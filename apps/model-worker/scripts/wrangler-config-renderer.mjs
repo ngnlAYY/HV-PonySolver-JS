@@ -44,7 +44,7 @@ function replaceMainPath(content, mainPath) {
   if (!mainPath) {
     return content
   }
-  return content.replace(/^\s*main\s*=\s*"[^"]*"\s*$/m, `main = "${escapeTomlString(mainPath)}"`)
+  return content.replace(/^[ \t]*main[ \t]*=[ \t]*"[^"\r\n]*"[ \t]*$/m, () => `main = "${escapeTomlString(mainPath)}"`)
 }
 
 function renderWranglerConfig(

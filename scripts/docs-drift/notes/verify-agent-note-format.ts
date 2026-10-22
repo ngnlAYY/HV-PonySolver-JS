@@ -3,7 +3,7 @@
  * Enforce Agent Note headers, lifecycle-specific sections, alternatives.
  * Implemented notes may not carry proposal-era H2s; present tense in the
  * body is a prose rule, not a lexical scan.
- * Run: npx tsx scripts/verify-agent-note-format.ts
+ * Run: node scripts/docs-drift/notes/verify-agent-note-format.ts
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -67,23 +67,28 @@ function maskSource(raw: string): MaskedSource {
   const lines = normalized.split('\n')
   const fenced = new Array<boolean>(lines.length).fill(false)
   const commented = new Array<boolean>(lines.length).fill(false)
-  let inFence = false
+  let fence: { character: string; length: number } | null = null
   let inComment = false
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i]
-    fenced[i] = inFence
     commented[i] = inComment
     // A fence opens/closes only on its own line (≤3 leading spaces); fence
     // mentions inside inline code or prose never toggle state.
-    if (!inComment && /^\s{0,3}```/.test(l)) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(l)
+    if (fence) {
       fenced[i] = true
-      inFence = !inFence
-    } else if (inFence) {
-      fenced[i] = true
+      if (marker && marker[1][0] === fence.character && marker[1].length >= fence.length && marker[2].trim() === '') {
+        fence = null
+      }
+      // Fence interiors are opaque: a `<!--` in a HTML/JSX sample must not
+      // leak the comment mask past the closing fence.
+      continue
     }
-    // Fence interiors are opaque: a `<!--` in a HTML/JSX sample must not
-    // leak the comment mask past the closing fence.
-    if (inFence) continue
+    if (!inComment && marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
+      fenced[i] = true
+      fence = { character: marker[1][0], length: marker[1].length }
+      continue
+    }
     const openIdx = inComment ? -1 : l.indexOf('<!--')
     const closeIdx = l.indexOf('-->')
     if (inComment) {

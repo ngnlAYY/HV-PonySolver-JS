@@ -1,7 +1,7 @@
 // Adapted from the write-notes-like-deepseek skill; project entry: ../verify-notes.mjs.
 /**
  * Verify tree: lifecycle/class/filename/INDEX and internal relative markdown links.
- * Run: npx tsx scripts/verify-agent-note-tree.ts
+ * Run: node scripts/docs-drift/notes/verify-agent-note-tree.ts
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'

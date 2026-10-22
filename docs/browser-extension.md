@@ -86,7 +86,7 @@ Firefox remote 因向模型服务发送 Bearer Key 而声明 `authenticationInfo
 
 CSP 为 `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'`，remote 追加 `connect-src 'self' https://models.ngnl.host`，packaged 为 `connect-src 'self'`。JS、module Worker、ORT glue 与 WASM 均随包分发；动态导入、远程可执行资产引用或哈希漂移使审计失败。remote 不含 `.ort`，packaged 必须且仅含清单指定模型。
 
-审计锁定完整 MV3 清单：版本、后台、独立设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 和默认顶层隔离世界。拒绝 `optional_permissions`、`optional_host_permissions`、`externally_connectable`、`sandbox` 扩权；HTML 连同嵌套 template 拒绝内联脚本/事件、`javascript:` URL、`srcdoc` 和 base URL 覆写。
+审计锁定完整 MV3 清单：版本、后台、独立设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 和默认顶层隔离世界。拒绝 `optional_permissions`、`optional_host_permissions`、`externally_connectable`、`sandbox` 扩权；HTML 连同嵌套 template 拒绝内联脚本/事件、规范化后的 `javascript:`/`data:`/`vbscript:` URL、`srcdoc` 和 base URL 覆写。普通文本和合法本地资源不按可执行 URL 处理。
 
 ## Runtime architecture
 
@@ -207,6 +207,8 @@ mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 CI 不自动运行 Android。独立 harness 须在 Android Firefox major 142 安装同一 canonical ZIP，关闭随机回退并成功推理至少一次。外部 run 的 artifact `hv-pony-solver-firefox-android-142-evidence` 内含 `firefox-android-142-evidence.json`，`kind` 为 `firefox-android-142-packaged-e2e`，记录设备、Android/浏览器版本、模型、精确 ZIP 和成功观察。
 
 内置发布设置 `publish_extension_artifact=true` 与 `firefox_android_e2e_run_id`，在 canonical 构建 job 内校验成功 run、可信 workflow/事件/commit 和本地同一 ZIP。缺证据、版本/归档不符或随机回退均阻止完整 ZIP 的首次上传；缺 `PACKAGED_MODEL_URL` 会跳过 canonical 门禁并阻止内置发布。
+
+桌面 attestation 同时校验解压树 SHA-256 和正安全整数 `tree.fileCount`；缺失、非整数或越界文件数不能作为发布证据。canonical 下载器按精确长度分配自有缓冲并即时复制每块，流源复用分块内存也不能改变已读取内容；全部字节与 SHA-256 验证后才落盘。
 
 ### GitHub desktop Release
 

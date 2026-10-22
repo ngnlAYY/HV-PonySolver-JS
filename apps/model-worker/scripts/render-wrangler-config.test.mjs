@@ -155,6 +155,36 @@ test('renderWranglerConfigFile escapes custom main paths as TOML strings', async
   })
 })
 
+test('renderWranglerConfig preserves replacement metacharacters in main paths', async () => {
+  const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+  const prefix = 'name = "worker"\n'
+  const suffix = '\ncompatibility_date = "2026-05-18"\n'
+  const template = `${prefix}main = "src/index.ts"${suffix}`
+
+  for (const replacement of ['$&', '$$', '$`', "$'"]) {
+    const mainPath = `/tmp/worker-${replacement}/src/index.ts`
+    const rendered = renderWranglerConfig(template, { values: testWranglerConfigEnv, mainPath })
+
+    assert.equal(rendered, `${prefix}main = "${mainPath}"${suffix}`)
+  }
+})
+
+test('renderWranglerConfig preserves blank lines and line endings around the main assignment', async () => {
+  const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+  const mainPath = '/tmp/worker-$&-$$/src/index.ts'
+  for (const [prefix, suffix] of [
+    ['', '\n'],
+    ['', '\r\n'],
+    ['\n\n', '\n\n'],
+    ['name = "worker"\r\n\r\n', '\r\n\r\ncompatibility_date = "2026-05-18"\r\n'],
+  ]) {
+    const template = `${prefix}main = "src/index.ts"${suffix}`
+    const rendered = renderWranglerConfig(template, { values: testWranglerConfigEnv, mainPath })
+
+    assert.equal(rendered, `${prefix}main = "${mainPath}"${suffix}`)
+  }
+})
+
 test('renderWranglerConfig defaults INVALID_KEY_MODE to decoy', async () => {
   const { renderWranglerConfig, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
 

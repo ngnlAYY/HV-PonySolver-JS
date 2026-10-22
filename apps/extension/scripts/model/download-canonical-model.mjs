@@ -150,8 +150,8 @@ async function readBoundedBody(response, identity, signal) {
     throw new CanonicalModelError('Canonical model response body is unavailable')
   }
 
+  const bytes = new Uint8Array(identity.byteLength)
   const reader = response.body.getReader()
-  const chunks = []
   let total = 0
   let complete = false
   try {
@@ -179,11 +179,9 @@ async function readBoundedBody(response, identity, signal) {
           `Canonical model byte length exceeds ${identity.byteLength}: received at least ${total}`,
         )
       }
-      chunks.push(chunk)
+      // Snapshot each chunk before the next read can reuse its backing buffer.
+      bytes.set(chunk, total - chunk.byteLength)
     }
-  } catch (error) {
-    cancelReader(reader)
-    throw error
   } finally {
     if (!complete) {
       cancelReader(reader)
@@ -199,12 +197,6 @@ async function readBoundedBody(response, identity, signal) {
     throw new CanonicalModelError(
       `Canonical model byte length mismatch: expected ${identity.byteLength}, received ${total}`,
     )
-  }
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
   }
   return bytes
 }

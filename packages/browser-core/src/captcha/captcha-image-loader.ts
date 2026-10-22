@@ -86,16 +86,17 @@ export class CachedImageLoader implements ImageLoader {
 
   private async fetchBlob(url: string, cache: RequestCache, signal: AbortSignal, fallback: boolean): Promise<Blob> {
     const fetchImpl = resolveFetchImplementation()
-    const response = await raceAbort(
-      fetchImpl(url, {
-        cache,
-        mode: 'same-origin',
-        credentials: 'include',
-        signal,
-      }),
+    const pendingResponse = fetchImpl(url, {
+      cache,
+      mode: 'same-origin',
+      credentials: 'include',
       signal,
-      () => abortReason(signal),
-    )
+    })
+    const response = await raceAbort(pendingResponse, signal, () => abortReason(signal)).catch((error: unknown) => {
+      // 取消只结束等待；不响应信号的 fetch 迟到返回时仍须释放正文。
+      void pendingResponse.then((lateResponse) => cancelByteStream(lateResponse.body, error)).catch(() => undefined)
+      throw error
+    })
     if (!response.ok) {
       cancelByteStream(response.body)
       const suffix = fallback ? ' (回退也失败)' : ''

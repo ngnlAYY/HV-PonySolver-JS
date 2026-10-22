@@ -31,12 +31,13 @@ vi.mock('../../src/model/model-integrity', async (importOriginal) => {
 })
 
 import { inferenceTimeoutConfig } from '../../src/inference/inference-config'
+import { IndexedDbModelStore } from '../../src/model/indexeddb-model-store'
 import { createCachedModelRow, ModelCache, readCachedModelBuffer } from '../../src/model/model-cache'
 import {
   getModelDownloadConfirmation,
   registerModelDownloadConfirmation,
 } from '../../src/model/model-download-confirmation-store'
-import { confirmCachedModelDownload, downloadModel } from '../../src/model/model-downloader'
+import { confirmCachedModelDownload, type downloadModel } from '../../src/model/model-downloader'
 import { verifyModelIntegrity } from '../../src/model/model-integrity'
 import { modelConfig } from '../../src/model/model-config'
 import { MODEL_CONFIRMATION_KEY } from '../../src/model/model-cache-schema'
@@ -197,6 +198,30 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+})
+
+describe('IndexedDbModelStore operation lifetime', () => {
+  it('removes abort listeners when a deadline wins over a non-cooperative operation', async () => {
+    vi.useFakeTimers()
+    const store = new IndexedDbModelStore()
+    const controller = new AbortController()
+    const addListener = vi.spyOn(controller.signal, 'addEventListener')
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
+    const cancel = vi.fn()
+    const context = store.createOperationContext(controller.signal, Date.now() + 20)
+    const { promise } = Promise.withResolvers<void>()
+    const pending = store.waitForOperation(promise, context, 'operation timed out', cancel)
+    const rejection = expect(pending).rejects.toThrow('operation timed out')
+
+    await vi.advanceTimersByTimeAsync(20)
+    await rejection
+
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(removeListener.mock.calls).toHaveLength(addListener.mock.calls.length)
+    controller.abort()
+    store.close()
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('readCachedModelBuffer', () => {

@@ -152,7 +152,9 @@ async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot, { require
     }
     const files = await collectSourceFiles(absoluteDir)
     for (const file of files) {
-      if (!importsByFile.has(file)) importsByFile.set(file, extractImportSpecifiers(await readFile(file, 'utf8')))
+      if (!importsByFile.has(file)) {
+        importsByFile.set(file, extractImportSpecifiers(await readFile(file, 'utf8'), file))
+      }
       const imports = importsByFile.get(file)
       for (const importSpec of imports) {
         if (importSpec.typeOnly && !rule.includeTypeOnly) {
@@ -182,14 +184,8 @@ async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot, { require
   }
 }
 
-function extractImportSpecifiers(source) {
-  const sourceFile = ts.createSourceFile(
-    'architecture-boundary-source.ts',
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  )
+function extractImportSpecifiers(source, fileName = 'architecture-boundary-source.ts') {
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false)
   const specifiers = []
 
   function visit(node) {
@@ -197,7 +193,14 @@ function extractImportSpecifiers(source) {
       specifiers.push({ specifier: node.moduleSpecifier.text, typeOnly: isTypeOnlyImportDeclaration(node) })
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
       specifiers.push({ specifier: node.moduleSpecifier.text, typeOnly: isTypeOnlyExportDeclaration(node) })
-    } else if (isStaticDynamicImport(node)) {
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      node.moduleReference.expression &&
+      ts.isStringLiteralLike(node.moduleReference.expression)
+    ) {
+      specifiers.push({ specifier: node.moduleReference.expression.text, typeOnly: node.isTypeOnly })
+    } else if (isStaticModuleCall(node)) {
       specifiers.push({ specifier: node.arguments[0].text, typeOnly: false })
     } else if (
       ts.isImportTypeNode(node) &&
@@ -243,12 +246,13 @@ function isTypeOnlyNamedBindings(namedBindings) {
   return namedBindings.elements.length > 0 && namedBindings.elements.every((element) => element.isTypeOnly)
 }
 
-function isStaticDynamicImport(node) {
+function isStaticModuleCall(node) {
   return (
     ts.isCallExpression(node) &&
-    node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+    (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(node.expression) && node.expression.text === 'require')) &&
     node.arguments.length > 0 &&
-    ts.isStringLiteral(node.arguments[0])
+    ts.isStringLiteralLike(node.arguments[0])
   )
 }
 

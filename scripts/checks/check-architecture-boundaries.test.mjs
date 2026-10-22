@@ -193,6 +193,52 @@ describe('checkArchitectureBoundaries', () => {
     })
   })
 
+  for (const source of [
+    'await import(`../status-panel/status-panel`)',
+    "import Panel = require('../status-panel/status-panel')",
+    "const Panel = require('../status-panel/status-panel')",
+  ]) {
+    it(`rejects static module loading through ${source}`, async () => {
+      await withRepo(async (repoRoot) => {
+        await writeSource(repoRoot, 'apps/userscript/src/inference/client.ts', source)
+        await assert.rejects(checkArchitectureBoundaries(repoRoot), /inference layer must not import status panel/)
+      })
+    })
+  }
+
+  for (const extension of ['mts', 'cts', 'cjs', 'jsx', 'tsx']) {
+    it(`checks boundary violations in nested .${extension} sources`, async () => {
+      await withRepo(async (repoRoot) => {
+        const source =
+          extension === 'jsx' || extension === 'tsx'
+            ? "const view = <div>{import('@hv-pony-solver/extension')}</div>"
+            : "const extension = require('@hv-pony-solver/extension')"
+        await writeSource(repoRoot, `packages/shared/src/nested/contract.${extension}`, source)
+        await assert.rejects(
+          checkArchitectureBoundaries(repoRoot),
+          /shared package must not import apps or browser core/,
+        )
+      })
+    })
+  }
+
+  it('preserves type-only import-equals exceptions but rejects reverse package dependencies', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(
+        repoRoot,
+        'apps/userscript/src/inference/client.cts',
+        "import type Panel = require('../status-panel/status-panel-types')",
+      )
+      await assert.doesNotReject(checkArchitectureBoundaries(repoRoot))
+      await writeSource(
+        repoRoot,
+        'packages/shared/src/contract.cts',
+        "import type Extension = require('@hv-pony-solver/extension')",
+      )
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /shared package must not import apps or browser core/)
+    })
+  })
+
   it('does not treat property calls named import as dynamic imports', async () => {
     await withRepo(async (repoRoot) => {
       await writeSource(

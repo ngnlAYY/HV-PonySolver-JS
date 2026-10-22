@@ -4,7 +4,9 @@ export type CaptchaControlsSnapshot = Readonly<{
   answers: readonly HTMLInputElement[]
   answerDisabled: readonly boolean[]
   answerTypes: readonly string[]
+  answerForms: readonly (HTMLFormElement | null)[]
   submit: HTMLInputElement | null
+  submitForm: HTMLFormElement | null
   submitDisabled: boolean
   submitType: string | null
   submitAction: string | null
@@ -79,7 +81,9 @@ function captureControls(form: HTMLFormElement): CaptchaControlsSnapshot {
     answers,
     answerDisabled: answers.map((answer) => answer.matches(':disabled')),
     answerTypes: answers.map((answer) => answer.type),
+    answerForms: answers.map((answer) => answer.form),
     submit,
+    submitForm: submit?.form ?? null,
     submitDisabled: submit?.matches(':disabled') ?? false,
     submitType: submit?.type ?? null,
     submitAction: getSubmissionAction(form, submit),
@@ -89,12 +93,14 @@ function captureControls(form: HTMLFormElement): CaptchaControlsSnapshot {
 function isSameControls(left: CaptchaControlsSnapshot, right: CaptchaControlsSnapshot): boolean {
   return (
     left.submit === right.submit &&
+    left.submitForm === right.submitForm &&
     left.submitType === right.submitType &&
     left.submitAction === right.submitAction &&
     left.answers.length === right.answers.length &&
     left.answers.every(
       (answer, index) =>
         answer === right.answers[index] &&
+        left.answerForms[index] === right.answerForms[index] &&
         left.answerDisabled[index] === right.answerDisabled[index] &&
         left.answerTypes[index] === right.answerTypes[index],
     )

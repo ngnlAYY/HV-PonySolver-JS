@@ -1,58 +1,81 @@
 import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import ts from 'typescript'
 
 const manifestRelativePath = 'apps/userscript/src/inference/onnx-runtime-assets.ts'
 
-function extractObject(source, property, sourcePath) {
-  const marker = property === 'ONNX_RUNTIME_ASSETS' ? 'ONNX_RUNTIME_ASSETS =' : `${property}:`
-  const propertyIndex = source.indexOf(marker)
-  const start = source.indexOf('{', propertyIndex)
-  if (propertyIndex < 0 || start < 0)
-    throw new Error(`Unable to read ONNX_RUNTIME_ASSETS.${property} from ${sourcePath}`)
-  let depth = 0
-  let quote = ''
-  let escaped = false
-  for (let index = start; index < source.length; index += 1) {
-    const character = source[index]
-    if (quote) {
-      if (escaped) escaped = false
-      else if (character === '\\') escaped = true
-      else if (character === quote) quote = ''
-      continue
-    }
-    if (character === "'" || character === '"' || character === '`') {
-      quote = character
-      continue
-    }
-    if (character === '{') depth += 1
-    if (character === '}' && --depth === 0) return source.slice(start, index + 1)
+function readStaticValue(node, context, sourcePath) {
+  if (
+    ts.isParenthesizedExpression(node) ||
+    (ts.isAsExpression(node) &&
+      ts.isTypeReferenceNode(node.type) &&
+      ts.isIdentifier(node.type.typeName) &&
+      node.type.typeName.text === 'const' &&
+      !node.type.typeArguments?.length)
+  ) {
+    return readStaticValue(node.expression, context, sourcePath)
   }
-  throw new Error(`Unterminated ONNX_RUNTIME_ASSETS.${property} in ${sourcePath}`)
+  if (ts.isStringLiteral(node)) return node.text
+  if (ts.isNumericLiteral(node)) return Number(node.text)
+  if (!ts.isObjectLiteralExpression(node)) {
+    throw new Error(`Invalid ${context} in ${sourcePath}: expected a static literal`)
+  }
+  const value = Object.create(null)
+  for (const property of node.properties) {
+    if (!ts.isPropertyAssignment(property) || (!ts.isIdentifier(property.name) && !ts.isStringLiteral(property.name))) {
+      throw new Error(`Invalid ${context} in ${sourcePath}: expected a direct property`)
+    }
+    const name = property.name.text
+    if (name === '__proto__' || Object.hasOwn(value, name)) {
+      throw new Error(`Invalid ${context} in ${sourcePath}: duplicate or special property`)
+    }
+    value[name] = readStaticValue(property.initializer, `${context}.${name}`, sourcePath)
+  }
+  return value
+}
+
+function readManifestRoot(source, sourcePath) {
+  const syntax = ts.createSourceFile(sourcePath, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS)
+  if (syntax.parseDiagnostics.length > 0) throw new Error(`Invalid ONNX_RUNTIME_ASSETS source in ${sourcePath}`)
+  let initializer
+  for (const statement of syntax.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== 'ONNX_RUNTIME_ASSETS') continue
+      if (initializer) throw new Error(`Duplicate ONNX_RUNTIME_ASSETS in ${sourcePath}`)
+      if (!(statement.declarationList.flags & ts.NodeFlags.Const) || !declaration.initializer) {
+        throw new Error(`Invalid ONNX_RUNTIME_ASSETS declaration in ${sourcePath}`)
+      }
+      initializer = declaration.initializer
+    }
+  }
+  if (!initializer) throw new Error(`Unable to read ONNX_RUNTIME_ASSETS from ${sourcePath}`)
+  // Parse the entire initializer: a valid-looking prefix must never hide a
+  // runtime suffix, spread, or getter that changes the shipped asset identity.
+  return requireObject(readStaticValue(initializer, 'ONNX_RUNTIME_ASSETS', sourcePath), 'ONNX_RUNTIME_ASSETS')
+}
+
+function requireObject(value, context) {
+  if (!value || typeof value !== 'object') throw new Error(`Unable to read ${context}`)
+  return value
 }
 
 function readString(source, property, context) {
-  const propertyPattern = /(?:^|\n)\s*(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*'(?<value>[^']+)'\s*,?/gm
-  for (const match of source.matchAll(propertyPattern)) {
-    if (match.groups?.name === property) return match.groups.value
-  }
-  throw new Error(`Unable to read ${context}.${property}`)
+  const value = source[property]
+  if (typeof value !== 'string' || !value) throw new Error(`Unable to read ${context}.${property}`)
+  return value
 }
 
 function readInteger(source, property, context) {
-  const propertyPattern = /(?:^|\n)\s*(?<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*(?<value>[0-9][0-9_]*)\s*,?/gm
-  for (const match of source.matchAll(propertyPattern)) {
-    if (match.groups?.name !== property) continue
-    const value = Number(match.groups.value.replaceAll('_', ''))
-    if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid ${context}.${property}`)
-    return value
-  }
-  throw new Error(`Unable to read ${context}.${property}`)
+  const value = source[property]
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid ${context}.${property}`)
+  return value
 }
 
-function readAsset(source, property, sourcePath, stringFields) {
+function readAsset(source, property, stringFields) {
   const context = `ONNX_RUNTIME_ASSETS.${property}`
-  const block = extractObject(source, property, sourcePath)
+  const block = requireObject(source[property], context)
   return {
     ...Object.fromEntries(stringFields.map((field) => [field, readString(block, field, context)])),
     byteLength: readInteger(block, 'byteLength', context),
@@ -66,10 +89,10 @@ function assertSha256(value, context) {
 }
 
 export function parseOnnxRuntimeAssetsManifest(source, { sourcePath = manifestRelativePath } = {}) {
-  const root = extractObject(source, 'ONNX_RUNTIME_ASSETS', sourcePath)
-  const externalRuntimeBlock = extractObject(root, 'externalFullRuntime', sourcePath)
+  const root = readManifestRoot(source, sourcePath)
+  const externalRuntimeBlock = requireObject(root.externalFullRuntime, 'ONNX_RUNTIME_ASSETS.externalFullRuntime')
   const externalFullRuntime = {
-    ...readAsset(root, 'externalFullRuntime', sourcePath, ['scriptUrl', 'wasmBaseUrl', 'mjsUrl', 'wasmUrl']),
+    ...readAsset(root, 'externalFullRuntime', ['scriptUrl', 'wasmBaseUrl', 'mjsUrl', 'wasmUrl']),
     mjsByteLength: readInteger(externalRuntimeBlock, 'mjsByteLength', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
     mjsSha256: readString(externalRuntimeBlock, 'mjsSha256', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
     mjsMaxByteLength: readInteger(externalRuntimeBlock, 'mjsMaxByteLength', 'ONNX_RUNTIME_ASSETS.externalFullRuntime'),
@@ -81,8 +104,8 @@ export function parseOnnxRuntimeAssetsManifest(source, { sourcePath = manifestRe
       'ONNX_RUNTIME_ASSETS.externalFullRuntime',
     ),
   }
-  const bundleAsset = readAsset(root, 'bundleAsset', sourcePath, ['path', 'filename'])
-  const wasmAsset = readAsset(root, 'wasmAsset', sourcePath, ['filename', 'publicPath', 'url', 'objectKey'])
+  const bundleAsset = readAsset(root, 'bundleAsset', ['path', 'filename'])
+  const wasmAsset = readAsset(root, 'wasmAsset', ['filename', 'publicPath', 'url', 'objectKey'])
   const manifest = {
     packageName: readString(root, 'packageName', 'ONNX_RUNTIME_ASSETS'),
     packageVersion: readString(root, 'packageVersion', 'ONNX_RUNTIME_ASSETS'),

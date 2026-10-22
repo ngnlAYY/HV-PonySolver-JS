@@ -5,6 +5,18 @@
 
 const LOG_TAG = 'model-worker'
 const ALLOWED_FIELD_NAMES: ReadonlySet<string> = new Set(['route', 'errorKind', 'errorName'])
+const ALLOWED_ERROR_NAMES: Readonly<Record<string, true>> = {
+  Error: true,
+  EvalError: true,
+  RangeError: true,
+  ReferenceError: true,
+  SyntaxError: true,
+  TypeError: true,
+  URIError: true,
+  AggregateError: true,
+  AbortError: true,
+  TimeoutError: true,
+}
 // eslint-disable-next-line no-control-regex -- These code points are the sanitization target.
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
@@ -17,7 +29,14 @@ export type WorkerLogFields = Readonly<{
 }>
 
 export function workerErrorName(error: unknown): string {
-  return error instanceof Error ? error.name : 'unknown'
+  if (!(error instanceof Error)) return 'unknown'
+  // Error names are mutable dependency data, not inherently safe classifications.
+  try {
+    const name = error.name
+    return typeof name === 'string' && Object.hasOwn(ALLOWED_ERROR_NAMES, name) ? name : 'Error'
+  } catch {
+    return 'Error'
+  }
 }
 
 function sanitizeFieldValue(value: string): string {

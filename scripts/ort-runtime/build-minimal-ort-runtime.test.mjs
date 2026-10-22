@@ -41,17 +41,19 @@ test('rejects invalid arguments before creating an ORT build root from an arbitr
   t.after(() => rm(temporaryParent, { recursive: true, force: true }))
   await mkdir(cwd)
 
-  const result = spawnSync('bash', [fileURLToPath(scriptUrl), '--invalid-option'], {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, ORT_BUILD_ROOT: buildRoot },
-  })
-  assert.equal(result.error, undefined)
-  assert.equal(result.status, 2)
-  const output = `${result.stdout}\n${result.stderr}`
-  assert.match(output, /Usage:/u)
-  assert.doesNotMatch(output, /MODULE_NOT_FOUND/u)
-  await assert.rejects(access(buildRoot), { code: 'ENOENT' })
+  for (const args of [['--invalid-option'], ['--install', '--invalid-option'], ['--install', '--install']]) {
+    const result = spawnSync('bash', [fileURLToPath(scriptUrl), ...args], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, ORT_BUILD_ROOT: buildRoot },
+    })
+    assert.equal(result.error, undefined)
+    assert.equal(result.status, 2)
+    const output = `${result.stdout}\n${result.stderr}`
+    assert.match(output, /Usage:/u)
+    assert.doesNotMatch(output, /MODULE_NOT_FOUND/u)
+    await assert.rejects(access(buildRoot), { code: 'ENOENT' })
+  }
 })
 
 test('serializes destructive work and revalidates the dedicated build root', async () => {

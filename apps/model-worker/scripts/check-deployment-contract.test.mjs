@@ -322,8 +322,9 @@ test('网络失败后按固定间隔重试并成功', async () => {
   assert.equal(requests.length, ALLOWED_ORIGINS.length * 2)
 })
 
-test('重试耗尽时保留次数、请求上下文和网络错误 cause', async () => {
-  const networkError = new Error('connection reset')
+test('重试耗尽时保留次数和请求上下文，不暴露网络错误内容或 cause', async () => {
+  const protectedValue = 'synthetic-private-network-input'
+  const networkError = new Error(`connection reset for ${protectedValue}`, { cause: new Error(protectedValue) })
   const delays = []
 
   await assert.rejects(
@@ -341,8 +342,9 @@ test('重试耗尽时保留次数、请求上下文和网络错误 cause', async
     (error) => {
       assert.match(error.message, /after 2 attempts/)
       assert.match(error.message, /OPTIONS origin=https:\/\/hentaiverse\.org/)
-      assert.match(error.message, /connection reset/)
-      assert.equal(error.cause.cause, networkError)
+      assert.match(error.message, /network request failed/)
+      assert.doesNotMatch(error.message, /connection reset|synthetic-private-network-input/)
+      assert.equal(error.cause.cause, undefined)
       return true
     },
   )
@@ -412,6 +414,65 @@ test('在发起请求前拒绝非法配置', async () => {
   await assert.rejects(checkDeploymentContract({ ...base, probeId: '' }), /probeId/)
   await assert.rejects(checkDeploymentContract({ ...base, ortModelUrl: ORT_MODEL_URL }), /must be provided together/)
   assert.equal(fetchCalls, 0)
+})
+
+test('非法 URL 和 Origin 不泄露输入或底层解析错误', async () => {
+  const protectedValue = 'synthetic-private-config-input'
+  let fetchCalls = 0
+  const base = {
+    modelUrl: MODEL_URL,
+    invalidKeyMode: 'decoy',
+    probeId: PROBE_ID,
+    fetchImpl: async () => {
+      fetchCalls += 1
+      throw new Error('must not run')
+    },
+  }
+  for (const options of [
+    { modelUrl: protectedValue },
+    { origins: [protectedValue] },
+    { origins: [`https://models.example/${protectedValue}`] },
+  ]) {
+    await assert.rejects(checkDeploymentContract({ ...base, ...options }), (error) => {
+      assert.match(error.message, /^Invalid (modelUrl|Origin)$/)
+      assert.equal(error.message.includes(protectedValue), false)
+      assert.equal(error.cause, undefined)
+      return true
+    })
+  }
+  assert.equal(fetchCalls, 0)
+})
+
+test('CLI 失败输出不泄露非法配置或网络错误输入', async () => {
+  const protectedValue = 'synthetic-private-cli-input'
+  for (const invalidUrl of [true, false]) {
+    const stdout = silentWriter()
+    const stderr = silentWriter()
+    let fetchCalls = 0
+    const exitCode = await runCli({
+      env: {
+        MODEL_WORKER_URL: invalidUrl ? protectedValue : MODEL_URL,
+        MODEL_WORKER_ORT_URL: ORT_MODEL_URL,
+        MODEL_WORKER_RUNTIME_WASM_URL: RUNTIME_WASM_URL,
+        MODEL_WORKER_RUNTIME_WASM_BYTE_LENGTH: String(RUNTIME_WASM_BYTE_LENGTH),
+        MODEL_WORKER_INVALID_KEY_MODE: 'decoy',
+        MODEL_WORKER_PROBE_ID: PROBE_ID,
+        MODEL_WORKER_CHECK_ATTEMPTS: '1',
+      },
+      fetchImpl: async () => {
+        fetchCalls += 1
+        throw new Error(protectedValue)
+      },
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    })
+
+    assert.equal(exitCode, 1)
+    assert.equal(stdout.read(), '')
+    assert.equal(stderr.read().includes(protectedValue), false)
+    assert.match(stderr.read(), invalidUrl ? /Invalid modelUrl/ : /network request failed/)
+    assert.equal(fetchCalls, invalidUrl ? 0 : 1)
+  }
 })
 
 test('CLI 成功返回 0，且只输出简短的非秘密摘要', async () => {

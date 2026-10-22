@@ -115,6 +115,7 @@ function auditPackagedMetafiles(metafiles, target, fixture = false) {
 }
 
 const htmlUrlAttributes = new Set(['href', 'src', 'action', 'formaction', 'data'])
+const executableUrlProtocols = new Set(['javascript:', 'data:', 'vbscript:'])
 
 function auditHtmlSource(source, relativePath, relativeFiles) {
   const dom = new JSDOM(source)
@@ -137,7 +138,10 @@ function auditHtmlSource(source, relativePath, relativeFiles) {
             throw new Error(`${relativePath} contains inline frame srcdoc content`)
           }
           // URL 解析会处理实体解码后的制表符、换行与 scheme 大小写，不能只检查原始前缀。
-          if (htmlUrlAttributes.has(name) && new globalThis.URL(attribute.value, baseUrl).protocol === 'javascript:') {
+          if (
+            htmlUrlAttributes.has(name) &&
+            executableUrlProtocols.has(new globalThis.URL(attribute.value, baseUrl).protocol)
+          ) {
             throw new Error(`${relativePath} contains an executable URL: ${attribute.name}`)
           }
           const scriptReference = element.localName === 'script' && (name === 'src' || name === 'href')

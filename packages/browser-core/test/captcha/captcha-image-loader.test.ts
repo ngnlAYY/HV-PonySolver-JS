@@ -155,6 +155,53 @@ describe('CachedImageLoader', () => {
     expect((fetchStub.mock.calls[1]![1] as RequestInit).cache).toBe('default')
   })
 
+  it('cancels a late cache response without delaying a successful network fallback', async () => {
+    vi.useFakeTimers()
+    const lateResponse = Promise.withResolvers<Response>()
+    const cancel = vi.fn(() => new Promise<void>(() => undefined))
+    const fetchStub = vi.fn().mockReturnValueOnce(lateResponse.promise).mockResolvedValueOnce(makeOkResponse())
+    globalThis.fetch = fetchStub
+
+    const loadPromise = new CachedImageLoader(50).get(FAKE_URL)
+    await vi.advanceTimersByTimeAsync(50)
+    const blob = await loadPromise
+    expect(blob.size).toBe(FAKE_BYTES.byteLength)
+    expect(fetchStub).toHaveBeenCalledTimes(2)
+
+    lateResponse.resolve(makeStreamResponse(new ReadableStream<Uint8Array>({ cancel })))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'TimeoutError' }))
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['abort', 'timeout'] as const)(
+    'cancels a late network response after %s without exposing cleanup rejection',
+    async (cause) => {
+      vi.useFakeTimers()
+      const lateResponse = Promise.withResolvers<Response>()
+      const cancel = vi.fn(() => Promise.reject(new Error('late cleanup failed')))
+      const fetchStub = vi.fn().mockResolvedValueOnce(makeFailResponse(504)).mockReturnValueOnce(lateResponse.promise)
+      globalThis.fetch = fetchStub
+      const controller = new AbortController()
+      const loadPromise = new CachedImageLoader(50).get(FAKE_URL, controller.signal)
+      const errorName = cause === 'abort' ? 'AbortError' : 'TimeoutError'
+      const rejection = expect(loadPromise).rejects.toMatchObject({ name: errorName })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchStub).toHaveBeenCalledTimes(2)
+
+      if (cause === 'abort') controller.abort()
+      else await vi.advanceTimersByTimeAsync(50)
+      await rejection
+      lateResponse.resolve(makeStreamResponse(new ReadableStream<Uint8Array>({ cancel })))
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(cancel).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: errorName }))
+      expect(fetchStub).toHaveBeenCalledTimes(2)
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
   it.each([
     ['image/jpeg', 'image/jpeg'],
     ['image/png; charset = binary', 'image/png'],

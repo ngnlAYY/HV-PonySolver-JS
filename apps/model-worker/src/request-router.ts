@@ -62,9 +62,18 @@ async function readObjectForRequest(
   env: Env,
   objectKey: string,
 ): Promise<R2Object | R2ObjectBody | null> {
+  let timedOut = false
+  const operation = request.method === 'HEAD' ? env.MODEL_BUCKET.head(objectKey) : env.MODEL_BUCKET.get(objectKey)
   return withModelWorkerDependencyTimeout(
-    request.method === 'HEAD' ? env.MODEL_BUCKET.head(objectKey) : env.MODEL_BUCKET.get(objectKey),
+    operation.then((object) => {
+      // R2 bindings cannot abort an in-flight read; release bodies that arrive after the deadline.
+      if (timedOut && object) cancelObjectBody(object)
+      return object
+    }),
     'R2',
+    () => {
+      timedOut = true
+    },
   )
 }
 

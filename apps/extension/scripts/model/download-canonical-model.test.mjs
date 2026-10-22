@@ -39,6 +39,32 @@ test('canonical downloader refuses redirects and sends an optional bearer token'
   assert.equal(request[1].signal.aborted, false)
 })
 
+test('canonical downloader snapshots reusable stream chunks into the verified result', async () => {
+  const chunk = new Uint8Array(1)
+  let index = 0
+  const body = new globalThis.ReadableStream(
+    {
+      pull(controller) {
+        if (index === bytes.byteLength) {
+          chunk.fill(255)
+          controller.close()
+          return
+        }
+        chunk[0] = bytes[index++]
+        controller.enqueue(chunk)
+      },
+    },
+    { highWaterMark: 0 },
+  )
+  const result = await fetchCanonicalModel({
+    fetchImpl: async () => new globalThis.Response(body),
+    identity,
+    url: 'https://models.example/canonical.ort',
+  })
+  assert.deepEqual(result.bytes, bytes)
+  assert.equal(body.locked, false)
+})
+
 test('canonical downloader fails closed on URL, authentication, length, hash and HTTP errors', async () => {
   await assert.rejects(fetchCanonicalModel({ identity }), /PACKAGED_MODEL_URL is required/u)
   await assert.rejects(fetchCanonicalModel({ identity, url: 'http://models.example/canonical.ort' }), /must use HTTPS/u)

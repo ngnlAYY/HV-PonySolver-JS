@@ -58,6 +58,17 @@ test('parseModelManifest can parse integrity-only manifests for release scripts'
   assert.equal(manifest.sha256, sha256.toLowerCase())
 })
 
+test('an optional MODEL_VERSION must still be nonempty when present', () => {
+  assert.throws(
+    () =>
+      parseModelManifest(
+        `export const MODEL_VERSION = ''; export const MODEL_INTEGRITY = { byteLength: 3, sha256: '${sha256}' }`,
+        { requireVersion: false },
+      ),
+    /Unable to read MODEL_VERSION/,
+  )
+})
+
 test('parseModelManifest supports quoted integrity property names', () => {
   const manifest = parseModelManifest(
     `export const MODEL_INTEGRITY = { "byteLength": 3, "sha256": '${sha256}' } as const`,
@@ -67,6 +78,42 @@ test('parseModelManifest supports quoted integrity property names', () => {
   assert.equal(manifest.version, null)
   assert.equal(manifest.byteLength, 3)
   assert.equal(manifest.sha256, sha256.toLowerCase())
+})
+
+test('parseModelManifest rejects properties that can replace the declared integrity fields', () => {
+  for (const replacement of [
+    '...{ byteLength: 4 }',
+    '...overrides',
+    "['byteLength']: 4",
+    '[fieldName]: 4',
+    'get byteLength() { return 4 }',
+    'byteLength() { return 4 }',
+    'byteLength',
+    'byteLength: 4',
+    `sha256: '${'b'.repeat(64)}'`,
+  ]) {
+    assert.throws(
+      () =>
+        parseModelManifest(`export const MODEL_INTEGRITY = { byteLength: 3, sha256: '${sha256}', ${replacement} }`, {
+          requireVersion: false,
+          sourcePath: 'fixture/model.ts',
+        }),
+      /(?:Invalid|Duplicate) MODEL_INTEGRITY(?:\.(?:byteLength|sha256))? in fixture\/model\.ts/,
+      replacement,
+    )
+  }
+})
+
+test('parseModelManifest ignores nested declarations and decodes static property names', () => {
+  const manifest = parseModelManifest(`
+    function unrelated() {
+      const MODEL_VERSION = 'nested'
+      const MODEL_INTEGRITY = { byteLength: 999, sha256: '${'0'.repeat(64)}' }
+    }
+    export const MODEL_VERSION = 'model'
+    export const MODEL_INTEGRITY = { 'byte\\u004cength': 3, sha256: '${sha256}' }
+  `)
+  assert.deepEqual(manifest, { version: 'model', byteLength: 3, sha256: sha256.toLowerCase() })
 })
 
 test('parseModelManifest ignores decoy manifest literals in comments and strings', () => {

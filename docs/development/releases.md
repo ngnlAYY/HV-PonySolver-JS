@@ -30,6 +30,16 @@ canonical 下载 URL 与 Bearer 来自受保护配置。下载器在发送前校
 
 自动 CI 在同一 workflow/event/ref 下取消旧运行；手动运行使用独立并发组，同组串行且不被 push 抢占。每个 job 保留独立超时。
 
+### CI 故障定位
+
+先定位首个失败 job/step，再判断后续 skipped 是依赖阻断还是独立失败：
+
+- `Security audit`：按公告升级最小兼容补丁，同时更新根声明、override 和锁文件；保留 `audit:high`、7 天发布等待与 trust policy，不用忽略公告或降低阈值换取绿灯。
+- CodeQL 提示 `Code scanning is not enabled for this repository`：检查仓库可见性、Code Security 许可与组织策略。公开仓库可使用免费 Code Scanning；个人私有仓库不能仅增加 workflow token 权限解决。改变可见性或购买许可须明确授权，不关闭上传或跳过发布门禁。
+- CodeQL 执行成功后仍须检查新分析及 open alerts。旧提交重跑只证明该提交与仓库设置；未提交的本地修复不在远程证据中。
+
+平台前提见 [GitHub 私有仓库启用说明](https://docs.github.com/en/code-security/reference/code-scanning/troubleshoot-analysis-errors/private-repository-enablement)。
+
 ## Model Worker 部署工作流
 
 [.github/workflows/deploy-cloudflare-model-worker.yml](../../.github/workflows/deploy-cloudflare-model-worker.yml) 仅手动触发，生产 job 只在 `refs/heads/main` 运行，并绑定 `production-model-worker` Environment；其他 ref 在读取受保护 secrets 前跳过。

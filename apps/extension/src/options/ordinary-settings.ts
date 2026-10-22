@@ -212,12 +212,19 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
   let pendingSaves = 0
   let saveGeneration = 0
   let saveTail: Promise<void> = Promise.resolve()
+  let inFlightSave: SaveIntent | null = null
   saveButton.disabled = true
 
-  function syncDirtyFields(): void {
+  function isFieldDirty(field: OrdinaryField): boolean {
+    const value = fields[field].read()
     const referenceValues = loaded ? baselineValues : initialValues
+    const pendingValue = inFlightSave?.fields.get(field)?.storageValue
+    return value !== referenceValues.get(field) || (pendingValue !== undefined && value !== pendingValue)
+  }
+
+  function syncDirtyFields(): void {
     for (const field of ordinaryFields) {
-      if (fields[field].read() === referenceValues.get(field)) {
+      if (!isFieldDirty(field)) {
         dirtyFields.delete(field)
       } else {
         dirtyFields.add(field)
@@ -233,8 +240,7 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
     if (!loaded) {
       editedBeforeLoad.add(field)
     }
-    const referenceValues = loaded ? baselineValues : initialValues
-    if (fields[field].read() === referenceValues.get(field)) {
+    if (!isFieldDirty(field)) {
       dirtyFields.delete(field)
     } else {
       dirtyFields.add(field)
@@ -337,7 +343,10 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
           if (generation !== saveGeneration) {
             return
           }
+          // 已启动的写入不能撤销；后续提交即使改回旧 baseline，也须覆盖这个在途值。
+          inFlightSave = intent
           await storageSet(intent.values)
+          inFlightSave = null
           commitSaveIntent(intent)
           if (generation === saveGeneration) {
             status.set('设置已保存；已打开的游戏页面刷新后应用全部设置')
@@ -347,6 +356,10 @@ export function installOrdinarySettingsController(status: OptionsStatus): Ordina
             status.set(formatErrorMessage(error), true)
           }
         } finally {
+          if (inFlightSave === intent) {
+            inFlightSave = null
+            syncDirtyFields()
+          }
           pendingSaves -= 1
           if (pendingSaves === 0) {
             saveButton.disabled = !loaded

@@ -44,7 +44,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 用户脚本和扩展可依赖共用包，彼此不得导入源码；Worker 只依赖 `shared` 纯契约，不导入浏览器代码。
 - 超时、面板、模型资产与协议常量由[权威模块](docs/architecture/overview.md#权威模块与变更入口)管理，不在调用方复制。
 - 共用包保留显式 exports；新增公共子路径先确认调用者，不恢复通配导出或以深层相对路径绕过边界。
-- 跨包导入或移动文件后运行 `architecture:check`。缺失受保护目录须失败关闭，反向类型依赖同样检查，包括 `import type`、`import('…').Type` 和 `typeof import('…')`。
+- 跨包导入或移动文件后运行 `architecture:check`。缺失受保护目录须失败关闭；覆盖 `.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs`、静态模板 import、require/import-equals，以及反向类型依赖 `import type`、`import('…').Type`、`typeof import('…')`。
 
 ## 浏览器端关键不变量
 
@@ -59,7 +59,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 同一验证码的同类失败须冷却或去重，避免日志和面板无界重复。冷却使用同页单调时钟；准备与 detect 阶段的永久模型错误都不随冷却结束或提交按钮启用而恢复，仅目标或已提交凭据变化可重试。
 - App 观察当前 documentElement，覆盖 body 替换与暂时缺失；验证码选择器的 `id/name` 补齐须补扫，移除时按旧活动目标即时取消。JPX 等脚本清除扫描 timer 后，相关 mutation 重挂扫描并保留原单调时钟截止时间，不因持续变化无限延期；销毁后迟到回调不得重启。
 - 自动模式每题只作一次原生提交；取消、超时、路由或目标变化后旧轮次停止点击/提交。观察器先取消变化或移除的活动目标，再防抖扫描；旧初始化迟到结算不得阻塞新目标或覆盖状态。处理中仅 URL 变化时，旧轮次结算后也须补扫当前有效目标，不依赖额外 DOM mutation。
-- 目标快照从准备前包含解析后的表单 action、原生提交控件实际 action 和控件类型；准备、推理或设置读取时发生变化即令旧任务失效。`formaction` 不得绕过同源约束。
+- 目标快照从准备前包含解析后的表单 action、原生提交控件实际 action、控件类型及实际 form 归属；准备、推理或设置读取时发生变化即令旧任务失效。观察 `form` 属性的失联/恢复，等价显式关联不重启；`formaction` 不得绕过同源约束。
 - 图片快照包含选源声明，`srcset`/`sizes`/`picture` 变化先取消旧轮次；响应式选源未就绪不回退旧图，加载完成补扫。设置读取须可取消且有界，未决 GM 读取不得阻塞新目标。
 
 ### 状态面板
@@ -69,7 +69,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 历史总耗时从模型准备前起算，自动模式截至提交点击，手动模式截至结果记录；识别阶段单独统计。持续时间用同页单调时钟，显示时刻用本地时间；取消/过期目标不写完成状态。
 - 状态、日志和历史有上限，重复错误聚合。新历史按每世界追加序号排序/裁剪，不由系统时间回拨决定新旧；旧记录不强迁移。保存失败回滚到已保存历史并报错。
 - 异步历史裁剪只依据已提交快照，未决乐观写入不能挤掉已保存记录；快照不完整则跳过删除。用户脚本用同源 localStorage 独立键追加，有效旧根只读兼容，不恢复整根 JSON 读改写。每世界最多读取 50 条，稳定追加后裁剪；并发可暂时超出物理数量。
-- 使用安全 DOM API；新增 `innerHTML`、动态代码等危险调用触发门禁，原则上不加白名单。`Function()` 与 `new Function()` 必须同样拒绝。
+- 使用安全 DOM API；新增 `innerHTML`、动态代码等危险调用触发门禁，原则上不加白名单。`Function()` 与 `new Function()`，以及全局/静态 computed 访问形式必须同样拒绝。
 
 ### 平台、存储与网络
 
@@ -77,26 +77,26 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 客户端保存和发送 Key 保留验证过的原始大小写，只去除首尾空白；服务端额度身份规范化不变。下载脚本的配置校验与错误链不得回显 URL、Bearer 或受保护值。
 - GM Key 新设置/清除先淘汰未写入的旧验证，不能让迟到验证恢复已清除或覆盖新 Key。实际提交后才取消并等待旧未完成初始化，再恢复当前失败目标；已就绪会话复用。取消输入、验证或存储失败不恢复，旧提交和销毁后回调不得唤醒旧 App。
 - 扩展 Key 事务提交独立驱动共享 Host 的同类恢复，再通知内容页，不依赖原请求成功响应。调用方取消仍报告取消，不能声称撤销已提交变更；提交前回滚不通知，关闭后的 Host 不复活，已就绪会话可复用。
-- 扩展 Key IndexedDB 的异常 `close` 与 `versionchange` 均使旧连接和未决事务失效，下次操作重开；旧连接迟到事件不得影响新连接。普通设置首次加载前的用户编辑身份独立于字段值，改回初始显示值仍不能被迟到快照覆盖。
+- 扩展 Key IndexedDB 的异常 `close` 与 `versionchange` 均使旧连接和未决事务失效，下次操作重开；旧连接迟到事件不得影响新连接。普通设置首次加载前的用户编辑身份独立于字段值，改回初始显示值仍不能被迟到快照覆盖；保存 dirty 同时比较已提交与在途值，回退提交和失败后的重复提交不得丢失。
 - 内容设置镜像按 key 合并初始化变更，限制超时、取消和不同 key 数量。快照失败清理监听器；预取消不读快照或监听。销毁后不启动排队写入/删除，已发起调用按真实结果结算。历史解析缓存观察外部写入并保留写后最终校对。
 - 原生 `fetch` 通过已有解析辅助函数调用，保留接收者，避免 `Illegal invocation`。
 - 消息严格校验 schema、来源、大小、超时和取消，`unknown` 不直接断言可信。Broker 只用实际 `sender.url`，不以 `sender.tab.url` 兜底；提供的 `sender.origin` 须一致且非 opaque，提供 `frameId` 时须为 0。内容仅限两个 Hentaiverse HTTPS 标准端口 origin，设置仅限本扩展设置页。
 - Port 断连在回调内经平台助手同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。BFCache 断连取消未决请求，恢复后按需连接，不自动重放下载或 Key 操作。Offscreen 同一空闲代际的确认不重置关闭重试次数或退避预算，新活动/代际才恢复预算；新 epoch 接管已空闲文档须迁移剩余通知，取消后迟到创建也须独立有界 claim，不重放原请求。
 - 图片消息有明确上限；HTTP Content-Type 严格校验后规范化基础 MIME，消息保持精确白名单。排队 detect 取消即移除并释放图片，不等队头。模型用可转移 `ArrayBuffer`，不改成无界 Base64 或重复拷贝。
 - 识别遵循 latest-wins，迟到旧结果不覆盖新状态。图片、模型和 Runtime 共用有界字节读取；未知长度在上限内增长自有缓冲并即时复制，不保留任意分块或外部大缓冲视图。
-- 浏览器和 Worker 流取消仅尽力清理，不等待可能挂起的取消 Promise，不覆盖原 HTTP、完整性或调用方取消错误。
+- 浏览器和 Worker 流取消仅尽力清理，不等待可能挂起的取消 Promise，不覆盖原 HTTP、完整性或调用方取消错误。图片 fetch/R2 读取超时后的迟到正文也须清理；缓存超时须释放取消监听器，用户脚本模型取消贯穿 GM 读取、正文和摘要，不重复包装流。
 
 ## 模型、运行时与扩展产物
 
 资产身份与更新见[Runtime](docs/onnx-runtime.md)，缓存事务见[缓存专题](docs/model-cache-strategy.md)，打包见[扩展专题](docs/browser-extension.md)。
 
-- ORT 模型/WASM 的文件名、URL、对象键、长度和 SHA-256 是原子契约；替换时同步清单、Worker 配置、构建器、测试和文档。源码资产解析必须校验完整 initializer，不得截取对象字面量后忽略继续求值的后缀。
+- ORT 模型/WASM 的文件名、URL、对象键、长度和 SHA-256 是原子契约；替换时同步清单、Worker 配置、构建器、测试和文档。源码资产解析必须校验完整 initializer 与直接唯一属性，不得忽略后缀求值、spread/computed 覆盖或 getter。
 - 模型 GET `403` 是永久 Key 拒绝，不作瞬时自动重试；提示不含 Key、URL 或正文，凭证提交后可走原恢复流程。内置资产确定性完整性失败跨 Worker 保留永久分类。
 - 模型/WASM 拒绝重定向，校验最大、声明、实际长度及 SHA-256；失败内容不缓存。远程扩展完整读取、校验并成功写入 IndexedDB 后才确认下载。
 - 模型字节与回执元数据在同一初始事务内绑定同一写入身份；确认后只更新匹配元数据，旧确认不覆盖新模型。
 - 缓存关闭、IndexedDB `versionchange`/异常 `close`、取消和超时传播到确认请求；晚到结果不清回执或标记已确认，不能撤销服务端已处理的确认。异常关闭清除连接，下次操作重新打开；旧连接迟到事件不得关闭新连接。
 - 内置构建只接受固定模型输入；产物审计模型身份、CSP、权限、Host、动态导入和远程可执行代码。JS、Worker、ORT glue、WASM 均随包分发，不允许远程执行。
-- 完整审计 MV3 后台、设置、action、content 和 CSP，拒绝未授权可选权限、外部连接与 sandbox。HTML 包括嵌套 template，不含内联事件、可执行 URL、srcdoc 或 base 覆写。
+- 完整审计 MV3 后台、设置、action、content 和 CSP，拒绝未授权可选权限、外部连接与 sandbox。HTML 包括嵌套 template，不含内联事件、规范化后的 javascript/data/vbscript 可执行 URL、srcdoc 或 base 覆写。
 - 远程包不含 `.ort`；内置包恰含清单声明的一个 `.ort`。不得声明 `web_accessible_resources` 或图片资源，必要变更须同步威胁模型、审计、测试和文档。
 - ZIP 固定本地日历字段，不把 UTC 时间点交给按本地时间编码的归档器；相同输入跨时区字节与 SHA-256 一致。
 - 包内按 `background/`、`content/`、`options/`、Chromium `offscreen/`、`runtime/` 分组，内置另有 `model/`，两份 JSON 清单在目标根。入口由 `apps/extension/src/platform/extension-paths.ts` 的 `EXTENSION_PATHS` 管理，变更同步清单、URL、来源、审计、浏览器脚本和文档。
@@ -111,7 +111,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 回执重复确认幂等；未知、失效或未完成回执不计次，并发不能突破月度上限。
 - 关闭额度时显示未启用/无限制，不伪造有限剩余量。确认请求格式正确返回 `409`，缺失/畸形回执返回 `400`，不伪造成功。
 - 模型、额度、公开 Runtime 各自维护 CORS 方法、头与公私策略，不合并成宽泛全局常量。HEAD、OPTIONS、诱饵和 Runtime 不计次；模型 `no-store`，内容寻址 Runtime 可长期 immutable。
-- R2 缺失或完整性异常失败关闭，不回退其他对象。DO 绑定、类导出、迁移是持久状态契约，回滚不可删除。
+- R2 缺失或完整性异常失败关闭，不回退其他对象。日志错误名称使用固定分类，不能信任可变 `Error.name` 或其 getter。DO 绑定、类导出、迁移是持久状态契约，回滚不可删除。
 
 ## 编码与文档规范
 
@@ -173,7 +173,7 @@ git diff --check
 
 - Actions 固定完整 40 位 commit SHA，Docker 固定完整 `sha256`，由 `assert-pinned-actions.mjs` 校验。同行 flow 中每个 `uses` 都检查或明确拒绝不支持的显式键形式，quoted 键值先解码；纯标量不当配置，不能可靠识别的相关语法拒绝，checkout 凭据字段不借用相邻步骤或字符串。
 - CI 修改核对真实 job 命令，不漏根 Node 测试；合并 job/workflow 保留最小权限、条件、发布门禁及 Code Scanning 连续性。
-- 扩展 artifact/Release 显式依赖本次 `codeql` 成功。完整 ZIP 的首次上传（含 job 间传递）也须通过发布授权及全部所需门禁；Android 校验在 canonical 构建 job 内对本地同一 ZIP 完成。分析成功不等于无告警；修复后核对新分析及告警实例。
+- 扩展 artifact/Release 显式依赖本次 `codeql` 成功。完整 ZIP 的首次上传（含 job 间传递）也须通过发布授权及全部所需门禁；Android 校验在 canonical 构建 job 内对本地同一 ZIP 完成。桌面证据的 tree.fileCount 必须为正安全整数。分析成功不等于无告警；修复后核对新分析及告警实例。仓库可见性/Code Security 许可异常不以跳过扫描处理。
 - 扩展 Release 在全部门禁后原子创建绑定 `GITHUB_SHA` 的新标签，再以 `--verify-tag` 发布；已有标签或 GitHub API 失败立即停止，不以查询失败推定标签缺失。标签创建后的发布失败保留标签，不自动删除或改绑。
 - Worker 默认不部署，仅明确允许发布的手动输入且 secrets 完整时部署。额度开关属于部署配置，无限制时客户端显示未启用。
 

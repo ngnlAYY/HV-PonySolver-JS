@@ -290,23 +290,21 @@ export class IndexedDbModelStore {
       void Promise.resolve(promise).catch(() => undefined)
       return Promise.reject(error)
     }
-    const controlSignals: AbortSignal[] = context.signal
-      ? [context.signal, context.lifecycleSignal]
-      : [context.lifecycleSignal]
-    const controlled = raceAbort(promise, controlSignals, () => this.operationControlError(), {
-      onAbort: cancel,
-    })
-    let timeoutId: ReturnType<typeof setTimeout> | undefined
-    const deadlineRace = new Promise<never>((_resolve, reject) => {
-      timeoutId = setTimeout(
-        () => {
-          cancel()
-          reject(new Error(timeoutMessage))
-        },
-        Math.max(0, context.deadline - Date.now()),
-      )
-    })
-    return Promise.race([controlled, deadlineRace]).finally(() => clearTimeout(timeoutId))
+    const timeoutController = new AbortController()
+    const controlSignals: AbortSignal[] = [context.lifecycleSignal, timeoutController.signal]
+    if (context.signal) controlSignals.push(context.signal)
+    const timeoutId = setTimeout(
+      () => timeoutController.abort(new Error(timeoutMessage)),
+      Math.max(0, context.deadline - Date.now()),
+    )
+    // The deadline must settle the abort race itself, releasing its listeners
+    // even when the underlying request ignores cancellation and never settles.
+    return raceAbort(
+      promise,
+      controlSignals,
+      () => (timeoutController.signal.aborted ? timeoutController.signal.reason : this.operationControlError()),
+      { onAbort: cancel },
+    ).finally(() => clearTimeout(timeoutId))
   }
 
   assertOperationActive(context: CacheOperationContext, timeoutMessage: string = '模型缓存操作超时'): void {

@@ -48,7 +48,13 @@ function parseJson(text, relativePath) {
 }
 
 async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
-  const readSource = options.readText ?? ((relativePath) => readText(repoRoot, relativePath))
+  const loadSource = options.readText ?? ((relativePath) => readText(repoRoot, relativePath))
+  // Contract and command checks share a per-run snapshot without retaining stale files across checks.
+  const sourceReads = new Map()
+  const readSource = (relativePath) => {
+    if (!sourceReads.has(relativePath)) sourceReads.set(relativePath, loadSource(relativePath))
+    return sourceReads.get(relativePath)
+  }
   const readPackage = async (relativePath) => parseJson(await readSource(relativePath), relativePath)
   const [
     rootPackageJson,

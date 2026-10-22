@@ -22,7 +22,7 @@ Worker 只从 `packages/shared` 消费纯契约；R2、KV、DO 和请求对象�
 
 `worker.fetch` 委托 `handleRequest`：读取并校验配置，按完整 pathname 精确匹配旧 ONNX、ORT、额度或公开 WASM 路由，再处理 OPTIONS、方法限制和业务请求。未知路径返回 404，方法不符返回带 `Allow` 的 405；具体矩阵见 [HTTP 参考](../reference/model-worker-http.md#响应矩阵)。
 
-OPTIONS 不做 Key/额度操作。模型和额度使用受限来源策略，WASM 成功响应和预检使用公开策略。顶层异常返回通用 500；日志只记路由和错误类别，不回显 Key、摘要、对象身份或底层错误文本。
+OPTIONS 不做 Key/额度操作。模型和额度使用受限来源策略，WASM 成功响应和预检使用公开策略。顶层异常返回通用 500；日志只记路由和错误类别，不回显 Key、摘要、对象身份或底层错误文本。`Error.name` 也按不可信数据处理，仅保留固定错误名称；自定义名称或抛错 getter 不得泄露输入或破坏通用响应。
 
 ## 鉴权与 Key 边界
 
@@ -43,7 +43,7 @@ KV 查询保留历史大小写兼容；额度身份始终以 canonical Key 的 S
 3. 对象缺失、完整性漂移或 GET 缺少 body 时返回通用 500，不回退到其他对象、不预留额度。
 4. 创建响应后执行 DO reserve，原子复核已确认数和 pending。成功才附加回执并交给客户端；拒绝返回 429/503。
 
-完整性或 reserve 失败时尽力取消已打开的 body，不等待取消 Promise，也不让清理抛错、拒绝或挂起覆盖原始错误。最终资源释放取决于流实现。
+完整性或 reserve 失败时尽力取消已打开的 body，不等待取消 Promise，也不让清理抛错、拒绝或挂起覆盖原始错误。R2 读取超过依赖截止时间后，迟到对象的 body 同样取消；不能中止已发起的 R2 绑定调用，也不为清理延迟 HTTP 失败响应。最终资源释放取决于流实现。
 
 HEAD 只读元数据，真实 HEAD 和公开 WASM 同样执行完整性预检；HEAD、诱饵、WASM 和关闭额度的模型 GET 不调用 reserve。资产的精确身份与联动步骤见 [Runtime 专题](../onnx-runtime.md)。
 

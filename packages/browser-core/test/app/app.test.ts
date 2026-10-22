@@ -1079,6 +1079,85 @@ describe('App', () => {
     expect(harness.trigger).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['answer', 'submit'] as const)(
+    'cancels preparation immediately when the %s loses its form owner and recovers after restoration',
+    async (kind) => {
+      const captcha = appendCaptcha('/form-owner.png')
+      const form = captcha.querySelector('form')!
+      form.id = 'captcha-form'
+      const control = captcha.querySelector<HTMLInputElement>(
+        kind === 'answer' ? 'input[name="riddleanswer[]"]' : '#riddlesubmit',
+      )!
+      const harness = createHarness()
+      const oldPreparation = Promise.withResolvers<void>()
+      vi.mocked(harness.detector.prepare).mockReturnValueOnce(oldPreparation.promise)
+      apps.push(harness.app)
+      harness.app.init()
+      await settleDom()
+      const oldSignal = harness.app.getAbortSignal()
+
+      control.setAttribute('form', form.id)
+      await Promise.resolve()
+      expect(oldSignal?.aborted).toBe(false)
+      control.setAttribute('form', 'missing-form')
+      await Promise.resolve()
+      expect(oldSignal?.aborted).toBe(true)
+      expect(harness.trigger).not.toHaveBeenCalled()
+
+      control.removeAttribute('form')
+      await settleDom()
+      expect(harness.detector.prepare).toHaveBeenCalledTimes(2)
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+      oldPreparation.resolve()
+      await settleDom()
+      expect(harness.trigger).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(['answer', 'submit'] as const)(
+    'retries a failed captcha when only the %s form association is restored',
+    async (kind) => {
+      const captcha = appendCaptcha('/restored-form-owner.png')
+      const control = captcha.querySelector<HTMLInputElement>(
+        kind === 'answer' ? 'input[name="riddleanswer[]"]' : '#riddlesubmit',
+      )!
+      control.setAttribute('form', 'missing-form')
+      const click = vi.spyOn(captcha.submitButton, 'click').mockImplementation(() => undefined)
+      const panel = createPanel()
+      const detector = createDetector()
+      vi.mocked(detector.detect).mockResolvedValue({
+        success: true,
+        ponies: ['TS'],
+        confidences: { TS: 0.9 },
+        detections: [],
+        candidates: [],
+      })
+      const solver = new CaptchaSolver(
+        panel,
+        detector,
+        { get: async () => new Blob(['captcha']) },
+        new AnswerSubmitter(
+          async () => [0, 0],
+          async () => [0, 0],
+        ),
+        async () => 'auto',
+      )
+      const { app } = createHarness({ panel, detector, solver })
+      apps.push(app)
+      app.init()
+      await settleDom()
+      expect(panel.addError).toHaveBeenCalledWith('答案控件不可用', expect.any(Number))
+      expect(click).not.toHaveBeenCalled()
+
+      control.removeAttribute('form')
+      await settleDom()
+      expect(detector.prepare).toHaveBeenCalledTimes(2)
+      expect(click).toHaveBeenCalledTimes(1)
+      expect(panel.addSuccess).toHaveBeenCalledTimes(1)
+      expect(panel.addError).toHaveBeenCalledTimes(1)
+    },
+  )
+
   it('rescans a suppressed initially disabled captcha when only its outer fieldset becomes enabled', async () => {
     const captcha = appendCaptcha('/initially-disabled.png')
     const fieldset = document.createElement('fieldset')

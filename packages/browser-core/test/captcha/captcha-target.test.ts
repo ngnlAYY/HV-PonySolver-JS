@@ -97,6 +97,33 @@ describe('findCaptchaTarget', () => {
     expect(isSameCaptchaTarget(beforeAnswerDisable, findCaptchaTarget())).toBe(false)
   })
 
+  it.each(['answer', 'submit'] as const)('tracks the %s form owner rather than its form attribute text', (kind) => {
+    const master = appendCandidate({ imageSrc: '/captcha.png' })
+    const form = master.querySelector('form')!
+    form.id = 'captcha-form'
+    const control = master.querySelector<HTMLInputElement>(
+      kind === 'answer' ? 'input[name="riddleanswer[]"]' : '#riddlesubmit',
+    )!
+    const initial = findCaptchaTarget()
+    control.setAttribute('form', form.id)
+    expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(true)
+
+    control.setAttribute('form', 'missing-form')
+    const unowned = findCaptchaTarget()
+    expect(control.form).toBeNull()
+    expect(isSameCaptchaTarget(initial, unowned)).toBe(false)
+
+    const otherForm = document.createElement('form')
+    otherForm.id = 'other-form'
+    document.body.appendChild(otherForm)
+    control.setAttribute('form', otherForm.id)
+    expect(control.form).toBe(otherForm)
+    expect(isSameCaptchaTarget(unowned, findCaptchaTarget())).toBe(false)
+
+    control.removeAttribute('form')
+    expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(true)
+  })
+
   it('tracks the parsed form action while treating equivalent relative and absolute URLs as stable', () => {
     appendCandidate({ imageSrc: '/captcha.png', formAction: '/submit' })
     const initial = findCaptchaTarget()

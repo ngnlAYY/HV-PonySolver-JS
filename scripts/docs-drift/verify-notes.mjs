@@ -42,7 +42,15 @@ export async function verifyNotes(repoRoot = defaultRepoRoot) {
   }
   const baseline = archiveBaseRef(process.env, event)
   // An unavailable baseline must not turn a shallow checkout into an empty archive.
-  execFileSync('git', ['rev-parse', '--verify', `${baseline}^{commit}`], { cwd: repoRoot, stdio: 'pipe' })
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--end-of-options', `${baseline}^{commit}`], {
+      cwd: repoRoot,
+      stdio: 'pipe',
+    })
+  } catch {
+    // Git diagnostics may include private environment values or configuration paths.
+    throw new Error('Notes archive check requires an accessible baseline commit')
+  }
   for (const validator of validators) {
     execFileSync(process.execPath, [resolve(import.meta.dirname, 'notes', validator)], {
       cwd: repoRoot,

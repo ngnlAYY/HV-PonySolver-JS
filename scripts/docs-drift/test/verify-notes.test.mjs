@@ -86,6 +86,35 @@ test('notes gate accepts implemented records and rejects missing alternatives or
   })
 })
 
+test('note sections inside tilde or longer backtick fences do not satisfy required prose', async () => {
+  await fixture(async (root, note) => {
+    const sectionStart = valid.indexOf('## Problem')
+    for (const [opening, closing] of [
+      ['~~~markdown', '~~~'],
+      ['````markdown\n```', '````'],
+    ]) {
+      await writeFile(note, `${valid.slice(0, sectionStart)}${opening}\n${valid.slice(sectionStart)}${closing}\n`)
+      const result = run(root)
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /missing one of|first section must be/u)
+    }
+  })
+})
+
+test('note format ignores status, proposal headings and comments within matching fences', async () => {
+  await fixture(async (root, note) => {
+    for (const [opening, closing] of [
+      ['~~~markdown', '~~~'],
+      ['````markdown\n```', '````'],
+      ['```markdown\n```not-a-closing-fence', '```'],
+    ]) {
+      await writeFile(note, `${valid}\n${opening}\nStatus: proposed\n## Proposal\n<!--\n${closing}\n`)
+      const result = run(root)
+      assert.equal(result.status, 0, result.stderr)
+    }
+  })
+})
+
 test('notes gate rejects lifecycle mismatch, invalid class and dangling note links', async () => {
   await fixture(async (root, note) => {
     await writeFile(note, valid.replace('Status: implemented', 'Status: proposed'))
@@ -105,6 +134,24 @@ test('missing decision root or unavailable archive baseline fails closed', async
     assert.notEqual(run(root, { AGENT_NOTE_ARCHIVE_BASE_REF: 'nonexistent-ref' }).status, 0)
     await rm(join(root, 'docs/decisions'), { recursive: true })
     assert.notEqual(run(root).status, 0)
+  })
+})
+
+test('notes gate hides Git diagnostics and baseline values when baseline verification fails', async () => {
+  await fixture(async (root) => {
+    const manifest = join(root, 'docs/decisions/archived/manifest.json')
+    for (const extra of [
+      { AGENT_NOTE_ARCHIVE_BASE_REF: 'public-invalid-baseline-sentinel' },
+      { GIT_CONFIG_COUNT: 'public-invalid-git-config-sentinel' },
+      { GIT_DIR: join(root, 'public-invalid-git-directory-sentinel') },
+      { PATH: join(root, 'public-unavailable-git-sentinel') },
+    ]) {
+      const result = run(root, extra)
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /Notes archive check requires an accessible baseline commit/u)
+      assert.doesNotMatch(result.stdout + result.stderr, /public-(?:invalid|unavailable)|fatal:|GIT_CONFIG_COUNT/u)
+      await assert.rejects(readFile(manifest), { code: 'ENOENT' })
+    }
   })
 })
 

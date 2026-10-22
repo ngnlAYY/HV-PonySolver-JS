@@ -265,6 +265,60 @@ describe('ordinary options settings lifecycle', () => {
     await vi.waitFor(() => expect(saveButton?.disabled).toBe(false))
   })
 
+  it.each([
+    ['success', true],
+    ['failure', true],
+    ['failure', false],
+  ] as const)(
+    'preserves the newest submit during a pending %s (restore baseline: %s)',
+    async (outcome, restoreBaseline) => {
+      const status = await installAndLoad({
+        [PANEL_POSITION_STORAGE_KEY]: '155,1240',
+        [PANEL_COMPACT_MODE_STORAGE_KEY]: '0',
+      })
+      const panelPosition = optionsElement<HTMLInputElement>('panel-position')
+      const compact = optionsElement<HTMLInputElement>('panel-compact')
+      let resolveFirst: (() => void) | undefined
+      let rejectFirst: ((error: Error) => void) | undefined
+      platformMocks.storageSet.mockReturnValueOnce(
+        new Promise<void>((resolve, reject) => {
+          resolveFirst = resolve
+          rejectFirst = reject
+        }),
+      )
+
+      panelPosition.value = '10,20'
+      panelPosition.dispatchEvent(new Event('input', { bubbles: true }))
+      compact.checked = true
+      compact.dispatchEvent(new Event('change', { bubbles: true }))
+      submitForm()
+      await vi.waitFor(() => expect(platformMocks.storageSet).toHaveBeenCalledTimes(1))
+      const desiredPosition = restoreBaseline ? '155,1240' : '10,20'
+      const desiredCompact = !restoreBaseline
+
+      panelPosition.value = desiredPosition
+      panelPosition.dispatchEvent(new Event('input', { bubbles: true }))
+      compact.checked = desiredCompact
+      compact.dispatchEvent(new Event('change', { bubbles: true }))
+      submitForm()
+      expect(status).toHaveBeenLastCalledWith('正在保存设置…')
+      if (outcome === 'success') resolveFirst?.()
+      else rejectFirst?.(new Error('first write failed'))
+
+      await vi.waitFor(() => expect(platformMocks.storageSet).toHaveBeenCalledTimes(2))
+      expect(platformMocks.storageSet).toHaveBeenLastCalledWith({
+        [PANEL_POSITION_STORAGE_KEY]: desiredPosition,
+        [PANEL_COMPACT_MODE_STORAGE_KEY]: desiredCompact ? '1' : '0',
+      })
+      await vi.waitFor(() => expect(status).toHaveBeenLastCalledWith('设置已保存；已打开的游戏页面刷新后应用全部设置'))
+      expect(panelPosition.value).toBe(desiredPosition)
+      expect(compact.checked).toBe(desiredCompact)
+      submitForm()
+      expect(status).toHaveBeenLastCalledWith('设置未修改')
+      expect(platformMocks.storageSet).toHaveBeenCalledTimes(2)
+    },
+  )
+
   it('uses parser defaults when random fallback and panel position storage are corrupt', async () => {
     await installAndLoad({
       [RANDOM_ON_FAIL_STORAGE_KEY]: 'corrupt',

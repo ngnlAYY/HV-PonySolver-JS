@@ -52,6 +52,72 @@ test('parses the custom bundle and content-addressed first-party WASM contract',
   assert.equal(manifest.wasmAsset.url, `https://models.ngnl.host/runtime/ort-wasm-simd-${wasmSha}.wasm`)
 })
 
+test('reads only the real top-level declaration and accepts harmless literal syntax', () => {
+  const misleading = "const example = 'ONNX_RUNTIME_ASSETS = { byteLength: 1 }'\n"
+  const source = `${misleading}// ONNX_RUNTIME_ASSETS = { ignored: 1 }\n${manifestSource()}`.replace(
+    "packageName: 'onnxruntime-web'",
+    '"packageName": "onnxruntime-web"',
+  )
+  assert.equal(parseOnnxRuntimeAssetsManifest(source).packageName, 'onnxruntime-web')
+  assert.equal(parseOnnxRuntimeAssetsManifest(source).externalFullRuntime.byteLength, 360_434)
+  const parenthesized = manifestSource()
+    .replace('ONNX_RUNTIME_ASSETS = {', 'ONNX_RUNTIME_ASSETS = ({')
+    .replace('} as const\n', '} as const)\n')
+  assert.equal(parseOnnxRuntimeAssetsManifest(parenthesized).externalFullRuntime.byteLength, 360_434)
+})
+
+test('rejects runtime evaluation after complete root and property initializers', () => {
+  const original = manifestSource()
+  for (const suffix of ['.bundleAsset', "['bundleAsset']", ' || {}', ' ? {} : {}', ' as const || {}']) {
+    assert.throws(
+      () => parseOnnxRuntimeAssetsManifest(original.replace('} as const\n', `}${suffix}\n`)),
+      /expected a static literal/,
+      suffix,
+    )
+  }
+  for (const expression of ['360_434 + 1', '360_434e1', "'360434'", '-1']) {
+    const source = original.replace('byteLength: 360_434', `byteLength: ${expression}`)
+    assert.throws(() => parseOnnxRuntimeAssetsManifest(source), /Invalid|exceeds/, expression)
+  }
+  assert.throws(
+    () =>
+      parseOnnxRuntimeAssetsManifest(
+        original.replace('  },\n  bundleAsset:', '  }.externalFullRuntime,\n  bundleAsset:'),
+      ),
+    /expected a static literal/,
+  )
+})
+
+test('rejects spreads, computed properties, getters, shorthand, and duplicates at every object boundary', () => {
+  for (const extra of [
+    '...{ byteLength: 1 },',
+    "['byteLength']: 1,",
+    'get byteLength() { return 1 },',
+    'byteLength,',
+    'byteLength: 1,',
+    '__proto__: {},',
+  ]) {
+    const source = manifestSource().replace('    byteLength: 360_434,', `    byteLength: 360_434,\n    ${extra}`)
+    assert.throws(() => parseOnnxRuntimeAssetsManifest(source), /expected a direct property|duplicate or special/)
+  }
+  const rootSpread = manifestSource().replace('} as const', '  ...{},\n} as const')
+  assert.throws(() => parseOnnxRuntimeAssetsManifest(rootSpread), /expected a direct property/)
+})
+
+test('rejects missing, duplicated, mutable, and malformed manifest declarations', () => {
+  for (const source of [
+    '',
+    `${manifestSource()}\n${manifestSource()}`,
+    manifestSource().replace('export const ', 'export let '),
+    'export const ONNX_RUNTIME_ASSETS;',
+    'export const ONNX_RUNTIME_ASSETS = {',
+    "export const ONNX_RUNTIME_ASSETS = 'not an object'",
+    'function example() { const ONNX_RUNTIME_ASSETS = {} }\n',
+  ]) {
+    assert.throws(() => parseOnnxRuntimeAssetsManifest(source), /ONNX_RUNTIME_ASSETS/)
+  }
+})
+
 test('rejects non-content-addressed WASM filenames', () => {
   assert.throws(
     () =>

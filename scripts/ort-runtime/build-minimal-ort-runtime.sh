@@ -47,7 +47,7 @@ cleanup_js_build_root() {
   remove_build_paths "$JS_BUILD_ROOT"
 }
 
-if [[ "${1:-}" == "--install" ]]; then
+if [[ $# -eq 1 && "${1:-}" == "--install" ]]; then
   INSTALL=1
 elif [[ $# -gt 0 ]]; then
   printf 'Usage: %s [--install]\n' "$0" >&2

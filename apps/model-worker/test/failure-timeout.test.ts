@@ -194,6 +194,46 @@ describe('failure-timeout', () => {
     }
   })
 
+  it.each(['model', 'runtime'] as const)(
+    'cancels a late %s R2 body after returning the timeout error',
+    async (route) => {
+      vi.useFakeTimers()
+      try {
+        const fixture = createModelFixture()
+        const env = createEnv(fixture)
+        const key = route === 'model' ? fixture.decoyModelObjectKey : fixture.runtimeWasmObjectKey
+        const object = await env.MODEL_BUCKET.get(key)
+        if (!object) throw new Error('missing fixture')
+        const cancel = vi.fn(() => new Promise<void>(() => undefined))
+        Object.defineProperty(object, 'body', { value: new ReadableStream({ cancel }) })
+        let resolveObject: ((value: R2ObjectBody | null) => void) | undefined
+        vi.spyOn(env.MODEL_BUCKET, 'get').mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              resolveObject = resolve
+            }),
+        )
+        const request =
+          route === 'model' ? modelRequest(fixture, 'GET') : assetRequest(fixture.publicRuntimeWasmPath, 'GET')
+        const pending = fetchWorker(request, env)
+
+        await vi.advanceTimersByTimeAsync(MODEL_WORKER_DEPENDENCY_TIMEOUT_MS)
+        const response = await pending
+        expect(response.status).toBe(500)
+        expect(await response.text()).toBe('Internal Server Error')
+        expect(cancel).not.toHaveBeenCalled()
+
+        resolveObject?.(object)
+        await vi.advanceTimersByTimeAsync(0)
+
+        expect(cancel).toHaveBeenCalledOnce()
+        expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedPaths).toEqual([])
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
   it('returns a retryable 503 when quota storage fails', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {
@@ -283,7 +323,7 @@ describe('failure-timeout', () => {
         authorizedModelRequest(fixture, 'GET'),
         createEnv(fixture, {
           keyValues: new Map<string, string>([[fixture.validKey, '1']]),
-          quotaError: new Error(`quota failed for ${fixture.validKey}`),
+          quotaError: Object.assign(new Error(`quota failed for ${fixture.validKey}`), { name: fixture.validKey }),
         }),
       )
 
@@ -292,6 +332,7 @@ describe('failure-timeout', () => {
       const logged = warnSpy.mock.calls.flat().join(' ')
       expect(logged).toContain('route=legacy-model')
       expect(logged).toContain('errorKind=quota-storage-unavailable')
+      expect(logged).toContain('errorName=Error')
       expect(logged).not.toContain('quota failed')
       expect(logged).not.toContain(fixture.validKey)
     } finally {
@@ -305,7 +346,11 @@ describe('failure-timeout', () => {
       const fixture = createModelFixture()
       const response = await fetchWorker(
         modelRequest(fixture, 'GET'),
-        createEnv(fixture, { bucketGetError: new Error(`R2 GET failed for ${fixture.decoyModelObjectKey}`) }),
+        createEnv(fixture, {
+          bucketGetError: Object.assign(new Error(`R2 GET failed for ${fixture.decoyModelObjectKey}`), {
+            name: fixture.decoyModelObjectKey,
+          }),
+        }),
       )
 
       expect(response.status).toBe(500)
@@ -320,6 +365,38 @@ describe('failure-timeout', () => {
       errorSpy.mockRestore()
     }
   })
+
+  it.each(['throwing-name', 'non-string-name', 'non-error'] as const)(
+    'keeps dependency %s failures generic without breaking the error response',
+    async (kind) => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const fixture = createModelFixture()
+        const env = createEnv(fixture)
+        const failure =
+          kind === 'non-error'
+            ? { name: fixture.decoyModelObjectKey }
+            : Object.defineProperty(new Error('dependency failed'), 'name', {
+                get() {
+                  if (kind === 'throwing-name') throw new Error(fixture.decoyModelObjectKey)
+                  return { toString: () => fixture.decoyModelObjectKey }
+                },
+              })
+        vi.spyOn(env.MODEL_BUCKET, 'get').mockRejectedValue(failure)
+
+        const response = await fetchWorker(modelRequest(fixture, 'GET'), env)
+
+        expect(response.status).toBe(500)
+        expect(await response.text()).toBe('Internal Server Error')
+        expect(errorSpy).toHaveBeenCalledOnce()
+        const logged = errorSpy.mock.calls.flat().join(' ')
+        expect(logged).toContain(`errorName=${kind === 'non-error' ? 'unknown' : 'Error'}`)
+        expect(logged).not.toContain(fixture.decoyModelObjectKey)
+      } finally {
+        errorSpy.mockRestore()
+      }
+    },
+  )
 
   it('keeps concurrent real, decoy, and public runtime requests isolated', async () => {
     const fixture = createModelFixture()

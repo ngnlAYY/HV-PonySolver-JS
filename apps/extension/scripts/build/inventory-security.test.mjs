@@ -213,6 +213,29 @@ const unsafeHtml = [
   ['encoded JavaScript URL', '<a href="java&#x0a;script:alert(1)">Click</a>', /executable URL/u],
   ['form JavaScript URL', '<button formaction=" JAVASCRIPT:alert(1)">Click</button>', /executable URL/u],
   ['SVG JavaScript URL', '<svg><a xlink:href="javascript:alert(1)">Click</a></svg>', /executable URL/u],
+  [
+    'data HTML frame',
+    '<iframe src="data:text/html,&lt;script&gt;alert(1)&lt;/script&gt;"></iframe>',
+    /executable URL/u,
+  ],
+  [
+    'base64 data HTML link',
+    '<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">Click</a>',
+    /executable URL/u,
+  ],
+  ['encoded data URL', '<a href=" Da&#x09;Ta&#x3a;text/html,test">Click</a>', /executable URL/u],
+  [
+    'SVG data URL',
+    '<svg><a xlink:href="data:image/svg+xml,&lt;svg xmlns=&quot;http://www.w3.org/2000/svg&quot;/&gt;">Click</a></svg>',
+    /executable URL/u,
+  ],
+  [
+    'template data URL',
+    '<template><template><iframe src="data:text/html,test"></iframe></template></template>',
+    /executable URL/u,
+  ],
+  ['VBScript URL', '<a href="vbscript:msgbox(1)">Click</a>', /executable URL/u],
+  ['encoded VBScript URL', '<button formaction=" Vb&#x0a;ScRiPt&#x3a;msgbox(1)">Click</button>', /executable URL/u],
   ['inline frame', '<iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;"></iframe>', /srcdoc/u],
   ['base override', '<base href="https://untrusted.invalid/"><script src="options.js"></script>', /base/u],
   ['template script', '<template><template><script>alert(1)</script></template></template>', /inline script/u],
@@ -247,6 +270,9 @@ test('does not mistake inert text, data attributes or comments for executable HT
       `
       <!-- onclick="alert(1)" -->
       <p data-note="javascript:example">onclick is not allowed</p>
+      <p data-source="data:text/html,test" data-note="vbscript:example">Plain scheme text</p>
+      <a href="#settings">Settings</a>
+      <a href="https://example.invalid/help">Help</a>
       <template><span>Plain template content</span></template>
       <link href="options.css" rel="stylesheet">
       <script src="options.js"></script>

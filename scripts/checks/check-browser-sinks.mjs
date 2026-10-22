@@ -14,8 +14,8 @@ const allowedSinks = new Map([['apps/userscript/src/inference/onnx-worker-extern
 
 if (isDirectRun(import.meta.url)) {
   try {
-    const { repoRoot, explicitRepoRoot } = parseRepoRootArgs(process.argv.slice(2), defaultRepoRoot)
-    await checkBrowserSinks(repoRoot, { requireSourceDir: explicitRepoRoot })
+    const { repoRoot } = parseRepoRootArgs(process.argv.slice(2), defaultRepoRoot)
+    await checkBrowserSinks(repoRoot, { requireSourceDir: true })
     process.stdout.write('Browser sink check passed\n')
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
@@ -56,7 +56,7 @@ async function checkBrowserSinks(repoRoot = defaultRepoRoot, { requireSourceDir 
 }
 
 function findSinkKinds(source, fileName = 'browser-sink-source.ts') {
-  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, readScriptKind(fileName))
+  const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, readScriptKind(fileName))
   const sinks = []
 
   function visit(node) {
@@ -82,6 +82,7 @@ function readScriptKind(fileName) {
       return ts.ScriptKind.JSX
     case '.js':
     case '.mjs':
+    case '.cjs':
       return ts.ScriptKind.JS
     default:
       return ts.ScriptKind.TS
@@ -97,22 +98,16 @@ function isAssignmentOperator(kind) {
 }
 
 function isInnerHtmlTarget(node) {
-  if (ts.isPropertyAccessExpression(node)) {
-    return node.name.text === 'innerHTML'
-  }
-  return (
-    ts.isElementAccessExpression(node) &&
-    ts.isStringLiteralLike(node.argumentExpression) &&
-    node.argumentExpression.text === 'innerHTML'
-  )
+  return readPropertyName(unwrapExpression(node)) === 'innerHTML'
 }
 
 function isFunctionConstructorCall(node) {
-  return (
-    (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
-    ts.isIdentifier(node.expression) &&
-    node.expression.text === 'Function'
-  )
+  if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return false
+  const expression = unwrapExpression(node.expression)
+  if (ts.isIdentifier(expression)) return expression.text === 'Function'
+  if (readPropertyName(expression) !== 'Function') return false
+  const receiver = unwrapExpression(expression.expression)
+  return ts.isIdentifier(receiver) && ['globalThis', 'window', 'self'].includes(receiver.text)
 }
 
 function isImportScriptsCall(node) {
@@ -120,10 +115,30 @@ function isImportScriptsCall(node) {
 }
 
 function isImportScriptsExpression(expression) {
-  if (ts.isIdentifier(expression)) {
-    return expression.text === 'importScripts'
+  expression = unwrapExpression(expression)
+  return ts.isIdentifier(expression)
+    ? expression.text === 'importScripts'
+    : readPropertyName(expression) === 'importScripts'
+}
+
+function readPropertyName(expression) {
+  if (ts.isPropertyAccessExpression(expression)) return expression.name.text
+  if (ts.isElementAccessExpression(expression) && ts.isStringLiteralLike(expression.argumentExpression)) {
+    return expression.argumentExpression.text
   }
-  return ts.isPropertyAccessExpression(expression) && expression.name.text === 'importScripts'
+  return null
+}
+
+function unwrapExpression(expression) {
+  while (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isAsExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isNonNullExpression(expression)
+  ) {
+    expression = expression.expression
+  }
+  return expression
 }
 
 export { allowedSinks, browserSourceDirs, checkBrowserSinks, findSinkKinds }

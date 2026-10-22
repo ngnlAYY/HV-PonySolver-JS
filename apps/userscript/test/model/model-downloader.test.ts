@@ -144,10 +144,11 @@ describe('downloadModel', () => {
     })
     controller.abort()
 
-    await expect(downloadPromise).rejects.toThrow('body aborted')
+    await expect(downloadPromise).rejects.toThrow('模型下载已取消')
+    expect(getFetchCall(fetchMock)[1].signal?.aborted).toBe(true)
   })
 
-  it('falls back to abort listeners when AbortSignal.any is unavailable', async () => {
+  it('forwards cancellation without requiring AbortSignal.any', async () => {
     const abortSignalConstructor = AbortSignal as typeof AbortSignal & { any?: typeof AbortSignal.any }
     const originalAny = abortSignalConstructor.any
     Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: undefined })
@@ -166,7 +167,8 @@ describe('downloadModel', () => {
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
       controller.abort()
 
-      await expect(downloadPromise).rejects.toThrow('body aborted')
+      await expect(downloadPromise).rejects.toThrow('模型下载已取消')
+      expect(getFetchCall(fetchMock)[1].signal?.aborted).toBe(true)
     } finally {
       Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: originalAny })
     }
@@ -200,18 +202,18 @@ describe('downloadModel', () => {
 
       const downloadPromise = downloadModel(controller.signal)
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-      // The abort fires after the fetch promise resolved; the polyfill must
-      // still forward it into the pending body read.
+      // Caller cancellation must still reach fetch after response headers arrive.
       await Promise.resolve()
       controller.abort()
 
-      await expect(downloadPromise).rejects.toThrow('body aborted')
+      await expect(downloadPromise).rejects.toThrow('模型下载已取消')
+      expect(getFetchCall(fetchMock)[1].signal?.aborted).toBe(true)
     } finally {
       Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: originalAny })
     }
   })
 
-  it('releases the polyfilled abort listeners once the body finishes reading', async () => {
+  it('releases caller abort listeners after completion without AbortSignal.any', async () => {
     const abortSignalConstructor = AbortSignal as typeof AbortSignal & { any?: typeof AbortSignal.any }
     const originalAny = abortSignalConstructor.any
     Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: undefined })
@@ -229,11 +231,46 @@ describe('downloadModel', () => {
       const buffer = await downloadModel(controller.signal, { integrity: TEST_INTEGRITY, verifyIntegrity: false })
 
       expect([...new Uint8Array(buffer)]).toEqual([1, 2, 3])
-      // Every abort listener attached to the caller signal (deadline guard and
-      // polyfill forwarders) must be removed again once the body is consumed.
+      // The shared deadline releases its caller listener after the operation settles.
       expect(removeSpy.mock.calls.length).toBe(addSpy.mock.calls.length)
     } finally {
       Object.defineProperty(abortSignalConstructor, 'any', { configurable: true, value: originalAny })
     }
+  })
+
+  it('cancels a pending saved-key read before any network request', async () => {
+    const { promise: accessKeyPromise, resolve: resolveAccessKey } = Promise.withResolvers<string>()
+    getModelAccessKey.mockReturnValueOnce(accessKeyPromise)
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3])))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+    const pending = downloadModel(controller.signal, { integrity: TEST_INTEGRITY })
+    await vi.waitFor(() => expect(getModelAccessKey).toHaveBeenCalled())
+
+    controller.abort()
+    await expect(pending).rejects.toThrow('模型下载已取消')
+    resolveAccessKey('late-key')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('cancels digest verification without accepting a late result', async () => {
+    const { promise: digestPromise, resolve: resolveDigest } = Promise.withResolvers<ArrayBuffer>()
+    const digest = vi.spyOn(crypto.subtle, 'digest').mockReturnValueOnce(digestPromise)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(new Uint8Array([1, 2, 3]))),
+    )
+    const controller = new AbortController()
+    const pending = downloadModel(controller.signal, { integrity: TEST_INTEGRITY })
+    await vi.waitFor(() => expect(digest).toHaveBeenCalledTimes(1))
+
+    controller.abort()
+    await expect(pending).rejects.toThrow('模型下载已取消')
+    resolveDigest(new ArrayBuffer(32))
+    await Promise.resolve()
+    await expect(pending).rejects.toThrow('模型下载已取消')
   })
 })
