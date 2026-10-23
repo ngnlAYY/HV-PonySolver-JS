@@ -25,7 +25,7 @@ Safari、其他移动浏览器、Manifest V2、商店签名和商店资料不在
 
 内置构建只接受固定输入，不接受路径/完整性覆盖或 Key 下载；清理旧 dist 前拒绝缺失、非普通文件、符号链接、长度不是 9,914,448 或 SHA-256 不符的模型。模型可从包中提取，完整性校验不提供保密性。
 
-构建职责位于 `scripts/build/`。ZIP 有界流式压缩并增量计算哈希，固定排序和本地日历时间 `1980-01-01 00:00:00`，相同输入跨时区字节一致。构建器与 geckodriver 安装器清理前拒绝仓库、cwd、home 及其祖先，包括临时目录和解析符号链接后的路径。
+构建职责位于 `scripts/build/`。ZIP 有界流式压缩并增量计算哈希，固定排序和本地日历时间 `1980-01-01 00:00:00`，相同输入跨时区字节一致。构建器与 geckodriver 安装器清理前拒绝仓库、cwd、home 及其祖先，包括临时目录和解析符号链接后的路径。目标列表逐项校验，稀疏数组在清理旧产物前拒绝。
 
 ## Build outputs and local loading
 
@@ -86,6 +86,8 @@ Firefox remote 因向模型服务发送 Bearer Key 而声明 `authenticationInfo
 
 CSP 为 `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'`，remote 追加 `connect-src 'self' https://models.ngnl.host`，packaged 为 `connect-src 'self'`。JS、module Worker、ORT glue 与 WASM 均随包分发；动态导入、远程可执行资产引用或哈希漂移使审计失败。remote 不含 `.ort`，packaged 必须且仅含清单指定模型。
 
+推理 Worker 内嵌固定上游的完整 MIT 许可，压缩产物同样保留；许可来源与 vendor 字节身份见[Runtime 专题](onnx-runtime.md#显式内置精简版)。
+
 审计锁定完整 MV3 清单：版本、后台、独立设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 和默认顶层隔离世界。拒绝 `optional_permissions`、`optional_host_permissions`、`externally_connectable`、`sandbox` 扩权；HTML 连同嵌套 template 拒绝内联脚本/事件、规范化后的 `javascript:`/`data:`/`vbscript:` URL、`srcdoc` 和 base URL 覆写。普通文本和合法本地资源不按可执行 URL 处理。
 
 ## Runtime architecture
@@ -145,6 +147,8 @@ remote 设置页在绑定处理器后才启用 Key 控件，已保存 Key 不回
 页面销毁取消操作，错误保留实际 Host/HTTP/超时/浏览器原因。仅额度查询对 Port 瞬断重连一次，其他操作不重放。
 
 packaged 设置页不打开 Key Port，Key 控件禁用并显示“当前版本已内置模型，无需配置模型 Key。”，普通设置仍可修改。
+
+设置页宽度随视口收缩，不以固定 body 最小宽度挤出窄窗口。320px 的静态布局验证不等于 Firefox Android 或最低版本验收。
 
 ## Script and test entry points
 

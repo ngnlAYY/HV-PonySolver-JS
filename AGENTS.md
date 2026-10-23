@@ -98,7 +98,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 模型/WASM 拒绝重定向，校验最大、声明、实际长度及 SHA-256；失败内容不缓存。远程扩展完整读取、校验并成功写入 IndexedDB 后才确认下载。
 - 模型字节与回执元数据在同一初始事务内绑定同一写入身份；确认后只更新匹配元数据，旧确认不覆盖新模型。
 - 缓存关闭、IndexedDB `versionchange`/异常 `close`、取消和超时传播到确认请求；晚到结果不清回执或标记已确认，不能撤销服务端已处理的确认。异常关闭清除连接，下次操作重新打开；旧连接迟到事件不得关闭新连接。
-- 内置构建只接受固定模型输入；产物审计模型身份、CSP、权限、Host、动态导入和远程可执行代码。JS、Worker、ORT glue、WASM 均随包分发，不允许远程执行。
+- 内置构建只接受固定模型输入；产物审计模型身份、CSP、权限、Host、动态导入和远程可执行代码。JS、Worker、ORT glue、WASM 均随包分发，不允许远程执行。bundled 用户脚本及扩展推理 Worker 保留上游完整 MIT 许可，压缩不得剥离；vendor 资产身份不因此改写。构建目标列表须拒绝稀疏项，校验先于旧产物清理。
 - 完整审计 MV3 后台、设置、action、content 和 CSP，拒绝未授权可选权限、外部连接与 sandbox。HTML 包括嵌套 template，不含内联事件、规范化后的 javascript/data/vbscript 可执行 URL、srcdoc 或 base 覆写。
 - 远程包不含 `.ort`；内置包恰含清单声明的一个 `.ort`。不得声明 `web_accessible_resources` 或图片资源，必要变更须同步威胁模型、审计、测试和文档。
 - ZIP 固定本地日历字段，不把 UTC 时间点交给按本地时间编码的归档器；相同输入跨时区字节与 SHA-256 一致。
@@ -156,7 +156,7 @@ git diff --check
 
 `check` 包含格式、lint、类型、工作区和根测试、文档、架构、危险调用、扩展打包、包体、覆盖率与构建。完整检查只跑一次工作区覆盖率测试及一次 `test:root`，不先运行 `check:quick` 重复普通测试；`check:quick` 仍使用普通测试。格式按忽略规则排除生成物、第三方资产与锁文件。`pnpm test` 先跑工作区再调用 `test:root`，后者以带引号的 `scripts/**/*.test.mjs` 发现根级用例；`pnpm -r test:coverage` 不含根级测试，单独运行不能替代前者或证明 CI test job 通过。
 
-测试按所有权去重：共用行为归 browser-core，应用保留适配接线与平台特有回归。删除用例须指出保留的等价行为断言；安全边界、取消/并发时序、已修缺陷和真实产物验证不能用行覆盖率替代，不降低门槛或以 skip/todo、缩窄 include 隐藏测试。具体取舍见[验证手册](docs/development/verification.md#测试归属与精简)。
+测试按所有权去重：共用行为归 browser-core，应用保留平台特有回归。删除用例须指出保留的等价行为断言；安全边界、取消/并发时序、已修缺陷和真实产物验证不能用行覆盖率替代。不复制配置字面量、脚本文字或纯转发回声作测试；实际覆盖率门槛与 include 不变，不以 skip/todo 隐藏测试。具体取舍见[验证手册](docs/development/verification.md#测试归属与精简)。
 
 - 修改用户脚本 Runtime 后分别检查 default/bundled 包体，不互相替代。
 - 修改扩展构建、安全或协议后，至少运行相关构建/E2E；远程/内置、Chromium/Firefox、最低版本/Android 各自提供证据。load-only 不证明真实模型鉴权。

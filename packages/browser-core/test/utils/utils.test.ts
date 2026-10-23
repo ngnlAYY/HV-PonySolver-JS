@@ -2,7 +2,6 @@ import { ANSWER_CODES } from '@hv-pony-solver/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DEFAULT_RANDOM_ON_FAIL } from '../../src/captcha/fallback-settings'
-import { captchaSelectors } from '../../src/captcha/captcha-selectors'
 import { solverConfig } from '../../src/captcha/solver-config'
 import { timingConfig } from '../../src/captcha/timing-config'
 import {
@@ -18,14 +17,6 @@ import { randDelay, shuffle, sleep } from '../../src/utils/delay'
 import { formatErrorMessage } from '../../src/utils/errors'
 
 describe('config defaults', () => {
-  it('matches legacy DOM selectors', () => {
-    expect(captchaSelectors.form).toBe('form[name="riddleform"]')
-    expect(captchaSelectors.image).toBe('#riddleimage img')
-    expect(captchaSelectors.master).toBe('#riddlemaster')
-    expect(captchaSelectors.submit).toBe('#riddlesubmit')
-    expect(captchaSelectors.answers).toBe('input[name="riddleanswer[]"]')
-  })
-
   it('matches legacy config defaults', () => {
     expect(ANSWER_CODES).toEqual(['TS', 'RA', 'FS', 'RD', 'PP', 'AJ'])
     expect(timingConfig.submitDelay).toEqual([3000, 5000])

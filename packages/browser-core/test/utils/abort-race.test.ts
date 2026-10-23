@@ -59,20 +59,6 @@ describe('raceAbort', () => {
     await expect(raced).rejects.toThrow('原生原因')
   })
 
-  it('keeps the promise pending while holdOnAbort is true and settles later', async () => {
-    const controller = new AbortController()
-    const operation = deferred<string>()
-    const raced = raceAbort(operation.promise, controller.signal, () => new Error('已取消'), {
-      holdOnAbort: () => true,
-    })
-
-    controller.abort()
-    await Promise.resolve()
-    operation.resolve('still settled')
-
-    await expect(raced).resolves.toBe('still settled')
-  })
-
   it('propagates an underlying rejection when no abort happens', async () => {
     const controller = new AbortController()
     const raced = raceAbort(Promise.reject(new Error('底层失败')), controller.signal, () => new Error('已取消'))

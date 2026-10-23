@@ -98,9 +98,8 @@ export async function encodeImage(
 }
 
 export function decodeImage(request: DetectRequest): Blob {
-  // The upstream isOffscreenRequest gate has already run the full isHostRequest
-  // validation; this sits on the trusted Host path, so only the detect type is
-  // re-checked here. Length and base64 shape are still validated explicitly.
+  // Broker (Firefox) or Offscreen (Chromium) already validated the full request.
+  // Keep local image checks without rescanning the request envelope.
   if (request.type !== 'detect') {
     throw new Error('验证码图片消息无效')
   }

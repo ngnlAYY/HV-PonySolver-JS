@@ -96,7 +96,7 @@ pnpm --filter @hv-pony-solver/userscript verify:onnx-runtime
 
 `build:external-runtime` 是默认 `build` 的显式别名；`verify-onnx-runtime-assets` 与 `verify:onnx-runtime` 等价。两种构建覆盖同一输出，须分别执行“构建 → 对应预算检查”，步骤见[用户脚本指南](../usage/userscript.md)。
 
-`benchmark:inference` 每次在应用 `.tmp/` 下创建独立临时目录，只清理本次目录；并发成功或失败不删除另一进程的输入/输出。此并发回归纳入用户脚本 `test` 与 `test:coverage`。
+`benchmark:inference` 每次在应用 `.tmp/` 下创建独立临时目录，只清理本次目录；并发成功或失败不删除另一进程的输入/输出。此并发回归纳入用户脚本 `test` 与 `test:coverage`。解析阶段使用生产 `parseYoloOutputTensor`，包含严格逐行验证，测试张量和维度在计时外创建；不能直接与旧宽松解析器的报告比较。
 
 旧版 ONNX 校验单独执行：
 

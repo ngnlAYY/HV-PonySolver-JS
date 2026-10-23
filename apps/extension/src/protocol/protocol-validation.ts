@@ -8,8 +8,8 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const expected = new Set(keys)
-  return Object.keys(value).length === expected.size && Object.keys(value).every((key) => expected.has(key))
+  const actualKeys = Object.keys(value)
+  return actualKeys.length === keys.length && actualKeys.every((key) => keys.includes(key))
 }
 
 export function hasAllowedKeys(
@@ -17,11 +17,9 @@ export function hasAllowedKeys(
   required: readonly string[],
   optional: readonly string[],
 ): boolean {
-  const allowed = new Set([...required, ...optional])
   return (
     required.every((key) => key in value) &&
-    Object.keys(value).length <= allowed.size &&
-    Object.keys(value).every((key) => allowed.has(key))
+    Object.keys(value).every((key) => required.includes(key) || optional.includes(key))
   )
 }
 

@@ -128,6 +128,29 @@ function result(label, values = [10, 11, 12], overrides = {}) {
   }
 }
 
+function referenceBootstrap(values, seed, resamples) {
+  let state = BigInt(seed >>> 0)
+  const rank = (sample, position) =>
+    sample.find((value) => {
+      const lower = sample.filter((candidate) => candidate < value).length
+      const equal = sample.filter((candidate) => candidate === value).length
+      return lower <= position && position < lower + equal
+    })
+  const estimates = Array.from({ length: resamples }, () => {
+    const sample = Array.from({ length: values.length }, () => {
+      state = (state * 1_664_525n + 1_013_904_223n) % 0x1_0000_0000n
+      return values[Number((state * BigInt(values.length)) / 0x1_0000_0000n)]
+    })
+    return (rank(sample, Math.floor((sample.length - 1) / 2)) + rank(sample, Math.floor(sample.length / 2))) / 2
+  })
+  return {
+    low: rank(estimates, Math.ceil(resamples * 0.025) - 1),
+    high: rank(estimates, Math.ceil(resamples * 0.975) - 1),
+    resamples,
+    seed,
+  }
+}
+
 describe('extension transport benchmark contract', () => {
   it('uses a representative matrix by default and keeps exhaustive opt-in explicit', () => {
     const representative = {
@@ -174,10 +197,6 @@ describe('extension transport benchmark contract', () => {
   it('calculates deterministic distribution and names the heap observation as a snapshot', () => {
     assert.equal(median([9, 1, 5, 3]), 4)
     assert.equal(percentile([1, 2, 3, 4, 5], 0.95), 5)
-    assert.deepEqual(
-      deterministicBootstrapCi([1, 2, 3, 4, 5], { resamples: 100, seed: 7 }),
-      deterministicBootstrapCi([1, 2, 3, 4, 5], { resamples: 100, seed: 7 }),
-    )
     const scenario = buildScenarioMatrix(config())[0]
     const summary = summarizeMeasuredSamples([
       sample(scenario, 1, snapshotProfiler(10)),
@@ -188,6 +207,34 @@ describe('extension transport benchmark contract', () => {
     assert.equal(summary.p95Ms, 3)
     assert.equal(summary.jsHeapSnapshotMaxBytes, 20)
     assert.equal('jsHeapPeakBytes' in summary, false)
+  })
+
+  it('matches an independent seeded-bootstrap oracle for odd, even and repeated samples', () => {
+    for (const seed of [0, 7, 0xffff_ffff]) {
+      for (const length of [2, 3, 4, 5, 10, 17]) {
+        const values = Object.freeze(Array.from({ length }, (_, index) => ((index * 7 + seed) % 11) - 5))
+        assert.deepEqual(
+          deterministicBootstrapCi(values, { seed, resamples: 100 }),
+          referenceBootstrap(values, seed, 100),
+        )
+      }
+    }
+  })
+
+  it('gives custom bootstrap statistics independent sample arrays', () => {
+    const samples = []
+    const snapshots = []
+    const result = deterministicBootstrapCi([1, 3, 7], {
+      resamples: 100,
+      statistic(sample) {
+        samples.push(sample)
+        snapshots.push([...sample])
+        return Math.max(...sample)
+      },
+    })
+    assert.equal(new Set(samples).size, 100)
+    assert.deepEqual(samples, snapshots)
+    assert.deepEqual(result, { low: 3, high: 7, resamples: 100, seed: 0x4856_5053 })
   })
 
   it('validates environment, raw samples, recalculated summary, and profiler fields', () => {

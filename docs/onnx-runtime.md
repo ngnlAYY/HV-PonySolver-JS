@@ -72,6 +72,8 @@ https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262a
 
 `wasmAsset.byteLength`、`wasmAsset.sha256` 与下方 R2 WASM 行一致。下载使用 `cache: force-cache`、`redirect: error`，校验失败终止初始化，不回退完整版。glue 不含 WASM，二者必须配对更新；扩展使用相同配对，但 WASM 从包内读取。
 
+完整 [MIT 许可](../apps/userscript/vendor/onnxruntime/LICENSE)取自固定上游提交。bundled 用户脚本与两种模式的扩展将其作为推理 Worker 的 banner 保留，压缩构建也不得删除；默认 external 用户脚本不额外内嵌这份许可。该声明不修改 vendor glue/WASM 的字节或哈希，也不增加扩展包根文件。
+
 ### 精简运行时供应链
 
 | 字段              | 固定值                                                             |
@@ -82,6 +84,8 @@ https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262a
 | 算子配置 SHA-256  | `2abe2e2987496ab518de97a7f4b157cec1bd1817c621d3523073034fb47591fe` |
 
 权威清单是 [ONNX_RUNTIME_ASSETS](../apps/userscript/src/inference/onnx-runtime-assets.ts)。精简构建为 CPU/WASM、SIMD、单线程和 basic minimal ORT 格式支持，不含 JSEP、WebGPU、WebNN、training、ML operators、RTTI 或 exceptions。算子/元素类型由固定 `model/yolo26n-640.onnx` 生成；`config/onnxruntime/required_operators_and_types.config` 为被忽略的可再生产物。
+
+Python 转换工具单独维护于 [requirements.in](../scripts/ort-runtime/requirements.in) 和带哈希的 [requirements.txt](../scripts/ort-runtime/requirements.txt)：ONNX `1.22.0`、ONNX Runtime `1.27.0`，bootstrap pip `26.2.0`。两个生成入口都使用精确 pip 版本及 `--require-hashes`。Python 工具升级不自动替换已采用的模型/glue/WASM；重新生成后仍按固定字节身份与转换结果验收。
 
 ## 复现与采用
 

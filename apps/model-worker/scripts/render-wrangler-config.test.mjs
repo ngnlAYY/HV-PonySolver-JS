@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, readdir, readFile, cp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 import { promisify } from 'node:util'
 
@@ -12,18 +12,6 @@ const scriptDir = dirname(fileURLToPath(import.meta.url))
 const workerDir = resolve(scriptDir, '..')
 const validKvNamespaceId = '0123456789abcdef0123456789abcdef'
 const validBucketName = 'bucket-prod'
-
-test('package coverage runs the Model Worker deployment-script tests under Node coverage', async () => {
-  const packageJson = JSON.parse(await readFile(join(workerDir, 'package.json'), 'utf8'))
-  const coverageCommand = packageJson.scripts?.['test:coverage'] ?? ''
-
-  assert.match(coverageCommand, /--experimental-test-coverage/u)
-  assert.match(coverageCommand, /scripts\/wrangler-config-renderer\.mjs/u)
-  assert.match(coverageCommand, /scripts\/wrangler-config-guard\.mjs/u)
-  assert.match(coverageCommand, /scripts\/check-deployment-contract\.mjs/u)
-  assert.match(coverageCommand, /scripts\/render-wrangler-config\.test\.mjs/u)
-  assert.match(coverageCommand, /scripts\/check-deployment-contract\.test\.mjs/u)
-})
 
 async function withTempWorker(callback, sourceWorkerDir = workerDir) {
   // 仅复制渲染器需要的源码；不接触生成配置、环境文件或 .wrangler 本地状态。
@@ -97,22 +85,34 @@ async function runValidate(wranglerConfig) {
   })
 }
 
-async function runModelWorkerVitest(env) {
-  return execFileAsync('mise', ['exec', '--', 'pnpm', 'exec', 'vitest', 'run', 'test/env.test.ts'], {
-    cwd: workerDir,
-    env: {
-      ...process.env,
-      ...env,
-    },
+async function readVitestWranglerConfig(env) {
+  return withTempWorker(async (tempWorkerDir) => {
+    const configPath = join(tempWorkerDir, 'vitest.config.ts')
+    await cp(join(workerDir, 'vitest.config.ts'), configPath)
+    const configUrl = pathToFileURL(configPath).href
+    const sourceConfigUrl = pathToFileURL(join(workerDir, 'vitest.config.ts')).href
+    await execFileAsync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        `
+          import { registerHooks } from 'node:module'
+          registerHooks({
+            resolve(specifier, context, nextResolve) {
+              const sourceContext = context.parentURL === ${JSON.stringify(configUrl)} && !specifier.startsWith('.')
+                ? { ...context, parentURL: ${JSON.stringify(sourceConfigUrl)} }
+                : context
+              return nextResolve(specifier, sourceContext)
+            },
+          })
+          await import(${JSON.stringify(configUrl)})
+        `,
+      ],
+      { cwd: tempWorkerDir, env: { PATH: process.env.PATH, ...env } },
+    )
+    return readFile(join(tempWorkerDir, '.wrangler/vitest/wrangler.toml'), 'utf8')
   })
-}
-
-function stripAnsi(value) {
-  const escape = String.fromCharCode(27)
-  return value
-    .split(escape)
-    .map((segment, index) => (index === 0 ? segment : segment.replace(/^\[[0-?]*[ -/]*[@-~]/u, '')))
-    .join('')
 }
 
 test('renderWranglerConfigFile writes generated test config from the template', async () => {
@@ -279,10 +279,19 @@ test('render-wrangler-config renders quota enforcement switch from env', async (
 })
 
 test('model-worker vitest config keeps test placeholders isolated from deploy render mode', async () => {
-  const result = await runModelWorkerVitest({ HV_PONY_SOLVER_RENDER_ENV: 'deploy' })
-  const stdout = stripAnsi(result.stdout)
+  const rendered = await readVitestWranglerConfig({
+    HV_PONY_SOLVER_RENDER_ENV: 'deploy',
+    MODEL_KEYS_KV_NAMESPACE_ID: 'synthetic-private-namespace',
+    MODEL_BUCKET_NAME: 'synthetic-private-bucket',
+    INVALID_KEY_MODE: 'error',
+    MODEL_DOWNLOAD_QUOTA_ENABLED: 'false',
+  })
 
-  assert.match(stdout, /Test Files\s+1 passed/)
+  assert.match(rendered, /id = "test-kv"/)
+  assert.match(rendered, /bucket_name = "test-bucket"/)
+  assert.match(rendered, /INVALID_KEY_MODE = "decoy"/)
+  assert.match(rendered, /MODEL_DOWNLOAD_QUOTA_ENABLED = "true"/)
+  assert.doesNotMatch(rendered, /synthetic-private-/)
 })
 
 test('render-wrangler-config requires MODEL_KEYS_KV_NAMESPACE_ID', async () => {

@@ -36,12 +36,22 @@ test('verify-model-integrity CLI exits 0 for a matching model and canonical mani
   }
 })
 
-test('verify-model-integrity CLI exits 1 for a mismatched model and canonical manifest', async () => {
+test('verify-model-integrity CLI exits 1 for a mismatched model and flushes deferred diagnostics', async () => {
   const fixture = await createCliFixture()
   try {
     const modelPath = join(fixture.root, 'yolo26n-640.onnx')
     await writeCanonicalManifest(fixture.root, Buffer.from([1, 2, 3]))
     await writeFile(modelPath, Buffer.from([4, 5]))
+    const deferredStderrPath = join(fixture.root, 'deferred-stderr.cjs')
+    await writeFile(
+      deferredStderrPath,
+      `const write = process.stderr.write.bind(process.stderr)
+process.stderr.write = (...args) => {
+  setTimeout(() => write(...args), 10)
+  return true
+}
+`,
+    )
 
     const result = await runCli(
       sourceScriptPath,
@@ -50,6 +60,7 @@ test('verify-model-integrity CLI exits 1 for a mismatched model and canonical ma
         MODEL_FILE: modelPath,
       },
       ['--repo-root', fixture.root],
+      ['--require', deferredStderrPath],
     )
 
     assert.equal(result.code, 1)
@@ -115,13 +126,6 @@ test('verify-model-integrity CLI reads the default canonical manifest when MODEL
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
-})
-
-test('verify-model-integrity does not call process.exit after writing mismatch errors', async () => {
-  const source = await readFile(sourceScriptPath, 'utf8')
-
-  assert.doesNotMatch(source, /writeError\([\s\S]*?process\.exit\(1\)/)
-  assert.match(source, /process\.exitCode\s*=\s*1/)
 })
 
 test('verify-model-integrity CLI ignores manifest path environment overrides', async () => {
@@ -191,15 +195,20 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
-function runCli(scriptPath, env, args = []) {
+function runCli(scriptPath, env, args = [], execArgv = []) {
   return new Promise((resolveRun) => {
-    execFile(process.execPath, [scriptPath, ...args], { cwd: dirname(scriptPath), env }, (error, stdout, stderr) => {
-      resolveRun({
-        code: error && typeof error.code === 'number' ? error.code : 0,
-        stdout,
-        stderr,
-      })
-    })
+    execFile(
+      process.execPath,
+      [...execArgv, scriptPath, ...args],
+      { cwd: dirname(scriptPath), env },
+      (error, stdout, stderr) => {
+        resolveRun({
+          code: error && typeof error.code === 'number' ? error.code : 0,
+          stdout,
+          stderr,
+        })
+      },
+    )
   })
 }
 

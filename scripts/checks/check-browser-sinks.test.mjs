@@ -110,9 +110,10 @@ describe('checkBrowserSinks', () => {
     "(globalThis as typeof globalThis).Function('return input')",
   ]) {
     it(`rejects the global Function constructor through ${source}`, async () => {
-      const result = await runCheckerWithSource(source)
-      assert.notEqual(result.status, 0, result.stdout)
-      assert.match(result.stderr, /unexpected Function sink/)
+      await withRepo(async (repoRoot) => {
+        await writeSource(repoRoot, 'apps/userscript/src/app/runtime-loader.ts', source)
+        await assert.rejects(checkBrowserSinks(repoRoot), /unexpected Function sink/)
+      })
     })
   }
 
@@ -145,6 +146,8 @@ describe('checkBrowserSinks', () => {
 function createFunction(source) { return source }
 createFunction('return input')
 const text = "Function(source); new Function(source)"
+const ignoredSinks = 'new Function(importScripts)'
+// node.innerHTML = userInput
 // Function(source)
 /* new Function(source) */
 `)
@@ -197,18 +200,6 @@ const text = "Function(source); new Function(source)"
       await writeSource(repoRoot, 'apps/extension/src/content/main.ts', "new Function('unsafe')\n")
 
       await assert.rejects(checkBrowserSinks(repoRoot), /unexpected innerHTML sink[\s\S]*unexpected Function sink/)
-    })
-  })
-
-  it('ignores sink-like text in comments and strings', async () => {
-    await withRepo(async (repoRoot) => {
-      await writeSource(
-        repoRoot,
-        'apps/userscript/src/app/app.ts',
-        "// node.innerHTML = userInput\nconst text = 'new Function(importScripts)'\n",
-      )
-
-      await assert.doesNotReject(checkBrowserSinks(repoRoot))
     })
   })
 })

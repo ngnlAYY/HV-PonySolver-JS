@@ -140,21 +140,6 @@ describe('CachedImageLoader', () => {
     expect(logger.warn).toHaveBeenCalledTimes(1)
   })
 
-  it('gives the network fallback its own budget after a slow cache read', async () => {
-    vi.useFakeTimers()
-    const hanging = new Promise<Response>(() => undefined)
-    const fetchStub = vi.fn().mockResolvedValueOnce(hanging).mockResolvedValueOnce(makeOkResponse())
-    globalThis.fetch = fetchStub
-
-    const resultPromise = new CachedImageLoader(50).get(FAKE_URL)
-    await vi.advanceTimersByTimeAsync(60)
-    const result = await resultPromise
-
-    expect(Array.from(new Uint8Array(await result.arrayBuffer()))).toEqual(Array.from(FAKE_BYTES))
-    expect(fetchStub).toHaveBeenCalledTimes(2)
-    expect((fetchStub.mock.calls[1]![1] as RequestInit).cache).toBe('default')
-  })
-
   it('cancels a late cache response without delaying a successful network fallback', async () => {
     vi.useFakeTimers()
     const lateResponse = Promise.withResolvers<Response>()
@@ -165,8 +150,9 @@ describe('CachedImageLoader', () => {
     const loadPromise = new CachedImageLoader(50).get(FAKE_URL)
     await vi.advanceTimersByTimeAsync(50)
     const blob = await loadPromise
-    expect(blob.size).toBe(FAKE_BYTES.byteLength)
+    expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual(Array.from(FAKE_BYTES))
     expect(fetchStub).toHaveBeenCalledTimes(2)
+    expect((fetchStub.mock.calls[1]![1] as RequestInit).cache).toBe('default')
 
     lateResponse.resolve(makeStreamResponse(new ReadableStream<Uint8Array>({ cancel })))
     await vi.advanceTimersByTimeAsync(0)

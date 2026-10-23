@@ -17,6 +17,8 @@
 
 客户端按 [ONNX_RUNTIME_ASSETS](../../src/inference/onnx-runtime-assets.ts) 校验实际长度和 SHA-256，再通过 `ort.env.wasm.wasmBinary` 注入。glue 与其他 WASM 不保证 ABI 匹配，必须成对采用。
 
+[LICENSE](LICENSE)保留固定上游提交的完整 MIT 文本。bundled 用户脚本和扩展推理 Worker 将其作为 banner 随包分发，压缩也保留；不通过修改此 vendor bundle 来添加声明，因此上面的长度和哈希不变。
+
 ## 复现与采用
 
 仓库根运行 `mise exec -- pnpm build:onnx-runtime` 生成隔离产物；核对版本、长度和哈希后，用 `mise exec -- pnpm build:onnx-runtime -- --install` 安装 bundle 和生成算子配置。随后至少验证：

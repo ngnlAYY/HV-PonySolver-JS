@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url'
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
 const requirementsPath = path.join(repositoryRoot, 'scripts', 'ort-runtime', 'requirements.txt')
 const inputPath = path.join(repositoryRoot, 'scripts', 'ort-runtime', 'requirements.in')
-const buildScriptPath = path.join(repositoryRoot, 'scripts', 'ort-runtime', 'build-minimal-ort-runtime.sh')
 
 function requirementBlocks(source) {
   const blocks = []
@@ -40,11 +39,4 @@ test('every ONNX conversion requirement has an exact version and hashes', async 
   for (const line of input.split(/\r?\n/u).filter(Boolean)) {
     assert.match(line, /^[a-z0-9][a-z0-9._-]*==[^\s]+$/iu)
   }
-})
-
-test('minimal runtime build installs only the tracked hash lock', async () => {
-  const source = await readFile(buildScriptPath, 'utf8')
-  assert.match(source, /--require-hashes -r "\$PYTHON_REQUIREMENTS"/u)
-  assert.match(source, /PIP_VERSION=\d+\.\d+\.\d+/u)
-  assert.doesNotMatch(source, /flatbuffers>=|onnxruntime==1\.27\.0'|onnx==1\.20\.1'/u)
 })

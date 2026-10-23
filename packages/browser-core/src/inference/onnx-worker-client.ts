@@ -28,11 +28,8 @@ type LoadedModelBuffer = Readonly<{
 
 type PreparationOperation = {
   readonly controller: AbortController
-  /** The first caller decides whether the whole preparation stays off-panel. */
-  readonly silent: boolean
   promise: Promise<void>
   owners: number
-  settled: boolean
   readonly timeoutId: ReturnType<typeof setTimeout>
 }
 
@@ -206,14 +203,13 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     this.consecutiveDetectErrors = 0
   }
 
+  /** The first caller decides whether the whole preparation stays off-panel. */
   private startPreparation(source: PreparationSource, silent: boolean = false): PreparationOperation {
     const controller = new AbortController()
     const operation: PreparationOperation = {
       controller,
-      silent,
       promise: Promise.resolve(),
       owners: 0,
-      settled: false,
       timeoutId: setTimeout(() => {
         controller.abort(new Error('ONNX Worker 初始化超时'))
       }, inferenceTimeoutConfig.workerPrepareTimeoutMs),
@@ -229,7 +225,6 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
         throw error
       })
       .finally(() => {
-        operation.settled = true
         clearTimeout(operation.timeoutId)
         if (this.preparation === operation) {
           this.preparation = null
@@ -245,12 +240,7 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       let settled = false
       const release = (): void => {
         operation.owners -= 1
-        if (
-          operation.owners === 0 &&
-          !operation.settled &&
-          this.preparation === operation &&
-          !operation.controller.signal.aborted
-        ) {
+        if (operation.owners === 0 && this.preparation === operation && !operation.controller.signal.aborted) {
           operation.controller.abort(new PreparationCancelledError())
         }
       }

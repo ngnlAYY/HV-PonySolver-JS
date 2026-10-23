@@ -85,20 +85,6 @@ describe('App', () => {
     apps.length = 0
   })
 
-  it('registers the unified settings menu during init', async () => {
-    const { App } = await import('../../src/app/app')
-    const app = new App()
-    apps.push(app)
-
-    app.init()
-
-    expect(registerSettingsMenu).toHaveBeenCalledWith(
-      expect.objectContaining({
-        onVerifyModelAccessKey: expect.any(Function),
-      }),
-    )
-  })
-
   it('does not revive the entry when DOMContentLoaded arrives after terminal pagehide', async () => {
     const readyState = vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading')
     try {

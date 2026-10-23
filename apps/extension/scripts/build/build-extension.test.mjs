@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 import { unzipSync } from 'fflate'
+import { ORT_RUNTIME_WASM_FILENAME, ORT_RUNTIME_WASM_INTEGRITY } from '@hv-pony-solver/shared/ort-runtime'
 
 import {
   assertSafeBuildOutputRoot,
@@ -26,6 +27,9 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const extensionRoot = path.resolve(scriptDirectory, '../..')
 const repositoryRoot = path.resolve(extensionRoot, '../..')
+const runtimeLicense = (
+  await readFile(path.join(repositoryRoot, 'apps/userscript/vendor/onnxruntime/LICENSE'), 'utf8')
+).trimEnd()
 const extensionPackage = JSON.parse(await readFile(path.join(extensionRoot, 'package.json'), 'utf8'))
 const extensionVersion = extensionPackage.version
 const execFileAsync = promisify(execFile)
@@ -34,15 +38,6 @@ const contentHosts = ['https://hentaiverse.org/*', 'https://alt.hentaiverse.org/
 const remoteCsp =
   "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self' https://models.ngnl.host"
 const packagedCsp = "script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'self'; connect-src 'self'"
-
-test('derives the packaged runtime WASM identity from the shared contract', async () => {
-  const source = await readFile(path.join(scriptDirectory, 'config.mjs'), 'utf8')
-
-  assert.match(source, /ORT_RUNTIME_WASM_FILENAME/u)
-  assert.match(source, /ORT_RUNTIME_WASM_INTEGRITY/u)
-  assert.doesNotMatch(source, /const runtimeWasmFilename = ['"]/u)
-  assert.doesNotMatch(source, /const runtimeWasmSha256 = ['"]/u)
-})
 
 test('creates byte-identical archives across positive and negative time zones', async (context) => {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-archive-timezone-'))
@@ -121,6 +116,14 @@ function assertArchiveIntegrity({ archive, archiveBytes, archiveName, artifact, 
       sha256: sha256(archive[name]),
     })
   }
+  assert.deepEqual(buildManifest.files[`runtime/${ORT_RUNTIME_WASM_FILENAME}`], {
+    byteLength: ORT_RUNTIME_WASM_INTEGRITY.byteLength,
+    sha256: ORT_RUNTIME_WASM_INTEGRITY.sha256,
+  })
+  assert.ok(
+    new TextDecoder().decode(archive['runtime/inference-worker.js']).includes(runtimeLicense),
+    'Runtime Worker must retain the full upstream MIT notice',
+  )
 }
 
 test('creates the exact remote and packaged manifest matrix without a WAR', () => {
@@ -266,29 +269,6 @@ test('guards recursive build cleanup with canonical allowed roots', async () => 
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true })
   }
-})
-
-test('coverage gate includes every security-critical Node script without exclusions', async () => {
-  const coverageCommand = extensionPackage.scripts['test:coverage']
-  for (const script of [
-    'scripts/browser/browser-support.mjs',
-    'scripts/build/build-extension.mjs',
-    'scripts/model/download-canonical-model.mjs',
-    'scripts/browser/install-geckodriver.mjs',
-    'scripts/e2e/packaged-smoke-artifact.mjs',
-    'scripts/release/release-gate.mjs',
-  ]) {
-    assert.match(coverageCommand, new RegExp(`--test-coverage-include=${script.replaceAll('.', '\\.')}(?:\\s|$)`, 'u'))
-  }
-  assert.match(
-    coverageCommand,
-    /--test-coverage-include=scripts\/e2e\/packaged-smoke-artifact\.mjs\s+--test-coverage-lines=75\s+--test-coverage-branches=60\s+--test-coverage-functions=90\s+scripts\/e2e\/packaged-smoke-artifact\.test\.mjs/u,
-  )
-  assert.match(
-    coverageCommand,
-    /--test-coverage-include=scripts\/release\/release-gate\.mjs\s+--test-coverage-lines=85\s+--test-coverage-branches=75\s+--test-coverage-functions=90\s+"?scripts\/\*\*\/\*\.test\.mjs/u,
-  )
-  assert.doesNotMatch(coverageCommand, /--test-coverage-exclude/u)
 })
 
 test('validates packaged model file type, length, and SHA-256', async () => {
@@ -519,6 +499,7 @@ test('rejects invalid fixture input and targets before replacing existing output
     (outputRoot) => buildExtensions({ outputRoot, targets: ['fireofx'] }),
     (outputRoot) => buildExtensions({ outputRoot, targets: ['chromium', 'chromium'] }),
     (outputRoot) => buildExtensions({ outputRoot, targets: [] }),
+    (outputRoot) => buildExtensions({ outputRoot, targets: new Array(1) }),
   ]) {
     const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-extension-preserve-'))
     const sentinelPath = path.join(outputRoot, 'sentinel.txt')

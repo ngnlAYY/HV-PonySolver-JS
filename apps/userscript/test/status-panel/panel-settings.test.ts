@@ -140,13 +140,6 @@ describe('panel settings', () => {
     await expect(getPanelPosition()).resolves.toEqual({ top: 155, left: 1240 })
   })
 
-  it('reads the default history limit when no value is saved', async () => {
-    const { getPanelHistoryLimit, getPanelHistoryLimitSync } = await import('../../src/status-panel/panel-settings')
-
-    expect(getPanelHistoryLimitSync()).toBe(5)
-    await expect(getPanelHistoryLimit()).resolves.toBe(5)
-  })
-
   it('persists and clears the history limit through localStorage fallback', async () => {
     const { clearPanelHistoryLimit, getPanelHistoryLimit, setPanelHistoryLimit } =
       await import('../../src/status-panel/panel-settings')

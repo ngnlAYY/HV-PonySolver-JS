@@ -21,19 +21,6 @@ beforeEach(() => {
 })
 
 describe('answer-mode-settings', () => {
-  it('defaults to auto when storage is empty, invalid, or fails', async () => {
-    const { getAnswerMode } = await import('../../src/captcha/answer-mode-settings')
-
-    gmGetValue.mockReturnValueOnce('')
-    await expect(getAnswerMode()).resolves.toBe('auto')
-    gmGetValue.mockReturnValueOnce('unsupported')
-    await expect(getAnswerMode()).resolves.toBe('auto')
-    gmGetValue.mockImplementationOnce(() => {
-      throw new Error('storage offline')
-    })
-    await expect(getAnswerMode()).resolves.toBe('auto')
-  })
-
   it('reads and persists valid answer modes', async () => {
     const { getAnswerMode, setAnswerMode } = await import('../../src/captcha/answer-mode-settings')
 

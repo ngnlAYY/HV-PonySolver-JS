@@ -1,16 +1,6 @@
 export type RaceAbortOptions = Readonly<{
-  /**
-   * Builds the rejection reason when an abort wins the race. Defaults to the
-   * aborted signal's own abort reason.
-   */
-  createError?: () => unknown
   /** Runs when an abort wins the race, before the rejection is delivered. */
   onAbort?: () => void
-  /**
-   * Returns true to leave the promise pending on abort; use only when the
-   * underlying operation is guaranteed to settle on its own.
-   */
-  holdOnAbort?: () => boolean
 }>
 
 type AbortRejectionReason = Error | DOMException
@@ -58,9 +48,8 @@ export function raceAbort<T>(
     const aborted = watched.find((signal) => signal.aborted)
     return aborted ? defaultAbortReason(aborted) : new DOMException('操作已取消', 'AbortError')
   }
-  const hold = options.holdOnAbort ?? (() => false)
   const preAborted = watched.find((signal) => signal.aborted)
-  if (preAborted && !hold()) {
+  if (preAborted) {
     options.onAbort?.()
     void Promise.resolve(promise).catch(() => undefined)
     return Promise.reject(buildReason())
@@ -81,7 +70,7 @@ export function raceAbort<T>(
       callback()
     }
     const onAbort = (): void => {
-      if (settled || hold()) {
+      if (settled) {
         return
       }
       settled = true
@@ -96,8 +85,5 @@ export function raceAbort<T>(
       (value) => finish(() => resolve(value)),
       (error: unknown) => finish(() => reject(error)),
     )
-    if (preAborted) {
-      onAbort()
-    }
   })
 }

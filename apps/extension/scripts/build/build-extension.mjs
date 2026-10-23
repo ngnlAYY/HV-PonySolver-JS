@@ -11,8 +11,13 @@ export { verifyPackagedModelFile } from './assets.mjs'
 export { createTargetInventory, auditBuiltExtension } from './inventory.mjs'
 
 function validateTargets(targets) {
-  if (!Array.isArray(targets) || targets.length < 1 || targets.some((target) => !extensionTargets.has(target))) {
+  if (!Array.isArray(targets) || targets.length < 1) {
     throw new Error(`Unsupported extension targets: ${JSON.stringify(targets)}`)
+  }
+  for (const target of targets) {
+    if (!extensionTargets.has(target)) {
+      throw new Error(`Unsupported extension targets: ${JSON.stringify(targets)}`)
+    }
   }
   if (new Set(targets).size !== targets.length) {
     throw new Error('Extension build targets must be unique')

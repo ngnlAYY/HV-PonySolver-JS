@@ -11,7 +11,7 @@ import type { Env, InvalidKeyMode, WorkerConfig } from './worker-types'
 // eslint-disable-next-line no-control-regex -- These code points are the validation target.
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 // Paths flow verbatim into the Content-Disposition quoted-string emitted by model-response.ts,
-// so quote-like characters are rejected for parity with scripts/wrangler-guard's TOML string rule.
+// so quote-like characters are rejected for parity with scripts/wrangler-config-guard.mjs's TOML string rule.
 const FORBIDDEN_PATH_CHARACTER_PATTERN = /["'`\\]/
 const PATH_MUST_BE_ABSOLUTE_MESSAGE = 'must be an absolute pathname'
 const PATH_MUST_NOT_CONTAIN_QUOTES_MESSAGE = 'must not contain quotes or backslashes'

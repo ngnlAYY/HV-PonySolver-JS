@@ -134,7 +134,11 @@ export class HistoryStore {
     if (!isEnumerableTextStorage(this.storage)) {
       return legacyRecords.map((record) => ({ ...record }))
     }
-    return [...this.getKeyedRecords(this.storage, world).map(({ record }) => record), ...legacyRecords]
+    const keyedRecords = this.getKeyedRecords(this.storage, world)
+    if (legacyRecords.length === 0) {
+      return keyedRecords.slice(0, HISTORY_MAX).map(({ record }) => ({ ...record }))
+    }
+    return [...keyedRecords.map(({ record }) => record), ...legacyRecords]
       .sort(compareHistoryRecords)
       .slice(0, HISTORY_MAX)
       .map((record) => ({ ...record }))
@@ -172,7 +176,7 @@ export class HistoryStore {
     storage: EnumerableTextStorage,
     currentRecords: HistoryRecord[],
   ): HistoryMutation {
-    const records = [record, ...currentRecords].sort(compareHistoryRecords).slice(0, HISTORY_MAX)
+    const records = [record, ...currentRecords].slice(0, HISTORY_MAX)
     const entryKey = `${HISTORY_ENTRY_PREFIX}${world}:${this.entryIdFactory()}`
     let write: void | Promise<void>
     try {

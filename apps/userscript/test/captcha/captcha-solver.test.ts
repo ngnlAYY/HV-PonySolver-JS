@@ -108,45 +108,10 @@ function createSolver(
   }
 }
 
-function expectPanelError(panel: StatusPanel, message: string): void {
-  expect(panel.setStatus).toHaveBeenCalledWith({ inference: `错误: ${message}` })
-  expect(panel.addError).toHaveBeenCalledWith(message, expect.any(Number))
-}
-
 describe('CaptchaSolver', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
     vi.restoreAllMocks()
-  })
-
-  it('submits detected ponies and records success', async () => {
-    appendCaptcha()
-    const detector = createDetector(
-      vi.fn(async () => ({
-        success: true,
-        ponies: ['RA'],
-        confidences: { RA: 0.97 },
-        detections: [],
-        candidates: [],
-      })),
-    )
-    const { solver, panel, answerSubmitter } = createSolver({ detector })
-
-    vi.mocked(answerSubmitter.submit).mockImplementation(async (_form, _ponies, _onError, onSubmitted) => {
-      onSubmitted()
-    })
-
-    const result = await solver.trigger()
-
-    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
-    expect(answerSubmitter.submit).toHaveBeenCalledWith(
-      expect.any(HTMLFormElement),
-      ['RA'],
-      expect.any(Function),
-      expect.any(Function),
-      expect.objectContaining({ isCurrent: expect.any(Function) }),
-    )
-    expect(panel.addSuccess).toHaveBeenCalledWith(['RA'], { RA: 0.97 }, expect.any(Number))
   })
 
   it('does not record or submit when cancellation happens while answer mode is loading', async () => {
@@ -175,21 +140,6 @@ describe('CaptchaSolver', () => {
     expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
     expect(panel.addManualResult).not.toHaveBeenCalled()
-  })
-
-  it('reports image loading and detector stages before failed detection results', async () => {
-    appendCaptcha()
-    const detector = createDetector(vi.fn(async () => emptyDetectionResult(false)))
-    const { solver, panel, answerSubmitter } = createSolver({ detector, randomOnFail: false })
-
-    const result = await solver.trigger()
-
-    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'transient' })
-    expect(panel.setStatus).toHaveBeenCalledWith({ inference: '获取图片' })
-    expect(panel.setStatus).toHaveBeenCalledWith({ inference: expect.stringMatching(/^图片获取完成 \d+ms$/) })
-    expect(panel.setStatus).toHaveBeenCalledWith({ inference: '推理请求中' })
-    expectPanelError(panel, '识别失败: 无可提交答案')
-    expect(answerSubmitter.submit).not.toHaveBeenCalled()
   })
 })
 

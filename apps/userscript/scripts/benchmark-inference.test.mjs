@@ -13,7 +13,7 @@ export async function build({ outfile }) {
     export const imagePreprocessConfig = { imageSize: 2 }
     export const yoloOutputConfig = { rowSize: 6, confidenceIndex: 4, classIndex: 5 }
     export const copyRgbaToChwFloat32 = () => {}
-    export const parseYoloOutput = () => []
+    export const parseYoloOutputTensor = () => []
   \`)
   process.send({ outfile })
   if (process.env.BENCH_TEST_WAIT === '1') await new Promise(resolve => process.once('message', resolve))
@@ -77,7 +77,7 @@ for (const secondFails of [false, true]) {
         first.child.send('continue')
         const firstResult = await first.finished
         assert.equal(firstResult.code, 0, firstResult.stderr)
-        assert.match(firstResult.stdout, /parseYoloOutput:.*ms\/op/u)
+        assert.match(firstResult.stdout, /parseYoloOutputTensor:.*ms\/op/u)
         assert.deepEqual(await readdir(join(root, '.tmp')), ['keep'])
       } finally {
         for (const { child } of children) {

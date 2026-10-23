@@ -3,7 +3,14 @@ import path from 'node:path'
 import { build } from 'esbuild'
 import { browserSupport } from '../browser/browser-support.mjs'
 import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
-import { extensionRoot, version, runtimeGlueSource, runtimeWasmSource, runtimeWasmFilename } from './config.mjs'
+import {
+  extensionRoot,
+  version,
+  runtimeGlueSource,
+  runtimeWasmSource,
+  runtimeWasmFilename,
+  runtimeLicenseBanner,
+} from './config.mjs'
 import { createManifest, normalizeModelDelivery } from './policy.mjs'
 import { extensionRuntimeGluePlugin, packagedModelIdentityPlugin, fixtureDetectHookPlugin } from './assets.mjs'
 import { createTargetInventory, auditTargetInventory, writeBuildManifest } from './inventory.mjs'
@@ -84,6 +91,7 @@ export async function buildTarget(outputRoot, target, options = {}) {
     target: [browserSupport[target].esbuildTarget],
     minify: true,
     legalComments: 'none',
+    banner: { js: runtimeLicenseBanner },
     sourcemap: false,
     logLevel: 'warning',
     metafile: true,

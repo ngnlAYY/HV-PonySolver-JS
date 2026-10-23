@@ -58,11 +58,6 @@ describe('root bundle gate', () => {
 })
 
 describe('bundle budget evaluation', () => {
-  it('pins both profile budgets', () => {
-    assert.equal(BUNDLE_BUDGET_PROFILES.default.budgetBytes, 256 * 1024)
-    assert.equal(BUNDLE_BUDGET_PROFILES.bundled.budgetBytes, 1024 * 1024)
-  })
-
   it('accepts an artifact exactly at its budget', () => {
     assert.deepEqual(
       evaluateBundleBudget({

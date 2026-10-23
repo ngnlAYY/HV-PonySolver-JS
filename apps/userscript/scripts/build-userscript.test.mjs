@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -7,9 +9,7 @@ import { test } from 'node:test'
 import { promisify } from 'node:util'
 
 import {
-  createArtifactManifest,
   createMainBuildOptions,
-  createMetafileJson,
   createUserscriptOutput,
   createWorkerBuildOptions,
   injectUserscriptVersion,
@@ -20,6 +20,7 @@ import {
 
 const execFileAsync = promisify(execFile)
 const appDir = resolve(import.meta.dirname, '..')
+const runtimeLicenseText = await readFile(resolve(appDir, 'vendor/onnxruntime/LICENSE'), 'utf8')
 const runtimeManifest = {
   externalFullRuntime: {
     scriptUrl: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort.min.js',
@@ -90,7 +91,6 @@ test('build options select external full and bundled minimal runtime providers',
   assert.equal(externalWorker.alias, undefined)
   assert.deepEqual(externalWorker.define, {
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.scriptUrl),
-    __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BASE_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmBaseUrl),
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.byteLength),
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.sha256),
     __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.maxByteLength),
@@ -108,6 +108,7 @@ test('build options select external full and bundled minimal runtime providers',
     workerEntryPoint: '/app/bundled-worker.ts',
     runtimeProfile: 'bundled',
     runtimeBundlePath: '/app/vendor/ort.wasm.bundle.min.mjs',
+    runtimeLicenseText,
     runtimeManifest,
     shouldMinify: true,
     shouldWriteMetafile: true,
@@ -121,6 +122,14 @@ test('build options select external full and bundled minimal runtime providers',
     __HV_PONY_SOLVER_BUNDLED_ORT_WASM_MAX_BYTE_LENGTH__: '2000000',
   })
   assert.equal(bundledWorker.minify, true)
+  assert.throws(
+    () =>
+      createWorkerBuildOptions({
+        runtimeProfile: 'bundled',
+        runtimeBundlePath: '/app/vendor/ort.wasm.bundle.min.mjs',
+      }),
+    /requires the ONNX Runtime license/,
+  )
 
   const main = createMainBuildOptions({
     entryPoint: '/app/main.ts',
@@ -131,24 +140,11 @@ test('build options select external full and bundled minimal runtime providers',
   assert.equal(main.define.__HV_PONY_SOLVER_WORKER_SCRIPT__, JSON.stringify('self.onmessage = () => {}'))
 })
 
-test('manifest helpers record the selected runtime profile', () => {
-  assert.equal(createMetafileJson({ a: 1 }, { b: 2 }), JSON.stringify({ main: { a: 1 }, worker: { b: 2 } }, null, 2))
-  assert.deepEqual(
-    createArtifactManifest({
-      outputFile: 'out.user.js',
-      byteLength: 12,
-      sha256: 'a'.repeat(64),
-      minified: true,
-      bundledRuntime: false,
-    }),
-    { artifact: 'out.user.js', byteLength: 12, sha256: 'a'.repeat(64), minified: true, bundledRuntime: false },
-  )
-})
-
 test('default build downloads the pinned full runtime and excludes minimal runtime assets', async () => {
   const result = await runBuildInTempDir({ withMetafile: true })
   const packageVersion = JSON.parse(await readFile(resolve(appDir, 'package.json'), 'utf8')).version
   assert.ok(result.output.startsWith('// ==UserScript=='))
+  assert.match(result.output, /^\/\/ @name\s+HV-PonySolver-Local$/m)
   // The artifact header version must be injected from apps/userscript/package.json.
   assert.match(result.output, new RegExp(`^// @version\\s+${escapeRegExp(packageVersion)}$`, 'm'))
   assert.doesNotMatch(result.output, /__HV_PONY_SOLVER_VERSION__/)
@@ -169,6 +165,7 @@ test('default build downloads the pinned full runtime and excludes minimal runti
 
 test('bundled build embeds the custom glue and uses the verified first-party minimal WASM', async () => {
   const result = await runBuildInTempDir({ args: ['--runtime=bundled'], withMetafile: true })
+  assertRuntimeLicense(result.output)
   assert.match(result.output, /wasmBinary/)
   assert.match(result.output, /models\.ngnl\.host\/runtime\/ort-wasm-simd-/)
   assert.doesNotMatch(result.output, /cdn\.jsdelivr\.net\/npm\/onnxruntime-web@1\.27\.0\/dist\/ort\.min\.js/)
@@ -198,6 +195,10 @@ test('minified default build writes external-profile artifact integrity outputs'
   assert.equal(manifest.minified, true)
   assert.equal(manifest.bundledRuntime, false)
   assert.match(manifest.sha256, /^[0-9a-f]{64}$/)
+  assert.equal(manifest.sha256, createHash('sha256').update(result.output).digest('hex'))
+  assert.equal(manifest.byteLength, Buffer.byteLength(result.output))
+  assert.match(manifest.artifact, /(?:^|\/)hv-pony-solver\.user\.js$/)
+  assert.equal(Object.hasOwn(manifest, 'metafile'), false)
   assert.equal(manifest.sha256, result.sha256Text.trim())
 })
 
@@ -206,8 +207,18 @@ test('minified bundled build records its embedded runtime', async () => {
     args: ['--runtime=bundled', '--minify'],
     withArtifactManifest: true,
   })
+  assertRuntimeLicense(result.output)
   assert.equal(JSON.parse(result.artifactManifest).bundledRuntime, true)
 })
+
+function assertRuntimeLicense(output) {
+  for (const line of runtimeLicenseText.trim().split('\n').filter(Boolean)) {
+    assert.ok(
+      output.includes(line) || output.includes(JSON.stringify(line).slice(1, -1)),
+      `Missing ONNX Runtime license text: ${line}`,
+    )
+  }
+}
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

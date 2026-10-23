@@ -2,11 +2,7 @@ import type { HostStatusUpdate } from '../protocol/messages'
 
 export type ForwardedHostStatus = Readonly<{ model?: string; session?: string }>
 
-/**
- * Single extraction of the Host-owned rows (model/session) that travel across
- * the Host boundary. The broker snapshot merge and the forwarding status sink
- * previously kept two diverging-prone copies of this filter.
- */
+/** Inference timing stays content-owned, including during broker snapshot replay. */
 export function pickForwardedHostFields(
   changes: HostStatusUpdate | Readonly<Record<string, unknown>>,
 ): ForwardedHostStatus {

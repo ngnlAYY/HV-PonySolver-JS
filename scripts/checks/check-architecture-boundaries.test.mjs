@@ -268,7 +268,7 @@ describe('checkArchitectureBoundaries', () => {
       await writeSource(
         repoRoot,
         'apps/userscript/src/status-panel/status-panel.ts',
-        "import { parseYoloOutput } from '../inference/yolo-output-parser'\n",
+        "import { parseYoloOutputTensor } from '../inference/yolo-output-parser'\n",
       )
 
       await assert.rejects(checkArchitectureBoundaries(repoRoot), /status panel must not import inference/)

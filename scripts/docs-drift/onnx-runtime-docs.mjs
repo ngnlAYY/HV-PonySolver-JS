@@ -49,11 +49,18 @@ function checkOnnxRuntimeAssetsDocs(
     expectedAssets.wasmAsset.publicPath,
     expectedAssets.wasmAsset.url,
     expectedAssets.wasmAsset.objectKey,
+    expectedAssets.wasmAsset.sha256,
     'wasmAsset.url',
     'wasmAsset.byteLength',
     'wasmAsset.sha256',
     'wasmAsset.maxByteLength',
     'wasmPaths',
+    'wasmBinary',
+    'redirect: error',
+    'Content-Length',
+    '规范十进制',
+    '解压',
+    '不等待取消 Promise',
     'onFirstSessionInitSettled',
     'verify:onnx-runtime',
     'build:onnx-runtime',
@@ -67,43 +74,4 @@ function checkOnnxRuntimeAssetsDocs(
   return errors
 }
 
-function checkOnnxRuntimeSupplementalDocs(
-  onnxRuntimeAssetsSource,
-  onnxRuntimeDoc,
-  expectedAssets = parseOnnxRuntimeAssetsManifest(onnxRuntimeAssetsSource),
-) {
-  const requiredTerms = [
-    'ONNX_RUNTIME_ASSETS',
-    expectedAssets.packageVersion,
-    expectedAssets.sourceCommit,
-    expectedAssets.emsdkVersion,
-    expectedAssets.externalFullRuntime.scriptUrl,
-    expectedAssets.externalFullRuntime.mjsUrl,
-    expectedAssets.externalFullRuntime.wasmUrl,
-    expectedAssets.externalFullRuntime.sha256,
-    'externalFullRuntime.mjsByteLength',
-    'externalFullRuntime.mjsSha256',
-    'externalFullRuntime.mjsMaxByteLength',
-    expectedAssets.externalFullRuntime.mjsSha256,
-    expectedAssets.externalFullRuntime.wasmSha256,
-    expectedAssets.wasmAsset.publicPath,
-    expectedAssets.wasmAsset.objectKey,
-    expectedAssets.wasmAsset.sha256,
-    'redirect: error',
-    'Content-Length',
-    '规范十进制',
-    '解压',
-    '不等待取消 Promise',
-    'wasmPaths',
-    'wasmBinary',
-    'onFirstSessionInitSettled',
-    'build:onnx-runtime',
-    'verify:onnx-runtime',
-  ]
-
-  return requiredTerms.flatMap((term) =>
-    onnxRuntimeDoc.includes(term) ? [] : [`docs/onnx-runtime.md ONNX Runtime contract must mention ${term}`],
-  )
-}
-
-export { checkOnnxRuntimeAssetsDocs, checkOnnxRuntimeSupplementalDocs }
+export { checkOnnxRuntimeAssetsDocs }

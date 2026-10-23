@@ -6,7 +6,7 @@ EXTENSION_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
 REPOSITORY_ROOT="$(CDPATH='' cd -- "$EXTENSION_ROOT/../.." && pwd)"
 FIXTURE_ROOT="$EXTENSION_ROOT/test/fixtures/packaged-model"
 VENV="${PACKAGED_FIXTURE_VENV:-$REPOSITORY_ROOT/.tmp/packaged-fixture-venv}"
-PIP_VERSION=26.1.1
+PIP_VERSION=26.2.0
 
 python3 -m venv "$VENV"
 # shellcheck disable=SC1091

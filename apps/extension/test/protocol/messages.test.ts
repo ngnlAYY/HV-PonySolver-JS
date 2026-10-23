@@ -138,8 +138,7 @@ describe('extension protocol', () => {
 
   it('decodes without a full request rescan but keeps type, shape, and size validation', async () => {
     type DetectRequestLike = Parameters<typeof decodeImage>[0]
-    // Upstream isOffscreenRequest already ran the full isHostRequest gate, so
-    // the trusted Host path only re-checks the detect discriminator here.
+    // The trusted Host receives a validated request; decoding does not rescan its envelope.
     const trusted = { type: 'detect', imageBase64: 'AQID', mimeType: 'image/png' } as DetectRequestLike
     expect([...new Uint8Array(await decodeImage(trusted).arrayBuffer())]).toEqual([1, 2, 3])
 

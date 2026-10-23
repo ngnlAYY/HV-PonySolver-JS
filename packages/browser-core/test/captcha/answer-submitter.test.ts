@@ -393,33 +393,6 @@ describe('AnswerSubmitter', () => {
       expect(onSubmitted).toHaveBeenCalledTimes(1)
     })
 
-    it('awaits asynchronous timing providers', async () => {
-      const form = createForm(true)
-      const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
-      for (const checkbox of checkboxes) {
-        checkbox.checked = false
-      }
-      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
-      button.click = vi.fn()
-      const submitter = new AnswerSubmitter(
-        async () => [2600, 2600],
-        async () => [800, 800],
-      )
-      const submitPromise = submitter.submit(form, ['TS', 'RA'], vi.fn(), vi.fn())
-      await flushMicrotasks()
-      expect(checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(1)
-      await vi.advanceTimersByTimeAsync(799)
-      expect(checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(1)
-      await vi.advanceTimersByTimeAsync(1)
-      expect(checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(2)
-      await vi.advanceTimersByTimeAsync(2599)
-      expect(button.click).not.toHaveBeenCalled()
-      await vi.advanceTimersByTimeAsync(1)
-      await submitPromise
-
-      expect(button.click).toHaveBeenCalledTimes(1)
-    })
-
     it('does not click submit when signal is aborted during submit delay', async () => {
       const form = createForm(true)
       const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!

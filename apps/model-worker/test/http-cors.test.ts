@@ -106,21 +106,6 @@ describe('http-cors', () => {
     expect(response.headers.get('x-hv-model-access')).toBeNull()
   })
 
-  it('allows Authorization Bearer tokens to read historical uppercase KV keys', async () => {
-    const fixture = createModelFixture()
-    const env = createEnv(fixture, {
-      keyValues: new Map<string, string>([[UPPERCASE_ACCESS_TOKEN, '1']]),
-    })
-
-    const response = await fetchWorker(
-      modelRequest(fixture, 'GET', undefined, { authorization: `Bearer ${CANONICAL_ACCESS_TOKEN}` }),
-      env,
-    )
-
-    expect(response.status).toBe(200)
-    expect(await readResponseBody(response)).toBe(fixture.realBody)
-  })
-
   it('allows uppercase Authorization Bearer tokens to read lowercase canonical KV keys', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {

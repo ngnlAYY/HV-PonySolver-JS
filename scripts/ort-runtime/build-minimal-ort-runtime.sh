@@ -3,7 +3,7 @@ set -euo pipefail
 
 ORT_TAG=v1.27.0
 ORT_COMMIT=8f0278c77bf44b0cc83c098c6c722b92a36ac4b5
-PIP_VERSION=26.1.1
+PIP_VERSION=26.2.0
 # 构建稍后会进入 ORT 源码目录，清理保护仍以启动时的工作目录为准。
 INITIAL_CWD="$(pwd -P)"
 ROOT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)"

@@ -9,7 +9,6 @@ type SharedDownload = {
   readonly controller: AbortController
   readonly promise: Promise<ArrayBuffer>
   owners: number
-  settled: boolean
 }
 
 /** 每次网络请求共享，交付给不同 Worker 的可转移缓冲仍各有所有者。 */
@@ -58,7 +57,7 @@ export class SharedModelDownloads {
       return ownerBuffer
     } finally {
       shared.owners -= 1
-      if (shared.owners === 0 && !shared.settled && this.activeDownloads.get(downloadKey) === shared) {
+      if (shared.owners === 0 && this.activeDownloads.get(downloadKey) === shared) {
         this.activeDownloads.delete(downloadKey)
         shared.controller.abort(new ModelCacheLifecycleError('模型缓存操作已取消'))
       }
@@ -72,11 +71,10 @@ export class SharedModelDownloads {
       .finally(() => {
         const active = this.activeDownloads.get(downloadKey)
         if (active?.controller === controller) {
-          active.settled = true
           this.activeDownloads.delete(downloadKey)
         }
       })
-    return { controller, promise, owners: 0, settled: false }
+    return { controller, promise, owners: 0 }
   }
 
   close(): void {

@@ -1,6 +1,9 @@
 export function median(values) {
   if (!Array.isArray(values) || values.length === 0) throw new Error('Cannot calculate a median without samples')
-  const sorted = [...values].sort((left, right) => left - right)
+  return medianOfSorted([...values].sort((left, right) => left - right))
+}
+
+function medianOfSorted(sorted) {
   const middle = Math.floor(sorted.length / 2)
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
 }
@@ -9,9 +12,14 @@ export function percentile(values, percentileValue) {
   if (!Array.isArray(values) || values.length === 0) throw new Error('Cannot calculate a percentile without samples')
   if (!Number.isFinite(percentileValue) || percentileValue < 0 || percentileValue > 1)
     throw new Error(`Invalid percentile: ${percentileValue}`)
-  const sorted = [...values].sort((left, right) => left - right)
-  const index = Math.ceil(percentileValue * sorted.length) - 1
-  return sorted[Math.max(0, index)]
+  return percentileOfSorted(
+    [...values].sort((left, right) => left - right),
+    percentileValue,
+  )
+}
+
+function percentileOfSorted(sorted, percentileValue) {
+  return sorted[Math.max(0, Math.ceil(percentileValue * sorted.length) - 1)]
 }
 
 function standardDeviation(values) {
@@ -37,13 +45,16 @@ export function deterministicBootstrapCi(values, options = {}) {
   if (!Number.isSafeInteger(resamples) || resamples < 100) throw new Error('Bootstrap requires at least 100 resamples')
   const random = seededRandom(seed)
   const estimates = []
+  // Only the built-in median can reuse its scratch array; custom statistics may retain samples.
+  const medianSample = statistic === median ? new Array(values.length) : null
   for (let sampleIndex = 0; sampleIndex < resamples; sampleIndex += 1) {
-    const sample = []
+    const sample = medianSample ?? new Array(values.length)
     for (let valueIndex = 0; valueIndex < values.length; valueIndex += 1)
-      sample.push(values[Math.floor(random() * values.length)])
-    estimates.push(statistic(sample))
+      sample[valueIndex] = values[Math.floor(random() * values.length)]
+    estimates.push(medianSample ? medianOfSorted(sample.sort((left, right) => left - right)) : statistic(sample))
   }
-  return { low: percentile(estimates, 0.025), high: percentile(estimates, 0.975), resamples, seed }
+  estimates.sort((left, right) => left - right)
+  return { low: percentileOfSorted(estimates, 0.025), high: percentileOfSorted(estimates, 0.975), resamples, seed }
 }
 
 function maximumFinite(values) {

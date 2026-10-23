@@ -93,7 +93,7 @@ sequenceDiagram
 
 [Worker 入口](../../packages/browser-core/src/inference/onnx-worker-entry.ts) 验证 `unknown` 请求，初始化 Runtime，复用 OffscreenCanvas/CHW 缓冲并执行 WASM 推理；[request bridge](../../packages/browser-core/src/inference/worker-request-bridge.ts) 验证结构化响应、管理 request id 与超时。
 
-候选列表只维护一次有界 top-N 排名；检测列表取原始置信度满足阈值的前缀，保留最高分兜底与稳定同分顺序。阈值判断先于展示舍入，低排名行仍完整校验。结构化响应逐项检查 `detections`/`candidates`，拒绝 structured clone 保留的稀疏数组。
+生产与基准共用严格的 `parseYoloOutputTensor`，不保留跳过非法行的宽松解析入口。候选只维护一次有界 top-N 排名，原地右移替代 `splice` 临时数组；检测列表取原始置信度满足阈值的前缀，保留最高分兜底与稳定同分顺序。阈值判断先于展示舍入，低排名行仍完整校验。结构化响应逐项检查 `detections`/`candidates`，拒绝 structured clone 保留的稀疏数组。
 
 用户脚本的 [onnx-worker-client.ts](../../apps/userscript/src/inference/onnx-worker-client.ts) 注入 [blob-worker.ts](../../apps/userscript/src/inference/blob-worker.ts) 创建的 Worker，并把构建时内联的脚本文本交给它。两个入口分别是：
 
@@ -128,7 +128,7 @@ sequenceDiagram
 
 面板观察器独立于 csp 开关，观察 documentElement 下 body 及子节点。首次初始化也允许 body 缺失，先注册观察、等待插入，不因面板尚未挂载而中止 App 启动。AADB 等脚本移除 `.ponyLog` 后挂回原节点，不重建应用或重读历史。渲染先复核挂载，再命中缓存或消费自身 mutation，避免遗漏外部移除。destroy 断开观察并清空引用，迟到回调不能复活面板。
 
-[HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 在写入前分配每世界的正安全整数 `sequence`：本实例已分配与当前可见序号的最大值加一，失败可留空洞，重建后从已保存记录恢复。独立键按序号、时间戳、稳定 key 排序裁剪；未互相可见的并发写可同序号，再以后二者排序。非法序号视为损坏，上限耗尽走保存失败通道。无序号旧记录按原时间戳读取，非枚举旧数组保留原顺序；显示用 `timestamp`/`time` 不单调化，旧数据不重写。
+[HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 在写入前分配每世界的正安全整数 `sequence`：本实例已分配与当前可见序号的最大值加一，失败可留空洞，重建后从已保存记录恢复。独立键按序号、时间戳、稳定 key 排序裁剪；未互相可见的并发写可同序号，再以后二者排序。没有旧根记录时复用独立键的已排序结果；本实例新序号最高，乐观追加直接前置，不重复排序。非法序号视为损坏，上限耗尽走保存失败通道。无序号旧记录按原时间戳读取，非枚举旧数组保留原顺序；显示用 `timestamp`/`time` 不单调化，旧数据不重写。
 
 历史文本各自仍限 1024 个 UTF-16 code unit、每世界仍读 50 条。JSON 防御上限按三个文本字段最坏六字符转义加结构余量计算：单条 19456 字符、双世界旧根 1946624 字符，避免合法引号、反斜杠或控制字符记录被自行裁剪。精确值归 [answer-history-config.ts](../../packages/browser-core/src/persistence/answer-history-config.ts)。追加后的旧根清理只读取一次；读取失败不证明损坏，不删除有效根，也不把已经提交的独立键追加改报失败。
 
@@ -146,15 +146,15 @@ App 在 `prepareTarget()` 前用 `performance.now()` 取开始时间，与手动
 
 核心和用户脚本测试目录按源码领域镜像组织。核心 `vitest` 默认使用 jsdom；用户脚本 `vitest` 也使用 jsdom，脚本门禁另由 Node test 执行。用户脚本唯一的 Playwright 浏览器目录是 `test/e2e`，当前配置只声明 Chromium 项目；这不能证明 Firefox、不同用户脚本管理器或真实 Model Worker 的行为。
 
-| 变更                     | 最小测试                                                                                   | 还应关注                                          |
-| ------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| App 调度、目标替换、销毁 | `browser-core/test/app`, `userscript/test/app`                                             | `CaptchaSolver`、E2E smoke                        |
-| 勾选、保留答案、原生提交 | 两个包的 `test/captcha/answer-submitter.test.ts`                                           | 表单替换和取消场景                                |
-| Worker 协议、超时、恢复  | 两个包的 `test/inference`                                                                  | 用户脚本 Blob Worker 与两个 Runtime 入口          |
-| 下载、完整性、缓存事务   | `browser-core/test/model`、`userscript/test/model`                                         | `docs/model-cache-strategy.md`、Model Worker 契约 |
-| GM 存储和设置菜单        | `userscript/test/userscript`                                                               | 敏感 Key 不落到 page-readable storage             |
-| 面板和历史               | 两个包的 `test/status-panel` 与 `test/persistence`                                         | csp 可见性、重新挂载、异步设置和持久化失败        |
-| 构建/metadata/资产       | `apps/userscript/scripts/*test.mjs`、`apps/userscript/test/userscript-build-smoke.test.ts` | 构建产物审计和包体预算                            |
+| 变更                     | 最小测试                                           | 还应关注                                          |
+| ------------------------ | -------------------------------------------------- | ------------------------------------------------- |
+| App 调度、目标替换、销毁 | `browser-core/test/app`, `userscript/test/app`     | `CaptchaSolver`、E2E smoke                        |
+| 勾选、保留答案、原生提交 | 两个包的 `test/captcha/answer-submitter.test.ts`   | 表单替换和取消场景                                |
+| Worker 协议、超时、恢复  | 两个包的 `test/inference`                          | 用户脚本 Blob Worker 与两个 Runtime 入口          |
+| 下载、完整性、缓存事务   | `browser-core/test/model`、`userscript/test/model` | `docs/model-cache-strategy.md`、Model Worker 契约 |
+| GM 存储和设置菜单        | `userscript/test/userscript`                       | 敏感 Key 不落到 page-readable storage             |
+| 面板和历史               | 两个包的 `test/status-panel` 与 `test/persistence` | csp 可见性、重新挂载、异步设置和持久化失败        |
+| 构建/metadata/资产       | `apps/userscript/scripts/*test.mjs`                | 实际 external/bundled 产物、完整许可与包体预算    |
 
 定向命令与完整检查统一见[验证手册](../development/verification.md#按修改区域选择验证)；包含 Worker 的检查先准备测试绑定，用户脚本 Runtime 变更分别验证 external/bundled，不能用后一份产物替代前一份。
 

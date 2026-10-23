@@ -15,7 +15,7 @@ describe('OnnxWorkerClient', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     SuccessfulWorker.reset()
-    vi.stubGlobal('__HV_PONY_SOLVER_TEST_WORKER_SCRIPT__', 'self.onmessage = () => {}')
+    vi.stubGlobal('__HV_PONY_SOLVER_WORKER_SCRIPT__', 'self.onmessage = () => {}')
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
   })
 

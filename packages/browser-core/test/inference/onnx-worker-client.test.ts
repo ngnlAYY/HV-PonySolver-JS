@@ -33,7 +33,6 @@ describe('OnnxWorkerClient', () => {
     vi.restoreAllMocks()
     SuccessfulWorker.reset()
     TimeoutThenSuccessfulWorker.reset()
-    vi.stubGlobal('__HV_PONY_SOLVER_TEST_WORKER_SCRIPT__', 'self.onmessage = () => {}')
     stubWorker(FailingWorker as unknown as new (...args: unknown[]) => Worker)
   })
 
@@ -59,6 +58,7 @@ describe('OnnxWorkerClient', () => {
         vi.spyOn(performance, 'now').mockReturnValueOnce(100).mockReturnValue(125.4)
         if (phase === 'detect') {
           await client.detect(new Blob(['image']))
+          expect(panel.setStatus).toHaveBeenCalledWith({ inference: '推理中' })
           expect(panel.setStatus).toHaveBeenCalledWith({ inference: '完成 25ms' })
         } else {
           await client.prepare()
@@ -289,9 +289,6 @@ describe('OnnxWorkerClient', () => {
 
     const result = await client.detect(imageBlob)
 
-    expect(SuccessfulWorker.messages[0]).toMatchObject({ type: 'init', modelBuffer })
-    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('wasmPath')
-    expect(SuccessfulWorker.messages[0]).not.toHaveProperty('ortScriptUrl')
     const detectMessage = SuccessfulWorker.messages.find((message) => message.type === 'detect')
     const detectTransfer =
       SuccessfulWorker.transfers[SuccessfulWorker.messages.findIndex((message) => message.type === 'detect')]
@@ -300,23 +297,6 @@ describe('OnnxWorkerClient', () => {
     expect(detectTransfer).toEqual([])
     expect(imageBlob.arrayBuffer).not.toHaveBeenCalled()
     expect(result).toMatchObject({ success: true, ponies: ['TS'] })
-  })
-
-  it('reports elapsed inference time when detect succeeds', async () => {
-    stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
-    const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
-    const modelCache = {
-      getCached: vi.fn(async () => modelBuffer),
-      download: vi.fn(async () => modelBuffer),
-      putCached: vi.fn(async () => undefined),
-    } as unknown as ModelCache
-    const panel = createMockPanel()
-    const client = new OnnxWorkerClient(modelCache, panel)
-
-    await client.detect({} as Blob)
-
-    expect(panel.setStatus).toHaveBeenCalledWith({ inference: '推理中' })
-    expect(panel.setStatus).toHaveBeenCalledWith({ inference: expect.stringMatching(/^完成 \d+ms$/) })
   })
 
   it('does not reset session readiness when prepare is called after ready', async () => {
@@ -837,11 +817,13 @@ describe('OnnxWorkerClient', () => {
     await preparePromise
 
     await runTimedOutDetect()
+    await runTimedOutDetect()
 
     SuccessfulWorker.autoRespond = true
     await expect(client.detect({} as Blob)).resolves.toMatchObject({ success: true })
     SuccessfulWorker.autoRespond = false
 
+    await runTimedOutDetect()
     await runTimedOutDetect()
 
     // Two stalls have accumulated since the successful detect, which stays
@@ -869,7 +851,6 @@ describe('OnnxWorkerClient', () => {
   })
 
   it('keeps silent preparations off-panel when initialization succeeds', async () => {
-    vi.stubGlobal('__HV_PONY_SOLVER_TEST_WORKER_SCRIPT__', 'self.onmessage = () => {}')
     stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
     const modelBuffer = new Uint8Array([1, 2, 3, 4]).buffer
     const modelCache = {

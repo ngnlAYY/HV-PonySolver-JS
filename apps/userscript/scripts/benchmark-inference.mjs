@@ -23,8 +23,8 @@ async function loadBenchmarkedFunctions() {
   await writeFile(
     entryPath,
     [
-      "import { copyRgbaToChwFloat32, imagePreprocessConfig, parseYoloOutput, yoloOutputConfig } from '@hv-pony-solver/browser-core'",
-      'export { copyRgbaToChwFloat32, imagePreprocessConfig, parseYoloOutput, yoloOutputConfig }',
+      "import { copyRgbaToChwFloat32, imagePreprocessConfig, parseYoloOutputTensor, yoloOutputConfig } from '@hv-pony-solver/browser-core'",
+      'export { copyRgbaToChwFloat32, imagePreprocessConfig, parseYoloOutputTensor, yoloOutputConfig }',
       '',
     ].join('\n'),
   )
@@ -68,17 +68,17 @@ function createYoloFixture(yoloOutputConfig) {
     yolo[base + yoloOutputConfig.confidenceIndex] = (row % 100) / 100
     yolo[base + yoloOutputConfig.classIndex] = row % 6
   }
-  return yolo
+  return { data: yolo, dims: [1, yoloRows, yoloOutputConfig.rowSize] }
 }
 
 try {
-  const { copyRgbaToChwFloat32, imagePreprocessConfig, parseYoloOutput, yoloOutputConfig } =
+  const { copyRgbaToChwFloat32, imagePreprocessConfig, parseYoloOutputTensor, yoloOutputConfig } =
     await loadBenchmarkedFunctions()
   const { plane, rgba, chw } = createRgbaFixture(imagePreprocessConfig.imageSize)
   const yolo = createYoloFixture(yoloOutputConfig)
 
   time('copyRgbaToChwFloat32', preprocessIterations, () => copyRgbaToChwFloat32(rgba, chw, plane))
-  time('parseYoloOutput', parserIterations, () => parseYoloOutput(yolo))
+  time('parseYoloOutputTensor', parserIterations, () => parseYoloOutputTensor(yolo))
 } finally {
   await rm(tmpDir, { recursive: true, force: true })
 }

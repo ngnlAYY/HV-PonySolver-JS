@@ -17,9 +17,7 @@ import {
   stripIgnoredSyntax,
 } from './source-syntax.mjs'
 
-// 这里有意只做窄范围源码事实提取，用于 README drift 检查。
-// 它不是通用 TypeScript parser；运行时 HTTP 行为应由 apps/model-worker 的 Worker tests 覆盖。
-// 本文件只保证文档检查读取的是预期源码事实，并避免被注释、字符串、regex 和死代码误导。
+// 只提取文档所需的源码事实；运行时 HTTP 行为由 Model Worker 测试验证。
 function readModelWorkerHttpFacts(requestRouterSource, modelAccessSource, modelResponseSource, sharedModelSource) {
   const errors = []
   const allowedMethods = readStringConstant(

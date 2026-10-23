@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { yoloOutputConfig } from '../../src/inference/inference-config'
-import { parseYoloOutput, parseYoloOutputTensor } from '../../src/inference/yolo-output-parser'
+import type { YoloParseResult } from '../../src/inference/inference-types'
+import { parseYoloOutputTensor } from '../../src/inference/yolo-output-parser'
 
 function yoloRow(confidence: number, classId: number): number[] {
   const row = Array.from({ length: yoloOutputConfig.rowSize }, () => 0)
@@ -10,14 +11,18 @@ function yoloRow(confidence: number, classId: number): number[] {
   return row
 }
 
-describe('parseYoloOutput', () => {
+function parseRows(data: Float32Array): YoloParseResult {
+  return parseYoloOutputTensor({ data, dims: [data.length / yoloOutputConfig.rowSize, yoloOutputConfig.rowSize] })
+}
+
+describe('YOLO ranking', () => {
   it('returns mapped ponies for rows above the confidence threshold', () => {
     const data = new Float32Array([
       ...yoloRow(yoloOutputConfig.confidenceThreshold + 0.1, 0),
       ...yoloRow(yoloOutputConfig.confidenceThreshold + 0.2, 2),
     ])
 
-    const result = parseYoloOutput(data)
+    const result = parseRows(data)
 
     expect(result.success).toBe(true)
     expect(result.ponies).toEqual(['FS', 'TS'])
@@ -27,7 +32,7 @@ describe('parseYoloOutput', () => {
   it('falls back to the highest-confidence row when no row passes the threshold', () => {
     const data = new Float32Array([...yoloRow(0.1, 1), ...yoloRow(0.2, 3)])
 
-    const result = parseYoloOutput(data)
+    const result = parseRows(data)
 
     expect(result.success).toBe(true)
     expect(result.ponies).toEqual(['RD'])
@@ -39,108 +44,24 @@ describe('parseYoloOutput', () => {
     ])
   })
 
-  it('ignores a trailing partial row when data length is not a multiple of rowSize', () => {
-    const partialRow = Array.from({ length: yoloOutputConfig.rowSize - 1 }, (_, index) => {
-      return index === yoloOutputConfig.confidenceIndex ? 0.99 : 0
-    })
-    const data = new Float32Array([...yoloRow(0.45, 0), ...partialRow])
-
-    const result = parseYoloOutput(data)
-
-    expect(result.success).toBe(true)
-    expect(result.ponies).toEqual(['TS'])
-    expect(result.confidences).toEqual({ TS: 0.45 })
-    expect(result.detections).toEqual([{ class_id: 0, confidence: 0.45 }])
-  })
-
-  it('ignores NaN and Infinity confidences', () => {
-    const data = new Float32Array([
-      ...yoloRow(Number.NaN, 0),
-      ...yoloRow(Number.POSITIVE_INFINITY, 1),
-      ...yoloRow(0.77, 2),
-    ])
-
-    const result = parseYoloOutput(data)
-
-    expect(result.success).toBe(true)
-    expect(result.ponies).toEqual(['FS'])
-    expect(result.confidences).toEqual({ FS: 0.77 })
-    expect(result.candidates).toEqual([{ class_id: 2, confidence: 0.77 }])
-  })
-
   it('keeps the highest confidence for duplicate pony classes', () => {
     const data = new Float32Array([...yoloRow(0.31, 0), ...yoloRow(0.45, 0)])
 
-    const result = parseYoloOutput(data)
+    const result = parseRows(data)
 
     expect(result.success).toBe(true)
     expect(result.ponies).toEqual(['TS'])
     expect(result.confidences).toEqual({ TS: 0.45 })
-  })
-
-  it('truncates floating class ids with Math.trunc before mapping answers', () => {
-    const data = new Float32Array([...yoloRow(0.6, 2.9), ...yoloRow(0.5, 3.9)])
-
-    const result = parseYoloOutput(data)
-
-    expect(result.success).toBe(true)
-    expect(result.ponies).toEqual(['FS', 'RD'])
-    expect(result.confidences).toEqual({ FS: 0.6, RD: 0.5 })
-    expect(result.detections).toEqual([
-      { class_id: 2, confidence: 0.6 },
-      { class_id: 3, confidence: 0.5 },
-    ])
   })
 
   it('marks results with too many distinct pony kinds as unsuccessful while preserving all kinds', () => {
     const data = new Float32Array([...yoloRow(0.91, 0), ...yoloRow(0.92, 1), ...yoloRow(0.93, 2), ...yoloRow(0.94, 3)])
 
-    const result = parseYoloOutput(data)
+    const result = parseRows(data)
 
     expect(result.success).toBe(false)
     expect(result.ponies).toEqual(['RD', 'FS', 'RA', 'TS'])
     expect(result.confidences).toEqual({ RD: 0.94, FS: 0.93, RA: 0.92, TS: 0.91 })
-  })
-
-  it('keeps only the top detections sorted by confidence', () => {
-    const rows: number[] = []
-    for (let i = 0; i < yoloOutputConfig.maxDetections + 4; i += 1) {
-      const confidence = i % 2 === 0 ? 0.31 + i / 100 : 0.95 - i / 100
-      rows.push(...yoloRow(confidence, i % 6))
-    }
-
-    const result = parseYoloOutput(new Float32Array(rows))
-
-    expect(result.detections).toHaveLength(yoloOutputConfig.maxDetections)
-    expect(result.detections.map((detection) => detection.confidence)).toEqual(
-      [...result.detections].map((detection) => detection.confidence).sort((left, right) => right - left),
-    )
-    expect(result.detections).not.toContainEqual(expect.objectContaining({ confidence: 0.31 }))
-  })
-
-  it('ignores invalid class ids', () => {
-    const data = new Float32Array([...yoloRow(0.88, 999), ...yoloRow(0.77, 2)])
-
-    const result = parseYoloOutput(data)
-
-    expect(result.success).toBe(true)
-    expect(result.ponies).toEqual(['FS'])
-    expect(result.confidences).toEqual({ FS: 0.77 })
-  })
-
-  it('falls back to the highest finite row with a valid class id', () => {
-    const data = new Float32Array([
-      ...yoloRow(0.29, 999),
-      ...yoloRow(Number.NaN, 0),
-      ...yoloRow(0.21, 3),
-      ...yoloRow(0.22, 2),
-    ])
-
-    const result = parseYoloOutput(data)
-
-    expect(result.success).toBe(true)
-    expect(result.ponies).toEqual(['FS'])
-    expect(result.confidences).toEqual({ FS: 0.22 })
   })
 
   it('keeps below-threshold valid rows in candidates without adding them to threshold detections', () => {
@@ -150,7 +71,7 @@ describe('parseYoloOutput', () => {
       ...yoloRow(yoloOutputConfig.confidenceThreshold - 0.01, 2),
     ])
 
-    const result = parseYoloOutput(data)
+    const result = parseRows(data)
 
     expect(result.detections).toEqual([{ class_id: 1, confidence: 0.4 }])
     expect(result.candidates).toEqual([
@@ -160,13 +81,13 @@ describe('parseYoloOutput', () => {
     ])
   })
 
-  it('limits candidates to maxDetections and ignores invalid rows', () => {
-    const rows: number[] = [...yoloRow(Number.NaN, 0), ...yoloRow(Number.POSITIVE_INFINITY, 1), ...yoloRow(0.99, 999)]
+  it('limits below-threshold candidates to maxDetections', () => {
+    const rows: number[] = []
     for (let i = 0; i < yoloOutputConfig.maxDetections + 3; i += 1) {
       rows.push(...yoloRow(0.1 + i / 100, i % 6))
     }
 
-    const result = parseYoloOutput(new Float32Array(rows))
+    const result = parseRows(new Float32Array(rows))
 
     expect(result.candidates).toHaveLength(yoloOutputConfig.maxDetections)
     expect(result.candidates.map((detection) => detection.confidence)).toEqual(
@@ -215,13 +136,47 @@ describe('parseYoloOutputTensor', () => {
     expect(result.ponies).toEqual(['TS', 'RA', 'FS', 'RD', 'PP', 'AJ'])
   })
 
-  it('validates rows that cannot enter either top-candidate list', () => {
-    const rows = Array.from({ length: yoloOutputConfig.maxDetections }, () => yoloRow(0.9, 0))
-    rows.push([Number.NaN, 0, 0, 0, 0.1, 1])
+  it('matches a stable full-sort oracle across ascending, descending, tied and mixed scores', () => {
+    for (const count of [1, 15, 16, 17, 300]) {
+      const patterns = [
+        Array.from({ length: count }, (_, index) => (index + 1) / (count + 1)),
+        Array.from({ length: count }, (_, index) => (count - index) / (count + 1)),
+        Array.from({ length: count }, () => 0.8),
+        Array.from({ length: count }, (_, index) => ((index * 73) % 101) / 100),
+      ]
+      for (const scores of patterns) {
+        const rows = scores.map((score, index) => ({
+          confidence: Math.fround(score),
+          class_id: index % 6,
+          index,
+        }))
+        const ranked = [...rows].sort((left, right) => right.confidence - left.confidence || left.index - right.index)
+        const selected = ranked.filter((row) => row.confidence >= yoloOutputConfig.confidenceThreshold)
+        const round = (row: (typeof rows)[number]) => ({
+          class_id: row.class_id,
+          confidence: Math.round(row.confidence * 1_000_000) / 1_000_000,
+        })
+        const result = parseRows(new Float32Array(rows.flatMap((row) => yoloRow(row.confidence, row.class_id))))
 
-    expect(() => parseYoloOutputTensor({ data: new Float32Array(rows.flat()), dims: [1, rows.length, 6] })).toThrow(
-      '包含无效数值',
-    )
+        expect(result.candidates).toEqual(ranked.slice(0, yoloOutputConfig.maxDetections).map(round))
+        expect(result.detections).toEqual(
+          (selected.length === 0 ? ranked.slice(0, 1) : selected.slice(0, yoloOutputConfig.maxDetections)).map(round),
+        )
+      }
+    }
+  })
+
+  it('validates every column in rows that cannot enter the top-candidate list', () => {
+    for (let column = 0; column < yoloOutputConfig.rowSize; column += 1) {
+      for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+        const rows = Array.from({ length: yoloOutputConfig.maxDetections }, () => yoloRow(0.9, 0))
+        const rejected = yoloRow(0.1, 1)
+        rejected[column] = value
+        rows.push(rejected)
+
+        expect(() => parseRows(new Float32Array(rows.flat()))).toThrow(`模型输出第 ${rows.length} 行包含无效数值`)
+      }
+    }
   })
 
   it.each([

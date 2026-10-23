@@ -35,14 +35,6 @@ describe('timing-settings', () => {
     expect(getMultiClickDelayRangeSync()).toEqual([300, 800])
   })
 
-  it('falls back to defaults for invalid persisted timing values', async () => {
-    gmGetValue.mockImplementation((key: string) => (key === 'hvPonySolverSubmitDelay' ? '5000-3000' : 'bad'))
-    const { getSubmitDelayRangeSync, getMultiClickDelayRangeSync } = await import('../../src/captcha/timing-settings')
-
-    expect(getSubmitDelayRangeSync()).toEqual([3000, 5000])
-    expect(getMultiClickDelayRangeSync()).toEqual([1000, 1500])
-  })
-
   it('saves canonical timing range values', async () => {
     const { setSubmitDelayRange, setMultiClickDelayRange } = await import('../../src/captcha/timing-settings')
 

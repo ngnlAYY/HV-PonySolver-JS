@@ -1,7 +1,6 @@
 type MockWorkerMessage = {
   requestId?: number
   type?: string
-  wasmPath?: string
   imageBlob?: Blob
   modelBuffer?: ArrayBuffer
 }

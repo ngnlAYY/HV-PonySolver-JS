@@ -15,7 +15,7 @@ const identity = {
   output: { name: 'output0', type: 'float32', dimensions: [1, 6] },
   expected: { classId: 0, confidence: 0.95 },
   generator: {
-    onnx: '1.20.1',
+    onnx: '1.22.0',
     onnxruntime: '1.27.0',
     requirements: 'scripts/ort-runtime/requirements.txt',
   },

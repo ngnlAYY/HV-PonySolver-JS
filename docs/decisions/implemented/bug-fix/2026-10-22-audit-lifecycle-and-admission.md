@@ -98,3 +98,87 @@ Worker 检查只使用 test-kv/test-bucket，原生成配置已按字节恢复�
 另执行 Chromium product 基准：正式 content client → Broker → Offscreen → Worker → ORT 连续识别 100 次、四标签页 12 次请求完成；20 次取消全部取消并成功恢复，结束后各客户端 active=0。4000×4000 合成图片的结果保持一致。localhost 缓存回放只发生一次 GET、一次确认、一次二进制写入及两次元数据写入。此运行使用合成白图，没有准确率结论；CDP 只记录未强制 GC 的堆快照，不能证明峰值或无泄漏，也不与上一版本作端到端性能比较。
 
 `benchmark:ci` 的四场景、1600 次有界 transport 操作通过，仅证明浏览器复制/摘要与 runner 生命周期。最终重新生成 external 用户脚本和 remote 扩展，临时 Firefox driver 与本次浏览器实例已清理。
+
+## 525db8f 后的算法、测试与依赖复审
+
+前述结果属于已提交基线 `525db8f`。后续复审重新覆盖三个应用、两个共用包、构建/检查脚本、静态页面和样式、注释与测试；以下决定和证据不替换前述记录。
+
+### 决定与边界
+
+- YOLO top-N 使用有界原地右移，删除 `splice` 临时数组和已由降序排名保证的重复最大值比较。删除仅由测试/基准调用的宽松解析器，所有调用迁移到严格 `parseYoloOutputTensor`；畸形张量继续失败关闭，不保留别名。
+- 删除初始化、共享下载中可由活动任务身份推导的重复字段；移除 test-only `holdOnAbort`、重复错误工厂选项、Worker 文本测试 override 与转发模块。实际运行中 detect 的取消宽限仍由客户端负责，realm 内的测试缓冲复制保留。
+- 历史在没有旧根时复用独立键排序；新序号记录直接前置。自动答案候选只去重一次。旧根合并、稳定同分顺序、人工选择和已提交快照裁剪不变。
+- 消息 guard 对固定小型键表直接查询，避免每次创建 Set、合并键数组及重复枚举。bootstrap 默认中位数复用 scratch array，分位估计只排序一次；自定义统计函数仍获得独立样本数组。
+- 构建目标数组逐项校验，稀疏项在旧产物清理前拒绝。设置页移除 340px body 最小宽度，320px 视口不再横向溢出，不据此扩大浏览器支持声明。
+- 去掉重复 ONNX 文档校验，保留唯一校验器及独有条款。静态安全负例复用进程内真实检查器，CLI 拒绝/成功/清理仍有执行证据。测试删减与保留映射见[测试归属决定的补充](../testing/2026-10-14-test-suite-ownership.md#2026-10-22-再审补充)。
+- Runtime 许可不能当作冗余注释删除。固定上游 [MIT LICENSE](https://raw.githubusercontent.com/microsoft/onnxruntime/8f0278c77bf44b0cc83c098c6c722b92a36ac4b5/LICENSE)保留在 vendor，完整文本仅加入包含 ORT 的 Worker banner，压缩也保留。原 vendor glue/WASM 不变；这不是完整法律合规结论。
+
+未采用 JPEG/RGBA 新数值约定或更复杂额度状态算法：前者微小收益不足，后者对 live/expired 状态有相反性能影响。保留简单可验证实现，不把某一输入的微基准优势推广到所有请求。
+
+### 局部性能与行为证据
+
+以下各场景均比较同一机器上的旧/新实现；解析与消息使用 Chromium 155.0.8059.79，统计比较使用真实 Node CLI。七次采样中位数，仅表示对应局部负载，不表示端到端推理或峰值内存提升。
+
+| 场景                            | 修改前毫秒 | 修改后毫秒 |
+| ------------------------------- | ---------: | ---------: |
+| 严格 YOLO，300 随机行/次        |    0.02924 |    0.01132 |
+| 严格 YOLO，8400 随机行/次       |    0.29438 |    0.21854 |
+| 严格 YOLO，100000 随机行/次     |      3.277 |      2.573 |
+| 严格 YOLO，100000 升序行/次     |     17.623 |      8.957 |
+| 消息键校验，1000000 次/批       |      225.6 |      100.0 |
+| benchmark compare，16 场景/报告 |    468.414 |    399.157 |
+
+独立 oracle 覆盖 2796 份有效张量、69 份非法张量、2097152 种答案候选组合、1000 份历史；消息校验覆盖 16 个调用点的 9120 种键组合。统计比较的 JSON 字节保持一致，另有 18 组独立 BigInt PRNG/rank 参考。原生浏览器复验转移缓冲、共享 GET/回执、最后 owner 取消、同 tick 准备替换、手动项保留、旧目标恢复、面板安全文本与销毁。
+
+历史读取排序次数从两次降为一次，追加从六次降为三次；10000 次读取耗时 298.60/301.33ms，基本中性，不声称读取加速。五个同类 Function sink 负例不再分别启动 TypeScript 进程，保留全部输入/拒绝断言及独立 CLI 回归。设置页实测 320px 下 scrollWidth=320，浅色/深色均无横向溢出，未初始化的敏感控件仍禁用。
+
+### 依赖审计与补丁
+
+全量审计最初发现开发依赖 `@vitest/mocker@4.1.11` 的 [GHSA-qxg6-89mg-rqv8](https://github.com/advisories/GHSA-qxg6-89mg-rqv8) 与 [GHSA-xp26-3454-mjgp](https://github.com/advisories/GHSA-xp26-3454-mjgp)。仓库没有直接启用公告中的独立 mocker/interceptor 开发服务器；这不免除依赖补丁。
+
+Registry 记录 Vitest 4.1.12 发布于 `2026-10-15T14:51:24.991Z`，到本次 `2026-10-22T15:25Z` 已满足 10080 分钟等待期；两个 coverage provider 与 mocker 同样满足。所有工作区仅升级 Vitest 系列到 4.1.12，同步两个 coverage provider；lockfile 仅变更该版本组及 peer 身份。冻结安装通过，未增加等待期、trust policy 或漏洞忽略例外。
+
+补丁后全量 `pnpm audit --json` 为零公告。原生 Node 导入已安装的 `createManualModuleSource`，执行其生成模块后确认恶意引号只作为参数数据，未执行注入语句；Windows 路径漏洞不声称已在 Linux 原生复现。`audit --prod` 图为空，因为第三方代码在本仓库声明为 devDependencies；ORT 仍会随客户端分发，不能用空图替代全量审计。
+
+已安装依赖许可元数据无 Unknown；同时发现 ORT 上游短声明被压缩剥离，按上述完整 banner 修复。`pnpm outdated` 还报告多个非安全版本更新；不进行无关全量升级。保留的维护风险是已弃用的 [@cloudflare/vitest-pool-workers](https://registry.npmjs.org/@cloudflare/vitest-pool-workers/0.20.3)：当前 peer 接受 Vitest 4.1.x，而新命名包引入独立 Wrangler/Miniflare 升级，本轮不混入该运行时迁移。资产、产品版本、权限与发布门禁不变。
+
+### Python 构建依赖补查
+
+不能把 npm 零公告推广到 Python 工具链。通过 [OSV batch API](https://google.github.io/osv.dev/post-v1-querybatch/)查询哈希锁的八个 PyPI 包、pip bootstrap 和固定 ORT commit，发现以下去重后的 GHSA；对应 PYSEC 别名不重复计数：
+
+| 构建依赖 | 原版本 | 修复版本 | 原公告数量                   |
+| -------- | ------ | -------- | ---------------------------- |
+| ONNX     | 1.20.1 | 1.22.0   | 8：4 High、3 Moderate、1 Low |
+| pip      | 26.1.1 | 26.2.0   | 2 Moderate                   |
+
+ONNX 公告包含 [外部数据符号链接读取](https://github.com/advisories/GHSA-3r9x-f23j-gc73)、[不受保护的对象配置](https://github.com/advisories/GHSA-538c-55jv-c5g9)、[hardlink 绕过](https://github.com/advisories/GHSA-cmw6-hcpp-c6jp)、[不受信任仓库警告抑制](https://github.com/advisories/GHSA-hqmj-h5c6-369m)、[Upsample 空指针](https://github.com/advisories/GHSA-hwpq-hmq9-wj77)、[external data symlink](https://github.com/advisories/GHSA-p433-9wv8-28xj)、[Gemm 越界读取](https://github.com/advisories/GHSA-p893-rvq9-2xf9)和[外部数据 TOCTOU](https://github.com/advisories/GHSA-q56x-g2fj-4rj6)。pip 对应[双重编码索引 URL](https://github.com/advisories/GHSA-qwm4-qh6w-59xr)与[安装入口名称路径穿越](https://github.com/advisories/GHSA-wf93-45jw-7689)。这些是构建/转换依赖，不是浏览器发起的 Python 执行；固定模型输入降低暴露，但不代替修补。
+
+采用覆盖全部公告的最小稳定修复版本，PyPI 发布日期分别为 2026-06-15、2026-07-29，均非 yanked 且已超过七天。uv 按原 Python 3.12/Linux 目标重新生成哈希锁，只改变 ONNX，其他七个锁定依赖保持原版本。两个脚本同步固定 pip；fixture provenance 同步 ONNX 版本。没有替换 ONNX Runtime 1.27.0 或重写 canonical 模型、glue、WASM。
+
+隔离复制真实生成脚本与源码，在 Python 3.12 和 3.14.7 下分别执行 pip 固定安装、`--require-hashes`、模型生成及 ORT 转换。两次结果均与仓库 fixture 按字节相同：1072 字节，SHA-256 为 `b42a0dea98b6d13b8f5485535dbe1e17a4e414bd54e351f117a33be7191907b3`。原生 ONNX 正常 external data 读取成功，替换为指向隔离哨兵的符号链接后以 ValidationError 拒绝。
+
+补丁后重新查询全部八个 PyPI 包、pip 与固定 ORT commit，OSV 无公告且无分页遗漏。未重编整个 ORT/WASM 工具链，未访问生产模型服务；查询结果不证明未知漏洞或操作系统、浏览器二进制没有漏洞。
+
+### 本次复审验证结算
+
+`VITEST_MAX_WORKERS=2 mise exec -- pnpm check` 完整通过，包含 workerd、覆盖率、根测试、类型、lint、文档、架构、危险调用和构建。Python 补丁追加后，八项定向锁/ORT 脚本回归通过，扩展 Node 工具链 162 项重新通过，并再次执行双浏览器 fixture ZIP 推理；没有重复执行整个工作区覆盖率。
+
+| 独立用例归属  | 525db8f 基线 | 最终集合 |
+| ------------- | -----------: | -------: |
+| 工作区 Vitest |         1243 |     1221 |
+| 工作区 Node   |          262 |      257 |
+| 根级 Node     |          379 |      377 |
+| 合计          |         1884 |     1855 |
+
+净减少 29 个独立用例；原覆盖率链另外运行的 9 个产物用例及本轮定向复验不重复计入。所有已执行用例通过，无 skip/todo，覆盖率门槛不变。旧 Python 安装命令的源码字符串断言退役，哈希锁结构校验及真实 hash-locked 安装/转换证据保留，不重新固定新的版本字符串。
+
+Chromium 155.0.8059.79 / Firefox 153.0 的 remote load-only、fixture 和 canonical packaged 推理通过；用户脚本 Chromium E2E 为 9 项通过，content fixture、320px 设置页、bundled 真实 Worker 及两个包体 profile 均通过。Runtime glue/WASM 原始身份未变，完整 MIT 声明由真实压缩产物回归验证。
+
+product 基准完成 100 次连续识别、四标签页 12 次请求、20 次取消及恢复；客户端最终 active=0，localhost 缓存回放仍为一次 GET、一次确认和一次二进制写入。CI transport 1600 次操作与严格解析 benchmark 命令通过。这里没有同负载端到端基线，不把局部算法收益当作整体推理加速。
+
+| 用户脚本未压缩 profile | 最终字节 | 预算字节 |
+| ---------------------- | -------: | -------: |
+| external               |   207902 |   262144 |
+| bundled                |   290679 |  1048576 |
+
+原 Worker 配置已按字节恢复；两套 Python 隔离环境、临时 driver 与浏览器已清理，默认 external/remote 产物已恢复。未提交、推送、发布或部署；未运行最低版本、Android、生产 Key、真实脚本管理器及远程 CI/CodeQL。Cloudflare 测试集成的弃用仍是明确保留的维护风险，不作为漏洞忽略。

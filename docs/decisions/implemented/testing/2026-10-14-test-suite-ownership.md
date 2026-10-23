@@ -53,3 +53,26 @@ Status: implemented
 减少共用实现的重复场景和静态事实的重复扫描；完整本地检查不再运行两轮工作区测试。应用单包测试不再承担共用实现完整证明，改动共用代码须运行 browser-core；跨包改动仍执行完整检查。以后出现新行为分区或缺陷时补充针对性回归，不以本次删减数量限制测试增长。
 
 完整资产验证和浏览器 E2E 未被单测 fixture 替代；覆盖率通过也不证明真实 Key、最低浏览器版本、Android 或远程 CodeQL 已验证。耗时对比须区分单次测量、资源争用和失败基线，不把一次更快运行称为稳定性能保证。验证遵循[验证手册](../../../development/verification.md)。
+
+## 2026-10-22 再审补充
+
+以下精简基于 `525db8f`，不改写上表的历史数量或验证结果：
+
+| 移除或替换                                                             | 保留的行为归属                                                                                              |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 用户脚本 Worker 文本转发测试、test-only override                       | `test/inference/onnx-worker-client.test.ts` 的实际 Blob Worker 初始化、撤销与缓存；原生 Worker smoke        |
+| 重复的 default/bundled build smoke、manifest helper 回声               | `scripts/build-userscript.test.mjs` 的真实两 profile 与压缩产物；补实际长度、SHA-256、名称和完整许可断言    |
+| 用户脚本成功提交、失败阶段、默认模式/延迟/历史条数、菜单注册的重复断言 | core solver/settings 的同名行为回归；用户脚本 GM 保存/读取、异步面板默认值及实际菜单回调调用                |
+| `process.exit` 源码字符串断言                                          | 模型校验 CLI mismatch 回归延迟 stderr 写入，仍须完整报告诊断并非零退出                                      |
+| `awaits asynchronous timing providers`                                 | `uses injected submit and multi-click timing ranges` 保留异步 provider 与时间边界                           |
+| slow-cache fallback 单一成功项                                         | 迟到 cache 正文清理回归同时检查 fallback 模式、实际字节与独立期限                                           |
+| 推理单一成功耗时断言、top-N 自排序比较、选择器常量副本                 | 单调时钟回拨回归保留精确耗时；独立全排序 oracle；真实目标定位、选择器补齐和答案提交                         |
+| 宽松解析器非法行容忍用例、test-only holdOnAbort 用例                   | 能力本身移除；生产维度、逐列非有限值、非法类别拒绝与运行中 detect 取消宽限回归保留，不声称继续容忍旧输入    |
+| 两份相同 uppercase KV 授权用例之一                                     | `allows canonical lowercase tokens to read uppercase historical KV keys` 仍验证相同 GET、200 与真实模型字节 |
+| 嵌套 Vitest env suite                                                  | 原生导入真实 config，断言测试绑定排除继承的合成部署值；workerd 环境用例由完整 coverage 执行一次             |
+| 重复状态格式化测试文件                                                 | 状态 owner 回归保留 123ms 与 NaN-to-0ms 的可观察输出及推理状态过滤                                          |
+| WASM 配置源码副本、重复包体预算断言、重复 sink 注释负例                | 真实 ZIP 的 WASM 身份；既有 CLI 自定义文件/超预算场景；真实 CLI 注释/字符串正例                             |
+| 配置阈值与 package 命令文本副本                                        | 删除配置复制测试，实际 coverage include、阈值和脚本不变，继续执行真实覆盖率与产物门禁                       |
+| Runtime verifier 的 wording/命令文本测试                               | 实际 bundle 字节得到正确长度/摘要；同长度损坏必须拒绝，不能先输出成功                                       |
+
+bootstrap 原自比较换成独立 PRNG/分位参考与自定义统计样本所有权回归；新增稀疏构建目标保护与许可产物断言。连续两次推理超时后成功、再连续两次超时的回归明确验证计数重置，不能以一次超时成功掩盖状态未清零。具体源码变化、局部测量和本轮验证见[后续复审](../bug-fix/2026-10-22-audit-lifecycle-and-admission.md#525db8f-后的算法测试与依赖复审)。

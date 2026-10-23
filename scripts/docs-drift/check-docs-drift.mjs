@@ -12,7 +12,7 @@ import {
   checkModelWorkerOpsDocs,
   readModelWorkerHttpFacts,
 } from './model-worker-docs.mjs'
-import { checkOnnxRuntimeAssetsDocs, checkOnnxRuntimeSupplementalDocs } from './onnx-runtime-docs.mjs'
+import { checkOnnxRuntimeAssetsDocs } from './onnx-runtime-docs.mjs'
 import { checkRootCheckCommand, checkCommandExamples } from './readme-commands.mjs'
 import { COMMAND_DOCUMENTS } from './documentation-paths.mjs'
 import { checkExtensionDocs } from './extension-docs.mjs'
@@ -141,7 +141,6 @@ async function checkDocsDrift(repoRoot = defaultRepoRoot, options = {}) {
     ...modelWorkerHttpFacts.errors,
     ...checkModelManifestDocs(modelSource, onnxRuntimeDoc),
     ...checkOnnxRuntimeAssetsDocs(onnxRuntimeAssetsSource, userscriptPackageJson, onnxRuntimeDoc, runtimeAssets),
-    ...checkOnnxRuntimeSupplementalDocs(onnxRuntimeAssetsSource, onnxRuntimeDoc, runtimeAssets),
     ...checkModelWorkerDocs(httpDoc, modelWorkerHttpFacts),
     ...checkModelCacheStrategyDocs(modelCacheStrategyDoc, modelWorkerHttpFacts),
     ...checkModelWorkerOpsDocs(modelWorkerOpsDoc, releaseDoc, modelWorkerDeploymentWorkflow),

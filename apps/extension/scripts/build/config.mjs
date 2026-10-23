@@ -20,6 +20,8 @@ const runtimeGlueSource = path.join(
   'onnxruntime',
   'ort.wasm.bundle.min.mjs',
 )
+const runtimeLicense = await readFile(path.join(path.dirname(runtimeGlueSource), 'LICENSE'), 'utf8')
+const runtimeLicenseBanner = `/*!\n${runtimeLicense.trimEnd()}\n*/`
 const runtimeGlueSha256 = 'a63d4f08e70220c0f721fabfd4e4b958aa127334a19038b2732d07e919f32554'
 // fflate 按本地日历字段编码 ZIP 时间；固定这些字段可避免时区影响归档字节或越过 1980 年下限。
 const deterministicZipTimestamp = new Date(1980, 0, 1, 0, 0, 0)
@@ -61,6 +63,7 @@ export {
   runtimeWasmSource,
   runtimeGlueSource,
   runtimeGlueSha256,
+  runtimeLicenseBanner,
   deterministicZipTimestamp,
   dynamicRuntimeImport,
   disabledDynamicRuntimeImport,

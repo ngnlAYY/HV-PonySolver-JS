@@ -70,10 +70,6 @@ function controlsAreUsable(form: HTMLFormElement, controls: SubmissionControls):
   )
 }
 
-function uniqueIndices(indices: readonly number[]): number[] {
-  return [...new Set(indices)]
-}
-
 function confidenceForIndex(
   index: number,
   confidences: AnswerConfidenceMap | undefined,
@@ -95,12 +91,11 @@ function selectAutomaticIndices(
   preserveCheckedAnswers: boolean,
   confidences: AnswerConfidenceMap | undefined,
 ): number[] {
-  const unique = uniqueIndices(indices)
   if (!preserveCheckedAnswers) {
-    return unique
+    return [...new Set(indices)]
   }
 
-  const automatic = uniqueIndices([...previouslyAutomatic.keys(), ...unique]).filter(
+  const automatic = [...new Set([...previouslyAutomatic.keys(), ...indices])].filter(
     (index) => !manuallyChecked.has(index),
   )
   const totalSelected = manuallyChecked.size + automatic.length

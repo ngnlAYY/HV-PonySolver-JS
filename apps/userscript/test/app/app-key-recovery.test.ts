@@ -96,7 +96,7 @@ describe('App GM Key commit recovery', () => {
     vi.stubGlobal('alert', vi.fn())
     vi.stubGlobal('fetch', fetchImpl)
     vi.stubGlobal('Worker', SuccessfulWorker)
-    vi.stubGlobal('__HV_PONY_SOLVER_TEST_WORKER_SCRIPT__', 'self.onmessage = () => {}')
+    vi.stubGlobal('__HV_PONY_SOLVER_WORKER_SCRIPT__', 'self.onmessage = () => {}')
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:worker')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)

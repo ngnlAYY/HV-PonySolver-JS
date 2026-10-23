@@ -63,6 +63,7 @@ async function buildExternalWorker(): Promise<string> {
     workerEntryPoint: path.resolve(appRoot, 'src/inference/onnx-worker-external-entry.ts'),
     runtimeProfile: 'external',
     runtimeBundlePath: undefined,
+    runtimeLicenseText: undefined,
     runtimeManifest: testRuntimeManifest,
     shouldMinify: false,
     shouldWriteMetafile: false,

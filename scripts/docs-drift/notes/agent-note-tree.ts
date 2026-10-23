@@ -6,7 +6,6 @@
 import { readdirSync, existsSync, lstatSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
-/** Recurse `dir` and return posix-relative `.md` paths prefixed with `prefix`. Node 18 compatible (no fs.globSync). */
 function listMd(dir: string, prefix: string): string[] {
   if (!existsSync(dir)) return []
   const out: string[] = []

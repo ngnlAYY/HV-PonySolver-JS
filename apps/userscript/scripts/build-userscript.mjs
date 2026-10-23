@@ -105,6 +105,7 @@ export function createWorkerBuildOptions({
   workerEntryPoint,
   runtimeProfile,
   runtimeBundlePath,
+  runtimeLicenseText,
   runtimeManifest,
   shouldMinify,
   shouldWriteMetafile,
@@ -118,9 +119,11 @@ export function createWorkerBuildOptions({
   }
   if (runtimeProfile === 'bundled') {
     if (!runtimeBundlePath) throw new Error('Bundled runtime profile requires a runtime bundle path')
+    if (!runtimeLicenseText?.trim()) throw new Error('Bundled runtime profile requires the ONNX Runtime license')
     return {
       ...options,
       alias: { 'onnxruntime-web/wasm': runtimeBundlePath },
+      banner: { js: `/*! ONNX Runtime Web\n${runtimeLicenseText.trimEnd()}\n*/` },
       define: {
         'import.meta.url': JSON.stringify(runtimeManifest.wasmAsset.url),
         __HV_PONY_SOLVER_BUNDLED_ORT_WASM_URL__: JSON.stringify(runtimeManifest.wasmAsset.url),
@@ -134,7 +137,6 @@ export function createWorkerBuildOptions({
     ...options,
     define: {
       __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.scriptUrl),
-      __HV_PONY_SOLVER_EXTERNAL_ORT_WASM_BASE_URL__: JSON.stringify(runtimeManifest.externalFullRuntime.wasmBaseUrl),
       __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.byteLength),
       __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_SHA256__: JSON.stringify(runtimeManifest.externalFullRuntime.sha256),
       __HV_PONY_SOLVER_EXTERNAL_ORT_SCRIPT_MAX_BYTE_LENGTH__: String(runtimeManifest.externalFullRuntime.maxByteLength),
@@ -188,6 +190,7 @@ async function main() {
   const shouldWriteMetafile = Boolean(metafilePath)
   const runtimeManifest = await readOnnxRuntimeAssetsManifest(repoRoot)
   let runtimeBundlePath
+  let runtimeLicenseText
   if (runtimeProfile === 'bundled') {
     runtimeBundlePath = resolve(
       process.env.HV_PONY_SOLVER_ONNX_RUNTIME_BUNDLE_PATH || resolveRuntimeBundlePath(runtimeManifest, repoRoot),
@@ -199,6 +202,7 @@ async function main() {
           `sha256=${runtimeManifest.bundleAsset.sha256}; actual byteLength=${runtimeStats.byteLength} sha256=${runtimeStats.sha256}`,
       )
     }
+    runtimeLicenseText = await readFile(resolve(appDir, 'vendor/onnxruntime/LICENSE'), 'utf8')
   }
 
   const workerResult = await build(
@@ -206,6 +210,7 @@ async function main() {
       workerEntryPoint: runtimeProfile === 'bundled' ? bundledWorkerEntryPoint : externalWorkerEntryPoint,
       runtimeProfile,
       runtimeBundlePath,
+      runtimeLicenseText,
       runtimeManifest,
       shouldMinify,
       shouldWriteMetafile,
@@ -216,9 +221,6 @@ async function main() {
     createMainBuildOptions({ entryPoint, shouldMinify, shouldWriteMetafile, workerScriptText }),
   )
   const mainText = outputText(mainResult, 'main')
-  // The metadata template is extracted from the TS source as before; the
-  // version placeholder is replaced at the final artifact level so that the
-  // published @version always matches apps/userscript/package.json.
   const { version: userscriptVersion } = await readJsonFile(resolve(appDir, 'package.json'), 'userscript package.json')
   if (typeof userscriptVersion !== 'string' || userscriptVersion.length === 0) {
     throw new Error('apps/userscript/package.json is missing a version string')

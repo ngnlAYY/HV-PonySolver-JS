@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { join } from 'node:path'
+import { parseOnnxRuntimeAssetsManifest } from '../check-docs-drift.mjs'
 import { readFile, runCheck, withFixture, writeFile } from './fixtures.mjs'
 
 for (const [document, facts] of [
@@ -166,23 +167,39 @@ test('fails clearly when runtime reference omits ONNX Runtime asset verification
   await withFixture(async (fixtureRoot) => {
     const readmePath = join(fixtureRoot, 'docs/onnx-runtime.md')
     const readme = await readFile(readmePath, 'utf8')
-    await writeFile(
-      readmePath,
-      readme
-        .replaceAll('verify:onnx-runtime', 'verify onnx runtime')
-        .replaceAll('build:onnx-runtime', 'build onnx runtime')
-        .replaceAll('wasmAsset.url', 'wasm asset url')
-        .replaceAll('externalFullRuntime', 'external full runtime')
-        .replaceAll('bundledMinimalRuntime', 'bundled minimal runtime'),
+    const assets = parseOnnxRuntimeAssetsManifest(
+      await readFile(join(fixtureRoot, 'apps/userscript/src/inference/onnx-runtime-assets.ts'), 'utf8'),
     )
+    const terms = [
+      'verify:onnx-runtime',
+      'build:onnx-runtime',
+      'wasmAsset.url',
+      'externalFullRuntime',
+      'bundledMinimalRuntime',
+      assets.wasmAsset.sha256,
+      'wasmBinary',
+      'redirect: error',
+      'Content-Length',
+      '规范十进制',
+      '解压',
+      '不等待取消 Promise',
+    ]
+    let changed = readme
+    for (const term of terms) {
+      assert.ok(changed.includes(term))
+      changed = changed.replaceAll(term, 'omitted runtime behavior')
+    }
+    await writeFile(readmePath, changed)
 
     const result = await runCheck(fixtureRoot)
     assert.notEqual(result.exitCode, 0)
-    assert.match(result.stderr, /docs\/onnx-runtime.md.*verify:onnx-runtime/s)
-    assert.match(result.stderr, /docs\/onnx-runtime.md.*build:onnx-runtime/s)
-    assert.match(result.stderr, /docs\/onnx-runtime.md.*wasmAsset\.url/s)
-    assert.match(result.stderr, /docs\/onnx-runtime.md.*externalFullRuntime/s)
-    assert.match(result.stderr, /docs\/onnx-runtime.md.*bundledMinimalRuntime/s)
+    const diagnostics = result.stderr.split('\n')
+    for (const term of terms) {
+      assert.ok(
+        diagnostics.some((line) => line.includes('docs/onnx-runtime.md') && line.includes(term)),
+        result.stderr,
+      )
+    }
   })
 })
 
@@ -211,7 +228,6 @@ test('fails clearly when ONNX Runtime docs omit the external JSEP MJS contract a
   })
 })
 
-// GET 行的基本缺项由下方更强的「附注不能补足行内事实」回归覆盖。
 test('fails clearly when HTTP reference authorized HEAD row omits Bearer auth', async () => {
   await withFixture(async (fixtureRoot) => {
     const readmePath = join(fixtureRoot, 'docs/reference/model-worker-http.md')

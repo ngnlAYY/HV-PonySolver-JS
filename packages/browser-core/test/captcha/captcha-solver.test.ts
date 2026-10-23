@@ -699,53 +699,34 @@ describe('CaptchaSolver random fallback', () => {
   })
 
   it('does not use the random fallback in manual mode', async () => {
-    vi.resetModules()
-    vi.doMock('../../src/captcha/solver-config', () => ({ solverConfig: { randomOnFail: true } }))
-    try {
-      const { CaptchaSolver: RandomCaptchaSolver } = await import('../../src/captcha/captcha-solver')
-      appendCaptcha()
-      const panel = createPanel()
-      const detector = createDetector(vi.fn(async () => emptyDetectionResult(false)))
-      const imageLoader = { get: vi.fn(async () => new Blob(['captcha'])) }
-      const answerSubmitter = createAnswerSubmitter()
-      const solver = new RandomCaptchaSolver(panel, detector, imageLoader, answerSubmitter, async () => 'manual')
+    appendCaptcha()
+    const { solver, panel, answerSubmitter } = createSolver({
+      getAnswerMode: async () => 'manual',
+      randomOnFail: true,
+    })
 
-      const result = await solver.trigger()
+    const result = await solver.trigger()
 
-      expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'transient' })
-      expect(answerSubmitter.submit).not.toHaveBeenCalled()
-      expect(panel.addRandomFailure).not.toHaveBeenCalled()
-      expectPanelError(panel, '识别失败: 无可提交答案')
-    } finally {
-      vi.doUnmock('../../src/captcha/solver-config')
-    }
+    expect(result).toEqual({ handled: false, captchaKey: 'http://localhost:3000/captcha.png', failure: 'transient' })
+    expect(answerSubmitter.submit).not.toHaveBeenCalled()
+    expect(panel.addRandomFailure).not.toHaveBeenCalled()
+    expectPanelError(panel, '识别失败: 无可提交答案')
   })
 
   it('submits a random pony when randomOnFail is enabled', async () => {
-    vi.resetModules()
-    vi.doMock('../../src/captcha/solver-config', () => ({ solverConfig: { randomOnFail: true } }))
-    try {
-      const { CaptchaSolver: RandomCaptchaSolver } = await import('../../src/captcha/captcha-solver')
-      appendCaptcha()
-      const panel = createPanel()
-      const detector = createDetector(vi.fn(async () => emptyDetectionResult(false)))
-      const imageLoader = { get: vi.fn(async () => new Blob(['captcha'])) }
-      const answerSubmitter = createAnswerSubmitter()
-      let submittedPony: string | undefined
-      vi.mocked(answerSubmitter.submit).mockImplementation(async (_form, ponies, _onError, onSubmitted) => {
-        expect(ponies).toHaveLength(1)
-        submittedPony = ponies[0]
-        expect(ANSWER_CODES).toContain(submittedPony)
-        onSubmitted()
-      })
+    appendCaptcha()
+    const { solver, panel, answerSubmitter } = createSolver({ randomOnFail: true })
+    let submittedPony: string | undefined
+    vi.mocked(answerSubmitter.submit).mockImplementation(async (_form, ponies, _onError, onSubmitted) => {
+      expect(ponies).toHaveLength(1)
+      submittedPony = ponies[0]
+      expect(ANSWER_CODES).toContain(submittedPony)
+      onSubmitted()
+    })
 
-      const solver = new RandomCaptchaSolver(panel, detector, imageLoader, answerSubmitter, async () => 'auto')
-      const result = await solver.trigger()
+    const result = await solver.trigger()
 
-      expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
-      expect(panel.addRandomFailure).toHaveBeenCalledWith(submittedPony, expect.any(Number))
-    } finally {
-      vi.doUnmock('../../src/captcha/solver-config')
-    }
+    expect(result).toEqual({ handled: true, captchaKey: 'http://localhost:3000/captcha.png', failure: null })
+    expect(panel.addRandomFailure).toHaveBeenCalledWith(submittedPony, expect.any(Number))
   })
 })
