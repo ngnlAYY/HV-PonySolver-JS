@@ -208,15 +208,17 @@ describe('HistoryStore', () => {
     }
   })
 
-  it('caps oversized legacy storage on read without requiring another write', () => {
-    const records = Array.from({ length: 51 }, (_, index) => ({
+  it('caps valid legacy records in stored order without rewriting oversized history', () => {
+    const records = Array.from({ length: HISTORY_MAX + 1 }, (_, index) => ({
       type: 'success',
       answers: `P${index}`,
       elapsed: index,
     }))
-    localStorage.setItem(HISTORY_KEY, JSON.stringify({ main: records }))
+    const raw = JSON.stringify({ main: records.flatMap((record) => [null, record]) })
+    localStorage.setItem(HISTORY_KEY, raw)
 
-    expect(new HistoryStore(localStorage).get('main')).toEqual(records.slice(0, 50))
+    expect(new HistoryStore(localStorage).get('main')).toEqual(records.slice(0, HISTORY_MAX))
+    expect(localStorage.getItem(HISTORY_KEY)).toBe(raw)
   })
 
   it('keeps append order when asynchronous writes become visible in reverse order', async () => {

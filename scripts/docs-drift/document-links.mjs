@@ -89,15 +89,20 @@ function stripFencedCode(source) {
   const visible = []
   let fence = null
   for (const line of lines) {
-    const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/u)?.[1]
-    if (marker) {
-      const character = marker[0]
-      if (fence === null) fence = { character, length: marker.length }
-      else if (fence.character === character && marker.length >= fence.length) fence = null
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line)
+    if (fence) {
+      if (marker && marker[1][0] === fence.character && marker[1].length >= fence.length && marker[2].trim() === '') {
+        fence = null
+      }
       visible.push('')
       continue
     }
-    visible.push(fence === null ? line : '')
+    if (marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
+      fence = { character: marker[1][0], length: marker[1].length }
+      visible.push('')
+      continue
+    }
+    visible.push(line)
   }
   return visible
 }

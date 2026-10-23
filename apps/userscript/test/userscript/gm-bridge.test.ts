@@ -80,11 +80,13 @@ describe('gm-bridge', () => {
 
   it('returns null when safeStorage.getItem catches localStorage errors', async () => {
     const { safeStorage } = await import('../../src/userscript/gm-bridge')
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    localStorage.setItem('key', 'stored-value')
+    const getItem = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
       throw new Error('blocked')
     })
 
     expect(safeStorage.getItem('key')).toBeNull()
+    expect(getItem).toHaveBeenCalledExactlyOnceWith('key')
   })
 
   it('returns false when GM_registerMenuCommand is unavailable', async () => {

@@ -1,3 +1,4 @@
+import { sha256Hex } from '../platform/byte-stream'
 import { modelConfig } from './model-config'
 import { ModelIntegrityVerificationError } from './permanent-model-error'
 
@@ -25,11 +26,6 @@ export function resolveIntegrityOptions(options: ModelIntegrityOptions = {}): {
   }
 }
 
-export async function computeModelSha256(buffer: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', buffer)
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 export async function verifyModelIntegrity(
   buffer: ArrayBuffer,
   integrity: ModelIntegrity,
@@ -38,7 +34,7 @@ export async function verifyModelIntegrity(
   if (buffer.byteLength !== integrity.byteLength) {
     throw new ModelIntegrityVerificationError(`${source}大小校验失败: ${buffer.byteLength} != ${integrity.byteLength}`)
   }
-  const sha256 = await computeModelSha256(buffer)
+  const sha256 = await sha256Hex(buffer)
   if (sha256 !== integrity.sha256) {
     throw new ModelIntegrityVerificationError(`${source} SHA-256 校验失败`)
   }

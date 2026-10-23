@@ -283,9 +283,7 @@ describe('quota-http', () => {
     expect((await fetchWorker(authorizedModelRequest(fixture, 'GET'), env)).status).toBe(429)
     expect(bucket.requestedKeys.length).toBe(readsBeforeExhaustedRequest)
 
-    // HEAD is unmetered, so an exhausted Key still identifies itself as valid by
-    // reporting the real object's size. Clients rely on this to verify a Key
-    // without spending a download.
+    // HEAD remains unmetered metadata access; clients verify Keys with GET /quota.
     const headResponse = await fetchWorker(authorizedModelRequest(fixture, 'HEAD'), env)
 
     expect(headResponse.status).toBe(200)
@@ -296,7 +294,7 @@ describe('quota-http', () => {
     )
   })
 
-  it('distinguishes a valid Key from an invalid one by HEAD content-length alone', async () => {
+  it('returns real or decoy HEAD metadata without accessing quota storage', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })
 

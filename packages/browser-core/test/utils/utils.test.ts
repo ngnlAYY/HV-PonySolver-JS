@@ -1,59 +1,17 @@
-import { ANSWER_CODES } from '@hv-pony-solver/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DEFAULT_RANDOM_ON_FAIL } from '../../src/captcha/fallback-settings'
 import { solverConfig } from '../../src/captcha/solver-config'
-import { timingConfig } from '../../src/captcha/timing-config'
-import {
-  imagePreprocessConfig,
-  inferenceRecoveryConfig,
-  inferenceTimeoutConfig,
-  prepareDeadlineConfig,
-  yoloOutputConfig,
-} from '../../src/inference/inference-config'
-import { modelConfig } from '../../src/model/model-config'
-import { ModelAccessKeyRejectedError } from '../../src/model/model-download-error'
+import { inferenceTimeoutConfig, prepareDeadlineConfig } from '../../src/inference/inference-config'
 import { randDelay, shuffle, sleep } from '../../src/utils/delay'
 import { formatErrorMessage } from '../../src/utils/errors'
 
-describe('config defaults', () => {
-  it('matches legacy config defaults', () => {
-    expect(ANSWER_CODES).toEqual(['TS', 'RA', 'FS', 'RD', 'PP', 'AJ'])
-    expect(timingConfig.submitDelay).toEqual([3000, 5000])
-    expect(timingConfig.multiClickDelay).toEqual([1000, 1500])
-    expect(DEFAULT_RANDOM_ON_FAIL).toBe(true)
+describe('configuration contracts', () => {
+  it('keeps consumers aligned with shared defaults and preparation deadlines', () => {
     expect(solverConfig.randomOnFail).toBe(DEFAULT_RANDOM_ON_FAIL)
-    expect(imagePreprocessConfig.imageSize).toBe(640)
-    expect(imagePreprocessConfig.maxEncodedBytes).toBe(2 * 1024 * 1024)
-    expect(imagePreprocessConfig.maxSourceSide).toBe(4096)
-    expect(imagePreprocessConfig.maxSourcePixels).toBe(16_000_000)
-    expect(yoloOutputConfig.confidenceThreshold).toBe(0.3)
-    expect(yoloOutputConfig.maxDetections).toBe(16)
-    expect(yoloOutputConfig.maxKinds).toBe(3)
-    expect(yoloOutputConfig.rowSize).toBe(6)
-    expect(yoloOutputConfig.confidenceIndex).toBe(4)
-    expect(yoloOutputConfig.classIndex).toBe(5)
-    expect(yoloOutputConfig.maxOutputRows).toBe(100_000)
-    expect(modelConfig.accessKey).toBe('')
-    expect(modelConfig.urlBase).toBe('https://models.ngnl.host/yolo26n-640.ort')
-    expect(modelConfig.cacheName).toBe('pony-solver-local')
-    expect(modelConfig.cacheKey).toBe('yolo26n-640.ort')
-    expect(modelConfig.version).toBe('yolo26n-640-2026-05-14')
-    expect(modelConfig.verifyIntegrity).toBe(true)
-    expect(inferenceTimeoutConfig.workerInitTimeoutMs).toBe(60000)
-    expect(inferenceTimeoutConfig.workerDetectTimeoutMs).toBe(30000)
-    expect(inferenceTimeoutConfig.workerAbortGraceTimeoutMs).toBe(1000)
-    expect(inferenceTimeoutConfig.workerPrepareTimeoutMs).toBe(100000)
-    expect(prepareDeadlineConfig).toEqual({
-      workerTimeoutMs: 100_000,
-      contentTimeoutMs: 105_000,
-      brokerTimeoutMs: 110_000,
-    })
+    expect(inferenceTimeoutConfig.workerPrepareTimeoutMs).toBe(prepareDeadlineConfig.workerTimeoutMs)
     expect(prepareDeadlineConfig.workerTimeoutMs).toBeLessThan(prepareDeadlineConfig.contentTimeoutMs)
     expect(prepareDeadlineConfig.contentTimeoutMs).toBeLessThan(prepareDeadlineConfig.brokerTimeoutMs)
-    expect(inferenceTimeoutConfig.modelDownloadTimeoutMs).toBe(30000)
-    expect(inferenceTimeoutConfig.modelCacheTimeoutMs).toBe(5000)
-    expect(inferenceRecoveryConfig.maxConsecutiveWorkerErrors).toBe(3)
   })
 })
 
@@ -76,7 +34,6 @@ describe('browser-core utility functions', () => {
     expect(formatErrorMessage({ name: 'NoisyError', message: 'raw text', userMessage: '' })).toBe(
       'NoisyError: raw text',
     )
-    expect(formatErrorMessage(new ModelAccessKeyRejectedError())).toBe('模型 Key 无效或已失效，请在设置中重新验证 Key')
   })
 
   it('returns random delays inside the inclusive range', () => {

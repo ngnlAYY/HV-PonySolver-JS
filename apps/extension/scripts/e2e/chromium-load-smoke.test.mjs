@@ -215,6 +215,15 @@ test('authenticated smoke waits for delayed verification completion instead of p
   assert.equal(page.finished, true)
 })
 
+test('authenticated smoke accepts the completed exhausted-quota notice as a valid saved Key', async (context) => {
+  const page = verificationPage(
+    context,
+    '模型 Key 有效并已安全保存；本月 5 次模型下载额度已用完，额度恢复后将自动下载模型',
+  )
+  await verifyRemoteModelKey(page)
+  assert.equal(page.finished, true)
+})
+
 test('authenticated smoke reports the completed verification failure', async (context) => {
   const page = verificationPage(context, '模型 Key 无效：HTTP 403')
   await assert.rejects(verifyRemoteModelKey(page), /模型 Key 无效：HTTP 403/u)

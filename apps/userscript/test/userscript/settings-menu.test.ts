@@ -99,7 +99,7 @@ describe('settings menu', () => {
     expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
   })
 
-  it('saves a valid model key when verification reports exhausted monthly quota', async () => {
+  it('does not save a model key when verification fails with a quota error', async () => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(VALID_KEY)
     const alert = vi.fn()
@@ -117,8 +117,8 @@ describe('settings menu', () => {
     registerSettingsMenu({ onVerifyModelAccessKey: verify })
     await registerMenuCommand.mock.calls[0][1]()
 
-    expect(setValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey', VALID_KEY)
-    expect(alert).toHaveBeenCalledWith('本月 5 次模型下载额度已用完')
+    expect(setValue).not.toHaveBeenCalled()
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining('模型下载 Key 验证失败:'))
   })
 
   it('clears the model key through the top-level settings menu', async () => {

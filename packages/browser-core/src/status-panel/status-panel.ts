@@ -32,7 +32,8 @@ export class StatusPanel implements StatusPanelContract {
   private el: HTMLDivElement | null = null
   private domObserver: MutationObserver | null = null
   private cspVisibilityRequired = true
-  private readonly world: World = getWorld()
+  private world: World = getWorld()
+  private worldGeneration = 0
   private compactMode = false
   private records: HistoryRecord[] = []
   private historyLimit: number
@@ -53,7 +54,7 @@ export class StatusPanel implements StatusPanelContract {
 
   create(): void {
     if (this.el) {
-      this.syncDom()
+      this.render()
       return
     }
     this.lifecycleGeneration += 1
@@ -62,6 +63,7 @@ export class StatusPanel implements StatusPanelContract {
     const lifecycleGeneration = this.lifecycleGeneration
     this.status = initialPanelStatus()
     this.persistenceError = null
+    this.world = getWorld()
     this.records = this.history.get(this.world)
     this.recordsVersion += 1
     this.compactMode = isPanelCompactModeSync(this.settingsStorage)
@@ -109,6 +111,7 @@ export class StatusPanel implements StatusPanelContract {
   }
 
   setStatus(changes: Partial<PanelStatus>): void {
+    this.syncWorld()
     this.status = { ...this.status, ...changes }
     this.scheduleRender()
   }
@@ -161,9 +164,12 @@ export class StatusPanel implements StatusPanelContract {
   }
 
   private addHistoryRecord(record: HistoryRecord): void {
+    this.syncWorld()
     const mutationGeneration = ++this.historyMutationGeneration
     const lifecycleGeneration = this.lifecycleGeneration
-    const mutation = this.history.add(this.world, record)
+    const worldGeneration = this.worldGeneration
+    const world = this.world
+    const mutation = this.history.add(world, record)
     this.records = mutation.records
     this.recordsVersion += 1
     this.persistenceError = null
@@ -171,28 +177,49 @@ export class StatusPanel implements StatusPanelContract {
 
     void mutation.persisted.then(
       (records) => {
-        if (
-          !this.el ||
-          lifecycleGeneration !== this.lifecycleGeneration ||
-          mutationGeneration !== this.historyMutationGeneration
-        ) {
+        if (!this.el || lifecycleGeneration !== this.lifecycleGeneration) {
+          return
+        }
+        if (this.syncWorld()) this.scheduleRender()
+        if (world !== this.world || mutationGeneration !== this.historyMutationGeneration) {
           return
         }
         this.records = records
         this.recordsVersion += 1
-        this.persistenceError = null
+        if (worldGeneration === this.worldGeneration) this.persistenceError = null
         this.scheduleRender()
       },
       (error: unknown) => {
         if (!this.el || lifecycleGeneration !== this.lifecycleGeneration) {
           return
         }
-        this.records = this.history.get(this.world)
+        if (this.syncWorld()) this.scheduleRender()
+        if (world !== this.world) {
+          return
+        }
+        // A return visit still needs the live rollback, never an old record snapshot or error.
+        this.records = this.history.get(world)
         this.recordsVersion += 1
-        this.persistenceError = `历史记录保存失败：${formatErrorMessage(error)}`
+        if (worldGeneration === this.worldGeneration) {
+          this.persistenceError = `历史记录保存失败：${formatErrorMessage(error)}`
+        }
         this.scheduleRender()
       },
     )
+  }
+
+  private syncWorld(): boolean {
+    const world = getWorld()
+    if (world === this.world) {
+      return false
+    }
+    this.world = world
+    // A return visit must not inherit persistence errors from the previous visit.
+    this.worldGeneration += 1
+    this.records = this.history.get(world)
+    this.recordsVersion += 1
+    this.persistenceError = null
+    return true
   }
 
   private scheduleRender(): void {
@@ -210,6 +237,7 @@ export class StatusPanel implements StatusPanelContract {
       return
     }
     this.syncDom()
+    if (this.syncWorld()) this.scheduleRender()
     const root = document.documentElement
     if (!root || typeof MutationObserver === 'undefined') {
       return
@@ -219,7 +247,7 @@ export class StatusPanel implements StatusPanelContract {
         !this.el?.isConnected ||
         (this.cspVisibilityRequired && mutations.some((mutation) => this.mutationMayChangeCspVisibility(mutation)))
       ) {
-        this.syncDom()
+        this.render()
       }
     })
     this.domObserver.observe(root, {
@@ -264,6 +292,7 @@ export class StatusPanel implements StatusPanelContract {
     if (!this.el) {
       return
     }
+    this.syncWorld()
     // 渲染可能先于 observer 回调，并消费待处理记录；先修复挂载再检查缓存。
     this.syncDom()
     const renderKey = JSON.stringify([

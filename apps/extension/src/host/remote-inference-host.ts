@@ -3,7 +3,6 @@ import {
   ModelCache,
   OnnxWorkerClient,
   downloadModel,
-  getModelAccessKey,
   probeModelAccessKey,
   queryModelDownloadQuota,
   type ModelAccessKeyProbe,
@@ -33,7 +32,7 @@ export function createRemoteKeyVerifier(
   return async (candidateKey, signal) => {
     const normalizedKey = candidateKey.trim()
     assertVerificationActive(signal)
-    // A HEAD probe settles Key validity without spending a monthly download.
+    // Authenticated GET /quota settles Key validity without spending a download.
     const probe = await dependencies.probe(signal, normalizedKey)
     assertVerificationActive(signal)
     if (!probe.valid) {
@@ -41,9 +40,8 @@ export function createRemoteKeyVerifier(
     }
     await dependencies.set(MODEL_ACCESS_KEY_STORAGE_KEY, normalizedKey, signal)
     assertVerificationActive(signal)
-    // Defensive: HEAD is unmetered today, so the probe cannot observe an
-    // exhausted quota. If it ever does, keep the Key and say so — an exhausted
-    // quota proves the Key is valid, and the download retries once it resets.
+    // Exhaustion does not invalidate the Key. Save it and report the reset-bound
+    // download restriction returned by the authenticated quota status.
     return probe.quotaExceededRetryAfterSeconds === null
       ? undefined
       : `模型 Key 有效并已安全保存；本月 ${MODEL_MONTHLY_DOWNLOAD_LIMIT} 次模型下载额度已用完，额度恢复后将自动下载模型`
@@ -58,11 +56,10 @@ export function createRemoteInferenceHost(
   let reconciliation: Promise<void> = Promise.resolve()
   const statusSink = emitStatus ? createForwardingStatusSink(emitStatus) : silentStatusSink
   const secretStorage = new IndexedDbStringStorage()
-  const modelCache = new ModelCache(statusSink, (signal, options) =>
-    downloadModel(signal, options, {
-      getAccessKey: () => getModelAccessKey(secretStorage),
-    }),
-  )
+  // The downloader bounds its wait; pass cancellation through to the underlying Key read too.
+  const getAccessKey = async (signal?: AbortSignal): Promise<string> =>
+    (await secretStorage.get(MODEL_ACCESS_KEY_STORAGE_KEY, signal)) ?? ''
+  const modelCache = new ModelCache(statusSink, (signal, options) => downloadModel(signal, options, { getAccessKey }))
   const detector = new OnnxWorkerClient(
     modelCache,
     statusSink,
@@ -100,7 +97,7 @@ export function createRemoteInferenceHost(
       await reconciliation
     },
     queryModelQuota: async (signal) => {
-      const quota = await queryModelDownloadQuota(signal, {}, { getAccessKey: () => getModelAccessKey(secretStorage) })
+      const quota = await queryModelDownloadQuota(signal, {}, { getAccessKey })
       if (!quota.enabled) {
         return '无次数限制（模型下载次数限制未开启）'
       }

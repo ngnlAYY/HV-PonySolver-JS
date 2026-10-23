@@ -11,6 +11,8 @@ import {
   writeFile,
 } from './fixtures.mjs'
 
+const nodeVersion = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf8')).engines.node.replace('>=', '')
+
 test('current repository README is in sync with source facts through the CLI', async () => {
   const result = await runCliCheck(repoRoot)
   assert.equal(result.exitCode, 0, result.stderr)
@@ -204,13 +206,16 @@ for (const command of ['mise exec -- pnpm install --frozen-lockfile']) {
 }
 
 for (const [documentedVersion, replacement, errorPattern] of [
-  ['24.15.0', '24.14.0', /docs\/development\/commands\.md.*Node.*24\.15\.0/s],
+  [nodeVersion, '0.0.0', /docs\/development\/commands\.md.*Node requirement/s],
   [packageManagerVersion, '0.0.0', /docs\/development\/commands\.md.*pnpm/s],
 ]) {
   test(`fails clearly when command reference drifts from runtime requirement ${documentedVersion}`, async () => {
     await withFixture(async (fixtureRoot) => {
       const readmePath = join(fixtureRoot, 'docs/development/commands.md')
-      await writeFile(readmePath, (await readFile(readmePath, 'utf8')).replaceAll(documentedVersion, replacement))
+      const source = await readFile(readmePath, 'utf8')
+      const changed = source.replaceAll(documentedVersion, replacement)
+      assert.notEqual(changed, source)
+      await writeFile(readmePath, changed)
 
       const result = await runCheck(fixtureRoot)
       assert.notEqual(result.exitCode, 0)

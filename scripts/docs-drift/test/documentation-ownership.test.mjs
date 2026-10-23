@@ -87,3 +87,22 @@ test('command examples cover shell fences and inline code, keeping exec and pros
   assert.match(errors[0], /missing-command/u)
   assert.match(errors[1], /missing-test/u)
 })
+
+for (const [name, lines] of [
+  ['mixed fence characters', ['```bash', '~~~', 'pnpm missing-command', '```']],
+  ['shorter closing fence', ['````bash', '```', 'pnpm missing-command', '````']],
+  ['closing fence with trailing content', ['~~~bash', '~~~not-a-close', 'pnpm missing-command', '~~~']],
+  ['space before shell info', ['``` bash', 'pnpm missing-command', '```']],
+]) {
+  test(`command examples remain checked with ${name}`, () => {
+    const root = { name: 'root', scripts: {} }
+    const errors = checkCommandExamples(root, [], lines.join('\n'), 'guide.md')
+    assert.equal(errors.length, 1)
+    assert.match(errors[0], /missing-command/u)
+  })
+}
+
+test('nested shell examples inside a longer text fence remain illustrative', () => {
+  const source = ['````text', '```bash', 'pnpm illustrative-prose', '```', '````'].join('\n')
+  assert.deepEqual(checkCommandExamples({ name: 'root', scripts: {} }, [], source, 'guide.md'), [])
+})

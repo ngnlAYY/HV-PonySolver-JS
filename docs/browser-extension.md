@@ -88,7 +88,7 @@ CSP 为 `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'se
 
 推理 Worker 内嵌固定上游的完整 MIT 许可，压缩产物同样保留；许可来源与 vendor 字节身份见[Runtime 专题](onnx-runtime.md#显式内置精简版)。
 
-审计锁定完整 MV3 清单：版本、后台、独立设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 和默认顶层隔离世界。拒绝 `optional_permissions`、`optional_host_permissions`、`externally_connectable`、`sandbox` 扩权；HTML 连同嵌套 template 拒绝内联脚本/事件、规范化后的 `javascript:`/`data:`/`vbscript:` URL、`srcdoc` 和 base URL 覆写。普通文本和合法本地资源不按可执行 URL 处理。
+审计锁定完整 MV3 清单：版本、后台、独立设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 和默认顶层隔离世界。拒绝 `optional_permissions`、`optional_host_permissions`、`externally_connectable`、`sandbox` 扩权；HTML 连同嵌套 template 拒绝内联脚本/事件、规范化后的 `javascript:`/`data:`/`vbscript:` URL、`srcdoc` 和 base URL 覆写。所有 `.js`、`.mjs`、`.cjs` 文件均进入执行代码审计，后缀比较不区分大小写；动态导入通过 AST 识别，注释分隔不能绕过，字符串或注释中的同名文本不误判，无效 JS 语法失败关闭。HTML 脚本引用必须指向这些已审类型的本地文件，其他后缀失败关闭。普通文本和合法本地资源不按可执行 URL 处理。
 
 ## Runtime architecture
 
@@ -135,12 +135,12 @@ packaged Host 不构造远程能力、不打开或修改原 Key、不声明模�
 
 remote 设置页在绑定处理器后才启用 Key 控件，已保存 Key 不回显：
 
-| 操作         | 行为                                                                        |
-| ------------ | --------------------------------------------------------------------------- |
-| 验证并保存   | HEAD 验证，不计下载；IndexedDB 事务提交后才算保存成功                       |
-| 查询下载次数 | 用已保存 Key 只读查询；关闭限制时显示“无次数限制（模型下载次数限制未开启）” |
-| 下载模型     | 用已保存 Key 下载、验证、缓存和确认；有效缓存命中不重复计次                 |
-| 清除 Key     | 删除 Key；不宣称撤销已经提交的事务或服务端确认                              |
+| 操作         | 行为                                                                                   |
+| ------------ | -------------------------------------------------------------------------------------- |
+| 验证并保存   | 认证 `GET /quota` 验证，不计下载；额度耗尽或禁用仍可保存，IndexedDB 事务提交后才算成功 |
+| 查询下载次数 | 用已保存 Key 只读查询；关闭限制时显示“无次数限制（模型下载次数限制未开启）”            |
+| 下载模型     | 用已保存 Key 下载、验证、缓存和确认；有效缓存命中不重复计次                            |
+| 清除 Key     | 删除 Key；不宣称撤销已经提交的事务或服务端确认                                         |
 
 验证/清除只清空点击后未编辑的输入，重输同样文字也算编辑。Key commit 独立驱动 Host 等待旧初始化取消后再通知 Broker，覆盖静默预热和其他 Port，就绪会话复用。调用方取消不撤销 commit；回滚或 Host 关闭后的迟到回调不通知，详见[凭证修订](architecture/extension-runtime.md#key-提交与凭证修订)。
 
@@ -214,12 +214,12 @@ CI 不自动运行 Android。独立 harness 须在 Android Firefox major 142 安
 
 内置发布设置 `publish_extension_artifact=true` 与 `firefox_android_e2e_run_id`，在 canonical 构建 job 内校验成功 run、可信 workflow/事件/commit 和本地同一 ZIP。缺证据、版本/归档不符或随机回退均阻止完整 ZIP 的首次上传；缺 `PACKAGED_MODEL_URL` 会跳过 canonical 门禁并阻止内置发布。
 
-桌面 attestation 同时校验解压树 SHA-256 和正安全整数 `tree.fileCount`；缺失、非整数或越界文件数不能作为发布证据。canonical 下载器按精确长度分配自有缓冲并即时复制每块，流源复用分块内存也不能改变已读取内容；全部字节与 SHA-256 验证后才落盘。
+桌面 attestation 同时校验解压树 SHA-256 和正安全整数 `tree.fileCount`；缺失、非整数或越界文件数不能作为发布证据。canonical 下载器按精确长度分配自有缓冲并即时复制每块，流源复用分块内存也不能改变已读取内容；全部字节与 SHA-256 验证后才落盘。Node Fetch 自动解压的响应另限制编码声明为 canonical 长度加 `max(64 KiB, ceil(canonical 长度 / 1024))`，该预算不扩大实际正文上限；无编码响应仍要求声明长度精确匹配。
 
 ### GitHub desktop Release
 
 在 main 手动设置 `publish_extension_release=true`，创建 `extension-v<version>`（当前 `extension-v0.1.1`），附已测试的远程双浏览器 ZIP、SHA-256 与 artifact 元数据。已有标签或非 main 被拒绝，只有最终发布 job 有写权限。
 
-两类扩展发布均要求本次 CodeQL job 成功、仓库检查、桌面 smoke、内置 fixture、最低桌面版本与受保护远程推理门禁。`production-model-smoke` 环境提供 `KV_KEY`；缺少凭据或未启用会跳过鉴权并阻止发布，不能以 HEAD 验证替代 detect。CodeQL 执行成功不代表没有安全告警。
+两类扩展发布均要求本次 CodeQL job 成功、仓库检查、桌面 smoke、内置 fixture、最低桌面版本与受保护远程推理门禁。`production-model-smoke` 环境提供 `KV_KEY`；缺少凭据或未启用会跳过鉴权并阻止发布，不能以 Key 验证或额度查询替代 detect。CodeQL 执行成功不代表没有安全告警。
 
 普通 push/PR 不发布；job 间传递的完整 ZIP 也须在显式授权及全部所需门禁通过后上传。GitHub Release 不等同商店签名或 Android 验收。全部输入、工作流与交付边界见[CI 与发布](development/releases.md)。

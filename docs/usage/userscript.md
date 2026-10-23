@@ -13,7 +13,7 @@
 
 两种 profile 都需有效 Key 下载同一远程 `.ort` 模型，构建时无需 Key，运行时不自动回退。用具备所需 GM API 的管理器导入并启用 `apps/userscript/dist/hv-pony-solver.user.js`；Playwright 测试不代替真实管理器兼容性验收。
 
-进入 Hentaiverse，在“HV-PonySolver 设置”中选择“设置模型下载 Key”。验证使用不计次的 HEAD；不要把 Key 写入源码、URL 或问题报告。
+进入 Hentaiverse，在“HV-PonySolver 设置”中选择“设置模型下载 Key”。验证使用不计次的认证 `GET /quota`，不下载模型；额度耗尽或禁用不影响有效 Key 的保存，额度服务故障会使验证失败。不要把 Key 写入源码、URL 或问题报告。
 
 - 新的设置或清除淘汰尚未写入的旧验证；取消输入不淘汰原操作。
 - 同页 GM 设置/清除串行提交。已发起的写入不可撤销，后续操作等待其结算，防止旧值迟到覆盖清除或新 Key；前次失败不阻断后续写入。此顺序不提供跨标签事务，底层写入永久挂起时也不能安全跳过。

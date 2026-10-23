@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ModelCache, OnnxWorkerClient } from '@hv-pony-solver/browser-core'
-import { ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared'
+import { ModelCache, type OnnxWorkerClient } from '@hv-pony-solver/browser-core'
 
 import { IndexedDbStringStorage } from '../../src/host/indexeddb-string-storage'
 import {
@@ -95,7 +94,7 @@ describe('createRemoteInferenceHost', () => {
       used: number
       remaining: number | null
       retryAfterSeconds: number | null
-    } = { enabled: true, limit: 5, used: 2, remaining: 3, retryAfterSeconds: 3600 }
+    } = { enabled: true, limit: 5, used: 5, remaining: 0, retryAfterSeconds: 3600 }
     class TestWorker {
       constructor(...args: unknown[]) {
         workerArguments.push(args)
@@ -107,21 +106,20 @@ describe('createRemoteInferenceHost', () => {
       },
     })
     vi.stubGlobal('Worker', TestWorker)
-    const requestedMethods: string[] = []
+    const requestedRoutes: string[] = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const method = init?.method ?? 'GET'
-        requestedMethods.push(method)
-        if (new URL(input.toString()).pathname === '/quota') {
+        const pathname = new URL(input.toString()).pathname
+        requestedRoutes.push(`${method} ${pathname}`)
+        if (pathname === '/quota') {
           expect(method).toBe('GET')
-          expect(new Headers(init?.headers).get('authorization')).toBe('Bearer stored-key')
+          const candidateProbe = requestedRoutes.length === 2
+          expect(new Headers(init?.headers).get('authorization')).toBe(
+            candidateProbe ? `Bearer ${'f'.repeat(64)}` : 'Bearer stored-key',
+          )
           return Response.json(quotaResponse)
-        }
-        if (method === 'HEAD') {
-          // The probe must present the candidate Key, never the stored one.
-          expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${'f'.repeat(64)}`)
-          return new Response(null, { headers: { 'content-length': String(ORT_MODEL_INTEGRITY.byteLength) } })
         }
         expect(new Headers(init?.headers).get('authorization')).toBe('Bearer stored-key')
         return new Response(new Uint8Array(modelBuffer))
@@ -137,7 +135,7 @@ describe('createRemoteInferenceHost', () => {
     const modelCache = detectorInternals.modelCache
     try {
       await expect(modelCache.download(undefined, false)).resolves.toEqual(modelBuffer)
-      expect(storageGet).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY)
+      expect(storageGet).toHaveBeenCalledWith(MODEL_ACCESS_KEY_STORAGE_KEY, expect.any(AbortSignal))
 
       expect(detectorInternals.workerFactory()).toBeInstanceOf(TestWorker)
       expect(workerArguments).toEqual([['moz-extension://test/runtime/inference-worker.js', { type: 'module' }]])
@@ -155,9 +153,15 @@ describe('createRemoteInferenceHost', () => {
           requestId: 'factory-verify',
           candidateKey: `  ${'f'.repeat(64)}  `,
         }),
-      ).resolves.toEqual({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'factory-verify', ok: true })
-      // Verification must settle on the HEAD probe alone, never on a metered GET.
-      expect(requestedMethods).toEqual(['GET', 'HEAD'])
+      ).resolves.toEqual({
+        protocol: PROTOCOL_VERSION,
+        type: 'result',
+        requestId: 'factory-verify',
+        ok: true,
+        notice: '模型 Key 有效并已安全保存；本月 5 次模型下载额度已用完，额度恢复后将自动下载模型',
+      })
+      // Verification must settle on quota JSON alone, never on a model request.
+      expect(requestedRoutes).toEqual(['GET /yolo26n-640.ort', 'GET /quota'])
       expect(cacheDownload).not.toHaveBeenCalled()
       expect(storageSet).toHaveBeenCalledWith(
         MODEL_ACCESS_KEY_STORAGE_KEY,
@@ -179,6 +183,7 @@ describe('createRemoteInferenceHost', () => {
       expect(cacheDownload).toHaveBeenCalledWith(expect.any(AbortSignal))
       expect(cachePut).toHaveBeenCalledWith(modelBuffer, true, true, expect.any(AbortSignal))
 
+      quotaResponse = { enabled: true, limit: 5, used: 2, remaining: 3, retryAfterSeconds: 3600 }
       await expect(
         host.handle({ protocol: PROTOCOL_VERSION, type: 'query-model-quota', requestId: 'factory-quota' }),
       ).resolves.toEqual({
@@ -218,4 +223,38 @@ describe('createRemoteInferenceHost', () => {
       vi.unstubAllGlobals()
     }
   })
+
+  it.each(['query-model-quota', 'download-model', 'prepare'] as const)(
+    'cancels the underlying Key read when %s is abandoned before any network request',
+    async (type) => {
+      let readCancelled = false
+      const storageGet = vi.spyOn(IndexedDbStringStorage.prototype, 'get').mockImplementation((_key, signal) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            readCancelled = true
+          },
+          { once: true },
+        )
+        // Keep the dependency pending: cancellation must settle without waiting for its acknowledgement.
+        return Promise.race<string | null>([])
+      })
+      const fetch = vi.fn()
+      vi.stubGlobal('fetch', fetch)
+      const host = createRemoteInferenceHost()
+      vi.spyOn(ModelCache.prototype, 'getCached').mockResolvedValue(null)
+      const caller = new AbortController()
+      try {
+        const response = host.handle({ protocol: PROTOCOL_VERSION, type, requestId: 'cancel-key-read' }, caller.signal)
+        await vi.waitFor(() => expect(storageGet).toHaveBeenCalledTimes(1))
+        caller.abort()
+        await expect(response).resolves.toMatchObject({ ok: false, error: expect.stringContaining('取消') })
+        expect(readCancelled).toBe(true)
+        expect(fetch).not.toHaveBeenCalled()
+      } finally {
+        host.destroy()
+        vi.unstubAllGlobals()
+      }
+    },
+  )
 })

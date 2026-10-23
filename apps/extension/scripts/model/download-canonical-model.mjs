@@ -144,8 +144,20 @@ async function readBoundedBody(response, identity, signal) {
   throwIfAborted(signal, 'Canonical model download')
   const declaredLength = response.headers.get('content-length')
   if (declaredLength !== null) {
+    // Node fetch exposes Content-Encoding but returns decoded bytes. Bound the
+    // wire declaration separately; the stream allocation stays at the model size.
+    const encoding = response.headers.get('content-encoding')?.trim().toLowerCase()
+    const encoded = encoding !== undefined && encoding !== 'identity'
+    const maximumDeclaredLength = encoded
+      ? identity.byteLength + Math.max(64 * 1024, Math.ceil(identity.byteLength / 1024))
+      : identity.byteLength
     const parsedLength = /^\d+$/u.test(declaredLength) ? Number(declaredLength) : Number.NaN
-    if (!Number.isSafeInteger(parsedLength) || parsedLength !== identity.byteLength) {
+    if (
+      !Number.isSafeInteger(parsedLength) ||
+      parsedLength <= 0 ||
+      parsedLength > maximumDeclaredLength ||
+      (!encoded && parsedLength !== identity.byteLength)
+    ) {
       cancelBody(response)
       throw new CanonicalModelError(
         `Canonical model Content-Length mismatch: expected ${identity.byteLength}, received ${Number.isSafeInteger(parsedLength) ? parsedLength : 'invalid'}`,

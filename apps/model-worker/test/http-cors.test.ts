@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { MODEL_DOWNLOAD_RECEIPT_HEADER, MODEL_INTEGRITY } from '@hv-pony-solver/shared'
 
@@ -10,6 +10,8 @@ import {
   createEnv,
   createModelFixture,
   fetchWorker,
+  type MockKvNamespace,
+  type MockModelDownloadQuotaNamespace,
   type MockR2Bucket,
   modelRequest,
   quotaRequest,
@@ -469,6 +471,97 @@ describe('http-cors', () => {
 
     expect(response.status).toBe(403)
     expect(await response.text()).toBe('Forbidden')
+  })
+
+  it('routes canonical percent-encoded custom paths without decoding or switching route policies', async () => {
+    const fixture = {
+      ...createModelFixture(),
+      publicModelPath: '/models/a%20b.onnx',
+      publicQuotaPath: '/account/%E9%A2%9D%E5%BA%A6',
+      publicOrtModelPath: '/models/%2e-model.ort',
+      publicRuntimeWasmPath: '/runtime/a%2Fb.wasm',
+    }
+    const env = createEnv(fixture, {
+      keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+      quotaEnabled: false,
+    })
+    const authorization = { authorization: `Bearer ${fixture.validKey}` }
+
+    for (const [path, body, contentType] of [
+      [fixture.publicModelPath, fixture.realBody, 'application/octet-stream'],
+      [fixture.publicOrtModelPath, fixture.ortBody, 'application/octet-stream'],
+      [fixture.publicRuntimeWasmPath, fixture.runtimeBody, 'application/wasm'],
+    ] as const) {
+      const response = await fetchWorker(assetRequest(path, 'GET', authorization), env)
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe(body)
+      expect(response.headers.get('content-type')).toBe(contentType)
+    }
+    const quota = await fetchWorker(quotaRequest(fixture, 'GET', undefined, authorization), env)
+    expect(quota.status).toBe(200)
+    expect(await quota.json()).toMatchObject({ enabled: false, remaining: null })
+
+    const modelOptions = await fetchWorker(modelRequest(fixture, 'OPTIONS'), env)
+    expect(modelOptions.status).toBe(204)
+    expect(modelOptions.headers.get('access-control-allow-methods')).toBe('GET, HEAD, OPTIONS')
+    const quotaOptions = await fetchWorker(quotaRequest(fixture, 'OPTIONS'), env)
+    expect(quotaOptions.status).toBe(204)
+    expect(quotaOptions.headers.get('access-control-allow-methods')).toBe('GET, POST, OPTIONS')
+
+    const decodedSlash = await fetchWorker(assetRequest('/runtime/a/b.wasm', 'OPTIONS'), env)
+    expect(decodedSlash.status).toBe(404)
+  })
+
+  it.each(['/models/../quota', '/models/%2e%2e/quota', '/models/a b.onnx', '//models.example/a.onnx'])(
+    'fails closed before HTTP routing for an invalid configured path: %j',
+    async (path) => {
+      const fixture = createModelFixture()
+      const env = createEnv(fixture, {
+        keyValues: new Map<string, string>([[fixture.validKey, '1']]),
+      })
+      env.PUBLIC_MODEL_PATH = path
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        for (const method of ['OPTIONS', 'GET']) {
+          const response = await fetchWorker(
+            assetRequest(path, method, { authorization: `Bearer ${fixture.validKey}` }),
+            env,
+          )
+
+          expect(response.status).toBe(500)
+          expect(await response.text()).toBe('Internal Server Error')
+          expect(response.headers.get('access-control-allow-methods')).toBeNull()
+        }
+        expect((env.MODEL_KEYS as MockKvNamespace).requestedKeys).toEqual([])
+        expect((env.MODEL_BUCKET as MockR2Bucket).requestedKeys).toEqual([])
+        expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedPaths).toEqual([])
+        expect(errorSpy.mock.calls).toEqual([
+          ['model-worker error route=request errorKind=unhandled-exception errorName=Error'],
+          ['model-worker error route=request errorKind=unhandled-exception errorName=Error'],
+        ])
+      } finally {
+        errorSpy.mockRestore()
+      }
+    },
+  )
+
+  it('fails closed rather than selecting a route when canonical public paths collide', async () => {
+    const fixture = createModelFixture()
+    const env = createEnv(fixture)
+    env.PUBLIC_MODEL_PATH = fixture.publicQuotaPath
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const response = await fetchWorker(quotaRequest(fixture, 'OPTIONS'), env)
+
+      expect(response.status).toBe(500)
+      expect(await response.text()).toBe('Internal Server Error')
+      expect(response.headers.get('access-control-allow-methods')).toBeNull()
+      expect((env.MODEL_KEYS as MockKvNamespace).requestedKeys).toEqual([])
+      expect((env.MODEL_BUCKET as MockR2Bucket).requestedKeys).toEqual([])
+      expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedPaths).toEqual([])
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it('returns 404 with CORS for non-model paths', async () => {

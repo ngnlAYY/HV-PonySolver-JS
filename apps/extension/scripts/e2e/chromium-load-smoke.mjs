@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { chromium } from '@playwright/test'
+import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared/model'
 import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 
 import { assertBrowserVersionForRun } from '../browser/browser-support.mjs'
@@ -153,9 +154,12 @@ export async function verifyRemoteModelKey(page, browserErrors = []) {
     { timeout: 120_000 },
   )
   const verificationStatus = await page.locator('#status').textContent()
-  assert.equal(
-    verificationStatus,
-    '模型 Key 验证成功并已安全保存',
+  // A validated quota status can accept the Key while reporting exhaustion.
+  // The later detect still must download and infer; this does not bypass it.
+  assert.ok(
+    verificationStatus === '模型 Key 验证成功并已安全保存' ||
+      verificationStatus ===
+        `模型 Key 有效并已安全保存；本月 ${MODEL_MONTHLY_DOWNLOAD_LIMIT} 次模型下载额度已用完，额度恢复后将自动下载模型`,
     `Production verification failed: ${verificationStatus || 'empty status'}${browserErrors.length > 0 ? `; browser errors: ${browserErrors.join(' | ')}` : ''}`,
   )
 }

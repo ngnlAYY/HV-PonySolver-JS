@@ -39,6 +39,45 @@ test('canonical downloader refuses redirects and sends an optional bearer token'
   assert.equal(request[1].signal.aborted, false)
 })
 
+test('canonical downloader separates encoded length from verified decoded bytes', async () => {
+  for (const encoding of ['gzip', 'br']) {
+    for (const declaredLength of [2, 24]) {
+      const result = await fetchCanonicalModel({
+        identity,
+        url: 'https://models.example/canonical.ort',
+        fetchImpl: async () =>
+          new globalThis.Response(bytes, {
+            headers: { 'content-encoding': encoding, 'content-length': String(declaredLength) },
+          }),
+      })
+      assert.deepEqual(result.bytes, bytes)
+    }
+  }
+})
+
+test('encoded responses retain declaration, decoded length and integrity bounds', async () => {
+  for (const [body, declaredLength, expected] of [
+    [bytes, String(identity.byteLength + 64 * 1024 + 1), /Content-Length mismatch/u],
+    [bytes, '0', /Content-Length mismatch/u],
+    [bytes, 'invalid', /Content-Length mismatch/u],
+    [Uint8Array.from([1, 2, 3, 4, 5]), '25', /byte length exceeds/u],
+    [Uint8Array.from([1, 2, 3]), '23', /byte length mismatch/u],
+    [Uint8Array.from([4, 3, 2, 1]), '24', /SHA-256 mismatch/u],
+  ]) {
+    await assert.rejects(
+      fetchCanonicalModel({
+        identity,
+        url: 'https://models.example/canonical.ort',
+        fetchImpl: async () =>
+          new globalThis.Response(body, {
+            headers: { 'content-encoding': 'gzip', 'content-length': declaredLength },
+          }),
+      }),
+      expected,
+    )
+  }
+})
+
 test('canonical downloader snapshots reusable stream chunks into the verified result', async () => {
   const chunk = new Uint8Array(1)
   let index = 0

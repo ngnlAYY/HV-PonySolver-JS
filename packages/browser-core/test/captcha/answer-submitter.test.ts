@@ -794,6 +794,34 @@ describe('AnswerSubmitter', () => {
       expect(onSubmitted).not.toHaveBeenCalled()
     })
 
+    it('stops an action change hidden by a named control while timing settings are pending', async () => {
+      const form = createForm(true)
+      form.setAttribute('action', '/submit')
+      const namedAction = document.createElement('input')
+      namedAction.name = 'action'
+      form.appendChild(namedAction)
+      Object.defineProperty(form, 'action', { value: namedAction, configurable: true })
+      const button = form.querySelector<HTMLInputElement>('#riddlesubmit')
+      if (!button) throw new Error('submit control missing')
+      const click = vi.spyOn(button, 'click').mockImplementation(() => undefined)
+      const onSubmitted = vi.fn()
+      const gate = Promise.withResolvers<readonly [number, number]>()
+      const submission = new AnswerSubmitter(
+        () => gate.promise,
+        async () => [0, 0],
+      ).submit(form, ['RA'], vi.fn(), onSubmitted)
+      await flushMicrotasks()
+      form.setAttribute('action', '/changed')
+      gate.resolve([0, 0])
+      await vi.runAllTimersAsync()
+      await submission
+
+      expect(click).not.toHaveBeenCalled()
+      expect(onSubmitted).not.toHaveBeenCalled()
+      expect(form.querySelectorAll('input[name="riddleanswer[]"]:checked')).toHaveLength(1)
+      expect(form.querySelector<HTMLInputElement>('input[name="riddleanswer[]"]')?.checked).toBe(true)
+    })
+
     it('does not submit when the captured form is disconnected during the delay', async () => {
       const form = createForm(true)
       const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!

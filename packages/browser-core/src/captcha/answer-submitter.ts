@@ -1,7 +1,7 @@
 import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
 import { randDelay, shuffle, sleep } from '../utils/delay'
 import { captchaSelectors } from './captcha-selectors'
-import { getSubmissionAction, isSameOriginForm } from './captcha-target'
+import { getFormAction, getSubmissionAction, isSameOriginForm } from './captcha-target'
 import { readAnswerSettings } from './read-answer-settings'
 import type { DelayRange } from './timing-settings'
 
@@ -213,7 +213,7 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       checkboxes: initialControls.checkboxes,
       button: initialControls.button,
     }
-    const expectedFormAction = form.action
+    const expectedFormAction = getFormAction(form)
     const expectedSubmitType = expectedControls.button.type
     const expectedSubmitAction = getSubmissionAction(form, expectedControls.button)
     if (!isSameOriginForm(form, expectedControls.button) || !controlsAreUsable(form, expectedControls)) {
@@ -244,7 +244,7 @@ export class AnswerSubmitter implements AnswerSubmissionService {
       }
       if (
         !hasSameControls(expectedControls, controls) ||
-        form.action !== expectedFormAction ||
+        getFormAction(form) !== expectedFormAction ||
         controls.button.type !== expectedSubmitType ||
         getSubmissionAction(form, controls.button) !== expectedSubmitAction ||
         !isSameOriginForm(form, controls.button) ||

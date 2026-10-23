@@ -49,6 +49,11 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
     }
   }
 
+  const keyValidationRow = extensionDoc.split(/\r?\n/u).find((line) => /^\|\s*验证并保存\s*\|/u.test(line)) ?? ''
+  if (!/\bGET\s+\/quota\b/u.test(keyValidationRow) || /\bHEAD\b/u.test(keyValidationRow)) {
+    errors.push('extension Key validation must document GET /quota instead of model HEAD')
+  }
+
   // 安全边界属于扩展专题，README 中的同名摘要不能补足正文缺项。
   for (const fact of [
     'sender.url',

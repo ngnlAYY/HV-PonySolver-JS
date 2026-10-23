@@ -67,6 +67,28 @@ describe('CachedImageLoader', () => {
     expect(logger.warn).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['gzip', FAKE_BYTES.byteLength - 3],
+    ['br', FAKE_BYTES.byteLength + 3],
+    ['unknown-encoding', 1],
+  ] as const)('reads browser-decoded %s bytes without enforcing the wire length', async (encoding, declaredLength) => {
+    const response = makeOkResponse(FAKE_BYTES, {
+      'content-type': 'image/png',
+      'content-encoding': encoding,
+      'content-length': String(declaredLength),
+    })
+    const fetchStub = vi.fn().mockResolvedValueOnce(response)
+    globalThis.fetch = fetchStub
+
+    const result = await new CachedImageLoader().get(FAKE_URL)
+
+    expect(Array.from(new Uint8Array(await result.arrayBuffer()))).toEqual(Array.from(FAKE_BYTES))
+    expect(result.type).toBe('image/png')
+    expect(response.body?.locked).toBe(false)
+    expect(fetchStub).toHaveBeenCalledTimes(1)
+    expect(logger.warn).not.toHaveBeenCalled()
+  })
+
   it('preserves the browser receiver when calling the default fetch', async () => {
     const fetchStub = vi.fn(function (this: typeof globalThis): Promise<Response> {
       if (this !== globalThis) {
@@ -265,7 +287,7 @@ describe('CachedImageLoader', () => {
     expect(body.getReader).not.toHaveBeenCalled()
   })
 
-  it('enforces the encoded byte cap while streaming and cleans up the reader', async () => {
+  it('enforces the decoded image byte cap despite a small compressed wire length', async () => {
     const oversizedChunk = new Uint8Array(imagePreprocessConfig.maxEncodedBytes + 1)
     const events: string[] = []
     const reader = {
@@ -277,7 +299,12 @@ describe('CachedImageLoader', () => {
       releaseLock: vi.fn(() => events.push('release')),
     }
     const body = { getReader: vi.fn(() => reader) }
-    const response = () => makeStreamResponse(body as unknown as ReadableStream<Uint8Array>)
+    const response = () =>
+      makeStreamResponse(body as unknown as ReadableStream<Uint8Array>, {
+        'content-type': 'image/png',
+        'content-encoding': 'gzip',
+        'content-length': '1',
+      })
     globalThis.fetch = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response())
 
     await expect(new CachedImageLoader().get(FAKE_URL)).rejects.toThrow(

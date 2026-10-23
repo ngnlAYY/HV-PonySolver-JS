@@ -14,6 +14,8 @@ App 在稳定的 documentElement 观察目标相关 mutation，保留防抖、�
 
 用户脚本以 GM Key 的实际存储提交驱动恢复。菜单保存、清除和留空清除成功后，先取消并等待旧的未完成模型初始化，再通知 CoreApp 恢复当前目标；已就绪会话继续使用。依赖组装层以提交修订号与销毁状态屏蔽旧回调，取消输入、验证失败或存储失败不触发恢复。HEAD 验证成功的提示只说明 Key 已验证并保存，不声称下载过模型。
 
+2026-10-23 的[编码长度与状态边界修复](2026-10-23-audit-boundaries-and-encoding.md)以认证 `GET /quota` 替代 HEAD 长度验证；本篇的实际提交、取消与恢复所有权不变，以下证据保留原日期含义。
+
 ## Existing record audit
 
 检索非归档决定中的答案、人工、body、面板、Key 和恢复：[面板挂载](2026-09-16-status-panel-remount.md)部分重叠，本篇补足独立答题扫描；[BFCache 断连](2026-09-18-extension-port-disconnect-errors.md)仍约束扩展连接，不自动重放下载或 Key 操作，均保留。

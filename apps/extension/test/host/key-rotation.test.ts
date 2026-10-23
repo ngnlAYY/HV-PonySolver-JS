@@ -3,7 +3,6 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { App } from '@hv-pony-solver/browser-core/app/app'
 import type { ModelCache, OnnxWorkerClient, StatusPanelContract } from '@hv-pony-solver/browser-core'
 import { ModelAccessKeyRejectedError } from '@hv-pony-solver/browser-core/model/model-download-error'
-import { ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared'
 
 import { RemoteDetectorClient } from '../../src/content/remote-detector-client'
 import { IndexedDbStringStorage } from '../../src/host/indexeddb-string-storage'
@@ -33,12 +32,7 @@ it.each(['verify-key', 'clear-key'] as const)(
     vi.spyOn(IndexedDbStringStorage.prototype, 'close').mockResolvedValue()
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        async () =>
-          new Response(null, {
-            headers: { 'content-length': String(ORT_MODEL_INTEGRITY.byteLength) },
-          }),
-      ),
+      vi.fn(async () => Response.json({ enabled: true, limit: 5, used: 0, remaining: 5, retryAfterSeconds: 3600 })),
     )
 
     const notifications = vi.fn(() => {
@@ -158,7 +152,7 @@ it.each(['verify-key', 'clear-key'] as const)(
     vi.spyOn(IndexedDbStringStorage.prototype, 'close').mockResolvedValue()
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(null, { headers: { 'content-length': String(ORT_MODEL_INTEGRITY.byteLength) } })),
+      vi.fn(async () => Response.json({ enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null })),
     )
     const notified = vi.fn()
     const host = createRemoteInferenceHost(undefined, notified)

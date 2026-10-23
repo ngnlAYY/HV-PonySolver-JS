@@ -113,9 +113,13 @@ export class CachedImageLoader implements ImageLoader {
       if (!response.body) {
         throw new Error('验证码图片响应正文不可用')
       }
+      // Same-origin responses expose Content-Encoding. A compressed response's
+      // Content-Length describes wire bytes, not the browser-decoded stream.
+      const encoding = response.headers.get('content-encoding')?.trim().toLowerCase()
+      const expectedLength = encoding === undefined || encoding === 'identity' ? declaredLength : null
       readerAcquired = true
       const bytes = await readBoundedByteStream(response.body, {
-        expectedByteLength: declaredLength,
+        expectedByteLength: expectedLength,
         maxByteLength: imagePreprocessConfig.maxEncodedBytes,
         sizeError: (actual) =>
           new Error(

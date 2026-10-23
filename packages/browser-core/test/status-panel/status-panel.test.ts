@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HistoryStore } from '../../src/persistence/answer-history-store'
+import { HistoryStore } from '../../src/persistence/answer-history-store'
 import type { HistoryRecord, World } from '../../src/persistence/answer-history-types'
-import type { SettingsStorage } from '../../src/platform/storage'
+import type { EnumerableTextStorage, SettingsStorage } from '../../src/platform/storage'
 import { StatusPanel } from '../../src/status-panel/status-panel'
 
 const panels: StatusPanel[] = []
@@ -77,14 +77,282 @@ function deferredSettingsStorage(): Readonly<{
   }
 }
 
+function createHistoryStorage(optimistic = false) {
+  const values = new Map<string, string>()
+  let nextWrite: Promise<void> | null = null
+  const storage: EnumerableTextStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem(key, value) {
+      const pending = nextWrite
+      nextWrite = null
+      if (pending) {
+        const previous = values.get(key)
+        if (optimistic) values.set(key, value)
+        return pending.then(
+          () => {
+            values.set(key, value)
+          },
+          (error: unknown) => {
+            if (optimistic) {
+              if (previous === undefined) values.delete(key)
+              else values.set(key, previous)
+            }
+            throw error
+          },
+        )
+      }
+      values.set(key, value)
+    },
+    removeItem(key) {
+      values.delete(key)
+    },
+    getItemsByPrefix: (prefix) => Array.from(values.entries()).filter(([key]) => key.startsWith(prefix)),
+  }
+  return {
+    storage,
+    deferNextWrite() {
+      const write = deferred<void>()
+      nextWrite = write.promise
+      return write
+    },
+  }
+}
+
 describe('StatusPanel history persistence', () => {
   afterEach(() => {
     for (const panel of panels.splice(0)) panel.destroy()
+    vi.restoreAllMocks()
   })
 
   beforeEach(() => {
     document.body.innerHTML = ''
     history.pushState(null, '', '/')
+  })
+
+  it('uses the current world when first created after navigation', async () => {
+    const { storage } = createHistoryStorage()
+    const store = new HistoryStore(storage)
+    const panel = createPanel(store, settingsStorage(false, false))
+
+    history.pushState(null, '', '/isekai/')
+    panel.create()
+    panel.addSuccess(['TS'], {}, 12)
+    await vi.waitFor(() => expect(document.querySelector('.ponyLog')?.textContent).toContain('[TS]'))
+
+    expect(document.querySelector('.ponyLog strong')?.textContent).toBe('异世界')
+    expect(store.get('main')).toEqual([])
+    expect(store.get('isekai')).toMatchObject([{ type: 'success', answers: 'TS', elapsed: 12 }])
+  })
+
+  it('partitions new history by the current URL and preserves both worlds on return', async () => {
+    const { storage } = createHistoryStorage()
+    const store = new HistoryStore(storage)
+    const panel = createPanel(store, settingsStorage(false, false))
+    panel.create()
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+    panel.addSuccess(['TS'], {}, 12)
+    await vi.waitFor(() => expect(element.textContent).toContain('[TS]'))
+
+    history.pushState(null, '', '/isekai/')
+    panel.addManualResult(['RA'], { RA: 0.95 }, 20)
+    await vi.waitFor(() => expect(element.querySelector('strong')?.textContent).toBe('异世界'))
+    expect(element.textContent).toContain('[RA(95.0)]')
+    expect(element.textContent).not.toContain('[TS]')
+    expect(store.get('main')).toMatchObject([{ type: 'success', answers: 'TS' }])
+    expect(store.get('isekai')).toMatchObject([{ type: 'manual', answers: 'RA(95.0)' }])
+
+    history.pushState(null, '', '/')
+    panel.addRandomFailure('RD', 30)
+    await vi.waitFor(() => expect(element.querySelector('strong')?.textContent).toBe('主世界'))
+    expect(element.textContent).toContain('识别失败，随机选择 RD')
+    expect(element.textContent).toContain('[TS]')
+    expect(element.textContent).not.toContain('[RA(95.0)]')
+    expect(store.get('main')).toMatchObject([
+      { type: 'random', answers: 'RD' },
+      { type: 'success', answers: 'TS' },
+    ])
+    expect(store.get('isekai')).toMatchObject([{ type: 'manual', answers: 'RA(95.0)' }])
+    expect(document.querySelector('.ponyLog')).toBe(element)
+    expect(document.querySelectorAll('.ponyLog')).toHaveLength(1)
+  })
+
+  it.each(['create', 'status', 'body replacement'] as const)(
+    'refreshes stored history in both directions on %s without recreating the panel',
+    async (activity) => {
+      const { storage } = createHistoryStorage()
+      const store = new HistoryStore(storage)
+      await store.add('main', { type: 'error', message: '主世界保存的错误', elapsed: 1 }).persisted
+      await store.add('isekai', { type: 'success', answers: 'RA', elapsed: 2 }).persisted
+      const panel = createPanel(store, settingsStorage(false, false))
+      panel.create()
+      panel.setStatus({ model: '模型已加载' })
+      const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+      await vi.waitFor(() => expect(element.textContent).toContain('模型已加载'))
+      const refresh = () => {
+        if (activity === 'create') panel.create()
+        else if (activity === 'status') panel.setSessionReady(8)
+        else document.body.replaceChildren(document.createElement('main'))
+      }
+
+      history.pushState(null, '', '/isekai/')
+      refresh()
+      await vi.waitFor(() => expect(element.querySelector('strong')?.textContent).toBe('异世界'))
+      expect(element.textContent).toContain('异世界最近答题:')
+      expect(element.textContent).toContain('[RA]')
+      expect(element.textContent).toContain('最近错误：无')
+      expect(element.textContent).not.toContain('主世界保存的错误')
+      expect(element.textContent).toContain('模型已加载')
+      expect(document.querySelector('.ponyLog')).toBe(element)
+
+      history.pushState(null, '', '/')
+      refresh()
+      await vi.waitFor(() => expect(element.querySelector('strong')?.textContent).toBe('主世界'))
+      expect(element.textContent).toContain('主世界最近答题:')
+      expect(element.textContent).toContain('最近错误：主世界保存的错误')
+      expect(element.textContent).not.toContain('[RA]')
+      expect(element.textContent).toContain('模型已加载')
+      expect(element.hidden).toBe(false)
+      expect(element.style.top).toBe('155px')
+      expect(element.style.left).toBe('1240px')
+      expect(document.querySelector('.ponyLog')).toBe(element)
+      expect(document.querySelectorAll('.ponyLog')).toHaveLength(1)
+    },
+  )
+
+  it.each(['success', 'failure'] as const)(
+    'observes navigation when an old-world persistence %s is the next panel activity',
+    async (outcome) => {
+      const { storage, deferNextWrite } = createHistoryStorage()
+      const store = new HistoryStore(storage)
+      await store.add('main', { type: 'success', answers: 'TS', elapsed: 1 }).persisted
+      await store.add('isekai', { type: 'success', answers: 'RA', elapsed: 2 }).persisted
+      const panel = createPanel(store, settingsStorage(false, false))
+      panel.create()
+      const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+      const oldWrite = deferNextWrite()
+      const add = vi.spyOn(store, 'add')
+      panel.addSuccess(['RD'], {}, 12)
+      const result = add.mock.results[0]
+      if (result?.type !== 'return') throw new Error('History mutation did not start')
+      await vi.waitFor(() => expect(element.textContent).toContain('[RD]'))
+
+      history.pushState(null, '', '/isekai/')
+      if (outcome === 'success') oldWrite.resolve()
+      else oldWrite.reject(new Error('old-world write failed'))
+      await result.value.persisted.catch(() => undefined)
+
+      expect(element.querySelector('strong')?.textContent).toBe('异世界')
+      expect(element.textContent).toContain('[RA]')
+      expect(element.textContent).not.toContain('[TS]')
+      expect(element.textContent).not.toContain('[RD]')
+      expect(element.textContent).not.toContain('历史记录保存失败')
+      expect(store.get('isekai')).toMatchObject([{ answers: 'RA' }])
+      expect(store.get('main').map((record) => record.type === 'success' && record.answers)).toEqual(
+        outcome === 'success' ? ['RD', 'TS'] : ['TS'],
+      )
+
+      history.pushState(null, '', '/')
+      panel.create()
+      expect(element.querySelector('strong')?.textContent).toBe('主世界')
+      expect(element.textContent).toContain('[TS]')
+      if (outcome === 'success') expect(element.textContent).toContain('[RD]')
+      else expect(element.textContent).not.toContain('[RD]')
+      expect(element.textContent).not.toContain('[RA]')
+      expect(element.textContent).not.toContain('历史记录保存失败')
+      expect(document.querySelector('.ponyLog')).toBe(element)
+    },
+  )
+
+  it.each([
+    ['success', false],
+    ['failure', false],
+    ['success', true],
+    ['failure', true],
+  ] as const)(
+    'keeps current records and persistence errors after a prior visit settles with %s (return=%s)',
+    async (outcome, returnToMain) => {
+      const { storage, deferNextWrite } = createHistoryStorage()
+      const store = new HistoryStore(storage)
+      await store.add('main', { type: 'success', answers: 'TS', elapsed: 1 }).persisted
+      await store.add('isekai', { type: 'success', answers: 'RA', elapsed: 2 }).persisted
+      const panel = createPanel(store, settingsStorage(false, false))
+      panel.create()
+      const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+      const oldWrite = deferNextWrite()
+      const add = vi.spyOn(store, 'add')
+      panel.addSuccess(['RD'], {}, 12)
+      const result = add.mock.results[0]
+      if (result?.type !== 'return') throw new Error('History mutation did not start')
+      await vi.waitFor(() => expect(element.textContent).toContain('[RD]'))
+
+      history.pushState(null, '', '/isekai/')
+      panel.create()
+      if (returnToMain) {
+        history.pushState(null, '', '/')
+        panel.setStatus({ inference: '返回主世界' })
+      }
+      const currentWrite = deferNextWrite()
+      panel.addSuccess(['PP'], {}, 20)
+      currentWrite.reject(new Error('current-world write failed'))
+      await vi.waitFor(() =>
+        expect(element.textContent).toContain('历史记录保存失败：Error: current-world write failed'),
+      )
+      const content = element.textContent
+
+      if (outcome === 'success') oldWrite.resolve()
+      else oldWrite.reject(new Error('old-world write failed'))
+      await result.value.persisted.catch(() => undefined)
+
+      expect(element.textContent).toBe(content)
+      expect(element.querySelector('strong')?.textContent).toBe(returnToMain ? '主世界' : '异世界')
+      expect(element.textContent).not.toContain('old-world write failed')
+      expect(element.textContent).not.toContain('[PP]')
+      expect(element.textContent).not.toContain('[RD]')
+      expect(store.get('isekai')).toMatchObject([{ answers: 'RA' }])
+      expect(store.get('main').map((record) => record.type === 'success' && record.answers)).toEqual(
+        outcome === 'success' ? ['RD', 'TS'] : ['TS'],
+      )
+
+      history.pushState(null, '', returnToMain ? '/isekai/' : '/')
+      panel.create()
+      expect(element.textContent).not.toContain('历史记录保存失败')
+      expect(document.querySelector('.ponyLog')).toBe(element)
+    },
+  )
+
+  it('reconciles a failed optimistic write after a round trip without restoring its prior-visit error', async () => {
+    const { storage, deferNextWrite } = createHistoryStorage(true)
+    const store = new HistoryStore(storage)
+    await store.add('main', { type: 'success', answers: 'TS', elapsed: 1 }).persisted
+    await store.add('isekai', { type: 'success', answers: 'RA', elapsed: 2 }).persisted
+    const panel = createPanel(store, settingsStorage(false, false))
+    panel.create()
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+    const oldWrite = deferNextWrite()
+    const add = vi.spyOn(store, 'add')
+    panel.addSuccess(['RD'], {}, 12)
+    const result = add.mock.results[0]
+    if (result?.type !== 'return') throw new Error('History mutation did not start')
+    await vi.waitFor(() => expect(element.textContent).toContain('[RD]'))
+
+    history.pushState(null, '', '/isekai/')
+    panel.create()
+    expect(element.textContent).toContain('[RA]')
+    expect(element.textContent).not.toContain('[RD]')
+    history.pushState(null, '', '/')
+    panel.create()
+    expect(element.textContent).toContain('[RD]')
+
+    oldWrite.reject(new Error('prior-visit write failed'))
+    await result.value.persisted.catch(() => undefined)
+
+    expect(element.querySelector('strong')?.textContent).toBe('主世界')
+    expect(element.textContent).toContain('[TS]')
+    expect(element.textContent).not.toContain('[RD]')
+    expect(element.textContent).not.toContain('历史记录保存失败')
+    expect(store.get('main')).toMatchObject([{ answers: 'TS' }])
+    expect(store.get('isekai')).toMatchObject([{ answers: 'RA' }])
+    expect(document.querySelector('.ponyLog')).toBe(element)
   })
 
   it.each([true, false])('starts without a body and mounts when one arrives (requireCsp=%s)', async (requireCsp) => {

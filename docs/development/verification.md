@@ -8,12 +8,14 @@
 
 [pnpm-workspace.yaml](../../pnpm-workspace.yaml) 保持以下约束：
 
-- `pmOnFail: ignore` 使 pnpm 12 只维护 project lock，避免 package-manager environment document 影响 GitHub Dependency Graph/Review；版本一致性由 mise、包声明、冻结安装和 `scripts/ci/node-version-contract.test.mjs` 保证。
+- `pmOnFail: ignore` 使 pnpm 12 只维护 project lock，避免 package-manager environment document 影响 GitHub Dependency Graph/Review；工具安装由 mise 和包声明管理，冻结安装与 `scripts/ci/node-version-contract.test.mjs` 保护 CI 缓存和锁文件边界。
 - `blockExoticSubdeps: true`、`trustPolicy: no-downgrade`；`minimumReleaseAge` 与 `trustPolicyIgnoreAfter` 均为 10080 分钟（7 天）。Cloudflare Workers 类型包的例外按精确版本列出，不扩大豁免。
 
-Vitest 与两个 coverage provider 同步采用兼容版本；安全补丁同样遵守等待期和 trust policy。依赖审计须包含开发依赖：本仓库的 ORT、构建器和测试工具均声明在 devDependencies，`audit --prod` 的空结果不证明客户端没有第三方代码。当前 Cloudflare 测试集成仍使用已弃用的 `@cloudflare/vitest-pool-workers`；迁移到 `@cloudflare/vitest-plugin` 涉及独立的 Wrangler/Miniflare 版本与运行时验证，不与无关补丁混合。
+Vitest 与两个 coverage provider 同步采用兼容版本；npm 安全补丁同样遵守等待期和 trust policy。依赖审计须包含开发依赖：本仓库的 ORT、构建器和测试工具均声明在 devDependencies，`audit --prod` 的空结果不证明客户端没有第三方代码。当前 Cloudflare 测试集成仍使用已弃用的 `@cloudflare/vitest-pool-workers`；迁移到 `@cloudflare/vitest-plugin` 涉及独立的 Wrangler/Miniflare 版本与运行时验证，不与无关补丁混合。
 
 另核对 `scripts/ort-runtime/requirements.in`、哈希锁和两个生成脚本的 pip bootstrap 版本；npm 审计不覆盖这些 Python 构建依赖。升级后在仓库外的隔离环境执行实际模型转换，比较 fixture 字节身份并复验对应产物；不以模型输入受信任为由忽略工具漏洞，也不无意重建/替换 canonical 资产。
+
+Node.js 工具链另查[官方安全公告](https://nodejs.org/en/blog/vulnerability)，npm 审计与 `undici` override 不覆盖 Node 内置 TLS、DNS、Brotli 或 Fetch。工具链升级须同步 mise、根包最低版本、命令文档并实际运行完整检查。2026-10-23 经维护者明确批准，仅 Node.js `24.22.1` 安全补丁提前采用；npm 七天等待、trust policy 和锁文件不变，后续例外仍需另行授权。
 
 工作区职责见[整体架构](../architecture/overview.md)。新增跨包导入、移动目录或修改 package export 后运行 `architecture:check`；类型边界同时检查 `import type`、`import('…').Type` 与 `typeof import('…')`。
 

@@ -72,7 +72,7 @@ sequenceDiagram
     Solver->>Panel: 状态与历史
 ```
 
-`CaptchaTarget` 在模型准备前捕获解析后的 `form.action`、原生提交控件的实际 action、类型及答案/提交控件的实际 `.form`。`App` 和 `CaptchaSolver` 贯穿准备、图片、推理、提交阶段用 `isSameCaptchaTarget` 复核；相对与绝对写法解析到同一 URL 时等价。`form` 属性使控件失联或换归属时立即取消，恢复关联后补扫；显式关联仍指向原表单时不重启。取消、超时或新目标使旧任务停止点击。
+`CaptchaTarget` 在模型准备前捕获解析后的 `form.action`、原生提交控件的实际 action、类型及答案/提交控件的实际 `.form`。表单地址统一通过 `HTMLFormElement.prototype` 的原生 getter 读取，不能被 `name="action"` 或 `id="action"` 控件遮蔽；同源检查、目标快照与提交前复核使用同一读取规则。`App` 和 `CaptchaSolver` 贯穿准备、图片、推理、提交阶段用 `isSameCaptchaTarget` 复核；相对与绝对写法解析到同一 URL 时等价。`form` 属性使控件失联或换归属时立即取消，恢复关联后补扫；显式关联仍指向原表单时不重启。取消、超时或新目标使旧任务停止点击。
 
 显式 `form` 关联还受验证码容器外同 ID 节点影响。外部节点插入、移除、改名或重排后，复核已跟踪控件的实际 `.form`；归属改变即取消旧准备或恢复扫描。已脱离页面的旧目标不因此触发无关扫描。
 
@@ -106,6 +106,8 @@ sequenceDiagram
 
 图片、模型与 Runtime 共用 `readBoundedByteStream`：已知长度分配最终缓冲，未知长度在上限内倍增并即时复制，结束只返回实际字节，不积累分块或外部大缓冲视图。增长/裁剪时新旧缓冲可能并存，字节上限不是进程内存上限。HTTP/头校验失败后尽力清理流，不等待取消 Promise；清理抛错、拒绝或挂起不能阻塞图片回退或覆盖原始错误。图片 fetch 忽略取消、在超时或取消后迟到返回时，也须取消无人消费的正文。
 
+HTTP `Content-Length` 描述线上编码长度，不等于 Fetch 解压后的字节数。图片存在内容编码时按实际正文上限读取，未编码响应仍复核声明长度；模型即使无法读取 CORS 隐藏的 `Content-Encoding`，也按清单长度和 SHA-256 验证解压后正文。模型编码声明预算见[缓存专题](../model-cache-strategy.md#缓存分层)。
+
 核心[下载器](../../packages/browser-core/src/model/model-downloader.ts) 统一管理调用方取消和截止时间，覆盖凭据读取、Bearer 请求、重定向拒绝、有界读取、完整性及回执；用户脚本[适配器](../../apps/userscript/src/model/model-downloader.ts) 只提供 GM Key 与原取消信号，不再重复包装信号、Response 或字节流。
 
 [ModelCache](../../packages/browser-core/src/model/model-cache.ts) 编排读取、共享下载、写入与确认；[IndexedDB store](../../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务，[record](../../packages/browser-core/src/model/model-cache-record.ts) 校验记录，[shared downloads](../../packages/browser-core/src/model/shared-model-downloads.ts) 合并并发下载。带回执的模型与待确认元数据同事务落盘，确认并更新匹配元数据后才允许后续缓存命中；无回执不确认。关闭、`versionchange` 或数据库异常关闭事件 `close` 取消数据库操作与共享下载，并使未完成确认失效。连接被清除后下次操作重新打开，旧连接迟到事件不影响新连接。
@@ -128,7 +130,9 @@ sequenceDiagram
 
 面板观察器独立于 csp 开关，观察 documentElement 下 body 及子节点。首次初始化也允许 body 缺失，先注册观察、等待插入，不因面板尚未挂载而中止 App 启动。AADB 等脚本移除 `.ponyLog` 后挂回原节点，不重建应用或重读历史。渲染先复核挂载，再命中缓存或消费自身 mutation，避免遗漏外部移除。destroy 断开观察并清空引用，迟到回调不能复活面板。
 
-[HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 在写入前分配每世界的正安全整数 `sequence`：本实例已分配与当前可见序号的最大值加一，失败可留空洞，重建后从已保存记录恢复。独立键按序号、时间戳、稳定 key 排序裁剪；未互相可见的并发写可同序号，再以后二者排序。没有旧根记录时复用独立键的已排序结果；本实例新序号最高，乐观追加直接前置，不重复排序。非法序号视为损坏，上限耗尽走保存失败通道。无序号旧记录按原时间戳读取，非枚举旧数组保留原顺序；显示用 `timestamp`/`time` 不单调化，旧数据不重写。
+同文档跨世界导航在下一次创建、状态更新、历史活动或相关 DOM 恢复时刷新世界标题和历史，复用原面板节点。每次写入绑定发起时的世界；另一世界的迟到成功或失败不能覆盖当前记录或保存错误。返回原世界后，迟到失败仍校对该世界的实时回滚结果，但不恢复旧访问的错误提示。
+
+[HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 在写入前分配每世界的正安全整数 `sequence`：本实例已分配与当前可见序号的最大值加一，失败可留空洞，重建后从已保存记录恢复。独立键按序号、时间戳、稳定 key 排序裁剪；未互相可见的并发写可同序号，再以后二者排序。没有旧根记录时复用独立键的已排序结果；本实例新序号最高，乐观追加直接前置，不重复排序。非法序号视为损坏，上限耗尽走保存失败通道。无序号旧记录按原时间戳读取，非枚举旧数组保留原顺序；旧根收满每世界 50 条有效记录即停止尾部校验，不构造完整过滤数组，仍不改写旧数据。显示用 `timestamp`/`time` 不单调化。
 
 历史文本各自仍限 1024 个 UTF-16 code unit、每世界仍读 50 条。JSON 防御上限按三个文本字段最坏六字符转义加结构余量计算：单条 19456 字符、双世界旧根 1946624 字符，避免合法引号、反斜杠或控制字符记录被自行裁剪。精确值归 [answer-history-config.ts](../../packages/browser-core/src/persistence/answer-history-config.ts)。追加后的旧根清理只读取一次；读取失败不证明损坏，不删除有效根，也不把已经提交的独立键追加改报失败。
 

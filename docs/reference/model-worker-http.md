@@ -12,6 +12,8 @@
 
 Runtime 表中的 `<sha256>` 只是缩写，路由仅匹配配置中的一个完整 pathname，不接受任意哈希。精确路径、对象键和字节身份见[资产清单](../onnx-runtime.md#r2-资产)。OPTIONS 不鉴权，返回 204；未知路径返回 404。
 
+自定义公开路径须已是规范 pathname，禁止 URL 解析会改变的点段、原始空格/Unicode 及 `//` 路径；有效百分号编码原样匹配。渲染与运行时校验同时检查全部显式和默认路径的唯一性，无效配置返回通用 500，而不是继续匹配其他路由。
+
 模型和 WASM 成功响应附 `Content-Length`、`X-Content-Type-Options: nosniff`，R2 提供 `httpEtag` 时附 `ETag`。模型另有 `Content-Disposition: inline; filename="…"`：文件名取公开路径最后一段，尾斜杠时回退到共享标准名。HEAD 只读取 R2 元数据并返回对象响应头，无正文、下载回执或额度操作；不能用 HEAD 证明 GET 尚有额度。
 
 文本错误使用 `text/plain; charset=utf-8`、`no-store` 和 `nosniff`。真实 ONNX、ORT 和公开 WASM 的 R2 长度须精确匹配清单；已记录的 SHA-256 也须匹配。缺 SHA 元数据兼容旧对象，客户端仍校验实际字节；元数据读取异常或漂移失败关闭。
@@ -55,6 +57,8 @@ Authorization: Bearer <64位十六进制token>
 Bearer 名称不区分大小写；服务端以小写 token 计算身份，KV 对 canonical、原始和历史大写变体做兼容查询，非空白标记才授权。客户端保存及发送已验证 Key 时保留原始大小写，避免丢失历史混合大小写 KV 的查询候选。query-string key 不授权真实模型；按缺少 Bearer token 处理。`?key=` 和 `?token=` 均不受支持，无效 Bearer 不回退到 query。
 
 `INVALID_KEY_MODE=decoy`（默认）使无效/缺失 Key 的模型请求选择诱饵，对象正常时返回 200；`error` 返回 403。`/quota` 在两种模式下都对无效 Key 返回 403，且先鉴权再校验回执。诱饵仅隐藏直接状态差异，不保证长度或耗时不可区分。
+
+客户端通过认证 `GET /quota` 验证 Key，不再比较模型 HEAD 的 `Content-Length`；合法耗尽或禁用额度仍视为有效。该操作不访问 R2、不预留回执、不确认下载；额度读取故障会使验证失败，不能把 Key 验证当作模型下载或实际推理证据。
 
 ## CORS
 

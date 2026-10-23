@@ -1,3 +1,5 @@
+import { brotliCompressSync, gzipSync } from 'node:zlib'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MODEL_DOWNLOAD_RECEIPT_HEADER } from '@hv-pony-solver/shared'
@@ -35,13 +37,16 @@ function getFetchCall(fetchMock: ReturnType<typeof vi.fn>): [string, RequestInit
 }
 
 function requestModelJson(
-  operation: 'quota' | 'confirmation',
+  operation: 'quota' | 'probe' | 'confirmation',
   response: Response,
   signal?: AbortSignal,
 ): Promise<unknown> {
   const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response)
   if (operation === 'quota') {
     return queryModelDownloadQuota(signal, {}, { fetchImpl })
+  }
+  if (operation === 'probe') {
+    return probeModelAccessKey(signal, {}, { fetchImpl })
   }
   fetchImpl.mockResolvedValueOnce(
     new Response(new Uint8Array([1, 2, 3]), {
@@ -234,7 +239,7 @@ describe('downloadModel', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('reports a rejected Key when a suspicious declaration carries a non-model body', async () => {
+  it('reports a rejected Key when both declaration and decoded body are decoy-sized', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(new Uint8Array([9]), { headers: { 'content-length': '1' } })),
@@ -243,7 +248,7 @@ describe('downloadModel', () => {
     await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('模型 Key 无效或已失效')
   })
 
-  it('reports a rejected Key for a suspicious declaration even with verification disabled', async () => {
+  it('keeps decoy rejection permanent even with verification disabled', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(new Uint8Array([9]), { headers: { 'content-length': '1' } })),
@@ -254,30 +259,57 @@ describe('downloadModel', () => {
     )
   })
 
-  it('accepts the real model when a proxy lies about its content length', async () => {
-    const response = new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-length': '1' } })
+  it.each([
+    ['gzip', '2'],
+    ['br', '1'],
+    [undefined, '2'],
+    ['gzip', String(gzipSync(new Uint8Array([1, 2, 3])).byteLength)],
+    ['br', String(brotliCompressSync(new Uint8Array([1, 2, 3])).byteLength)],
+    [undefined, String(gzipSync(new Uint8Array([1, 2, 3])).byteLength)],
+    [undefined, String(TEST_INTEGRITY.byteLength + 64 * 1024)],
+  ] as const)('accepts canonical decoded %s bytes with wire length %s', async (encoding, length) => {
+    const headers = new Headers({ 'content-length': length })
+    if (encoding) headers.set('content-encoding', encoding)
+    const response = new Response(new Uint8Array([1, 2, 3]), { headers })
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => response),
     )
 
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).resolves.toBeInstanceOf(ArrayBuffer)
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).resolves.toEqual(
+      new Uint8Array([1, 2, 3]).buffer,
+    )
+    expect(response.body?.locked).toBe(false)
+  })
+
+  it('keeps a decoded hash mismatch permanent without calling compression an invalid Key', async () => {
+    const response = new Response(new Uint8Array([1, 2, 4]), {
+      headers: { 'content-length': '1', 'content-encoding': 'br' },
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => response),
+    )
+
+    const result = downloadModel(undefined, { integrity: TEST_INTEGRITY })
+    await expect(result).rejects.toThrow('下载模型 SHA-256 校验失败')
+    await expect(result).rejects.toBeInstanceOf(PermanentModelError)
+    await expect(result).rejects.not.toBeInstanceOf(ModelAccessKeyRejectedError)
   })
 
   it('keeps truncated downloads retryable instead of naming them permanent', async () => {
     // Two of three bytes is short but not decoy-small, so this stays a plain size error.
-    const response = new Response(new Uint8Array([1, 2]), { headers: { 'content-length': '2' } })
+    const response = new Response(new Uint8Array([1, 2]), {
+      headers: { 'content-length': '1', 'content-encoding': 'gzip' },
+    })
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => response),
     )
 
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow(
-      '下载模型大小校验失败: 2 != 3',
-    )
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.not.toBeInstanceOf(
-      PermanentModelError,
-    )
+    const result = downloadModel(undefined, { integrity: TEST_INTEGRITY })
+    await expect(result).rejects.toThrow('下载模型大小校验失败: 2 != 3')
+    await expect(result).rejects.not.toBeInstanceOf(PermanentModelError)
   })
 
   it.each(['download', 'quota', 'probe', 'confirmation'] as const)(
@@ -301,9 +333,9 @@ describe('downloadModel', () => {
       const result = buffer
         ? confirmCachedModelDownload(buffer)
         : operation === 'quota'
-          ? queryModelDownloadQuota(undefined, options, { fetchImpl })
+          ? queryModelDownloadQuota(undefined, {}, { fetchImpl })
           : operation === 'probe'
-            ? probeModelAccessKey(undefined, options, { fetchImpl })
+            ? probeModelAccessKey(undefined, {}, { fetchImpl })
             : downloadCoreModel(undefined, options, { fetchImpl })
       let error: unknown
       const completed = result.catch((reason: unknown) => {
@@ -344,9 +376,9 @@ describe('downloadModel', () => {
         const result = buffer
           ? confirmCachedModelDownload(buffer, controller.signal)
           : operation === 'quota'
-            ? queryModelDownloadQuota(controller.signal, options, { fetchImpl })
+            ? queryModelDownloadQuota(controller.signal, {}, { fetchImpl })
             : operation === 'probe'
-              ? probeModelAccessKey(controller.signal, options, { fetchImpl })
+              ? probeModelAccessKey(controller.signal, {}, { fetchImpl })
               : downloadCoreModel(controller.signal, options, { fetchImpl })
         const rejection = expect(result).rejects.toThrow(ending === 'abort' ? '已取消' : '超时')
         await started.promise
@@ -366,7 +398,7 @@ describe('downloadModel', () => {
     },
   )
 
-  it.each(['quota', 'confirmation'] as const)(
+  it.each(['quota', 'probe', 'confirmation'] as const)(
     'cancels and unlocks an unfinished %s JSON body after abort and timeout',
     async (operation) => {
       vi.useFakeTimers()
@@ -390,7 +422,7 @@ describe('downloadModel', () => {
     },
   )
 
-  it.each(['quota', 'confirmation'] as const)(
+  it.each(['quota', 'probe', 'confirmation'] as const)(
     'bounds an oversized %s JSON body without waiting for cleanup',
     async (operation) => {
       const cancel = vi.fn(() => new Promise<void>(() => undefined))
@@ -405,23 +437,26 @@ describe('downloadModel', () => {
     },
   )
 
-  it.each(['quota', 'confirmation'] as const)(
+  it.each(['quota', 'probe', 'confirmation'] as const)(
     'accepts BOM-prefixed %s JSON at the 16 KiB boundary',
     async (operation) => {
       const value =
-        operation === 'quota'
+        operation !== 'confirmation'
           ? { enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null }
           : { confirmed: true }
       const bytes = new Uint8Array(16 * 1024).fill(0x20)
       bytes.set(new TextEncoder().encode(`\uFEFF${JSON.stringify(value)}`))
       const response = new Response(bytes)
 
-      await expect(requestModelJson(operation, response)).resolves.toEqual(operation === 'quota' ? value : undefined)
+      const expected = operation === 'probe' ? { valid: true, quotaExceededRetryAfterSeconds: null } : value
+      await expect(requestModelJson(operation, response)).resolves.toEqual(
+        operation === 'confirmation' ? undefined : expected,
+      )
       expect(response.body?.locked).toBe(false)
     },
   )
 
-  it.each(['quota', 'confirmation'] as const)(
+  it.each(['quota', 'probe', 'confirmation'] as const)(
     'rejects absent or malformed %s JSON without exposing response text',
     async (operation) => {
       const response = new Response('{"protected-fixture":}')
@@ -647,34 +682,28 @@ describe('downloadModel', () => {
     await expect(downloadPromise).rejects.toThrow('模型下载已取消')
   })
 
-  it('rejects and cancels responses whose content length is larger than expected by default', async () => {
+  it('rejects an encoded declaration one byte above its budget before reading or allocating decoded bytes', async () => {
     const arrayBuffer = vi.fn()
-    const cancel = vi.fn()
-    let readCount = 0
+    const cancel = vi.fn(async () => undefined)
+    const getReader = vi.fn()
+    const maxEncodedByteLength = TEST_INTEGRITY.byteLength + 64 * 1024
     const response = {
       ok: true,
-      headers: new Headers({ 'content-length': '4' }),
+      headers: new Headers({ 'content-length': String(maxEncodedByteLength + 1) }),
       arrayBuffer,
-      body: {
-        cancel,
-        getReader: vi.fn(() => ({
-          read: vi.fn(async () => {
-            readCount += 1
-            return readCount === 1
-              ? { done: false, value: new Uint8Array([1, 2, 3, 4]) }
-              : { done: true, value: undefined }
-          }),
-        })),
-      },
+      body: { cancel, getReader },
     } as unknown as Response
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => response),
     )
 
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow('下载模型大小校验失败')
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow(
+      `下载模型大小校验失败: ${maxEncodedByteLength + 1} > ${maxEncodedByteLength}`,
+    )
 
     expect(cancel).toHaveBeenCalledTimes(1)
+    expect(getReader).not.toHaveBeenCalled()
     expect(arrayBuffer).not.toHaveBeenCalled()
   })
 
@@ -785,7 +814,7 @@ describe('downloadModel', () => {
       vi.fn(async () => response),
     )
 
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY })).rejects.toThrow(
       '下载模型大小校验失败: 2 != 3',
     )
     expect(cancel).toHaveBeenCalledTimes(1)
@@ -819,7 +848,7 @@ describe('downloadModel', () => {
     expect(releaseLock).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects streamed over-reads when content-length is smaller than the body', async () => {
+  it('does not use a CORS-visible wire length as the decoded bound when verification is disabled', async () => {
     const response = new Response(
       new ReadableStream<Uint8Array>({
         pull(controller) {
@@ -836,8 +865,8 @@ describe('downloadModel', () => {
       vi.fn(async () => response),
     )
 
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
-      '下载模型大小校验失败: 3 != 2',
+    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).resolves.toEqual(
+      new Uint8Array([1, 2, 3]).buffer,
     )
   })
 
@@ -900,14 +929,14 @@ describe('downloadModel', () => {
     expect(pulls).toBe(4)
   })
 
-  it('stops reading when the streamed model exceeds the expected size and integrity verification is enabled', async () => {
+  it('stops reading decoded models above the canonical size despite a smaller wire length', async () => {
     let pulls = 0
     const arrayBuffer = vi.fn(async () => {
       throw new Error('arrayBuffer should not be used')
     })
     const response = {
       ok: true,
-      headers: new Headers(),
+      headers: new Headers({ 'content-encoding': 'gzip', 'content-length': '2' }),
       arrayBuffer,
       body: new ReadableStream<Uint8Array>({
         pull(controller) {
@@ -982,7 +1011,7 @@ describe('downloadModel', () => {
 describe('queryModelDownloadQuota', () => {
   function query(
     signal?: AbortSignal,
-    options: ModelIntegrityOptions = {},
+    options: Parameters<typeof queryModelDownloadQuota>[1] = {},
   ): ReturnType<typeof queryModelDownloadQuota> {
     return queryModelDownloadQuota(signal, options, { getAccessKey: getModelAccessKey })
   }
@@ -1106,12 +1135,11 @@ describe('queryModelDownloadQuota', () => {
 })
 
 describe('probeModelAccessKey', () => {
-  function probe(signal?: AbortSignal, options: ModelIntegrityOptions = {}): Promise<ModelAccessKeyProbe> {
-    return probeModelAccessKey(signal, { integrity: TEST_INTEGRITY, ...options }, { getAccessKey: getModelAccessKey })
-  }
-
-  function headResponse(status: number, headers: Record<string, string> = {}): Response {
-    return new Response(null, { status, headers })
+  function probe(
+    signal?: AbortSignal,
+    options: Parameters<typeof probeModelAccessKey>[1] = {},
+  ): Promise<ModelAccessKeyProbe> {
+    return probeModelAccessKey(signal, options, { getAccessKey: getModelAccessKey })
   }
 
   beforeEach(() => {
@@ -1124,8 +1152,14 @@ describe('probeModelAccessKey', () => {
     vi.unstubAllGlobals()
   })
 
-  it('probes with HEAD and the candidate Key so the monthly quota stays untouched', async () => {
-    const fetchMock = vi.fn(async () => headResponse(200, { 'content-length': '3' }))
+  it('validates only through GET /quota with the candidate Key and no receipt or model request', async () => {
+    getModelAccessKey.mockClear().mockReturnValue(new Promise<string>(() => undefined))
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        { enabled: true, limit: 5, used: 2, remaining: 3, retryAfterSeconds: 3600 },
+        { headers: { 'content-encoding': 'gzip', 'content-length': '1' } },
+      ),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(probe(undefined, { accessKeyOverride: '  candidate-token  ' })).resolves.toEqual({
@@ -1134,72 +1168,68 @@ describe('probeModelAccessKey', () => {
     })
 
     const [url, init] = getFetchCall(fetchMock)
-    expect(url).toBe(MODEL_URL)
-    expect(init.method).toBe('HEAD')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(getModelAccessKey).not.toHaveBeenCalled()
+    expect(url).toBe(QUOTA_URL)
+    expect(init.method ?? 'GET').toBe('GET')
     expect(init.cache).toBe('no-store')
+    expect(init.redirect).toBe('error')
+    expect(new Headers(init.headers).get(MODEL_DOWNLOAD_RECEIPT_HEADER)).toBeNull()
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer candidate-token')
-  })
-
-  it('treats a decoy-sized response as an invalid Key', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => headResponse(200, { 'content-length': '18' })),
-    )
-
-    await expect(probe()).resolves.toEqual({ valid: false, quotaExceededRetryAfterSeconds: null })
   })
 
   it('treats a forbidden response as an invalid Key', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => headResponse(403)),
+      vi.fn(async () => new Response(null, { status: 403 })),
     )
 
     await expect(probe()).resolves.toEqual({ valid: false, quotaExceededRetryAfterSeconds: null })
   })
 
-  it('reports an exhausted quota as a valid Key and surfaces retry-after', async () => {
+  it('accepts exhausted quota JSON and returns its reset interval', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => headResponse(429, { 'retry-after': '852747' })),
+      vi.fn(async () => Response.json({ enabled: true, limit: 5, used: 5, remaining: 0, retryAfterSeconds: 852_747 })),
     )
 
     await expect(probe()).resolves.toEqual({ valid: true, quotaExceededRetryAfterSeconds: 852_747 })
   })
 
-  it('reports an exhausted quota without a parsable retry-after as a valid Key', async () => {
+  it('accepts disabled quota JSON as a valid Key', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => headResponse(429, { 'retry-after': 'Wed, 01 Sep 2026 00:00:00 GMT' })),
+      vi.fn(async () => Response.json({ enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null })),
     )
 
     await expect(probe()).resolves.toEqual({ valid: true, quotaExceededRetryAfterSeconds: null })
   })
 
-  it('rejects other transport failures instead of reporting a verdict', async () => {
+  it.each([429, 500])('does not authenticate a Key from HTTP %s alone', async (status) => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => headResponse(500)),
+      vi.fn(async () => new Response(null, { status })),
     )
 
-    await expect(probe()).rejects.toThrow('模型 Key 验证失败: HTTP 500')
+    await expect(probe()).rejects.toThrow(
+      status === 429 ? '本月 5 次模型下载额度已用完' : '模型 Key 验证失败: HTTP 500',
+    )
   })
 
-  it.each([undefined, 'not-a-number'])(
-    'rejects a success response with an unusable Content-Length (%s)',
-    async (value) => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(async () => headResponse(200, value === undefined ? {} : { 'content-length': value })),
-      )
+  it('rejects a 200 response with an invalid quota schema instead of authenticating the Key', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ enabled: true, limit: 5, used: 5, remaining: 1, retryAfterSeconds: 3600 })),
+    )
 
-      await expect(probe()).rejects.toThrow('模型 Key 验证失败: 响应缺少有效的 Content-Length')
-    },
-  )
+    await expect(probe()).rejects.toThrow('模型 Key 验证失败: 响应格式无效')
+  })
 
   it('falls back to the stored Key when no candidate is supplied', async () => {
     getModelAccessKey.mockResolvedValue('stored-token')
-    const fetchMock = vi.fn(async () => headResponse(200, { 'content-length': '3' }))
+    const fetchMock = vi.fn(async () =>
+      Response.json({ enabled: true, limit: 5, used: 0, remaining: 5, retryAfterSeconds: 3600 }),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(probe()).resolves.toMatchObject({ valid: true })
@@ -1209,12 +1239,11 @@ describe('probeModelAccessKey', () => {
   it('rejects once the caller aborts the probe', async () => {
     const controller = new AbortController()
     controller.abort()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => headResponse(200, { 'content-length': '3' })),
-    )
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
 
     await expect(probe(controller.signal)).rejects.toThrow('模型 Key 验证已取消')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('rejects once the probe deadline expires', async () => {

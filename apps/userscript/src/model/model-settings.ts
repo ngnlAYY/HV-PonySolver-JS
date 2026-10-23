@@ -1,5 +1,4 @@
 import {
-  ModelDownloadQuotaExceededError,
   clearModelAccessKey as clearCoreModelAccessKey,
   formatErrorMessage,
   getModelAccessKey as getCoreModelAccessKey,
@@ -77,11 +76,6 @@ export async function setModelAccessKeyFromPrompt(
     await onVerify(accessKey)
   } catch (error) {
     if (generation !== keyIntentGeneration) return
-    if (error instanceof ModelDownloadQuotaExceededError) {
-      await setModelAccessKey(accessKey, onCommitted)
-      alertUser(error.message)
-      return
-    }
     alertUser(`模型下载 Key 验证失败: ${formatErrorMessage(error)}`)
     return
   }

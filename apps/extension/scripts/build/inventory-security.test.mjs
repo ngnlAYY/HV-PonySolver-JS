@@ -259,6 +259,59 @@ for (const [label, html, expected] of unsafeHtml) {
   })
 }
 
+test('audits dynamic imports in local module scripts referenced by HTML', async () => {
+  for (const source of [
+    'import("./other.mjs")',
+    'import/* comment */("./other.mjs")',
+    'import// comment\n("./other.mjs")',
+    '`${import/* comment */("./other.mjs")}`',
+  ]) {
+    const files = inventory('chromium', 'remote', undefined, '<script type="module" src="payload.mjs"></script>')
+    files.push({ relativePath: 'options/payload.mjs', bytes: Buffer.from(source) })
+    await assert.rejects(auditTargetInventory('chromium', { modelDelivery: 'remote' }, files), /dynamic import/u)
+  }
+})
+
+test('distinguishes inert import text and property calls from dynamic imports', async () => {
+  const files = inventory('chromium', 'remote')
+  files.push({
+    relativePath: 'runtime/payload.cjs',
+    bytes: Buffer.from(`
+      // import("./comment.mjs")
+      const text = 'import("./string.mjs")'
+      const template = \`import("./template.mjs")\`
+      const pattern = /import\\(/u
+      const loader = { import() {} }
+      loader.import()
+    `),
+  })
+  await auditTargetInventory('chromium', { modelDelivery: 'remote' }, files)
+})
+
+test('rejects invalid JavaScript instead of auditing a recovered partial syntax tree', async () => {
+  const files = inventory('chromium', 'remote')
+  files.push({ relativePath: 'runtime/payload.mjs', bytes: Buffer.from('const broken = ;') })
+  await assert.rejects(auditTargetInventory('chromium', { modelDelivery: 'remote' }, files), /invalid JavaScript/u)
+})
+
+test('audits packaged remote capabilities in non-js script files even without an HTML reference', async () => {
+  const files = inventory('firefox', 'packaged')
+  files.push({ relativePath: 'runtime/payload.cjs', bytes: Buffer.from('const name = "hvPonySolverExtensionSecrets"') })
+  await assert.rejects(
+    auditTargetInventory('firefox', { modelDelivery: 'packaged', model }, files),
+    /remote-model capability/u,
+  )
+})
+
+test('rejects executable HTML references to files outside the audited script types', async () => {
+  const files = inventory('chromium', 'remote', undefined, '<script src="payload.txt"></script>')
+  files.push({ relativePath: 'options/payload.txt', bytes: Buffer.from('import("./other.mjs")') })
+  await assert.rejects(
+    auditTargetInventory('chromium', { modelDelivery: 'remote' }, files),
+    /unsupported script resource/u,
+  )
+})
+
 test('does not mistake inert text, data attributes or comments for executable HTML', async () => {
   await auditTargetInventory(
     'chromium',

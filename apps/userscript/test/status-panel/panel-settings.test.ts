@@ -22,12 +22,14 @@ describe('panel settings', () => {
     })
 
     it('returns the default position when localStorage throws', async () => {
-      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      localStorage.setItem(STORAGE_KEY, '200,900')
+      const getItem = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
         throw new Error('storage error')
       })
       const { getPanelPositionSync } = await import('../../src/status-panel/panel-settings')
 
       expect(getPanelPositionSync()).toEqual({ top: 155, left: 1240 })
+      expect(getItem).toHaveBeenCalledExactlyOnceWith(STORAGE_KEY)
     })
   })
 

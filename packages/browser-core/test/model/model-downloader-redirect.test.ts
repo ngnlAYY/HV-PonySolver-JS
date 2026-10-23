@@ -30,13 +30,15 @@ describe('model downloader redirect policy', () => {
       .mockResolvedValueOnce(
         Response.json({ enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null }),
       )
-      .mockResolvedValueOnce(new Response(null, { headers: { 'content-length': String(TEST_BYTES.byteLength) } }))
+      .mockResolvedValueOnce(
+        Response.json({ enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null }),
+      )
       .mockResolvedValueOnce(Response.json({ confirmed: true }))
     const environment = { fetchImpl: fetchMock, getAccessKey: async () => 'saved-token' }
 
     const buffer = await downloadModel(undefined, { integrity: TEST_INTEGRITY }, environment)
-    await queryModelDownloadQuota(undefined, { integrity: TEST_INTEGRITY }, environment)
-    await probeModelAccessKey(undefined, { integrity: TEST_INTEGRITY }, environment)
+    await queryModelDownloadQuota(undefined, {}, environment)
+    await probeModelAccessKey(undefined, {}, environment)
     await confirmCachedModelDownload(buffer)
 
     expect(fetchMock).toHaveBeenCalledTimes(4)

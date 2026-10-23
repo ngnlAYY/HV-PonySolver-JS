@@ -135,7 +135,7 @@ describe('App', () => {
     },
   )
 
-  it('verifies the model access key through an unmetered HEAD probe without downloading', async () => {
+  it('verifies the model access key through a read-only quota probe without downloading', async () => {
     const { App } = await import('../../src/app/app')
     const app = new App()
     apps.push(app)
@@ -149,7 +149,7 @@ describe('App', () => {
     expect(modelPutCached).not.toHaveBeenCalled()
   })
 
-  it('rejects key verification when the HEAD probe reports an invalid key', async () => {
+  it('rejects key verification when the quota probe reports an invalid key', async () => {
     probeModelAccessKey.mockResolvedValue({ valid: false, quotaExceededRetryAfterSeconds: null })
     const { App } = await import('../../src/app/app')
     const app = new App()

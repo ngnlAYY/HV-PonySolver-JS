@@ -16,7 +16,7 @@
 
 ## 从源码构建
 
-在仓库根目录准备 [mise.toml](mise.toml) 固定的 Node.js `24.15.0` 和 pnpm `12.11.2`：
+在仓库根目录准备 [mise.toml](mise.toml) 固定的 Node.js `24.22.1` 和 pnpm `12.11.2`：
 
 ```bash
 mise trust
@@ -47,8 +47,8 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 
 - `auto` 识别、勾选后延迟点击原生提交按钮；`manual` 只记录结果。默认开启失败随机答案，扩展设置页可关闭。
 - 保留手动勾选，本轮手动取消的项不会被勾回。合计超过 4 项时，只按置信度裁剪自动项，目标至多 3 项；不会为达到目标撤销手动项。
-- 目标、图片或有效控件状态变化先取消旧轮次，不再点击或提交；容器外变化导致显式表单关联失效或恢复也会复核。新题不必等待旧初始化或设置读取完成；完整规则见[验证码生命周期](docs/architecture/browser-runtime.md#验证码生命周期与取消)。
-- 面板默认 `top=155, left=1240`，显示最近 5 条记录，仅在存在 `div#csp` 时可见；隐藏不停止识别。body 暂缺时等待挂载，AADB 等局部切页后恢复原面板与扫描，保留状态和历史；销毁后不恢复。
+- 目标、图片或有效控件状态变化先取消旧轮次，不再点击或提交；命名控件不能绕过同源检查，容器外变化导致显式表单关联失效或恢复也会复核。新题不必等待旧初始化或设置读取完成；完整规则见[验证码生命周期](docs/architecture/browser-runtime.md#验证码生命周期与取消)。
+- 面板默认 `top=155, left=1240`，显示最近 5 条记录，仅在存在 `div#csp` 时可见；隐藏不停止识别。body 暂缺时等待挂载，AADB 等局部切页后恢复原面板与扫描；同文档跨世界切换后，后续面板活动按当前世界显示和记录历史，销毁后不恢复。
 - JPX `AjaxRound` 清除扫描定时器后，后续验证码相关 DOM 变化会恢复扫描，每题仍只提交一次。排查步骤见[JPX 换轮](docs/usage/troubleshooting.md#jpx-开启-ajaxround-后只答第一题)。
 - 普通失败按同页单调时钟冷却 30 秒，不受系统校时影响；准备和识别阶段的永久模型错误均保持抑制，直到目标或已提交凭据变化。
 
@@ -60,7 +60,7 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 
 用户脚本新设置或清除 Key 会淘汰旧验证，同页 GM 写入按顺序提交，避免旧写入迟到恢复已清除的 Key。未完成的存储操作不能撤销，详见[Key 设置](docs/usage/userscript.md#构建并安装)。
 
-模型校验长度和 SHA-256 后写入 IndexedDB，模型缓存与扩展 Key 数据库连接异常关闭后，下次操作重新打开。额度默认按每 Key、每 UTC 自然月最多 5 次**已确认缓存下载**计算；查询、Key 验证和有效缓存命中不计次，关闭额度时显示无限制。详见[缓存与计次](docs/model-cache-strategy.md)。
+模型按解压后的实际长度和 SHA-256 校验后写入 IndexedDB，模型缓存与扩展 Key 数据库连接异常关闭后，下次操作重新打开。Key 验证通过认证 `GET /quota`，不依赖模型响应长度。额度默认按每 Key、每 UTC 自然月最多 5 次**已确认缓存下载**计算；查询、Key 验证和有效缓存命中不计次，关闭额度时显示无限制。详见[缓存与计次](docs/model-cache-strategy.md)。
 
 用户脚本两个 Runtime profile 不自动回退；“内置精简运行时”仍需下载模型和 WASM。资产身份见[Runtime 专题](docs/onnx-runtime.md)，扩展权限与消息边界见[扩展专题](docs/browser-extension.md#permission-matrix)。
 

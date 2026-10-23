@@ -16,6 +16,22 @@ test('extension documentation tracks the authoritative nested entry paths', asyn
   })
 })
 
+test('rejects model HEAD as the client Key verification protocol', async () => {
+  await withFixture(async (root) => {
+    const path = join(root, 'docs/browser-extension.md')
+    const source = await readFile(path, 'utf8')
+    const row = source.split(/\r?\n/u).find((line) => /^\|\s*验证并保存\s*\|/u.test(line))
+    assert.ok(row?.includes('GET /quota'), 'fixture must document quota-based Key validation')
+    const modified = source.replace(row, row.replace('GET /quota', 'HEAD /yolo26n-640.ort'))
+    assert.notEqual(modified, source)
+    await writeFile(path, modified)
+
+    const result = await runCheck(root)
+    assert.equal(result.exitCode, 1)
+    assert.match(result.stderr, /Key validation must document GET \/quota instead of model HEAD/u)
+  })
+})
+
 // 同一逐词校验只抽查代表事实；来源隔离和秘密脱敏本身由扩展行为测试负责。
 for (const fact of ['sender.url', '不传递 Playwright call log']) {
   test(`extension security contract belongs in its topic document: ${fact}`, async () => {

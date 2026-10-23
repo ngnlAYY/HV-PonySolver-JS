@@ -130,9 +130,15 @@ function isSameOriginUrl(url: string): boolean {
   }
 }
 
+/** Named controls can shadow form.action; read the native getter for validation and identity. */
+export function getFormAction(form: HTMLFormElement): string | null {
+  const action: unknown = Reflect.get(HTMLFormElement.prototype, 'action', form)
+  return typeof action === 'string' ? action : null
+}
+
 export function getSubmissionAction(form: HTMLFormElement, submit: HTMLInputElement | null): string | null {
   if (!submit || !['submit', 'image'].includes(submit.type) || !submit.hasAttribute('formaction')) {
-    return form.action
+    return getFormAction(form)
   }
   const override = submit.getAttribute('formaction') ?? ''
   // 显式空 formaction 使用文档地址，不继承 form.action 或 base 的地址。
@@ -145,9 +151,10 @@ export function getSubmissionAction(form: HTMLFormElement, submit: HTMLInputElem
 }
 
 export function isSameOriginForm(form: HTMLFormElement, submit: HTMLInputElement | null = null): boolean {
+  const formAction = getFormAction(form)
   const submissionAction = getSubmissionAction(form, submit)
   return (
-    (!form.action || isSameOriginUrl(form.action)) && submissionAction !== null && isSameOriginUrl(submissionAction)
+    formAction !== null && isSameOriginUrl(formAction) && submissionAction !== null && isSameOriginUrl(submissionAction)
   )
 }
 
@@ -166,8 +173,10 @@ export function findCaptchaTarget(): CaptchaTarget | null {
     if (responsive && (!image.complete || !image.currentSrc)) continue
     const captchaKey = responsive ? image.currentSrc : imageSource.src
     const controls = form ? captureControls(form) : null
+    const formAction = form ? getFormAction(form) : null
     if (
       form &&
+      formAction !== null &&
       controls &&
       image &&
       captchaKey &&
@@ -177,7 +186,7 @@ export function findCaptchaTarget(): CaptchaTarget | null {
       return {
         master,
         form,
-        formAction: form.action,
+        formAction,
         pageUrl: location.href,
         image,
         imageSource,

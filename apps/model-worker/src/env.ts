@@ -6,15 +6,11 @@ import {
   ORT_RUNTIME_WASM_PUBLIC_PATH,
 } from '@hv-pony-solver/shared'
 
+import { assertUniqueValues, validatePublicPath } from './config-validation'
 import type { Env, InvalidKeyMode, WorkerConfig } from './worker-types'
 
 // eslint-disable-next-line no-control-regex -- These code points are the validation target.
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
-// Paths flow verbatim into the Content-Disposition quoted-string emitted by model-response.ts,
-// so quote-like characters are rejected for parity with scripts/wrangler-config-guard.mjs's TOML string rule.
-const FORBIDDEN_PATH_CHARACTER_PATTERN = /["'`\\]/
-const PATH_MUST_BE_ABSOLUTE_MESSAGE = 'must be an absolute pathname'
-const PATH_MUST_NOT_CONTAIN_QUOTES_MESSAGE = 'must not contain quotes or backslashes'
 const MODEL_DOWNLOAD_QUOTA_ENABLED_DEFAULT = true
 
 // Worker env objects live for the whole isolate; validated configs are cached per env object so
@@ -44,32 +40,11 @@ function readRequiredValue(value: string | undefined, name: string): string {
 }
 
 function readPath(value: string | undefined, fallback: string, name: string): string {
-  const normalized = value === undefined ? fallback : readRequiredValue(value, name)
-  if (!normalized.startsWith('/') || normalized.includes('?') || normalized.includes('#')) {
-    throw new Error(`${name} ${PATH_MUST_BE_ABSOLUTE_MESSAGE}`)
-  }
-  if (FORBIDDEN_PATH_CHARACTER_PATTERN.test(normalized)) {
-    throw new Error(`${name} ${PATH_MUST_NOT_CONTAIN_QUOTES_MESSAGE}`)
-  }
-  return normalized
+  return validatePublicPath(value === undefined ? fallback : value, name)
 }
 
 function readValueOrFallback(value: string | undefined, fallback: string, name: string): string {
   return value === undefined ? fallback : readRequiredValue(value, name)
-}
-
-function assertUniqueValues(entries: ReadonlyArray<readonly [name: string, value: string]>, kind: string): void {
-  const owners = new Map<string, string>()
-  for (const [name, value] of entries) {
-    const existing = owners.get(value)
-    if (existing) {
-      // Only the conflicting variable names are reported. Embedding the raw value would leak
-      // configuration values (R2 object keys, public paths) into error surfaces, which the
-      // secret-free error contract forbids.
-      throw new Error(`${name} must differ from ${existing}; duplicate ${kind}`)
-    }
-    owners.set(value, name)
-  }
 }
 
 function readInvalidKeyMode(value: string | undefined): InvalidKeyMode {

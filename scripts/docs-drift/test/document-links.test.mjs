@@ -71,6 +71,40 @@ test('reports malformed links and ignores links in fenced code blocks', async ()
   assert.ok(errors[0].includes('docs/%E0%A4%A.md'))
 })
 
+for (const delimiter of ['```', '~~~']) {
+  test(`only a matching bare ${delimiter} fence closes the code block`, async (context) => {
+    const root = await createFixture({
+      'README.md': [
+        '[hidden heading](#hidden)',
+        `${delimiter}md`,
+        `${delimiter}still-code`,
+        '# Hidden',
+        '[ignored](missing-in-fence.md)',
+        `${delimiter}   `,
+        '[broken](missing-after-fence.md)',
+      ].join('\n'),
+    })
+    context.after(() => rm(root, { recursive: true, force: true }))
+
+    const errors = await checkDocumentationLinks(root)
+    assert.equal(errors.length, 2)
+    assert.ok(errors.some((error) => error.includes('#hidden') && error.includes('missing anchor')))
+    assert.ok(errors.some((error) => error.includes('missing-after-fence.md') && error.includes('does not exist')))
+    assert.ok(errors.every((error) => !error.includes('missing-in-fence.md')))
+  })
+}
+
+test('backticks in a backtick fence info string do not hide following links', async (context) => {
+  const root = await createFixture({
+    'README.md': '```invalid`info\n[broken](missing.md)\n',
+  })
+  context.after(() => rm(root, { recursive: true, force: true }))
+
+  const errors = await checkDocumentationLinks(root)
+  assert.equal(errors.length, 1)
+  assert.match(errors[0], /missing\.md.*does not exist/u)
+})
+
 test('fails closed when the documentation root cannot be scanned', async () => {
   const root = await mkdtemp(join(tmpdir(), 'hv-document-links-root-'))
   const errors = await checkDocumentationLinks(join(root, 'missing'))

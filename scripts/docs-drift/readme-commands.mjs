@@ -131,13 +131,24 @@ function checkCommandExamples(rootPackageJson, workspacePackageJsons, source, la
   const snippets = []
   let fence = null
   for (const line of source.split(/\r?\n/u)) {
-    const marker = /^\s*(`{3,}|~{3,})(\w*)/u.exec(line)
-    if (marker) {
-      fence = fence ? null : { shell: ['bash', 'sh', 'shell', 'zsh'].includes(marker[2]) }
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line)
+    if (fence) {
+      if (marker && marker[1][0] === fence.character && marker[1].length >= fence.length && marker[2].trim() === '') {
+        fence = null
+      } else if (fence.shell) {
+        snippets.push(line.trim())
+      }
       continue
     }
-    if (fence?.shell) snippets.push(line.trim())
-    else if (!fence) for (const match of line.matchAll(/`([^`\n]+)`/gu)) snippets.push(match[1])
+    if (marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
+      fence = {
+        character: marker[1][0],
+        length: marker[1].length,
+        shell: ['bash', 'sh', 'shell', 'zsh'].includes(marker[2].trim().split(/\s+/u, 1)[0]),
+      }
+      continue
+    }
+    for (const match of line.matchAll(/`([^`\n]+)`/gu)) snippets.push(match[1])
   }
   const errors = []
   const builtins = new Set(['install', 'exec', 'audit', 'store', 'dlx', '--version', '--help'])

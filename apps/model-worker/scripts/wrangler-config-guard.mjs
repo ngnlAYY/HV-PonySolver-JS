@@ -1,3 +1,9 @@
+import { DEFAULT_PUBLIC_MODEL_PATH } from '@hv-pony-solver/shared/model'
+import { ORT_MODEL_FILENAME } from '@hv-pony-solver/shared/ort-model'
+import { ORT_RUNTIME_WASM_FILENAME } from '@hv-pony-solver/shared/ort-runtime'
+
+import { assertUniqueValues, validatePublicPath } from '../src/config-validation.ts'
+
 const requiredVariables = ['MODEL_KEYS_KV_NAMESPACE_ID', 'MODEL_BUCKET_NAME']
 const productionModes = new Set(['production', 'deploy'])
 const placeholderValues = new Set(['test-kv', 'test-bucket'])
@@ -23,6 +29,12 @@ const renderedResources = [
   ['kv_namespaces', 'MODEL_KEYS', 'id'],
   ['r2_buckets', 'MODEL_BUCKET', 'bucket_name'],
 ]
+const publicPathDefaults = [
+  ['PUBLIC_MODEL_PATH', DEFAULT_PUBLIC_MODEL_PATH],
+  ['PUBLIC_QUOTA_PATH', '/quota'],
+  ['PUBLIC_ORT_MODEL_PATH', `/${ORT_MODEL_FILENAME}`],
+  ['PUBLIC_RUNTIME_WASM_PATH', `/runtime/${ORT_RUNTIME_WASM_FILENAME}`],
+]
 const invalidKeyModes = new Set(['decoy', 'error'])
 const quotaEnabledValues = new Set(['true', 'false'])
 const durableObjectBindingName = 'MODEL_DOWNLOAD_QUOTAS'
@@ -44,9 +56,8 @@ function hasControlCharacter(value) {
 }
 
 function assertNoUnresolvedPlaceholders(content, sourceName) {
-  const match = content.match(unresolvedPlaceholderPattern)
-  if (match) {
-    throw new Error(`${sourceName} contains unresolved placeholder ${match[0]}`)
+  if (unresolvedPlaceholderPattern.test(content)) {
+    throw new Error(`${sourceName} contains unresolved placeholders`)
   }
 }
 
@@ -216,6 +227,17 @@ function validateRenderedQuotaEnabled(content, sourceName) {
   }
 }
 
+function validateRenderedPublicPaths(content, sourceName) {
+  const entries = publicPathDefaults.map(([name, fallback]) => {
+    const values = readTomlStringAssignmentValues(content, name, sourceName)
+    if (values.length > 1) {
+      throw new Error(`${sourceName} must contain at most one ${name}`)
+    }
+    return [name, validatePublicPath(values[0] ?? fallback, name)]
+  })
+  assertUniqueValues(entries, 'public path')
+}
+
 function validateRenderedWranglerConfig(content, sourceName = 'wrangler.toml', { allowTestPlaceholders = false } = {}) {
   assertNoUnresolvedPlaceholders(content, sourceName)
   for (const [name, assignment] of renderedAssignments) {
@@ -223,6 +245,7 @@ function validateRenderedWranglerConfig(content, sourceName = 'wrangler.toml', {
   }
   validateRenderedInvalidKeyMode(content, sourceName)
   validateRenderedQuotaEnabled(content, sourceName)
+  validateRenderedPublicPaths(content, sourceName)
   for (const [tableName, binding, assignment] of renderedResources) {
     validateRenderedResource(content, tableName, binding, assignment, sourceName)
   }

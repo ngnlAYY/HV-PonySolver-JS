@@ -1,6 +1,6 @@
 import { inferenceTimeoutConfig } from '../inference/inference-config'
 import { resolveFetchImplementation } from '../platform/fetch'
-import { cancelByteStream, readBoundedByteStream } from '../platform/byte-stream'
+import { cancelByteStream, readBoundedByteStream, sha256Hex } from '../platform/byte-stream'
 import { raceAbort } from '../utils/abort-race'
 import {
   MODEL_DOWNLOAD_RECEIPT_HEADER,
@@ -14,7 +14,7 @@ import {
 } from './model-download-confirmation-store'
 import { ModelAccessKeyRejectedError, ModelDownloadQuotaExceededError } from './model-download-error'
 import { modelConfig } from './model-config'
-import { computeModelSha256, type ModelIntegrityOptions, resolveIntegrityOptions } from './model-integrity'
+import { type ModelIntegrityOptions, resolveIntegrityOptions } from './model-integrity'
 import { ModelIntegrityVerificationError } from './permanent-model-error'
 
 export type { ModelIntegrityOptions } from './model-integrity'
@@ -159,10 +159,6 @@ function createModelFetchInit(signal: AbortSignal, accessKey: string): RequestIn
   return init
 }
 
-function createModelProbeInit(signal: AbortSignal, accessKey: string): RequestInit {
-  return { ...createModelFetchInit(signal, accessKey), method: 'HEAD' }
-}
-
 function createModelConfirmationInit(signal: AbortSignal, accessKey: string, receiptId: string): RequestInit {
   const base = createModelFetchInit(signal, accessKey)
   const headers = new Headers(base.headers)
@@ -170,33 +166,15 @@ function createModelConfirmationInit(signal: AbortSignal, accessKey: string, rec
   return { ...base, headers, method: 'POST' }
 }
 
-function parseProbeByteLength(contentLength: string | null): number {
-  if (contentLength === null || !contentLengthPattern.test(contentLength)) {
-    throw new Error('模型 Key 验证失败: 响应缺少有效的 Content-Length')
-  }
-  const byteLength = Number(contentLength)
-  if (!Number.isSafeInteger(byteLength)) {
-    throw new Error('模型 Key 验证失败: 响应缺少有效的 Content-Length')
-  }
-  return byteLength
-}
-
 const contentLengthPattern = /^[0-9]+$/
 
-/**
- * Marks Content-Length declarations that brand an unauthorized Key's decoy.
- *
- * The decoy is orders of magnitude smaller than the real model, so a success
- * response declaring such a tiny body is untrustworthy: it may be a rejected
- * Key, or a proxy misreporting a real payload. The declaration therefore only
- * flags suspicion — the body hash decides — and must not drive read bounds.
- */
-function isSuspiciousDeclaredLength(contentLength: string | null, expectedByteLength: number): boolean {
-  if (contentLength === null || !contentLengthPattern.test(contentLength)) {
-    return false
-  }
-  const declaredByteLength = Number(contentLength)
-  return Number.isSafeInteger(declaredByteLength) && declaredByteLength * 2 < expectedByteLength
+function isDecoySizedResponse(response: Response, actualByteLength: number, expectedByteLength: number): boolean {
+  const contentLength = response.headers.get('content-length')
+  return (
+    contentLength !== null &&
+    Number(contentLength) * 2 < expectedByteLength &&
+    actualByteLength * 2 < expectedByteLength
+  )
 }
 
 function parseRetryAfterSeconds(value: string | null): number | null {
@@ -291,18 +269,14 @@ async function readModelResponse(
     cancelByteStream(response.body, error)
     throw error
   }
-  // A suspicious declaration may be lying about the payload, so it must not
-  // drive the read bounds; the caller adjudicates the body by hash instead.
-  const suspiciousDeclared =
-    declaredByteLength !== null && isSuspiciousDeclaredLength(contentLength, expectedByteLength ?? maxByteLength)
-  const trustDeclared = declaredByteLength !== null && !suspiciousDeclared
-  if (expectedByteLength !== null && declaredByteLength !== null && declaredByteLength > expectedByteLength) {
+  // Content-Length bounds encoded wire bytes, which can exceed the decoded
+  // model size due to gzip/br framing and incompressible blocks. Give that
+  // declaration a separate bounded overhead budget, even when CORS hides
+  // Content-Encoding; never use this budget for decoded stream allocation.
+  const maxEncodedByteLength = maxByteLength + Math.max(64 * 1024, Math.ceil(maxByteLength / 1024))
+  if (declaredByteLength !== null && declaredByteLength > maxEncodedByteLength) {
     cancelByteStream(response.body)
-    throw new Error(`下载模型大小校验失败: ${contentLength} != ${expectedByteLength}`)
-  }
-  if (declaredByteLength !== null && declaredByteLength > maxByteLength) {
-    cancelByteStream(response.body)
-    throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxByteLength}`)
+    throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxEncodedByteLength}`)
   }
   if (!response.body) {
     // Response.arrayBuffer() allocates the full payload before its size can be
@@ -310,23 +284,13 @@ async function readModelResponse(
     // non-standard bodyless responses.
     throw new Error('下载模型响应正文不可用')
   }
-  // Suspicious declarations use a bounded, growing buffer instead of trusting
-  // their length claim before the caller's hash check passes.
-  let expectedContentLength: number | null
-  if (declaredByteLength === null) {
-    expectedContentLength = expectedByteLength
-  } else if (trustDeclared) {
-    expectedContentLength = declaredByteLength
-  } else {
-    expectedContentLength = null
-  }
   return readBoundedByteStream(response.body, {
-    expectedByteLength: expectedContentLength,
+    expectedByteLength,
     maxByteLength: expectedByteLength === null ? maxByteLength : Math.min(expectedByteLength, maxByteLength),
     sizeError: (actual, limit) =>
-      new Error(
-        `下载模型大小校验失败: ${actual} ${expectedContentLength !== null || expectedByteLength !== null ? '!=' : '>'} ${limit}`,
-      ),
+      isDecoySizedResponse(response, actual, maxByteLength)
+        ? new ModelAccessKeyRejectedError()
+        : new Error(`下载模型大小校验失败: ${actual} ${expectedByteLength !== null ? '!=' : '>'} ${limit}`),
     wait: deadline.runPromise,
   })
 }
@@ -364,28 +328,18 @@ export async function downloadModel(
       integrity.byteLength,
       deadline,
     )
-    // The Worker answers an unauthorized Key with a small decoy under HTTP 200,
-    // but a lying proxy can declare the same tiny length for the real payload.
-    // A suspicious declaration therefore only triggers suspicion: the body hash
-    // proves a real model, and only a mismatch names the decoy as permanent.
-    const suspicious = isSuspiciousDeclaredLength(response.headers.get('content-length'), integrity.byteLength)
-    if (verifyIntegrity || suspicious) {
-      if (buffer.byteLength !== integrity.byteLength && !suspicious) {
-        throw new Error(`下载模型大小校验失败: ${buffer.byteLength} != ${integrity.byteLength}`)
-      }
-      const sha256 = await deadline.run(() => computeModelSha256(buffer))
-      if (sha256 === integrity.sha256) {
-        deadline.throwIfExpired()
-        return captureModelDownloadConfirmation(response, buffer, accessKey, fetchImpl)
-      }
-    }
-    deadline.throwIfExpired()
-    if (suspicious) {
+    // A tiny declaration can be compression, not a rejected Key. Preserve the
+    // decoy classification only when the decoded body is also far too small.
+    if (isDecoySizedResponse(response, buffer.byteLength, integrity.byteLength)) {
       throw new ModelAccessKeyRejectedError()
     }
     if (verifyIntegrity) {
-      throw new ModelIntegrityVerificationError(`下载模型 SHA-256 校验失败`)
+      const sha256 = await deadline.run(() => sha256Hex(buffer))
+      if (sha256 !== integrity.sha256) {
+        throw new ModelIntegrityVerificationError('下载模型 SHA-256 校验失败')
+      }
     }
+    deadline.throwIfExpired()
     return captureModelDownloadConfirmation(response, buffer, accessKey, fetchImpl)
   } finally {
     deadline.dispose()
@@ -404,13 +358,13 @@ function isSafeNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
-function parseQuotaStatus(value: unknown): ModelDownloadQuotaStatus {
+function parseQuotaStatus(value: unknown, label: string): ModelDownloadQuotaStatus {
   if (typeof value !== 'object' || value === null) {
-    throw new Error('模型下载次数查询失败: 响应格式无效')
+    throw new Error(`${label}失败: 响应格式无效`)
   }
   const candidate = value as Partial<ModelDownloadQuotaStatus>
   if (typeof candidate.enabled !== 'boolean') {
-    throw new Error('模型下载次数查询失败: 响应格式无效')
+    throw new Error(`${label}失败: 响应格式无效`)
   }
   if (!candidate.enabled) {
     if (
@@ -419,7 +373,7 @@ function parseQuotaStatus(value: unknown): ModelDownloadQuotaStatus {
       candidate.remaining !== null ||
       candidate.retryAfterSeconds !== null
     ) {
-      throw new Error('模型下载次数查询失败: 响应格式无效')
+      throw new Error(`${label}失败: 响应格式无效`)
     }
     return {
       enabled: false,
@@ -439,7 +393,7 @@ function parseQuotaStatus(value: unknown): ModelDownloadQuotaStatus {
     !isSafeNonNegativeInteger(candidate.retryAfterSeconds) ||
     candidate.retryAfterSeconds < 1
   ) {
-    throw new Error('模型下载次数查询失败: 响应格式无效')
+    throw new Error(`${label}失败: 响应格式无效`)
   }
   return {
     enabled: true,
@@ -450,92 +404,83 @@ function parseQuotaStatus(value: unknown): ModelDownloadQuotaStatus {
   }
 }
 
+type ModelAccessOptions = Pick<ModelIntegrityOptions, 'accessKeyOverride'>
+
+async function requestModelDownloadQuota(
+  deadline: DownloadDeadline,
+  options: ModelAccessOptions,
+  environment: ModelDownloadEnvironment,
+  label: string,
+): Promise<ModelDownloadQuotaStatus> {
+  deadline.throwIfExpired()
+  const accessKey = await deadline.run(() =>
+    getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
+  )
+  const fetchImpl = resolveFetchImplementation(environment.fetchImpl)
+  const response = await fetchModelResponse(deadline, () =>
+    fetchImpl(getQuotaUrl(), createModelFetchInit(deadline.signal, accessKey)),
+  )
+  if (!response.ok) {
+    cancelByteStream(response.body)
+    deadline.throwIfExpired()
+    if (response.status === 403) {
+      throw new ModelAccessKeyRejectedError()
+    }
+    if (response.status === 429) {
+      throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
+    }
+    throw new Error(`${label}失败: HTTP ${response.status}`)
+  }
+  const value = await readModelJsonResponse(response, deadline, label)
+  deadline.throwIfExpired()
+  return parseQuotaStatus(value, label)
+}
+
 export async function queryModelDownloadQuota(
   signal?: AbortSignal,
-  options: ModelIntegrityOptions = {},
+  options: ModelAccessOptions = {},
   environment: ModelDownloadEnvironment = {},
 ): Promise<ModelDownloadQuotaStatus> {
-  const deadline = createDownloadDeadline(signal, '模型下载次数查询', inferenceTimeoutConfig.modelProbeTimeoutMs)
+  const label = '模型下载次数查询'
+  const deadline = createDownloadDeadline(signal, label, inferenceTimeoutConfig.modelProbeTimeoutMs)
   try {
-    deadline.throwIfExpired()
-    const accessKey = await deadline.run(() =>
-      getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
-    )
-    const fetchImpl = resolveFetchImplementation(environment.fetchImpl)
-    const response = await fetchModelResponse(deadline, () =>
-      fetchImpl(getQuotaUrl(), createModelFetchInit(deadline.signal, accessKey)),
-    )
-    if (!response.ok) {
-      cancelByteStream(response.body)
-      deadline.throwIfExpired()
-      if (response.status === 403) {
-        throw new ModelAccessKeyRejectedError()
-      }
-      if (response.status === 429) {
-        throw new ModelDownloadQuotaExceededError(parseRetryAfterSeconds(response.headers.get('retry-after')))
-      }
-      throw new Error(`模型下载次数查询失败: HTTP ${response.status}`)
-    }
-    const value = await readModelJsonResponse(response, deadline, '模型下载次数查询')
-    deadline.throwIfExpired()
-    return parseQuotaStatus(value)
+    return await requestModelDownloadQuota(deadline, options, environment, label)
   } finally {
     deadline.dispose()
   }
 }
 
 export type ModelAccessKeyProbe = Readonly<{
-  /** True when the Worker served the real model rather than the decoy. */
+  /** True only after the authenticated quota endpoint returns a valid status. */
   valid: boolean
   /** Set when the Key is valid but its monthly download quota is already spent. */
   quotaExceededRetryAfterSeconds: number | null
 }>
 
 /**
- * Checks whether an access Key unlocks the real model without spending a download.
- *
- * The Worker only meters GET requests, so a HEAD probe leaves the monthly quota
- * untouched. A valid Key is served the real object and reports its full byte
- * length; an invalid one silently receives the much smaller decoy.
+ * Validates a Key through authenticated GET /quota without requesting a model,
+ * reserving a download receipt, or confirming a download. Exhausted and disabled
+ * quotas still authenticate the Key; only HTTP 403 supplies an invalid verdict.
  */
 export async function probeModelAccessKey(
   signal?: AbortSignal,
-  options: ModelIntegrityOptions = {},
+  options: ModelAccessOptions = {},
   environment: ModelDownloadEnvironment = {},
 ): Promise<ModelAccessKeyProbe> {
-  const { integrity } = resolveIntegrityOptions(options)
-  const deadline = createDownloadDeadline(signal, '模型 Key 验证', inferenceTimeoutConfig.modelProbeTimeoutMs)
+  const label = '模型 Key 验证'
+  const deadline = createDownloadDeadline(signal, label, inferenceTimeoutConfig.modelProbeTimeoutMs)
   try {
-    deadline.throwIfExpired()
-    const accessKey = await deadline.run(() =>
-      getRequestAccessKey(options.accessKeyOverride, environment.getAccessKey, deadline.signal),
-    )
-    const fetchImpl = resolveFetchImplementation(environment.fetchImpl)
-    const response = await fetchModelResponse(deadline, () =>
-      fetchImpl(getModelUrl(), createModelProbeInit(deadline.signal, accessKey)),
-    )
-    cancelByteStream(response.body)
-    deadline.throwIfExpired()
-    // Defensive: the Worker only meters GET, so a HEAD probe is never rejected
-    // for quota today. Should that contract change, an exhausted quota still
-    // proves the Key itself is good.
-    if (response.status === 429) {
-      return {
-        valid: true,
-        quotaExceededRetryAfterSeconds: parseRetryAfterSeconds(response.headers.get('retry-after')),
-      }
+    const quota = await requestModelDownloadQuota(deadline, options, environment, label)
+    return {
+      valid: true,
+      quotaExceededRetryAfterSeconds: quota.enabled && quota.remaining === 0 ? quota.retryAfterSeconds : null,
     }
-    if (response.status === 403) {
+  } catch (error) {
+    deadline.throwIfExpired()
+    if (error instanceof ModelAccessKeyRejectedError) {
       return { valid: false, quotaExceededRetryAfterSeconds: null }
     }
-    if (!response.ok) {
-      throw new Error(`模型 Key 验证失败: HTTP ${response.status}`)
-    }
-    const declaredByteLength = parseProbeByteLength(response.headers.get('content-length'))
-    return {
-      valid: declaredByteLength === integrity.byteLength,
-      quotaExceededRetryAfterSeconds: null,
-    }
+    throw error
   } finally {
     deadline.dispose()
   }

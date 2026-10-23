@@ -56,6 +56,26 @@ describe('findCaptchaTarget', () => {
     expect(findCaptchaTarget()).toBeNull()
   })
 
+  it('validates and snapshots the native action even when a named control shadows it', () => {
+    const master = appendCandidate({ imageSrc: '/captcha.png', formAction: 'https://example.invalid/submit' })
+    const form = master.querySelector('form')
+    if (!form) throw new Error('captcha form missing')
+    const namedAction = document.createElement('input')
+    namedAction.name = 'action'
+    form.appendChild(namedAction)
+    // Model native named-property shadowing explicitly; browser E2E covers the actual DOM behavior.
+    Object.defineProperty(form, 'action', { value: namedAction, configurable: true })
+    expect(findCaptchaTarget()).toBeNull()
+
+    form.setAttribute('action', '/submit')
+    const initial = findCaptchaTarget()
+    expect(initial?.formAction).toBe(new URL('/submit', location.href).href)
+    form.setAttribute('action', new URL('/submit', location.href).href)
+    expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(true)
+    form.setAttribute('action', '/other-submit')
+    expect(isSameCaptchaTarget(initial, findCaptchaTarget())).toBe(false)
+  })
+
   it('compares captcha identity by DOM references and normalized image URL', () => {
     const master = appendCandidate({ imageSrc: '/captcha.png', formAction: '/submit' })
     const first = findCaptchaTarget()

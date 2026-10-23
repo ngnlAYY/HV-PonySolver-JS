@@ -33,7 +33,7 @@ export function createAppDependencies(
     await detector.cancelPendingPreparation()
     if (!disposed && revision === credentialsRevision) recoverAfterModelCredentialsChanged?.()
   }
-  // HEAD validates the Key without reserving a download receipt or writing the cache.
+  // GET /quota validates the Key without reserving a download receipt or writing the cache.
   // Rejected keys use the shared error shown by the settings menu.
   const verifyModelAccessKey = async (candidateKey: string): Promise<void> => {
     const normalizedKey = candidateKey.trim()

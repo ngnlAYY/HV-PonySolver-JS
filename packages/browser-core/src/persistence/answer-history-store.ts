@@ -67,7 +67,14 @@ function parseHistoryRoot(raw: string | null): Record<string, unknown> | null {
 
 function getWorldRecords(root: Record<string, unknown>, world: World): HistoryRecord[] {
   const records = root[world]
-  return Array.isArray(records) ? records.filter(isHistoryRecord).slice(0, HISTORY_MAX) : []
+  if (!Array.isArray(records)) return []
+  const valid: HistoryRecord[] = []
+  for (const record of records) {
+    if (!isHistoryRecord(record)) continue
+    valid.push(record)
+    if (valid.length === HISTORY_MAX) break
+  }
+  return valid
 }
 
 function isEnumerableTextStorage(storage: TextStorage): storage is EnumerableTextStorage {

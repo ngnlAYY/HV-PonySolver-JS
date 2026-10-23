@@ -4,25 +4,8 @@ import { resolve } from 'node:path'
 import { test } from 'node:test'
 
 const repoRoot = resolve(import.meta.dirname, '../..')
-const expectedNodeVersion = '24.15.0'
-const expectedPnpmVersion = '12.11.2'
 
 const rootImporterDependencyPattern = /^ {6}(?:"([^"]+)"|'([^']+)'|([^:\s]+)):\s*$/u
-
-test('mise pins Node and pnpm consistently with package metadata', async () => {
-  const [miseSource, packageSource] = await Promise.all([
-    readFile(resolve(repoRoot, 'mise.toml'), 'utf8'),
-    readFile(resolve(repoRoot, 'package.json'), 'utf8'),
-  ])
-  const packageJson = JSON.parse(packageSource)
-  const toolsSource = miseSource.split(/^\[tools\][ \t]*$/mu)[1]?.split(/^\[/mu)[0] ?? ''
-
-  assert.equal(/^node\s*=\s*"(?<version>[^"]+)"/mu.exec(toolsSource)?.groups?.version, expectedNodeVersion)
-  assert.equal(/^pnpm\s*=\s*"(?<version>[^"]+)"/mu.exec(toolsSource)?.groups?.version, expectedPnpmVersion)
-  assert.equal(packageJson.engines?.node, `>=${expectedNodeVersion}`)
-  assert.equal(packageJson.packageManager, `pnpm@${expectedPnpmVersion}`)
-  await assert.rejects(readFile(resolve(repoRoot, '.node-version')), { code: 'ENOENT' })
-})
 
 for (const name of ['verify-monorepo.yml', 'deploy-cloudflare-model-worker.yml']) {
   test(`${name} installs repository tools with mise and preserves conditional dependency caching`, async () => {

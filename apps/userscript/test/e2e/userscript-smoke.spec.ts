@@ -132,6 +132,7 @@ async function startLifecycleFixture(
     pauseDetection?: boolean
     blockedSetting?: string
     missingBody?: boolean
+    shadowAction?: boolean
   }> = {},
 ): Promise<Readonly<{ releaseImage(pathname: string): void }>> {
   const bundle = await buildBrowserBundle()
@@ -174,7 +175,7 @@ async function startLifecycleFixture(
     return image?.complete && image.naturalWidth > 0
   })
   await page.addScriptTag({ content: bundle })
-  await page.evaluate(({ pauseDetection, blockedSetting, missingBody }) => {
+  await page.evaluate(({ pauseDetection, blockedSetting, missingBody, shadowAction }) => {
     const state = (window.__ponyLifecycle = {
       imageUrls: [] as string[],
       submissions: [] as string[],
@@ -201,8 +202,18 @@ async function startLifecycleFixture(
       },
     })
     const image = document.querySelector('img')
-    const button = document.querySelector('#riddlesubmit')
-    if (!image || !button) throw new Error('captcha fixture missing')
+    const form = document.querySelector('form')
+    const button = document.querySelector<HTMLInputElement>('#riddlesubmit')
+    if (!image || !form || !button) throw new Error('captcha fixture missing')
+    if (shadowAction) {
+      form.setAttribute('action', '/submit')
+      const namedAction = document.createElement('input')
+      namedAction.type = 'hidden'
+      namedAction.name = 'action'
+      form.appendChild(namedAction)
+      button.type = 'submit'
+      form.addEventListener('submit', (event) => event.preventDefault())
+    }
     button.addEventListener('click', () => state.submissions.push(image.currentSrc || image.src))
     const panel = new window.HvPonySolverE2E.StatusPanel(new window.HvPonySolverE2E.HistoryStore())
     let first = true
@@ -253,6 +264,29 @@ async function startLifecycleFixture(
   }, options)
   return { releaseImage: (pathname) => releaseImages.get(pathname)?.() }
 }
+
+test('userscript cancels native action changes shadowed by named controls and recovers', async ({ page }) => {
+  await startLifecycleFixture(page, { pauseDetection: true, shadowAction: true })
+  try {
+    await expect.poll(() => page.evaluate(() => typeof window.__ponyLifecycle.releaseDetection)).toBe('function')
+    await page.evaluate(() => {
+      const form = document.querySelector('form')
+      const action: unknown = form?.action
+      if (!form || !(action instanceof HTMLInputElement)) throw new Error('named property fixture missing')
+      form.setAttribute('action', 'https://example.invalid/submit')
+      window.__ponyLifecycle.releaseDetection?.()
+    })
+    await expect.poll(() => page.evaluate(() => window.__ponyLifecycle.isBusy())).toBe(false)
+    expect(await page.evaluate(() => window.__ponyLifecycle.submissions)).toEqual([])
+    await page.evaluate(() => {
+      document.querySelector('form')?.setAttribute('action', '/safe-submit')
+    })
+    await expect.poll(() => page.evaluate(() => window.__ponyLifecycle.submissions)).toEqual([localCaptchaUrl])
+    expect(await page.evaluate(() => window.__ponyLifecycle.unhandled)).toEqual([])
+  } finally {
+    await page.evaluate(() => window.__ponyLifecycle.destroy())
+  }
+})
 
 for (const picture of [false, true]) {
   test(`userscript waits for slow ${picture ? 'picture source' : 'srcset'} selection and cancels the old answer`, async ({

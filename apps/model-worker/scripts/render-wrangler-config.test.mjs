@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, mkdir, readdir, readFile, cp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, cp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -11,6 +11,7 @@ const execFileAsync = promisify(execFile)
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const workerDir = resolve(scriptDir, '..')
 const validKvNamespaceId = '0123456789abcdef0123456789abcdef'
+const sharedDir = resolve(workerDir, '../../packages/shared')
 const validBucketName = 'bucket-prod'
 
 async function withTempWorker(callback, sourceWorkerDir = workerDir) {
@@ -20,15 +21,27 @@ async function withTempWorker(callback, sourceWorkerDir = workerDir) {
 
   try {
     await mkdir(join(tempWorkerDir, 'scripts'), { recursive: true })
+    await mkdir(join(tempWorkerDir, 'src'), { recursive: true })
     for (const file of [
+      'package.json',
       'wrangler.template.toml',
       'scripts/render-wrangler-config.mjs',
       'scripts/wrangler-config-renderer.mjs',
       'scripts/wrangler-config-guard.mjs',
       'scripts/validate-wrangler-config.mjs',
+      'src/config-validation.ts',
     ]) {
       await cp(join(sourceWorkerDir, file), join(tempWorkerDir, file))
     }
+    const sharedTarget = join(tempRoot, 'packages/shared')
+    for (const file of ['package.json', 'src/model.ts', 'src/ort-model.ts', 'src/ort-runtime.ts']) {
+      await mkdir(dirname(join(sharedTarget, file)), { recursive: true })
+      await cp(join(sharedDir, file), join(sharedTarget, file))
+    }
+    // Match workspace resolution: Node only strips TypeScript outside node_modules.
+    const sharedLink = join(tempRoot, 'node_modules/@hv-pony-solver/shared')
+    await mkdir(dirname(sharedLink), { recursive: true })
+    await symlink(sharedTarget, sharedLink, 'dir')
     return await callback(tempWorkerDir)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -39,18 +52,20 @@ test('configuration fixtures exclude generated config, environment files and loc
   const source = await mkdtemp(join(tmpdir(), 'hv-worker-config-source-'))
   try {
     const files = [
+      'package.json',
       'wrangler.template.toml',
       'scripts/render-wrangler-config.mjs',
       'scripts/wrangler-config-renderer.mjs',
       'scripts/wrangler-config-guard.mjs',
       'scripts/validate-wrangler-config.mjs',
+      'src/config-validation.ts',
     ]
     for (const file of [...files, 'wrangler.toml', '.env', '.wrangler/state/sentinel']) {
       await mkdir(dirname(join(source, file)), { recursive: true })
       await writeFile(join(source, file), 'public fixture sentinel')
     }
     await withTempWorker(async (tempWorkerDir) => {
-      assert.deepEqual((await readdir(tempWorkerDir, { recursive: true })).sort(), ['scripts', ...files].sort())
+      assert.deepEqual((await readdir(tempWorkerDir, { recursive: true })).sort(), ['scripts', 'src', ...files].sort())
     }, source)
   } finally {
     await rm(source, { recursive: true, force: true })
@@ -362,7 +377,11 @@ test('render-wrangler-config rejects unresolved placeholders after rendering', a
         await writeFile(templatePath, `${template}\nUNKNOWN = "${'${UNKNOWN_PLACEHOLDER}'}"\n`)
       },
     ),
-    /apps\/model-worker\/wrangler\.toml contains unresolved placeholder \$\{UNKNOWN_PLACEHOLDER}/,
+    (error) => {
+      assert.equal(error.stdout, '')
+      assert.equal(error.stderr, 'apps/model-worker/wrangler.toml contains unresolved placeholders\n')
+      return true
+    },
   )
 })
 
@@ -400,7 +419,11 @@ test('validate-wrangler-config rejects stale test placeholders before deploy', a
 test('validate-wrangler-config rejects unresolved placeholders before deploy', async () => {
   await assert.rejects(
     runValidate(`id = "${validKvNamespaceId}"\nbucket_name = "${'${MODEL_BUCKET_NAME}'}"\n`),
-    /wrangler\.toml contains unresolved placeholder \$\{MODEL_BUCKET_NAME}/,
+    (error) => {
+      assert.equal(error.stdout, '')
+      assert.equal(error.stderr, 'wrangler.toml contains unresolved placeholders\n')
+      return true
+    },
   )
 })
 
@@ -493,4 +516,146 @@ test('validate-wrangler-config rejects duplicate bucket assignments with tab spa
     runValidate(`id = "${validKvNamespaceId}"\nbucket_name\t= "${validBucketName}"\nbucket_name = "other-bucket"\n`),
     /wrangler\.toml must contain exactly one bucket_name/,
   )
+})
+
+for (const name of ['PUBLIC_MODEL_PATH', 'PUBLIC_QUOTA_PATH', 'PUBLIC_ORT_MODEL_PATH', 'PUBLIC_RUNTIME_WASM_PATH']) {
+  test(`deployment rejects noncanonical ${name} without disclosing configured values`, async () => {
+    const { renderWranglerConfig } = await import('./wrangler-config-renderer.mjs')
+    const { validateRenderedWranglerConfig } = await import('./wrangler-config-guard.mjs')
+    const template = await readFile(join(workerDir, 'wrangler.template.toml'), 'utf8')
+    const rendered = renderWranglerConfig(template, {
+      values: { MODEL_KEYS_KV_NAMESPACE_ID: validKvNamespaceId, MODEL_BUCKET_NAME: validBucketName },
+    })
+
+    for (const [path, reason] of [
+      ['/models/../quota', 'must be a canonical URL pathname'],
+      ['/models/./a.onnx', 'must be a canonical URL pathname'],
+      ['/models/%2e%2e/quota', 'must be a canonical URL pathname'],
+      ['/models/.%2E/quota', 'must be a canonical URL pathname'],
+      ['/models/%2E./quota', 'must be a canonical URL pathname'],
+      ['/models/%2E/a.onnx', 'must be a canonical URL pathname'],
+      ['/models/.', 'must be a canonical URL pathname'],
+      ['/models/..', 'must be a canonical URL pathname'],
+      ['/models/a b.onnx', 'must be a canonical URL pathname'],
+      ['/models/a.onnx ', 'must be a canonical URL pathname'],
+      ['/模型/a.onnx', 'must be a canonical URL pathname'],
+      ['/models/<model>.onnx', 'must be a canonical URL pathname'],
+      ['/models/\uD800.onnx', 'must be a canonical URL pathname'],
+      ['//models.example/a.onnx', 'must be an absolute pathname'],
+      ['///models/a.onnx', 'must be an absolute pathname'],
+      ['models/a.onnx', 'must be an absolute pathname'],
+      [' /models/a.onnx', 'must be an absolute pathname'],
+      ['/models/a?query', 'must be an absolute pathname'],
+      ['/models/a#hash', 'must be an absolute pathname'],
+      ['/models/a\tonnx', 'must not contain control characters'],
+    ]) {
+      const configured = rendered.replace(new RegExp(`^${name} = "[^"]*"$`, 'm'), () => `${name} = "${path}"`)
+
+      assert.throws(() => validateRenderedWranglerConfig(configured), { message: `${name} ${reason}` })
+    }
+  })
+
+  test(`deployment preserves canonical percent-encoded ${name}`, async () => {
+    const { renderWranglerConfig } = await import('./wrangler-config-renderer.mjs')
+    const { validateRenderedWranglerConfig } = await import('./wrangler-config-guard.mjs')
+    const template = await readFile(join(workerDir, 'wrangler.template.toml'), 'utf8')
+    const rendered = renderWranglerConfig(template, {
+      values: { MODEL_KEYS_KV_NAMESPACE_ID: validKvNamespaceId, MODEL_BUCKET_NAME: validBucketName },
+    })
+
+    for (const path of [
+      '/',
+      '/models/a%20b.onnx',
+      '/%E6%A8%A1%E5%9E%8B/a.onnx',
+      '/models/%2e.onnx',
+      '/models/%252e%252e/quota',
+      '/models/%2F%3F%23%22%27%60%5C.onnx',
+      '/models/%2f%41%7e.onnx',
+      '/models//a.onnx',
+    ]) {
+      const configured = rendered.replace(new RegExp(`^${name} = "[^"]*"$`, 'm'), () => `${name} = "${path}"`)
+
+      assert.doesNotThrow(() => validateRenderedWranglerConfig(configured))
+    }
+  })
+}
+
+test('rendering refuses noncanonical public paths before creating a deployment config', async () => {
+  const { renderWranglerConfigFile, testWranglerConfigEnv } = await import('./wrangler-config-renderer.mjs')
+
+  for (const path of ['/models/../quota', '/models/%2e%2e/quota', '/models/a b.onnx']) {
+    await withTempWorker(async (tempWorkerDir) => {
+      const templatePath = join(tempWorkerDir, 'wrangler.template.toml')
+      const outputPath = join(tempWorkerDir, 'wrangler.toml')
+      const template = await readFile(templatePath, 'utf8')
+      await writeFile(
+        templatePath,
+        template.replace(/^PUBLIC_MODEL_PATH = "[^"]*"$/m, () => `PUBLIC_MODEL_PATH = "${path}"`),
+      )
+
+      await assert.rejects(renderWranglerConfigFile({ templatePath, outputPath, values: testWranglerConfigEnv }), {
+        message: 'PUBLIC_MODEL_PATH must be a canonical URL pathname',
+      })
+      await assert.rejects(readFile(outputPath), { code: 'ENOENT' })
+    })
+  }
+})
+
+test('rendering and deployment retain canonical custom paths', async () => {
+  const path = '/models/%E6%A8%A1%E5%9E%8B%20%2e.onnx'
+  const rendered = await runRender(
+    { MODEL_KEYS_KV_NAMESPACE_ID: validKvNamespaceId, MODEL_BUCKET_NAME: validBucketName },
+    async (tempWorkerDir) => {
+      const templatePath = join(tempWorkerDir, 'wrangler.template.toml')
+      const template = await readFile(templatePath, 'utf8')
+      await writeFile(
+        templatePath,
+        template.replace(/^PUBLIC_MODEL_PATH = "[^"]*"$/m, () => `PUBLIC_MODEL_PATH = "${path}"`),
+      )
+    },
+  )
+
+  assert.ok(rendered.wrangler.includes(`PUBLIC_MODEL_PATH = "${path}"`))
+  assert.equal(rendered.stderr, '')
+  await runValidate(rendered.wrangler)
+})
+
+test('deployment rejects canonical collisions, including omitted route defaults', async () => {
+  const { renderWranglerConfig } = await import('./wrangler-config-renderer.mjs')
+  const { validateRenderedWranglerConfig } = await import('./wrangler-config-guard.mjs')
+  const template = await readFile(join(workerDir, 'wrangler.template.toml'), 'utf8')
+  const rendered = renderWranglerConfig(template, {
+    values: { MODEL_KEYS_KV_NAMESPACE_ID: validKvNamespaceId, MODEL_BUCKET_NAME: validBucketName },
+  })
+
+  for (const [line, name, path] of rendered.matchAll(/^(PUBLIC_[A-Z_]+_PATH) = "([^"]*)"$/gm)) {
+    const otherName = name === 'PUBLIC_MODEL_PATH' ? 'PUBLIC_QUOTA_PATH' : 'PUBLIC_MODEL_PATH'
+    const collision = rendered.replace(new RegExp(`^${otherName} = "[^"]*"$`, 'm'), () => `${otherName} = "${path}"`)
+
+    for (const configured of [collision, collision.replace(line, '')]) {
+      assert.throws(
+        () => validateRenderedWranglerConfig(configured),
+        (error) => {
+          assert.match(error.message, /duplicate public path/)
+          assert.ok(error.message.includes(name))
+          assert.ok(error.message.includes(otherName))
+          assert.ok(!error.message.includes(path))
+          return true
+        },
+      )
+    }
+  }
+})
+
+test('deployment rejects duplicate public path assignments without disclosing either value', async () => {
+  const { renderWranglerConfig } = await import('./wrangler-config-renderer.mjs')
+  const { validateRenderedWranglerConfig } = await import('./wrangler-config-guard.mjs')
+  const template = await readFile(join(workerDir, 'wrangler.template.toml'), 'utf8')
+  const rendered = renderWranglerConfig(template, {
+    values: { MODEL_KEYS_KV_NAMESPACE_ID: validKvNamespaceId, MODEL_BUCKET_NAME: validBucketName },
+  })
+
+  assert.throws(() => validateRenderedWranglerConfig(`${rendered}\nPUBLIC_MODEL_PATH = "/second.onnx"\n`), {
+    message: 'wrangler.toml must contain at most one PUBLIC_MODEL_PATH',
+  })
 })

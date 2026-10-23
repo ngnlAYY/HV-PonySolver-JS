@@ -54,7 +54,7 @@ Chromium service worker 不持有推理会话。[chromium-bootstrap.ts](../../ap
 
 构建入口 [build-extension.mjs](../../apps/extension/scripts/build/build-extension.mjs) 将固定模式传给 [target.mjs](../../apps/extension/scripts/build/target.mjs)，选择后台、设置页和 Offscreen 入口；运行时不自动探测或回退。
 
-[remote-inference-host.ts](../../apps/extension/src/host/remote-inference-host.ts) 组装模型缓存与 Key IndexedDB；下载校验并写入后才确认额度。[远程设置页](../../apps/extension/src/options/remote.ts) 经独立 options Port 验证、查询、下载或清除。候选 Key 只短暂经过该 Port、Broker 与 Host 内存，不进入内容消息、普通存储、URL 或日志。
+[remote-inference-host.ts](../../apps/extension/src/host/remote-inference-host.ts) 组装模型缓存与 Key IndexedDB；下载校验并写入后才确认额度。下载、准备和额度查询的取消信号贯穿已保存 Key 的 IndexedDB 打开与读取事务；等待打开时已取消，迟到连接不能再启动 Key 读取。[远程设置页](../../apps/extension/src/options/remote.ts) 经独立 options Port 验证、查询、下载或清除。候选 Key 只短暂经过该 Port、Broker 与 Host 内存，不进入内容消息、普通存储、URL 或日志。
 
 [packaged-inference-host.ts](../../apps/extension/src/host/packaged-inference-host.ts) 只组装包内资产，不构造远程能力、不读改旧 Key、不声明模型服务 Host 权限；[设置页](../../apps/extension/src/options/packaged.ts) 禁用 Key 控件。[packaged-asset.ts](../../apps/extension/src/host/packaged-asset.ts) 校验状态、重定向、声明/实际长度及 SHA-256。确定性模型/WASM 完整性错误经严格 Worker 协议保留永久分类，不自动重试；网络与取消另行分类。
 

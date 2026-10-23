@@ -79,6 +79,95 @@ describe('readWorkerConfig', () => {
     expect(() => readWorkerConfig(env)).toThrow(/absolute pathname/)
   })
 
+  it.each(['', '   '])('rejects an explicitly empty public path instead of using its default: %j', (path) => {
+    const env = createEnv(createModelFixture())
+    env.PUBLIC_MODEL_PATH = path
+
+    expect(() => readWorkerConfig(env)).toThrow(/PUBLIC_MODEL_PATH.*required/u)
+  })
+
+  describe.each([
+    ['PUBLIC_MODEL_PATH', 'publicModelPath'],
+    ['PUBLIC_QUOTA_PATH', 'publicQuotaPath'],
+    ['PUBLIC_ORT_MODEL_PATH', 'publicOrtModelPath'],
+    ['PUBLIC_RUNTIME_WASM_PATH', 'publicRuntimeWasmPath'],
+  ] as const)('%s pathname boundaries', (name, property) => {
+    it.each([
+      '/models/../quota',
+      '/models/./a.onnx',
+      '/models/%2e%2e/quota',
+      '/models/.%2E/quota',
+      '/models/%2E./quota',
+      '/models/%2E/a.onnx',
+      '/models/.',
+      '/models/..',
+      '/models/a b.onnx',
+      '/models/a.onnx ',
+      '/模型/a.onnx',
+      '/models/<model>.onnx',
+      '/models/\uD800.onnx',
+    ])('rejects URL-normalized aliases without disclosing the value: %j', (path) => {
+      const env = createEnv(createModelFixture())
+      env[name] = path
+
+      expect(readWorkerConfigError(env).message).toBe(`${name} must be a canonical URL pathname`)
+    })
+
+    it.each(['models/a.onnx', '//models.example/a.onnx', '///models/a.onnx', '/a?query', '/a#hash', ' /a.onnx'])(
+      'rejects inputs that are not origin-relative pathnames: %j',
+      (path) => {
+        const env = createEnv(createModelFixture())
+        env[name] = path
+
+        expect(readWorkerConfigError(env).message).toBe(`${name} must be an absolute pathname`)
+      },
+    )
+
+    it.each(['/models/\ta.onnx', '/models/a.onnx\n', '/models/a\u007f.onnx'])(
+      'rejects control characters before URL parsing: %j',
+      (path) => {
+        const env = createEnv(createModelFixture())
+        env[name] = path
+
+        expect(readWorkerConfigError(env).message).toBe(`${name} must not contain control characters`)
+      },
+    )
+
+    it.each([
+      '/',
+      '/models/a%20b.onnx',
+      '/%E6%A8%A1%E5%9E%8B/a.onnx',
+      '/models/%2e.onnx',
+      '/models/%252e%252e/quota',
+      '/models/%2F%3F%23%22%27%60%5C.onnx',
+      '/models/%2f%41%7e.onnx',
+      '/models//a.onnx',
+    ])('preserves canonical pathname bytes: %j', (path) => {
+      const env = createEnv(createModelFixture())
+      env[name] = path
+
+      expect(readWorkerConfig(env)[property]).toBe(path)
+    })
+
+    it('includes the omitted route default when checking for collisions', () => {
+      const fixture = createModelFixture()
+      const defaultsEnv = createEnv(fixture)
+      delete defaultsEnv[name]
+      const fallback = readWorkerConfig(defaultsEnv)[property]
+      const env = createEnv(fixture)
+      delete env[name]
+      const otherName = name === 'PUBLIC_MODEL_PATH' ? 'PUBLIC_QUOTA_PATH' : 'PUBLIC_MODEL_PATH'
+      env[otherName] = fallback
+
+      const error = readWorkerConfigError(env)
+
+      expect(error.message).toContain('duplicate public path')
+      expect(error.message).toContain(name)
+      expect(error.message).toContain(otherName)
+      expect(error.message).not.toContain(fallback)
+    })
+  })
+
   it('rejects colliding public paths without embedding the path value', () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture)

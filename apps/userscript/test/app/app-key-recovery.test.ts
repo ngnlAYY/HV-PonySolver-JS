@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModelAccessKeyRejectedError } from '@hv-pony-solver/browser-core'
-import { ORT_MODEL_INTEGRITY } from '@hv-pony-solver/shared/ort-model'
 
 import { appendCaptcha } from '../../../../test/support/captcha-fixture'
 import { SuccessfulWorker } from '../../../../test/support/mock-worker'
@@ -85,8 +84,8 @@ describe('App GM Key commit recovery', () => {
     prompt.mockReset().mockReturnValue(null)
     fetchImpl
       .mockReset()
-      .mockImplementation(
-        async () => new Response(null, { headers: { 'content-length': String(ORT_MODEL_INTEGRITY.byteLength) } }),
+      .mockImplementation(async () =>
+        Response.json({ enabled: true, limit: 5, used: 0, remaining: 5, retryAfterSeconds: 3600 }),
       )
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
     vi.stubGlobal('GM_getValue', (key: string, fallback: string) => stored.get(key) ?? fallback)
@@ -135,7 +134,12 @@ describe('App GM Key commit recovery', () => {
     expect(cancelPreparation).toHaveBeenCalledTimes(1)
     expect(model.download).toHaveBeenCalledTimes(2)
     expect(detects()).toBe(1)
-    expect(fetchImpl).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ method: 'HEAD' }))
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const request = fetchImpl.mock.calls[0]
+    if (!request) throw new Error('quota request missing')
+    const [input, init] = request
+    expect(new URL(input.toString()).pathname).toBe('/quota')
+    expect(init?.method ?? 'GET').toBe('GET')
   })
 
   it.each([
@@ -245,6 +249,41 @@ describe('App GM Key commit recovery', () => {
     expect(recover).not.toHaveBeenCalled()
     expect(setValue).not.toHaveBeenCalled()
     expect(model.download).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves the saved Key and failed target when quota verification is rate-limited', async () => {
+    const previousKey = 'b'.repeat(64)
+    stored.set(KEY_STORAGE_KEY, previousKey)
+    model.download.mockRejectedValue(new ModelAccessKeyRejectedError())
+    fetchImpl.mockResolvedValueOnce(new Response('rate limited', { status: 429 }))
+    const recover = vi.spyOn(App.prototype, 'recoverAfterModelCredentialsChanged')
+    await startApp()
+
+    await runMenu('1', TEST_KEY)
+    await vi.runAllTimersAsync()
+
+    expect(stored.get(KEY_STORAGE_KEY)).toBe(previousKey)
+    expect(setValue).not.toHaveBeenCalled()
+    expect(recover).not.toHaveBeenCalled()
+    expect(model.download).toHaveBeenCalledTimes(1)
+    expect(globalThis.alert).toHaveBeenLastCalledWith(expect.stringContaining('模型下载 Key 验证失败:'))
+  })
+
+  it.each([
+    ['exhausted', { enabled: true, limit: 5, used: 5, remaining: 0, retryAfterSeconds: 3600 }],
+    ['disabled', { enabled: false, limit: 0, used: 0, remaining: null, retryAfterSeconds: null }],
+  ])('saves the Key and recovers after a valid %s quota response', async (_label, quota) => {
+    fetchImpl.mockResolvedValueOnce(Response.json(quota))
+    const recover = vi.spyOn(App.prototype, 'recoverAfterModelCredentialsChanged')
+    await startApp()
+
+    await runMenu('1', TEST_KEY)
+    await vi.runAllTimersAsync()
+
+    expect(stored.get(KEY_STORAGE_KEY)).toBe(TEST_KEY)
+    expect(setValue).toHaveBeenCalledExactlyOnceWith(KEY_STORAGE_KEY, TEST_KEY)
+    expect(recover).toHaveBeenCalledOnce()
+    expect(detects()).toBe(1)
   })
 
   it('does not revive a destroyed App when an already-started GM write commits late', async () => {

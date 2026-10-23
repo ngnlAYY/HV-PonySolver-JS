@@ -111,22 +111,15 @@ describe('model-runtime-assets', () => {
     expect(response.headers.get('x-hv-model-access')).toBeNull()
   })
 
-  it('returns the decoy model when key format is invalid', async () => {
+  it('returns the decoy model for malformed Bearer tokens without reading KV', async () => {
     const fixture = createModelFixture()
+    const env = createEnv(fixture)
 
-    const response = await fetchWorker(modelRequest(fixture, 'GET', fixture.invalidKey), createEnv(fixture))
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', fixture.invalidKey), env)
 
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.decoyBody)
-  })
-
-  it('returns the decoy model when authorized KV key is missing', async () => {
-    const fixture = createModelFixture()
-
-    const response = await fetchWorker(modelRequest(fixture, 'GET', fixture.validKey), createEnv(fixture))
-
-    expect(response.status).toBe(200)
-    expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+    expect((env.MODEL_KEYS as MockKvNamespace).requestedKeys).toEqual([])
   })
 
   it('returns the decoy model when Authorization Bearer KV key is missing', async () => {
@@ -152,15 +145,15 @@ describe('model-runtime-assets', () => {
     expect(response.headers.get('x-hv-model-access')).toBeNull()
   })
 
-  it('returns the decoy model when requested key is not authorized', async () => {
+  it('does not authorize a Bearer token merely because another KV key exists', async () => {
     const fixture = createModelFixture()
-    const response = await fetchWorker(
-      modelRequest(fixture, 'GET', fixture.mismatchedKey),
-      createEnv(fixture, { keyValues: new Map<string, string>([[fixture.validKey, '1']]) }),
-    )
+    const env = createEnv(fixture, { keyValues: new Map<string, string>([[fixture.validKey, '1']]) })
+    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', fixture.mismatchedKey), env)
 
     expect(response.status).toBe(200)
     expect(await readResponseBody(response)).toBe(fixture.decoyBody)
+    expect((env.MODEL_KEYS as MockKvNamespace).requestedKeys).toContain(fixture.mismatchedKey)
+    expect((env.MODEL_KEYS as MockKvNamespace).requestedKeys).not.toContain(fixture.validKey)
   })
 
   it('serves the requested ORT model from its dedicated protected object key', async () => {

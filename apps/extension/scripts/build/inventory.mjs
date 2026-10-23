@@ -2,6 +2,7 @@ import { readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { JSDOM } from 'jsdom'
+import ts from 'typescript'
 import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 import {
   version,
@@ -116,6 +117,21 @@ function auditPackagedMetafiles(metafiles, target, fixture = false) {
 
 const htmlUrlAttributes = new Set(['href', 'src', 'action', 'formaction', 'data'])
 const executableUrlProtocols = new Set(['javascript:', 'data:', 'vbscript:'])
+const javascriptFilePattern = /\.(?:[cm]?js)$/iu
+
+function assertNoDynamicImports(source, relativePath) {
+  const syntax = ts.createSourceFile(relativePath, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS)
+  if (syntax.parseDiagnostics.length > 0) {
+    throw new Error(`${relativePath} contains invalid JavaScript`)
+  }
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      throw new Error(`${relativePath} contains a dynamic import`)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(syntax)
+}
 
 function auditHtmlSource(source, relativePath, relativeFiles) {
   const dom = new JSDOM(source)
@@ -154,6 +170,9 @@ function auditHtmlSource(source, relativePath, relativeFiles) {
               throw new Error(`${relativePath} references remote executable content`)
             }
             throw new Error(`${relativePath} references a missing or non-local resource: ${reference}`)
+          }
+          if (scriptReference && !javascriptFilePattern.test(resource.pathname)) {
+            throw new Error(`${relativePath} references an unsupported script resource: ${reference}`)
           }
         }
         if (element.localName === 'script' && element.textContent?.trim()) {
@@ -280,12 +299,10 @@ async function auditTargetInventory(target, options, files) {
     auditHtmlSource(source, file.relativePath, relativeFiles)
   }
   const javascriptSources = []
-  for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.js'))) {
+  for (const file of files.filter((candidate) => javascriptFilePattern.test(candidate.relativePath))) {
     const source = file.bytes.toString('utf8')
     javascriptSources.push([file.relativePath, source])
-    if (/\bimport\s*\(/u.test(source)) {
-      throw new Error(`${file.relativePath} contains a dynamic import`)
-    }
+    assertNoDynamicImports(source, file.relativePath)
     if (/https?:\/\/[^"'\s]+\.(?:m?js|wasm)(?:[?"'\s]|$)/iu.test(source)) {
       throw new Error(`${file.relativePath} references remote executable code`)
     }
