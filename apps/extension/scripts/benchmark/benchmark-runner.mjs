@@ -433,7 +433,6 @@ async function executeBrowserSample(adapter, scenario) {
       for (let index = 0; index < payload.length; index += 1) {
         payload[index] = index % 251
       }
-      const durations = []
       const digestPayload = async (bytes) => {
         if (globalThis.crypto?.subtle) {
           await globalThis.crypto.subtle.digest('SHA-256', bytes)
@@ -456,7 +455,6 @@ async function executeBrowserSample(adapter, scenario) {
         await digestPayload(copied)
         digestCount += 1
         digestBytes += copied.byteLength
-        durations.push(globalThis.performance.now() - startedAt)
         active -= 1
       }
       let active = 0
@@ -486,8 +484,8 @@ async function executeBrowserSample(adapter, scenario) {
       return {
         durationMs,
         perOperationMs: durationMs / iterations,
-        successCount: durations.length,
-        errorCount: Math.max(0, iterations - durations.length),
+        successCount: digestCount,
+        errorCount: Math.max(0, iterations - digestCount),
         digestCount,
         digestBytes,
         idbOperationCount: 0,

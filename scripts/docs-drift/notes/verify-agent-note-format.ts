@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { agentNoteRoot, walkAgentNoteTree } from './agent-note-tree.ts'
+import { createMarkdownFenceScanner } from '../markdown-fences.mjs'
 
 const STATUS: Record<string, RegExp> = {
   proposed: /^Status: proposed$/,
@@ -67,26 +68,14 @@ function maskSource(raw: string): MaskedSource {
   const lines = normalized.split('\n')
   const fenced = new Array<boolean>(lines.length).fill(false)
   const commented = new Array<boolean>(lines.length).fill(false)
-  let fence: { character: string; length: number } | null = null
+  const scanFence = createMarkdownFenceScanner()
   let inComment = false
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i]
     commented[i] = inComment
-    // A fence opens/closes only on its own line (≤3 leading spaces); fence
-    // mentions inside inline code or prose never toggle state.
-    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(l)
-    if (fence) {
+    // 围栏内的 HTML 示例不参与注释状态；注释内的围栏不改变代码状态。
+    if (!inComment && scanFence(l)) {
       fenced[i] = true
-      if (marker && marker[1][0] === fence.character && marker[1].length >= fence.length && marker[2].trim() === '') {
-        fence = null
-      }
-      // Fence interiors are opaque: a `<!--` in a HTML/JSX sample must not
-      // leak the comment mask past the closing fence.
-      continue
-    }
-    if (!inComment && marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
-      fenced[i] = true
-      fence = { character: marker[1][0], length: marker[1].length }
       continue
     }
     const openIdx = inComment ? -1 : l.indexOf('<!--')

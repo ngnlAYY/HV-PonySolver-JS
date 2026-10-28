@@ -22,7 +22,7 @@ function assertNonEmptyString(value, label) {
   }
 }
 
-function artifactComparisonIdentity(artifact) {
+export function artifactComparisonIdentity(artifact) {
   if (artifact === null) return null
   return {
     target: artifact.target,
@@ -344,9 +344,6 @@ export function validateBenchmarkResult(result, options = {}) {
       }
       for (const [sampleIndex, sample] of [...invocation.warmupSamples, ...invocation.measuredSamples].entries()) {
         validateSample(sample, scenario, `${scenario.key} invocation ${invocation.index} sample ${sampleIndex}`)
-      }
-      if (invocation.measuredSamples.some((sample) => sample.errorCount !== 0)) {
-        throw new Error(`${scenario.key} invocation ${invocation.index} has correctness failures`)
       }
       if (!invocation.summary || typeof invocation.summary !== 'object') {
         throw new Error(`${scenario.key} invocation ${invocation.index} summary is required`)

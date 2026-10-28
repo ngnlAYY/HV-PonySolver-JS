@@ -129,6 +129,43 @@ describe('RemoteDetectorClient', () => {
     await expect(detectPromise).resolves.toEqual(result)
   })
 
+  it.each([
+    ['prepare', 'abort'],
+    ['prepare', 'destroy'],
+    ['detect', 'abort'],
+    ['detect', 'destroy'],
+  ] as const)(
+    'rejects %s when %s happens between response delivery and its continuation',
+    async (operation, ending) => {
+      const sink = statusSink()
+      const client = new RemoteDetectorClient(sink)
+      const controller = new AbortController()
+      const pending =
+        operation === 'prepare'
+          ? client.prepare(controller.signal)
+          : client.detect(new Blob([new Uint8Array([1])], { type: 'image/png' }), controller.signal)
+      try {
+        await vi.waitFor(() => expect(platformMocks.ports[0]?.postMessage).toHaveBeenCalledOnce())
+        const port = platformMocks.ports[0]!
+        const request = vi.mocked(port.postMessage).mock.calls[0]![0] as { requestId: string }
+        port.emitMessage({
+          protocol: PROTOCOL_VERSION,
+          type: 'result',
+          requestId: request.requestId,
+          ok: true,
+          result: { success: false, ponies: [], confidences: {}, detections: [], candidates: [] },
+        })
+        if (ending === 'abort') controller.abort()
+        else client.destroy()
+
+        await expect(pending).rejects.toThrow(ending === 'abort' ? '已取消' : '已关闭')
+        expect(sink.setSessionReady).not.toHaveBeenCalled()
+      } finally {
+        client.destroy()
+      }
+    },
+  )
+
   it.each([-5_000, 10_000])(
     'measures preparation with a monotonic clock despite a %dms clock change',
     async (shift) => {
@@ -580,6 +617,11 @@ describe('RemoteDetectorClient', () => {
 
     await expect(pending).rejects.toThrow('扩展推理连接已关闭')
     await expect(client.prepare()).rejects.toThrow('扩展推理连接已关闭')
+    const readImage = vi.spyOn(FileReader.prototype, 'readAsDataURL')
+    await expect(client.detect(new Blob([new Uint8Array([1])], { type: 'image/png' }))).rejects.toThrow(
+      '扩展推理连接已关闭',
+    )
+    expect(readImage).not.toHaveBeenCalled()
     expect(platformMocks.ports[0]!.disconnect).toHaveBeenCalledTimes(1)
     expect(panel.setSessionReady).not.toHaveBeenCalled()
   })

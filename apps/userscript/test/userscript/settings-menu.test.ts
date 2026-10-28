@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ModelDownloadQuotaExceededError } from '@hv-pony-solver/browser-core'
 
 // The core setter only persists Worker tokens (64 hex chars).
 const VALID_KEY = 'aB'.repeat(32)
@@ -78,46 +79,38 @@ describe('settings menu', () => {
     expect(alert).toHaveBeenCalledWith('模型下载 Key 已验证并保存')
   })
 
-  it('keeps the saved model key when top-level settings verification fails', async () => {
-    const registerMenuCommand = vi.fn()
-    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce('bad-key')
-    const alert = vi.fn()
-    const verify = vi.fn(async (_candidateKey: string) => {
-      throw new Error('HTTP 403')
-    })
-    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
-    vi.stubGlobal('prompt', prompt)
-    vi.stubGlobal('alert', alert)
-    localStorage.setItem('hvPonySolverModelAccessKey', 'old-key')
-    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
-
-    registerSettingsMenu({ onVerifyModelAccessKey: verify })
-    await registerMenuCommand.mock.calls[0][1]()
-
-    expect(verify).toHaveBeenCalledWith('bad-key')
-    expect(localStorage.getItem('hvPonySolverModelAccessKey')).toBe('old-key')
-    expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
-  })
-
-  it('does not save a model key when verification fails with a quota error', async () => {
+  it.each([
+    ['saved Key', VALID_KEY, new Error('HTTP 403')],
+    ['first-time Key', undefined, new Error('HTTP 403')],
+    ['quota failure', VALID_KEY, new ModelDownloadQuotaExceededError(3600)],
+  ] as const)('preserves GM storage after a %s verification failure', async (_label, previousKey, failure) => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(VALID_KEY)
     const alert = vi.fn()
-    const setValue = vi.fn(async () => undefined)
+    const setValue = vi.fn()
+    const deleteValue = vi.fn()
+    const verify = vi.fn().mockRejectedValue(failure)
+    const store = new Map<string, string>()
+    const key = 'hvPonySolverModelAccessKey'
+    if (previousKey) store.set(key, previousKey)
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
-    vi.stubGlobal('GM_setValue', setValue)
+    vi.stubGlobal('GM', {
+      getValue: (key: string, fallback: string) => store.get(key) ?? fallback,
+      setValue,
+      deleteValue,
+    })
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
-    const { ModelDownloadQuotaExceededError } = await import('@hv-pony-solver/browser-core')
-    const verify = vi.fn(async () => {
-      throw new ModelDownloadQuotaExceededError(3600)
-    })
     const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
 
     registerSettingsMenu({ onVerifyModelAccessKey: verify })
     await registerMenuCommand.mock.calls[0][1]()
 
+    expect(verify).toHaveBeenCalledExactlyOnceWith(VALID_KEY)
     expect(setValue).not.toHaveBeenCalled()
+    expect(deleteValue).not.toHaveBeenCalled()
+    expect(store.get(key)).toBe(previousKey)
+    expect(localStorage.getItem(key)).toBeNull()
     expect(alert).toHaveBeenCalledWith(expect.stringContaining('模型下载 Key 验证失败:'))
   })
 
@@ -211,40 +204,25 @@ describe('settings menu', () => {
     expect(alert).toHaveBeenCalledWith('答题间隔已保存')
   })
 
-  it('does not save a first-time model key when top-level verification fails', async () => {
-    const registerMenuCommand = vi.fn()
-    const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce('bad-key')
-    const alert = vi.fn()
-    const verify = vi.fn(async (_candidateKey: string) => {
-      throw new Error('HTTP 403')
-    })
-    vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
-    vi.stubGlobal('prompt', prompt)
-    vi.stubGlobal('alert', alert)
-    const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
-
-    registerSettingsMenu({ onVerifyModelAccessKey: verify })
-    await registerMenuCommand.mock.calls[0][1]()
-
-    expect(verify).toHaveBeenCalledWith('bad-key')
-    expect(localStorage.getItem('hvPonySolverModelAccessKey')).toBeNull()
-    expect(alert).toHaveBeenCalledWith('模型下载 Key 验证失败: Error: HTTP 403')
-  })
-
   it('keeps the model key when the top-level model prompt is cancelled', async () => {
     const registerMenuCommand = vi.fn()
     const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(null)
     const alert = vi.fn()
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
+    const setValue = vi.fn()
+    const deleteValue = vi.fn()
+    vi.stubGlobal('GM', { getValue: () => VALID_KEY, setValue, deleteValue })
     vi.stubGlobal('prompt', prompt)
     vi.stubGlobal('alert', alert)
-    localStorage.setItem('hvPonySolverModelAccessKey', 'old-key')
     const { registerSettingsMenu } = await import('../../src/userscript/settings-menu')
+    const { getModelAccessKey } = await import('../../src/model/model-settings')
 
     registerSettingsMenu()
     await registerMenuCommand.mock.calls[0][1]()
 
-    expect(localStorage.getItem('hvPonySolverModelAccessKey')).toBe('old-key')
+    await expect(getModelAccessKey()).resolves.toBe(VALID_KEY)
+    expect(setValue).not.toHaveBeenCalled()
+    expect(deleteValue).not.toHaveBeenCalled()
     expect(alert).not.toHaveBeenCalled()
   })
 

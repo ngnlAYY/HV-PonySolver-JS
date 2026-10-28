@@ -88,7 +88,7 @@ CSP 为 `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'se
 
 推理 Worker 内嵌固定上游的完整 MIT 许可，压缩产物同样保留；许可来源与 vendor 字节身份见[Runtime 专题](onnx-runtime.md#显式内置精简版)。
 
-审计锁定完整 MV3 清单：版本、后台、独立设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 和默认顶层隔离世界。拒绝 `optional_permissions`、`optional_host_permissions`、`externally_connectable`、`sandbox` 扩权；HTML 连同嵌套 template 拒绝内联脚本/事件、规范化后的 `javascript:`/`data:`/`vbscript:` URL、`srcdoc` 和 base URL 覆写。所有 `.js`、`.mjs`、`.cjs` 文件均进入执行代码审计，后缀比较不区分大小写；动态导入通过 AST 识别，注释分隔不能绕过，字符串或注释中的同名文本不误判，无效 JS 语法失败关闭。HTML 脚本引用必须指向这些已审类型的本地文件，其他后缀失败关闭。普通文本和合法本地资源不按可执行 URL 处理。
+审计锁定完整 MV3 清单：版本、后台、独立设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 和默认顶层隔离世界。拒绝 `optional_permissions`、`optional_host_permissions`、`externally_connectable`、`sandbox` 扩权；所有 `.html/.htm` 文件不区分后缀大小写进行审计，连同嵌套 template 拒绝内联脚本/事件、规范化后的 `javascript:`/`data:`/`vbscript:` URL、`srcdoc` 和 base URL 覆写。所有 `.js`、`.mjs`、`.cjs` 文件均进入执行代码审计，后缀比较不区分大小写；动态导入通过 AST 识别，注释分隔不能绕过，字符串或注释中的同名文本不误判，无效 JS 语法失败关闭。HTML 脚本引用必须指向这些已审类型的本地文件，其他后缀失败关闭。普通文本和合法本地资源不按可执行 URL 处理。
 
 ## Runtime architecture
 
@@ -116,6 +116,8 @@ Broker 在监听消息或调用 Host 前校验本扩展 ID 与实际 `sender.url
 Offscreen claim 仅在同一 epoch/contextId 复用，等待者共享握手、独立取消；失败、超时、文档替换或后台重启后重新 claim，每次启动安排空闲回收。`claim` 与 `confirm-idle` 共用 `OFFSCREEN_CONTROL_TIMEOUT_MS` 上限；空闲确认超时释放关闭等待，迟到响应不关闭文档，后续请求与有限退避仍可继续。Firefox 直接持有 Host，不声明 `background.persistent`。细节见[扩展运行时](architecture/extension-runtime.md)。
 
 ## Model and runtime ownership
+
+内置构建在读取模型文件前验证清单和普通文件长度，拒绝明显不匹配的输入；读取后仍复核实际长度与 SHA-256，预检不代替完整性校验。
 
 remote Host 持有下载器、模型与 Key 的独立 IndexedDB；有界下载通过长度/SHA-256 校验并缓存后才确认回执，详见[缓存专题](model-cache-strategy.md)。
 

@@ -6,8 +6,9 @@ import assert from 'node:assert/strict'
 
 import { checkDocumentationLinks } from '../document-links.mjs'
 
-async function createFixture(files) {
+async function createFixture(context, files) {
   const root = await mkdtemp(join(tmpdir(), 'hv-document-links-'))
+  context.after(() => rm(root, { recursive: true, force: true }))
   for (const [relativePath, content] of Object.entries(files)) {
     const filePath = join(root, relativePath)
     await mkdir(join(filePath, '..'), { recursive: true })
@@ -16,8 +17,8 @@ async function createFixture(files) {
   return root
 }
 
-test('accepts local files, directories, headings, duplicate heading slugs, and external URLs', async () => {
-  const root = await createFixture({
+test('accepts local files, directories, headings, duplicate heading slugs, and external URLs', async (context) => {
+  const root = await createFixture(context, {
     'README.md': [
       '[guide](docs/guide.md#重复标题)',
       '[guide duplicate](docs/guide.md#重复标题-1)',
@@ -41,8 +42,8 @@ test('accepts local files, directories, headings, duplicate heading slugs, and e
   assert.deepEqual(await checkDocumentationLinks(root), [])
 })
 
-test('reports missing files, missing anchors, outside links, and generated targets', async () => {
-  const root = await createFixture({
+test('reports missing files, missing anchors, outside links, and generated targets', async (context) => {
+  const root = await createFixture(context, {
     'README.md': [
       '[missing](docs/missing.md)',
       '[missing anchor](docs/guide.md#不存在)',
@@ -61,8 +62,8 @@ test('reports missing files, missing anchors, outside links, and generated targe
   assert.ok(errors.some((error) => error.includes('wrangler.toml') && error.includes('generated')))
 })
 
-test('reports malformed links and ignores links in fenced code blocks', async () => {
-  const root = await createFixture({
+test('reports malformed links and ignores links in fenced code blocks', async (context) => {
+  const root = await createFixture(context, {
     'README.md': ['```', '[ignored](missing-in-fence.md)', '```', '[broken](docs/%E0%A4%A.md)'].join('\n'),
   })
 
@@ -73,7 +74,7 @@ test('reports malformed links and ignores links in fenced code blocks', async ()
 
 for (const delimiter of ['```', '~~~']) {
   test(`only a matching bare ${delimiter} fence closes the code block`, async (context) => {
-    const root = await createFixture({
+    const root = await createFixture(context, {
       'README.md': [
         '[hidden heading](#hidden)',
         `${delimiter}md`,
@@ -84,7 +85,6 @@ for (const delimiter of ['```', '~~~']) {
         '[broken](missing-after-fence.md)',
       ].join('\n'),
     })
-    context.after(() => rm(root, { recursive: true, force: true }))
 
     const errors = await checkDocumentationLinks(root)
     assert.equal(errors.length, 2)
@@ -95,27 +95,28 @@ for (const delimiter of ['```', '~~~']) {
 }
 
 test('backticks in a backtick fence info string do not hide following links', async (context) => {
-  const root = await createFixture({
+  const root = await createFixture(context, {
     'README.md': '```invalid`info\n[broken](missing.md)\n',
   })
-  context.after(() => rm(root, { recursive: true, force: true }))
 
   const errors = await checkDocumentationLinks(root)
   assert.equal(errors.length, 1)
   assert.match(errors[0], /missing\.md.*does not exist/u)
 })
 
-test('fails closed when the documentation root cannot be scanned', async () => {
+test('fails closed when the documentation root cannot be scanned', async (context) => {
   const root = await mkdtemp(join(tmpdir(), 'hv-document-links-root-'))
+  context.after(() => rm(root, { recursive: true, force: true }))
   const errors = await checkDocumentationLinks(join(root, 'missing'))
   assert.equal(errors.length, 1)
   assert.match(errors[0], /unable to scan documentation directory/)
 })
 
-test('follows in-repository symlinks, rejects escaped symlinks, and ignores generated directories', async () => {
+test('follows in-repository symlinks, rejects escaped symlinks, and ignores generated directories', async (context) => {
   const outsideRoot = await mkdtemp(join(tmpdir(), 'hv-document-links-outside-'))
+  context.after(() => rm(outsideRoot, { recursive: true, force: true }))
   await writeFile(join(outsideRoot, 'outside.md'), '# Outside\n')
-  const root = await createFixture({
+  const root = await createFixture(context, {
     'README.md': '[inside](docs/inside-link.md#inside)\n[escaped](docs/escaped-link.md#outside)\n',
     'docs/inside.md': '# Inside\n',
     '.codegraph/README.md': '[missing](missing.md)\n',
@@ -129,8 +130,8 @@ test('follows in-repository symlinks, rejects escaped symlinks, and ignores gene
   assert.ok(errors[0].includes('escapes the repository'))
 })
 
-test('keeps heading slugs unique when explicit suffixed headings collide', async () => {
-  const root = await createFixture({
+test('keeps heading slugs unique when explicit suffixed headings collide', async (context) => {
+  const root = await createFixture(context, {
     'README.md': '[first](docs/headings.md#foo)\n[second](docs/headings.md#foo-1)\n[third](docs/headings.md#foo-2)\n',
     'docs/headings.md': '# Foo\n# Foo-1\n# Foo\n',
   })
@@ -138,24 +139,25 @@ test('keeps heading slugs unique when explicit suffixed headings collide', async
   assert.deepEqual(await checkDocumentationLinks(root), [])
 })
 
-test('accepts a repository root passed through a symlink', async () => {
-  const root = await createFixture({
+test('accepts a repository root passed through a symlink', async (context) => {
+  const root = await createFixture(context, {
     'README.md': '[guide](docs/guide.md#guide)\n',
     'docs/guide.md': '# Guide\n',
   })
-  const alias = join(await mkdtemp(join(tmpdir(), 'hv-document-links-alias-parent-')), 'repo-alias')
+  const aliasParent = await mkdtemp(join(tmpdir(), 'hv-document-links-alias-parent-'))
+  context.after(() => rm(aliasParent, { recursive: true, force: true }))
+  const alias = join(aliasParent, 'repo-alias')
   await symlink(root, alias, 'dir')
 
   assert.deepEqual(await checkDocumentationLinks(alias), [])
 })
 
 test('shared document snapshots refresh between checks and report every referring document', async (context) => {
-  const root = await createFixture({
+  const root = await createFixture(context, {
     'README.md': '[shared](docs/shared.md#shared)\n',
     'docs/guide.md': '[shared](shared.md#shared)\n',
     'docs/shared.md': '# Shared\n',
   })
-  context.after(() => rm(root, { recursive: true, force: true }))
   assert.deepEqual(await checkDocumentationLinks(root), [])
 
   await writeFile(join(root, 'docs/shared.md'), '# Changed\n')

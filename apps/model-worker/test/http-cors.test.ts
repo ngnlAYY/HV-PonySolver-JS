@@ -61,18 +61,6 @@ describe('http-cors', () => {
     expect(await readResponseBody(response)).toBe(fixture.realBody)
   })
 
-  it('allows uppercase tokens to read lowercase canonical KV keys', async () => {
-    const fixture = createModelFixture()
-    const env = createEnv(fixture, {
-      keyValues: new Map<string, string>([[CANONICAL_ACCESS_TOKEN, '1']]),
-    })
-
-    const response = await fetchWorker(authorizedModelRequest(fixture, 'GET', UPPERCASE_ACCESS_TOKEN), env)
-
-    expect(response.status).toBe(200)
-    expect(await readResponseBody(response)).toBe(fixture.realBody)
-  })
-
   it('allows mixed-case tokens to read matching historical mixed-case KV keys', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, {

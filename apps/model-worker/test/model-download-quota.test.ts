@@ -186,6 +186,62 @@ describe('ModelDownloadQuota', () => {
     await expect((await confirm(quota, RECEIPT_ID)).json()).resolves.toMatchObject({ confirmed: false, used: 0 })
   })
 
+  it.each(['status', 'reserve', 'confirm'] as const)(
+    'uses the current UTC month when %s storage reads span a month boundary',
+    async (operation) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-08-31T23:59:59.999Z'))
+      const quota = createQuotaStub()
+      const confirmedReceipt = await reserve(quota)
+      await confirm(quota, confirmedReceipt)
+      const pendingReceipt = await reserve(quota)
+
+      const response = await runInDurableObject(quota, (instance) => {
+        const response = instance.fetch(
+          new Request(`https://quota.internal/${operation}`, {
+            method: 'POST',
+            headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: pendingReceipt },
+          }),
+        )
+        vi.setSystemTime(new Date('2026-09-01T00:00:00.000Z'))
+        return response
+      })
+
+      await expect(response.json()).resolves.toMatchObject(
+        operation === 'reserve'
+          ? { allowed: true, retryAfterSeconds: 30 * 24 * 60 * 60 }
+          : { used: 0, ...(operation === 'confirm' ? { confirmed: false } : {}) },
+      )
+      if (operation === 'reserve') {
+        await expect(
+          runInDurableObject(quota, async (_instance, state) => state.storage.get('monthly-download-quota-v2')),
+        ).resolves.toMatchObject({ month: '2026-09', used: 0 })
+      }
+    },
+  )
+
+  it('does not confirm a receipt that expires while waiting for storage', async () => {
+    vi.useFakeTimers()
+    const reservedAt = new Date('2026-08-10T12:00:00.000Z').getTime()
+    vi.setSystemTime(reservedAt)
+    const quota = createQuotaStub()
+    const receiptId = await reserve(quota)
+    vi.setSystemTime(reservedAt + MODEL_DOWNLOAD_RESERVATION_TTL_MS - 1)
+
+    const response = await runInDurableObject(quota, (instance) => {
+      const response = instance.fetch(
+        new Request('https://quota.internal/confirm', {
+          method: 'POST',
+          headers: { [MODEL_DOWNLOAD_RECEIPT_HEADER]: receiptId },
+        }),
+      )
+      vi.setSystemTime(reservedAt + MODEL_DOWNLOAD_RESERVATION_TTL_MS)
+      return response
+    })
+
+    await expect(response.json()).resolves.toMatchObject({ confirmed: false, used: 0 })
+  })
+
   it('fails closed and preserves malformed persisted quota states', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'))

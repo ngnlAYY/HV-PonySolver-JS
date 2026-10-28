@@ -101,6 +101,40 @@ describe('quota-http', () => {
     expect((env.MODEL_DOWNLOAD_QUOTAS as MockModelDownloadQuotaNamespace).requestedIdentities).toEqual([])
   })
 
+  it.each(['GET', 'POST'])('keeps internal quota fields out of the public %s response', async (method) => {
+    const fixture = createModelFixture()
+    const fields = {
+      used: 1,
+      remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - 1,
+      retryAfterSeconds: 60,
+    }
+    const expected =
+      method === 'GET'
+        ? { enabled: true, limit: MODEL_MONTHLY_DOWNLOAD_LIMIT, ...fields }
+        : { confirmed: true, alreadyConfirmed: false, ...fields }
+    const env = createEnv(fixture, {
+      keyValues: new Map([[fixture.validKey, '1']]),
+      quotaNamespace: {
+        idFromName: (name) => ({ toString: () => name }) as DurableObjectId,
+        get: () => ({
+          fetch: async () =>
+            Response.json({ ...expected, enabled: false, internalDiagnostic: 'synthetic-private-quota-data' }),
+        }),
+      },
+    })
+
+    const response = await fetchWorker(
+      quotaRequest(fixture, method, undefined, {
+        authorization: `Bearer ${fixture.validKey}`,
+        ...(method === 'POST' ? { [MODEL_DOWNLOAD_RECEIPT_HEADER]: 'a'.repeat(32) } : {}),
+      }),
+      env,
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual(expected)
+  })
+
   it('rejects missing, malformed, and expired download confirmations without increasing usage', async () => {
     const fixture = createModelFixture()
     const env = createEnv(fixture, { keyValues: new Map([[fixture.validKey, '1']]) })

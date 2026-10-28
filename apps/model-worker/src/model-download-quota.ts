@@ -259,24 +259,25 @@ export class ModelDownloadQuota extends DurableObject<Record<string, never>> {
       return new Response('Bad Request', { status: 400 })
     }
 
-    const now = new Date()
-    const nowMs = now.getTime()
-    const month = utcMonthKey(now)
-    const retryAfterSeconds = secondsUntilNextUtcMonth(now)
     if (pathname === STATUS_PATH) {
       const stored = await this.ctx.storage.get<StoredQuotaState>(QUOTA_STATE_KEY)
-      const state = currentState(stored, month, nowMs)
+      const now = new Date()
+      const state = currentState(stored, utcMonthKey(now), now.getTime())
       return jsonResponse({
         limit: MODEL_MONTHLY_DOWNLOAD_LIMIT,
         used: state.used,
         remaining: MODEL_MONTHLY_DOWNLOAD_LIMIT - state.used,
-        retryAfterSeconds,
+        retryAfterSeconds: secondsUntilNextUtcMonth(now),
       })
     }
 
     const result = await this.ctx.storage.transaction(async (transaction) => {
       const stored = await transaction.get<StoredQuotaState>(QUOTA_STATE_KEY)
-      const state = currentState(stored, month, nowMs)
+      // Storage waits and transaction retries may cross a UTC month or receipt expiry.
+      const now = new Date()
+      const nowMs = now.getTime()
+      const retryAfterSeconds = secondsUntilNextUtcMonth(now)
+      const state = currentState(stored, utcMonthKey(now), nowMs)
       if (pathname === CONFIRM_PATH) {
         if (state.confirmed.includes(receiptId)) {
           return confirmationResult(state, retryAfterSeconds, true, true)

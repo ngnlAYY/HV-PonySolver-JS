@@ -35,7 +35,7 @@ export class RemoteDetectorClient implements DetectorService {
   ) {}
 
   async prepare(signal?: AbortSignal, options?: Readonly<{ silent?: boolean }>): Promise<void> {
-    this.assertNotAborted(signal)
+    this.assertActive(signal)
     const silent = options?.silent === true
     const startedAt = performance.now()
     if (!silent) {
@@ -52,7 +52,7 @@ export class RemoteDetectorClient implements DetectorService {
         signal,
         !silent,
       )
-      this.assertNotAborted(signal)
+      this.assertActive(signal)
       if (!this.destroyed && !silent) {
         this.statusSink.setSessionReady(Math.round(performance.now() - startedAt))
       }
@@ -65,7 +65,7 @@ export class RemoteDetectorClient implements DetectorService {
   }
 
   async detect(blob: Blob, signal?: AbortSignal): Promise<YoloParseResult> {
-    this.assertNotAborted(signal)
+    this.assertActive(signal)
     // A real detect on this page proves the session is being used, so the
     // prefetch idle-backoff budget starts fresh again.
     resetPrefetchMisses()
@@ -73,10 +73,10 @@ export class RemoteDetectorClient implements DetectorService {
     try {
       image = await encodeImage(blob, signal)
     } catch (error) {
-      this.assertNotAborted(signal)
+      this.assertActive(signal)
       throw new Error(`验证码图片编码失败: ${formatErrorMessage(error)}`, { cause: error })
     }
-    this.assertNotAborted(signal)
+    this.assertActive(signal)
     const response = await this.request(
       {
         protocol: PROTOCOL_VERSION,
@@ -87,6 +87,7 @@ export class RemoteDetectorClient implements DetectorService {
       DETECT_DEADLINE_CONFIG.clientTimeoutMs,
       signal,
     )
+    this.assertActive(signal)
     if (!response.result) {
       throw new Error('扩展推理 Host 未返回识别结果')
     }
@@ -245,7 +246,10 @@ export class RemoteDetectorClient implements DetectorService {
     }
   }
 
-  private assertNotAborted(signal?: AbortSignal): void {
+  private assertActive(signal?: AbortSignal): void {
+    if (this.destroyed) {
+      throw new Error('扩展推理连接已关闭')
+    }
     if (signal?.aborted) {
       throw new Error('扩展推理请求已取消')
     }

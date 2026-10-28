@@ -38,7 +38,7 @@
   -> HostResponse -> 原路径返回
 ```
 
-[内容客户端](../../apps/extension/src/content/remote-detector-client.ts) 为每个请求创建 [RequestLifecycle](../../apps/extension/src/protocol/request-lifecycle.ts)，监听响应、断连和超时；取消时在同一 Port 发送指定 request id 的 `cancel`。仅非静默 prepare/detect 活动期间，Host 广播和断连才更新面板的模型/会话状态。推理状态在内容侧统计，初始化往返用同页 `performance.now()` 取整；静默、取消、超时、销毁及请求结束后的广播不写就绪耗时。
+[内容客户端](../../apps/extension/src/content/remote-detector-client.ts) 为每个请求创建 [RequestLifecycle](../../apps/extension/src/protocol/request-lifecycle.ts)，监听响应、断连和超时；取消时在同一 Port 发送指定 request id 的 `cancel`。编码前、编码后及 Host 响应返回前均复核调用方取消与客户端销毁；即使消息已经结算，异步续体执行前发生取消也不得返回旧结果或写入就绪状态。仅非静默 prepare/detect 活动期间，Host 广播和断连才更新面板的模型/会话状态。推理状态在内容侧统计，初始化往返用同页 `performance.now()` 取整；静默、取消、超时、销毁及请求结束后的广播不写就绪耗时。
 
 [Broker](../../apps/extension/src/background/broker.ts) 在监听消息前校验扩展 ID、实际 `sender.url` 与 Port 名称，再校验 schema/request id 并按端口与后台代际限流。它不以 `sender.tab.url` 兜底；`sender.origin`、`frameId` 与 HTTPS origin 的规则见[来源边界](../browser-extension.md#runtime-architecture)。每个 Host 调用绑定 `AbortSignal`，断连、取消或超时终止对应请求。单向状态广播不结算请求；凭证版本同时广播与持久化，供下一代内容脚本恢复。
 

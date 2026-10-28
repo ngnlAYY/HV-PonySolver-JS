@@ -89,7 +89,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - RGBA 转 CHW 在写入前验证输入、输出和像素数量；归一化表覆盖全部字节值，保持原 Float32 结果与 RGB 平面顺序。
 - 图片消息有明确上限；HTTP Content-Type 严格校验后规范化基础 MIME，消息保持精确白名单。排队 detect 取消即移除并释放图片，不等队头。模型用可转移 `ArrayBuffer`，不改成无界 Base64 或重复拷贝。
 - 已取消准备退场时，新 prepare/detect 不得继承旧调用方取消；等待可独立取消，销毁后不得读取模型或创建 Worker。
-- 识别遵循 latest-wins，迟到旧结果不覆盖新状态。图片、模型和 Runtime 共用有界字节读取；未知长度在上限内增长自有缓冲并即时复制，不保留任意分块或外部大缓冲视图。
+- 识别遵循 latest-wins，迟到旧结果不覆盖新状态。扩展内容客户端在图片编码前后及 Host 响应返回前复核取消/销毁，消息已结算但调用续体尚未执行时也不能返回旧结果。图片、模型和 Runtime 共用有界字节读取；未知长度在上限内增长自有缓冲并即时复制，不保留任意分块或外部大缓冲视图。
 - HTTP 编码声明长度与 Fetch 解压后正文长度分开约束；模型即使 CORS 隐藏 Content-Encoding 也须按清单实际长度和 SHA-256 校验，编码开销预算不扩大模型正文上限。
 - 内置资产预取消不发起 Fetch；等待 Fetch、正文和摘要均可取消，忽略取消的 Fetch 迟到返回时释放正文。
 - 模型响应声明长度错误只报告固定分类或已验证数字，不回显原始头值。
@@ -105,7 +105,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 模型字节与回执元数据在同一初始事务内绑定同一写入身份；确认后只更新匹配元数据，旧确认不覆盖新模型。
 - 缓存关闭、IndexedDB `versionchange`/异常 `close`、取消和超时传播到确认请求；晚到结果不清回执或标记已确认，不能撤销服务端已处理的确认。异常关闭清除连接，下次操作重新打开；旧连接迟到事件不得关闭新连接。
 - 内置构建只接受固定模型输入；产物审计模型身份、CSP、权限、Host、动态导入和远程可执行代码。JS、Worker、ORT glue、WASM 均随包分发，不允许远程执行。bundled 用户脚本及扩展推理 Worker 保留上游完整 MIT 许可，压缩不得剥离；vendor 资产身份不因此改写。构建目标列表须拒绝稀疏项，校验先于旧产物清理。
-- 完整审计 MV3 后台、设置、action、content 和 CSP，拒绝未授权可选权限、外部连接与 sandbox。HTML 包括嵌套 template，不含内联事件、规范化后的 javascript/data/vbscript 可执行 URL、srcdoc 或 base 覆写。`.js/.mjs/.cjs` 均执行相同产物审计，不区分后缀大小写；动态导入按 AST 识别，注释不能绕过，语法错误失败关闭。HTML 脚本引用不得指向未审类型。
+- 完整审计 MV3 后台、设置、action、content 和 CSP，拒绝未授权可选权限、外部连接与 sandbox。HTML 审计覆盖 `.html/.htm` 且不区分后缀大小写，包括嵌套 template，不含内联事件、规范化后的 javascript/data/vbscript 可执行 URL、srcdoc 或 base 覆写。`.js/.mjs/.cjs` 均执行相同产物审计，不区分后缀大小写；动态导入按 AST 识别，注释不能绕过，语法错误失败关闭。HTML 脚本引用不得指向未审类型。
 - 远程包不含 `.ort`；内置包恰含清单声明的一个 `.ort`。不得声明 `web_accessible_resources` 或图片资源，必要变更须同步威胁模型、审计、测试和文档。
 - ZIP 固定本地日历字段，不把 UTC 时间点交给按本地时间编码的归档器；相同输入跨时区字节与 SHA-256 一致。
 - 包内按 `background/`、`content/`、`options/`、Chromium `offscreen/`、`runtime/` 分组，内置另有 `model/`，两份 JSON 清单在目标根。入口由 `apps/extension/src/platform/extension-paths.ts` 的 `EXTENSION_PATHS` 管理，变更同步清单、URL、来源、审计、浏览器脚本和文档。
@@ -118,7 +118,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 历史大小写 KV 查询共用总期限；截止后不得因迟到读取继续启动候选、R2 或额度工作，不能为每次候选重置超时。
 - 默认每 Key 每 UTC 自然月最多 5 次已确认下载，ONNX/ORT 共用。`GET /quota` 只查，模型 GET 只预留回执，成功缓存后 `POST /quota` 确认才计次。
 - 开启额度时，模型 GET 在读 R2 前只读预检已确认额度；耗尽/预检失败不读对象。完整性检查后仍需原子预留，预检不替代并发/待确认槽位硬上限。
-- 回执重复确认幂等；未知、失效或未完成回执不计次，并发不能突破月度上限。
+- 回执重复确认幂等；未知、失效或未完成回执不计次，并发不能突破月度上限。status 与 reserve/confirm 在状态读取完成后获取当前时间，事务重试重新取时，覆盖等待跨 UTC 月界与 TTL 到期。公开额度响应仅投影契约字段，内部额外字段不得透传或覆盖开关。
 - 关闭额度时显示未启用/无限制，不伪造有限剩余量。确认请求格式正确返回 `409`，缺失/畸形回执返回 `400`，不伪造成功。
 - 模型、额度、公开 Runtime 各自维护 CORS 方法、头与公私策略，不合并成宽泛全局常量。HEAD、OPTIONS、诱饵和 Runtime 不计次；模型 `no-store`，内容寻址 Runtime 可长期 immutable。
 - 自定义公开路径须已是规范 URL pathname，拒绝点段、编码点段、原始空格/Unicode 和网络路径；合法百分号编码原样保留。渲染与运行时共用校验，唯一性包含省略配置的默认路径，失败不回显配置值。

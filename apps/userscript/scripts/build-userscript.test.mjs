@@ -236,10 +236,11 @@ async function runBuildInTempDir({ args = [], runtimeBundlePath, withMetafile, w
       env: {
         ...process.env,
         HV_PONY_SOLVER_USERSCRIPT_OUTPUT_PATH: outputPath,
-        ...(runtimeBundlePath ? { HV_PONY_SOLVER_ONNX_RUNTIME_BUNDLE_PATH: runtimeBundlePath } : {}),
-        ...(metafilePath ? { HV_PONY_SOLVER_METAFILE_PATH: metafilePath } : {}),
-        ...(artifactManifestPath ? { HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH: artifactManifestPath } : {}),
-        ...(artifactSha256Path ? { HV_PONY_SOLVER_ARTIFACT_SHA256_PATH: artifactSha256Path } : {}),
+        // Optional outputs and runtime overrides must not escape this fixture through inherited environment values.
+        HV_PONY_SOLVER_ONNX_RUNTIME_BUNDLE_PATH: runtimeBundlePath ?? '',
+        HV_PONY_SOLVER_METAFILE_PATH: metafilePath ?? '',
+        HV_PONY_SOLVER_ARTIFACT_MANIFEST_PATH: artifactManifestPath ?? '',
+        HV_PONY_SOLVER_ARTIFACT_SHA256_PATH: artifactSha256Path ?? '',
       },
     })
     return {

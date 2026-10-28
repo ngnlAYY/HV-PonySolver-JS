@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import { parseRepoRootArgs } from '../lib/cli.mjs'
 import { isDirectRun } from '../lib/direct-run.mjs'
+import { createMarkdownFenceScanner } from './markdown-fences.mjs'
 
 const IGNORED_DIRECTORY_NAMES = new Set([
   '.claude',
@@ -85,26 +86,8 @@ async function collectDocumentationFiles(repoRoot) {
 }
 
 function stripFencedCode(source) {
-  const lines = source.split(/\r?\n/u)
-  const visible = []
-  let fence = null
-  for (const line of lines) {
-    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line)
-    if (fence) {
-      if (marker && marker[1][0] === fence.character && marker[1].length >= fence.length && marker[2].trim() === '') {
-        fence = null
-      }
-      visible.push('')
-      continue
-    }
-    if (marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
-      fence = { character: marker[1][0], length: marker[1].length }
-      visible.push('')
-      continue
-    }
-    visible.push(line)
-  }
-  return visible
+  const scanFence = createMarkdownFenceScanner()
+  return source.split(/\r?\n/u).map((line) => (scanFence(line) ? '' : line))
 }
 
 function headingSlug(title) {
@@ -119,18 +102,20 @@ function headingSlug(title) {
 
 function headingAnchors(lines) {
   const anchors = new Set()
+  const suffixes = new Map()
   for (const line of lines) {
     const match = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/u)
     if (!match?.[1]) continue
     const base = headingSlug(match[1])
     if (!base) continue
-    let candidate = base
-    let suffix = 0
+    let suffix = suffixes.get(base) ?? 0
+    let candidate = suffix === 0 ? base : `${base}-${suffix}`
     while (anchors.has(candidate)) {
       suffix += 1
       candidate = `${base}-${suffix}`
     }
     anchors.add(candidate)
+    suffixes.set(base, suffix + 1)
   }
   return anchors
 }

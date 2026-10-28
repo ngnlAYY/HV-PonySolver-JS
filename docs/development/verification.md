@@ -13,7 +13,7 @@
 
 Vitest 与两个 coverage provider 同步采用兼容版本；npm 安全补丁同样遵守等待期和 trust policy。依赖审计须包含开发依赖：本仓库的 ORT、构建器和测试工具均声明在 devDependencies，`audit --prod` 的空结果不证明客户端没有第三方代码。当前 Cloudflare 测试集成仍使用已弃用的 `@cloudflare/vitest-pool-workers`；迁移到 `@cloudflare/vitest-plugin` 涉及独立的 Wrangler/Miniflare 版本与运行时验证，不与无关补丁混合。
 
-Vite 由 Vitest 引入，根包只通过 workspace override 统一版本，不重复声明直接依赖。TypeScript 7 原生 CLI 负责类型检查，TypeScript 6 兼容包供 ESLint 和资产/架构检查器的编译器 API 使用；两个 coverage provider 分别覆盖浏览器/普通 Node 测试与 Cloudflare Worker，不按名称相近删除。TypeScript 6 仅由调用编译器 API 的根包、用户脚本资产解析器和扩展产物审计器直接声明；shared、browser-core 与 Model Worker 保留原生 CLI，不重复声明兼容包。当前依赖用途与精简证据见[后续审计](../audits/2026-10-27-maintainability-follow-up.md)，既有安全补丁见[同日初次审计](../audits/2026-10-27-repository-audit.md)。
+Vite 由 Vitest 引入，根包只通过 workspace override 统一版本，不重复声明直接依赖。TypeScript 7 原生 CLI 负责类型检查，TypeScript 6 兼容包供 ESLint 和资产/架构检查器的编译器 API 使用；两个 coverage provider 分别覆盖浏览器/普通 Node 测试与 Cloudflare Worker，不按名称相近删除。TypeScript 6 仅由调用编译器 API 的根包、用户脚本资产解析器和扩展产物审计器直接声明；shared、browser-core 与 Model Worker 保留原生 CLI，不重复声明兼容包。当前依赖用途复核见[本轮审计](../audits/2026-10-27-quota-and-tooling-audit.md)，声明精简证据见[前次审计](../audits/2026-10-27-maintainability-follow-up.md)，既有安全补丁见[同日初次审计](../audits/2026-10-27-repository-audit.md)。
 
 另核对 `scripts/ort-runtime/requirements.in`、哈希锁和两个生成脚本的 pip bootstrap 版本；npm 审计不覆盖这些 Python 构建依赖。升级后在仓库外的隔离环境执行实际模型转换，比较 fixture 字节身份并复验对应产物；不以模型输入受信任为由忽略工具漏洞，也不无意重建/替换 canonical 资产。
 
@@ -72,6 +72,7 @@ Vitest 主要验证 TypeScript/运行时逻辑；包内 Node 测试覆盖构建�
 - 清单共有字段的负例覆盖两种后台形态，不重复四种模型/浏览器组合；四种有效清单、权限/CSP/模型身份差异、危险 HTML 及产物/E2E 矩阵仍独立验证。
 - WASM 单测用小型确定性字节和对应测试身份驱动真实读取/哈希路径，不反复深比较完整 WASM；真实文件身份归构建审计与浏览器 E2E。
 - 不复制配置数值、package 脚本文字或纯转发返回值作测试；实际覆盖率命令、include 与门槛保持不变。等价静态安全负例可在进程内运行真实检查器，但保留 CLI 的真实成功、拒绝与清理回归。
+- 构建测试显式覆盖可选输出路径和 Runtime override，不能从调用者环境继承并写到 fixture 外；敏感 Key 的失败/取消断言使用实际 GM 存储边界。
 - 不降低覆盖率门槛，不用 skip/todo、改 include 或合并用例计数冒充精简；[精简决定](../decisions/implemented/testing/2026-10-14-test-suite-ownership.md)记录归属和取舍。
 
 ## 浏览器证据边界

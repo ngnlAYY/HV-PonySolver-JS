@@ -3,12 +3,7 @@ import { hasExpectedR2ObjectIntegrity, type AssetIntegrity } from './asset-integ
 import { logWorkerError, logWorkerWarning, workerErrorName, type WorkerLogRoute } from './logger'
 import { selectModelAccess } from './model-access'
 import { withModelWorkerDependencyTimeout } from './request-timeout'
-import {
-  confirmModelDownloadQuota,
-  readModelDownloadQuota,
-  reserveModelDownloadQuota,
-  type ModelDownloadQuotaStatus,
-} from './model-download-quota'
+import { confirmModelDownloadQuota, readModelDownloadQuota, reserveModelDownloadQuota } from './model-download-quota'
 import {
   attachModelDownloadReceipt,
   modelObjectResponse,
@@ -194,17 +189,21 @@ async function serveQuota(request: Request, env: Env, config: WorkerConfig): Pro
   }
   try {
     if (receiptId !== null) {
-      const confirmation = await confirmModelDownloadQuota(env.MODEL_DOWNLOAD_QUOTAS, access.canonicalToken, receiptId)
-      if (!confirmation.confirmed) {
+      const { confirmed, alreadyConfirmed, used, remaining, retryAfterSeconds } = await confirmModelDownloadQuota(
+        env.MODEL_DOWNLOAD_QUOTAS,
+        access.canonicalToken,
+        receiptId,
+      )
+      if (!confirmed) {
         return textResponse(request, 'Model download receipt expired', 409)
       }
-      return modelQuotaStatusResponse(request, confirmation)
+      return modelQuotaStatusResponse(request, { confirmed, alreadyConfirmed, used, remaining, retryAfterSeconds })
     }
-    const quota: ModelDownloadQuotaStatus = await readModelDownloadQuota(
+    const { limit, used, remaining, retryAfterSeconds } = await readModelDownloadQuota(
       env.MODEL_DOWNLOAD_QUOTAS,
       access.canonicalToken,
     )
-    const status: PublicQuotaStatus = { enabled: true, ...quota }
+    const status: PublicQuotaStatus = { enabled: true, limit, used, remaining, retryAfterSeconds }
     return modelQuotaStatusResponse(request, status)
   } catch (error) {
     logWorkerWarning({

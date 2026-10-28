@@ -1,3 +1,5 @@
+import { createMarkdownFenceScanner } from './markdown-fences.mjs'
+
 function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
   const checkCommand = rootPackageJson.scripts?.check
   if (typeof checkCommand !== 'string') {
@@ -129,22 +131,12 @@ function commandDescriptionMentions(readme, command, required) {
 // Check copyable commands in both inline code and shell fences, without executing examples.
 function checkCommandExamples(rootPackageJson, workspacePackageJsons, source, label) {
   const snippets = []
-  let fence = null
+  const scanFence = createMarkdownFenceScanner()
   for (const line of source.split(/\r?\n/u)) {
-    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line)
+    const fence = scanFence(line)
     if (fence) {
-      if (marker && marker[1][0] === fence.character && marker[1].length >= fence.length && marker[2].trim() === '') {
-        fence = null
-      } else if (fence.shell) {
+      if (fence.content && ['bash', 'sh', 'shell', 'zsh'].includes(fence.language)) {
         snippets.push(line.trim())
-      }
-      continue
-    }
-    if (marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
-      fence = {
-        character: marker[1][0],
-        length: marker[1].length,
-        shell: ['bash', 'sh', 'shell', 'zsh'].includes(marker[2].trim().split(/\s+/u, 1)[0]),
       }
       continue
     }

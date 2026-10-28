@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 
 import { benchmarkSchemaVersion } from './benchmark-config.mjs'
-import { validateBenchmarkResult } from './benchmark-result.mjs'
+import { artifactComparisonIdentity, validateBenchmarkResult } from './benchmark-result.mjs'
 import { deterministicBootstrapCi, median } from './benchmark-statistics.mjs'
 
 function assertComparableScenario(baseline, candidate) {
@@ -40,17 +40,6 @@ const environmentComparisonFields = [
 ]
 function comparableEnvironment(environment) {
   return Object.fromEntries(environmentComparisonFields.map((field) => [field, environment[field]]))
-}
-function artifactComparisonIdentity(artifact) {
-  if (artifact === null) return null
-  return {
-    target: artifact.target,
-    version: artifact.version,
-    modelDelivery: artifact.modelDelivery,
-    fixture: artifact.fixture,
-    model: artifact.model,
-    wasm: artifact.wasm,
-  }
 }
 function profilerPeakComparable(invocations) {
   const samples = invocations.flatMap(({ measuredSamples }) => measuredSamples)

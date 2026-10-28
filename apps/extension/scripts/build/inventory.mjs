@@ -294,7 +294,7 @@ async function auditTargetInventory(target, options, files) {
     }
     verifyPackagedModelBytes(ortFiles[0].bytes, expectedModel)
   }
-  for (const file of files.filter((candidate) => candidate.relativePath.endsWith('.html'))) {
+  for (const file of files.filter((candidate) => /\.html?$/iu.test(candidate.relativePath))) {
     const source = file.bytes.toString('utf8')
     auditHtmlSource(source, file.relativePath, relativeFiles)
   }

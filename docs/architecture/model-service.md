@@ -62,7 +62,7 @@ HEAD 只读元数据，真实 HEAD 和公开 WASM 同样执行完整性预检；
 }
 ```
 
-状态校验要求月份有效、`confirmed.length === used`、`used + pending 数量 <= 5`，回执为不重复的 32 位小写十六进制。损坏状态失败关闭并保留原值，不静默清零。TTL 在请求读取状态时过滤过期预留，后续成功写入才持久化清理结果；没有客户端 `cancel` 端点。
+状态校验要求月份有效、`confirmed.length === used`、`used + pending 数量 <= 5`，回执为不重复的 32 位小写十六进制。损坏状态失败关闭并保留原值，不静默清零。TTL 在状态读取完成后按当前时间过滤过期预留，后续成功写入才持久化清理结果；没有客户端 `cancel` 端点。status 读取及 reserve/confirm 每次事务读取完成后重新获取时间，存储等待或事务重试跨 UTC 月界、回执到期时不沿用请求开始时的快照。
 
 ```mermaid
 stateDiagram-v2
@@ -85,7 +85,7 @@ stateDiagram-v2
 
 内部 `POST /status` 只读，不创建持久状态；返回上限、已用、剩余和距下个 UTC 月的秒数。进入新月后使用空状态，旧月 pending/confirmed 不迁移。关闭额度时顶层 `/quota` 不访问 DO，查询返回 `enabled=false` 和 `remaining=null`；确认的 400/409 规则见 HTTP 参考。
 
-内部 reserve/confirm/status 响应按实际字节限制为 16 KiB，增量解码 UTF-8，再执行既有 JSON/schema 校验。非成功响应、超限、读取失败及超时均尽力取消正文；已开始读取时取消 reader，迟到 Response 也清理。清理不等待取消 Promise，JSON 解析错误不回显正文。三类调用仍共用各自原有五秒依赖期限，不改变持久状态或公开 HTTP 协议。
+内部 reserve/confirm/status 响应按实际字节限制为 16 KiB，增量解码 UTF-8，再执行既有 JSON/schema 校验。非成功响应、超限、读取失败及超时均尽力取消正文；已开始读取时取消 reader，迟到 Response 也清理。清理不等待取消 Promise，JSON 解析错误不回显正文。三类调用仍共用各自原有五秒依赖期限。公开 GET/POST 只投影 HTTP 契约字段，内部额外字段不会透传，也不能覆盖由部署配置决定的 `enabled`。
 
 ## Shared 契约导航
 

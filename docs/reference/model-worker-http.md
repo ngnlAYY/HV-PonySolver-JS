@@ -46,6 +46,8 @@ Runtime 表中的 `<sha256>` 只是缩写，路由仅匹配配置中的一个完
 | `GET /quota`，`MODEL_DOWNLOAD_QUOTA_ENABLED=false` | `enabled=false`、`limit=0`、`used=0`、`remaining=null`、`retryAfterSeconds=null`；表示无限制                |
 | `POST /quota` 成功                                 | `confirmed=true`、`alreadyConfirmed`、`used`、`remaining`、`retryAfterSeconds`；不包含 `enabled` 或 `limit` |
 
+公开额度 JSON 仅包含上表列出的字段；内部 DO 响应的额外字段不会透传或覆盖额度开关。月份与回执到期判断使用状态读取完成后的当前时间，覆盖异步存储等待跨边界的情况。
+
 回执是 32 位十六进制，服务端去除首尾空白并转小写后校验；预留有效期十分钟。客户端必须用同一 Key，在完整读取、校验并提交 IndexedDB 缓存后确认；POST 不需要请求正文。ONNX/ORT 共用每 Key、每 UTC 自然月 5 次，HEAD、OPTIONS、诱饵和 Runtime 不计次。关闭限制不发回执、不计次，合法确认明确返回 409，畸形回执仍先返回 400；没有 cancel 端点。
 
 ## 鉴权

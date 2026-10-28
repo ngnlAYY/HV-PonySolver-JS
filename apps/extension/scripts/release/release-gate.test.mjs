@@ -105,43 +105,6 @@ async function writeTransferredArtifact(outputRoot, target, contentSecurityPolic
   return record
 }
 
-async function rewriteTransferredArchive(outputRoot, record, contentSecurityPolicy) {
-  const archiveName = record.archive.archiveName
-  const manifestBytes = jsonBytes({
-    manifest_version: 3,
-    background:
-      record.target === 'chromium'
-        ? { service_worker: 'background/background.js' }
-        : { scripts: ['background/background.js'] },
-    content_security_policy: { extension_pages: contentSecurityPolicy },
-  })
-  const modelBytes = await readFile(new URL('../../../../model/yolo26n-640.ort', import.meta.url))
-  const sourceFiles = {
-    'background/background.js': Buffer.from('globalThis.releaseFixture = true\n'),
-    'manifest.json': manifestBytes,
-    [`model/${model.filename}`]: modelBytes,
-  }
-  const files = Object.fromEntries(
-    Object.entries(sourceFiles).map(([name, bytes]) => [
-      name,
-      {
-        byteLength: name.startsWith('model/') ? model.byteLength : bytes.byteLength,
-        sha256: name.startsWith('model/') ? model.sha256 : sha256(bytes),
-      },
-    ]),
-  )
-  const buildManifest = { target: record.target, version: record.version, modelDelivery: 'packaged', model, files }
-  const archiveBytes = Buffer.from(zipSync({ ...sourceFiles, 'build-manifest.json': jsonBytes(buildManifest) }))
-  const archive = { archiveName, byteLength: archiveBytes.byteLength, sha256: sha256(archiveBytes) }
-  const changedRecord = { ...buildManifest, archive }
-  await Promise.all([
-    writeFile(path.join(outputRoot, `${record.target}.artifact.json`), `${JSON.stringify(changedRecord)}\n`),
-    writeFile(path.join(outputRoot, archiveName), archiveBytes),
-    writeFile(path.join(outputRoot, `${archiveName}.sha256`), `${archive.sha256}  ${archiveName}\n`),
-  ])
-  return changedRecord
-}
-
 function successfulInference(runCount = 2) {
   return {
     randomFallback: false,
@@ -426,9 +389,9 @@ test(
     assert.equal(tampered.status, 1)
     assert.match(tampered.stderr, /archive bytes do not match artifact metadata/u)
 
-    const wrongCspRecord = await rewriteTransferredArchive(
+    const wrongCspRecord = await writeTransferredArtifact(
       outputRoot,
-      records[0],
+      records[0].target,
       "script-src 'self'; object-src 'none'",
     )
     attestation.targets.chromium.archive = { ...wrongCspRecord.archive }

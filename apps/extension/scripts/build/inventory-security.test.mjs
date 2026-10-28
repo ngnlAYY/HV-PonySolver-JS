@@ -259,6 +259,17 @@ for (const [label, html, expected] of unsafeHtml) {
   })
 }
 
+test('audits additional HTML pages regardless of extension case or short suffix', async () => {
+  for (const suffix of ['HTML', 'HtMl', 'htm', 'HTM']) {
+    const files = inventory('chromium', 'remote')
+    files.push({
+      relativePath: `options/extra.${suffix}`,
+      bytes: Buffer.from('<template><button onclick="alert(1)">Click</button></template>'),
+    })
+    await assert.rejects(auditTargetInventory('chromium', { modelDelivery: 'remote' }, files), /inline event handler/u)
+  }
+})
+
 test('audits dynamic imports in local module scripts referenced by HTML', async () => {
   for (const source of [
     'import("./other.mjs")',

@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify, TextDecoder } from 'node:util'
@@ -306,6 +306,19 @@ test('validates packaged model file type, length, and SHA-256', async () => {
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true })
   }
+})
+
+test('rejects oversized sparse model files before attempting a full read', async (context) => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-pony-model-size-'))
+  context.after(() => rm(temporaryRoot, { recursive: true, force: true }))
+  const sourcePath = path.join(temporaryRoot, modelFilename)
+  await writeFile(sourcePath, '')
+  const oversizedLength = 2 ** 31
+  await truncate(sourcePath, oversizedLength)
+  const identity = { filename: modelFilename, byteLength: 3, sha256: sha256(Buffer.from([1, 2, 3])) }
+  await assert.rejects(verifyPackagedModelFile(sourcePath, identity), {
+    message: `Packaged model byte length mismatch: expected 3, received ${oversizedLength}`,
+  })
 })
 
 test('keeps default and explicit remote builds deterministic and model-free', async () => {

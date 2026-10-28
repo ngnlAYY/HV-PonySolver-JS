@@ -49,6 +49,7 @@ function verifyPackagedModelBytes(bytes, identity) {
 }
 
 export async function verifyPackagedModelFile(sourcePath, identity = packagedModelIdentity) {
+  assertPackagedModelIdentity(identity)
   let stats
   try {
     stats = await lstat(sourcePath)
@@ -60,6 +61,9 @@ export async function verifyPackagedModelFile(sourcePath, identity = packagedMod
   }
   if (!stats.isFile()) {
     throw new Error(`Packaged model source must be a regular file: ${sourcePath}`)
+  }
+  if (stats.size !== identity.byteLength) {
+    throw new Error(`Packaged model byte length mismatch: expected ${identity.byteLength}, received ${stats.size}`)
   }
   const bytes = await readFile(sourcePath)
   return verifyPackagedModelBytes(bytes, identity)
