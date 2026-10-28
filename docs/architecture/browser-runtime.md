@@ -87,7 +87,7 @@ sequenceDiagram
 
 ## 推理 Worker 与 Runtime profile
 
-[OnnxWorkerClient](../../packages/browser-core/src/inference/onnx-worker-client.ts) 管理初始化共享、串行检测、超时恢复、会话重建和销毁，`WorkerFactory` 由平台注入。取消立即移除未开始项并释放图片；活动项完成或取消宽限到期终止后才执行下一项。销毁立即拒绝全部排队项。
+[OnnxWorkerClient](../../packages/browser-core/src/inference/onnx-worker-client.ts) 管理初始化共享、串行检测、超时恢复、会话重建和销毁，`WorkerFactory` 由平台注入。取消立即移除未开始项并释放图片；活动项完成或取消宽限到期终止后才执行下一项。销毁立即拒绝全部排队项。内部准备或检测成功后，`prepare()`、`prepareFromVerifiedModel()` 和 `detect()` 在各自公开结果交付前再次复核取消/销毁；内部 Promise 已结算不代表调用仍有效，也不能撤回已交付结果。
 
 最后一个准备 owner 取消后，新 `prepare()` 或 `detect()` 若恰在旧代际退场期间到达，先可取消地等待退场，再共享或启动当前准备；不继承旧调用方的取消。新调用自身取消或客户端销毁时，不再读取模型或创建 Worker。
 

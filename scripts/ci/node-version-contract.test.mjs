@@ -49,21 +49,6 @@ for (const name of ['verify-monorepo.yml', 'deploy-cloudflare-model-worker.yml']
   })
 }
 
-test('workspace scripts use the pnpm selected by mise without requiring Corepack', async () => {
-  const packages = [
-    'package.json',
-    'apps/extension/package.json',
-    'apps/userscript/package.json',
-    'apps/model-worker/package.json',
-    'packages/browser-core/package.json',
-    'packages/shared/package.json',
-  ]
-  for (const file of packages) {
-    const packageJson = JSON.parse(await readFile(resolve(repoRoot, file), 'utf8'))
-    assert.doesNotMatch(Object.values(packageJson.scripts).join('\n'), /\bcorepack\b/iu, file)
-  }
-})
-
 test('pnpm workspace has one fail-closed root lockfile document', async () => {
   const [workspaceSource, lockSource, packageSource] = await Promise.all([
     readFile(resolve(repoRoot, 'pnpm-workspace.yaml'), 'utf8'),

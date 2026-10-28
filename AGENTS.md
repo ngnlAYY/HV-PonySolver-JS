@@ -88,7 +88,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - Port 断连在回调内经平台助手同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。BFCache 断连取消未决请求，恢复后按需连接，不自动重放下载或 Key 操作。Offscreen 同一空闲代际的确认不重置关闭重试次数或退避预算，新活动/代际才恢复预算；新 epoch 接管已空闲文档须迁移剩余通知，取消后迟到创建也须独立有界 claim，不重放原请求。claim 与 confirm-idle 都须有界；空闲确认超时释放关闭等待，迟到响应不能关闭文档。
 - RGBA 转 CHW 在写入前验证输入、输出和像素数量；归一化表覆盖全部字节值，保持原 Float32 结果与 RGB 平面顺序。
 - 图片消息有明确上限；HTTP Content-Type 严格校验后规范化基础 MIME，消息保持精确白名单。排队 detect 取消即移除并释放图片，不等队头。模型用可转移 `ArrayBuffer`，不改成无界 Base64 或重复拷贝。
-- 已取消准备退场时，新 prepare/detect 不得继承旧调用方取消；等待可独立取消，销毁后不得读取模型或创建 Worker。
+- 已取消准备退场时，新 prepare/detect 不得继承旧调用方取消；等待可独立取消，销毁后不得读取模型或创建 Worker。核心 prepare、prepareFromVerifiedModel、detect 在内部工作结算后、公开结果交付前再次复核取消/销毁。
 - 识别遵循 latest-wins，迟到旧结果不覆盖新状态。扩展内容客户端在图片编码前后及 Host 响应返回前复核取消/销毁，消息已结算但调用续体尚未执行时也不能返回旧结果。图片、模型和 Runtime 共用有界字节读取；未知长度在上限内增长自有缓冲并即时复制，不保留任意分块或外部大缓冲视图。
 - HTTP 编码声明长度与 Fetch 解压后正文长度分开约束；模型即使 CORS 隐藏 Content-Encoding 也须按清单实际长度和 SHA-256 校验，编码开销预算不扩大模型正文上限。
 - 内置资产预取消不发起 Fetch；等待 Fetch、正文和摘要均可取消，忽略取消的 Fetch 迟到返回时释放正文。
@@ -104,10 +104,11 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 模型/WASM 拒绝重定向，校验最大、声明、实际长度及 SHA-256；失败内容不缓存。远程扩展完整读取、校验并成功写入 IndexedDB 后才确认下载。
 - 模型字节与回执元数据在同一初始事务内绑定同一写入身份；确认后只更新匹配元数据，旧确认不覆盖新模型。
 - 缓存关闭、IndexedDB `versionchange`/异常 `close`、取消和超时传播到确认请求；晚到结果不清回执或标记已确认，不能撤销服务端已处理的确认。异常关闭清除连接，下次操作重新打开；旧连接迟到事件不得关闭新连接。
-- 内置构建只接受固定模型输入；产物审计模型身份、CSP、权限、Host、动态导入和远程可执行代码。JS、Worker、ORT glue、WASM 均随包分发，不允许远程执行。bundled 用户脚本及扩展推理 Worker 保留上游完整 MIT 许可，压缩不得剥离；vendor 资产身份不因此改写。构建目标列表须拒绝稀疏项，校验先于旧产物清理。
+- 内置构建只接受固定模型输入；产物审计模型身份、CSP、权限、Host、动态导入和远程可执行代码。JS、Worker、ORT glue、WASM 均随包分发，不允许远程执行。bundled 用户脚本及扩展推理 Worker 保留上游完整 MIT 许可，压缩不得剥离；vendor 资产身份不因此改写。构建目标列表须拒绝稀疏项，校验先于旧产物清理；产物 inventory 拒绝符号链接及其他非普通条目，不静默遗漏。
 - 完整审计 MV3 后台、设置、action、content 和 CSP，拒绝未授权可选权限、外部连接与 sandbox。HTML 审计覆盖 `.html/.htm` 且不区分后缀大小写，包括嵌套 template，不含内联事件、规范化后的 javascript/data/vbscript 可执行 URL、srcdoc 或 base 覆写。`.js/.mjs/.cjs` 均执行相同产物审计，不区分后缀大小写；动态导入按 AST 识别，注释不能绕过，语法错误失败关闭。HTML 脚本引用不得指向未审类型。
 - 远程包不含 `.ort`；内置包恰含清单声明的一个 `.ort`。不得声明 `web_accessible_resources` 或图片资源，必要变更须同步威胁模型、审计、测试和文档。
 - ZIP 固定本地日历字段，不把 UTC 时间点交给按本地时间编码的归档器；相同输入跨时区字节与 SHA-256 一致。
+- canonical 与 geckodriver 下载器在排队操作真正开始前复核取消，预取消不派发 fetch；保留原取消原因与迟到正文清理。
 - 包内按 `background/`、`content/`、`options/`、Chromium `offscreen/`、`runtime/` 分组，内置另有 `model/`，两份 JSON 清单在目标根。入口由 `apps/extension/src/platform/extension-paths.ts` 的 `EXTENSION_PATHS` 管理，变更同步清单、URL、来源、审计、浏览器脚本和文档。
 
 ## Model Worker 与额度规则
@@ -117,7 +118,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 模型 Key 只接受 `Authorization: Bearer <64 位十六进制值>`，查询字符串永不授权真实模型。统一规范化 Key，以不可逆摘要隔离 DO；不使用全局计数，不记录原 Key、规范化 Key、摘要或额度状态。
 - 历史大小写 KV 查询共用总期限；截止后不得因迟到读取继续启动候选、R2 或额度工作，不能为每次候选重置超时。
 - 默认每 Key 每 UTC 自然月最多 5 次已确认下载，ONNX/ORT 共用。`GET /quota` 只查，模型 GET 只预留回执，成功缓存后 `POST /quota` 确认才计次。
-- 开启额度时，模型 GET 在读 R2 前只读预检已确认额度；耗尽/预检失败不读对象。完整性检查后仍需原子预留，预检不替代并发/待确认槽位硬上限。
+- 开启额度时，模型 GET 在读 R2 前只读预检已确认额度；耗尽/预检失败不读对象。完整性检查后仍需原子预留，预检不替代并发/待确认槽位硬上限。pending 满槽的重试期限取最早 TTL 与下个 UTC 月界中的较早者。
 - 回执重复确认幂等；未知、失效或未完成回执不计次，并发不能突破月度上限。status 与 reserve/confirm 在状态读取完成后获取当前时间，事务重试重新取时，覆盖等待跨 UTC 月界与 TTL 到期。公开额度响应仅投影契约字段，内部额外字段不得透传或覆盖开关。
 - 关闭额度时显示未启用/无限制，不伪造有限剩余量。确认请求格式正确返回 `409`，缺失/畸形回执返回 `400`，不伪造成功。
 - 模型、额度、公开 Runtime 各自维护 CORS 方法、头与公私策略，不合并成宽泛全局常量。HEAD、OPTIONS、诱饵和 Runtime 不计次；模型 `no-store`，内容寻址 Runtime 可长期 immutable。
@@ -133,6 +134,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 精确命令归 `docs/development/commands.md`，HTTP 归 `docs/reference/model-worker-http.md`，资产归 `docs/onnx-runtime.md`。迁移契约同步逐篇读取与负向测试，不拼接全部正文掩盖缺项。
 - 非平凡行为、架构、跨文件契约、工具流程、测试策略或数据格式变化须更新已有决定或新增 `docs/decisions/<lifecycle>/<class>/日期-主题.md`。遵循 [write-notes-like-deepseek 格式约定](docs/development/documentation.md#决策笔记)，理由翻转另写互链；机械修改不立 Note。
 - 笔记根及祖先、归档目录/Markdown/封印清单拒绝 symlink，不能经链接走出仓库后跳过 Git 基线。每条封印独立校验普通文件、归档相对路径和 SHA-256；扫描遗漏不替代验证，清单异常不追加封印；Git 仓库内直接入口也验证基线 commit，无效基线或读取失败不能冒充历史清单缺失。
+- 笔记结构由格式检查器共用树扫描验证，链接统一归 document-links；完整文档检查保留事实、链接、结构/格式与归档封印，不另加重复链接解析器。
 - 新维护文档按[导航](docs/README.md)归类；目录迁移同步包命令、测试发现、CI 和引用。历史审计保留原日期与证据，不刷新旧测试结果。
 
 ## 配置与秘密

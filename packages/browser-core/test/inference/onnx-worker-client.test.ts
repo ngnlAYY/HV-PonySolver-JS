@@ -70,6 +70,68 @@ describe('OnnxWorkerClient', () => {
     },
   )
 
+  it.each(['abort', 'destroy'] as const)(
+    'rejects a completed detection when %s precedes public result delivery',
+    async (action) => {
+      stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+      const panel = createMockPanel()
+      const client = new OnnxWorkerClient(
+        { getCached: vi.fn(async () => new ArrayBuffer(8)), download: vi.fn(), putCached: vi.fn() },
+        panel,
+      )
+      const controller = new AbortController()
+      vi.mocked(panel.setStatus).mockImplementation((status) => {
+        if (status.inference?.startsWith('完成')) {
+          // Run after the inner detection resolves, before the queue delivers it.
+          queueMicrotask(() => {
+            if (action === 'abort') controller.abort()
+            else client.destroy()
+          })
+        }
+      })
+      try {
+        await client.prepare()
+        await expect(client.detect(new Blob(['image']), controller.signal)).rejects.toThrow(
+          action === 'abort' ? '推理请求已取消' : 'Worker 已关闭',
+        )
+        expect(SuccessfulWorker.messages.filter((message) => message.type === 'detect')).toHaveLength(1)
+        if (action === 'abort') {
+          vi.mocked(panel.setStatus).mockReset()
+          await expect(client.detect(new Blob(['current']))).resolves.toMatchObject({ success: true })
+          expect(SuccessfulWorker.instances).toHaveLength(1)
+        }
+      } finally {
+        client.destroy()
+      }
+    },
+  )
+
+  it.each(['prepare', 'prepareFromVerifiedModel'] as const)(
+    'rejects %s when destroyed after session readiness but before public completion',
+    async (method) => {
+      stubWorker(SuccessfulWorker as unknown as new (...args: unknown[]) => Worker)
+      const panel = createMockPanel()
+      const client = new OnnxWorkerClient(
+        {
+          getCached: vi.fn(async () => new ArrayBuffer(8)),
+          download: vi.fn(),
+          putCached: vi.fn(async () => undefined),
+        },
+        panel,
+      )
+      vi.mocked(panel.setSessionReady).mockImplementation(() => queueMicrotask(() => client.destroy()))
+      try {
+        const preparation =
+          method === 'prepare' ? client.prepare() : client.prepareFromVerifiedModel(new ArrayBuffer(8))
+        await expect(preparation).rejects.toThrow('Worker 已关闭')
+        expect(SuccessfulWorker.terminateCount).toBe(1)
+        expect(SuccessfulWorker.messages.filter((message) => message.type === 'init')).toHaveLength(1)
+      } finally {
+        client.destroy()
+      }
+    },
+  )
+
   it('preserves permanent Worker failures through repeated explicit preparation', async () => {
     class IntegrityFailureWorker {
       onmessage: ((event: MessageEvent) => void) | null = null

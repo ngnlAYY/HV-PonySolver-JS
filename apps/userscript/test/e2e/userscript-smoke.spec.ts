@@ -36,12 +36,6 @@ type E2EDetector = Readonly<{
   destroy(): void
 }>
 
-type E2EModelCache = Readonly<{
-  download(): Promise<ArrayBuffer>
-  putCached(...args: never[]): Promise<void>
-  close(): void
-}>
-
 type E2EApi = Readonly<{
   timingConfig: {
     submitDelay: [number, number]
@@ -61,7 +55,6 @@ type E2EApi = Readonly<{
   App: new (
     dependencies: Readonly<{
       panel: object
-      modelCache: E2EModelCache
       detector: E2EDetector
       solver: object
     }>,
@@ -125,6 +118,12 @@ async function buildBrowserBundle(): Promise<string> {
   return bundleText
 }
 
+// All cases inject identical code into independent pages; build it once per Playwright worker.
+let browserBundleText: string
+test.beforeAll(async () => {
+  browserBundleText = await buildBrowserBundle()
+})
+
 async function startLifecycleFixture(
   page: Page,
   options: Readonly<{
@@ -135,7 +134,6 @@ async function startLifecycleFixture(
     shadowAction?: boolean
   }> = {},
 ): Promise<Readonly<{ releaseImage(pathname: string): void }>> {
-  const bundle = await buildBrowserBundle()
   const imageBytes = Buffer.from(
     await page.evaluate(() => {
       const canvas = document.createElement('canvas')
@@ -174,7 +172,7 @@ async function startLifecycleFixture(
     const image = document.querySelector('img')
     return image?.complete && image.naturalWidth > 0
   })
-  await page.addScriptTag({ content: bundle })
+  await page.addScriptTag({ content: browserBundleText })
   await page.evaluate(({ pauseDetection, blockedSetting, missingBody, shadowAction }) => {
     const state = (window.__ponyLifecycle = {
       imageUrls: [] as string[],
@@ -246,11 +244,6 @@ async function startLifecycleFixture(
       panel,
       detector,
       solver,
-      modelCache: {
-        download: async () => new ArrayBuffer(0),
-        putCached: async () => undefined,
-        close: () => undefined,
-      },
     })
     state.isBusy = () => solver.isBusy
     state.destroy = () => app.destroy()
@@ -364,8 +357,6 @@ test('userscript mounts and solves when body first appears after App initializat
 })
 
 test('userscript app solves a local captcha with mocked browser detector', async ({ page }) => {
-  const bundleText = await buildBrowserBundle()
-
   const submittedEvents: Array<{ answers: string[]; source: string }> = []
   await page.route(localCaptchaUrl, async (route) => {
     await route.fulfill({
@@ -422,16 +413,11 @@ test('userscript app solves a local captcha with mocked browser detector', async
 
   await page.goto(localPageUrl)
 
-  await page.addScriptTag({ content: bundleText })
+  await page.addScriptTag({ content: browserBundleText })
   await page.evaluate(() => {
     window.HvPonySolverE2E.timingConfig.submitDelay = [0, 0]
     window.HvPonySolverE2E.timingConfig.multiClickDelay = [0, 0]
     const panel = new window.HvPonySolverE2E.StatusPanel(new window.HvPonySolverE2E.HistoryStore())
-    const mockModelCache = {
-      download: async () => new ArrayBuffer(0),
-      putCached: async () => undefined,
-      close: () => undefined,
-    }
     const mockDetector = {
       prepare: async () => ({}),
       detect: async () => ({
@@ -445,7 +431,6 @@ test('userscript app solves a local captcha with mocked browser detector', async
     }
     const app = new window.HvPonySolverE2E.App({
       panel,
-      modelCache: mockModelCache,
       detector: mockDetector,
       solver: new window.HvPonySolverE2E.CaptchaSolver(
         panel,
@@ -467,7 +452,6 @@ test('userscript app solves a local captcha with mocked browser detector', async
 })
 
 test('userscript history keeps concurrent same-origin tab writes and preserves the legacy root', async ({ page }) => {
-  const bundleText = await buildBrowserBundle()
   const sibling = await page.context().newPage()
   const blankPage = '<!doctype html><html><body><main>history fixture</main></body></html>'
   const serveBlankPage = (route: {
@@ -483,7 +467,10 @@ test('userscript history keeps concurrent same-origin tab writes and preserves t
     main: [{ type: 'success', answers: 'LEGACY', elapsed: 1, timestamp: 1, time: '00:00:01' }],
   })
   await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: HISTORY_KEY, value: legacyRoot })
-  await Promise.all([page.addScriptTag({ content: bundleText }), sibling.addScriptTag({ content: bundleText })])
+  await Promise.all([
+    page.addScriptTag({ content: browserBundleText }),
+    sibling.addScriptTag({ content: browserBundleText }),
+  ])
 
   const launchAt = Date.now() + 200
   const writeRecords = (tab: typeof page, prefix: string) =>

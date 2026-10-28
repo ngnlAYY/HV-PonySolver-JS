@@ -28,7 +28,7 @@
 
 ## 决策与历史
 
-[文档重建决定](decisions/implemented/process/2026-09-16-documentation-rebuild.md)说明契约归属与稳定路径。最新结果见[2026-10-27 额度与工具链复核](audits/2026-10-27-quota-and-tooling-audit.md)和[边界与复用决定](decisions/implemented/bug-fix/2026-10-27-quota-boundaries-and-audit-simplification.md)；[前次审计](audits/2026-10-27-maintainability-follow-up.md)保留历史缓存与 Offscreen 证据；[同日初次审计](audits/2026-10-27-repository-audit.md)保留原验证记录。其余记录按主题检索 [decisions](decisions/)，原验证结果保留各自日期含义。
+[文档重建决定](decisions/implemented/process/2026-09-16-documentation-rebuild.md)说明契约归属与稳定路径。最新结果见[2026-10-27 结果交付与工具链复核](audits/2026-10-27-delivery-and-tooling-audit.md)和[交付边界与审计归并决定](decisions/implemented/bug-fix/2026-10-27-delivery-boundaries-and-audit-ownership.md)；[前次审计](audits/2026-10-27-quota-and-tooling-audit.md)保留原验证记录。其余记录按主题检索 [decisions](decisions/)，原验证结果保留各自日期含义。
 
 | 历史记录                                                                 | 内容                                                                         |
 | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |

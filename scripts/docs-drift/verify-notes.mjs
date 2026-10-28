@@ -6,7 +6,7 @@ import { parseRepoRootArgs } from '../lib/cli.mjs'
 import { isDirectRun } from '../lib/direct-run.mjs'
 
 const defaultRepoRoot = resolve(import.meta.dirname, '../..')
-const validators = ['verify-agent-note-tree.ts', 'verify-agent-note-format.ts', 'verify-archived-agent-notes.ts']
+const validators = ['verify-agent-note-format.ts', 'verify-archived-agent-notes.ts']
 
 export function archiveBaseRef(environment, event) {
   if (environment.AGENT_NOTE_ARCHIVE_BASE_REF) return environment.AGENT_NOTE_ARCHIVE_BASE_REF

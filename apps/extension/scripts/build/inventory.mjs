@@ -27,6 +27,8 @@ async function walkFiles(root, current = root) {
       files.push(...(await walkFiles(root, absolutePath)))
     } else if (entry.isFile()) {
       files.push({ absolutePath, relativePath: path.relative(root, absolutePath).split(path.sep).join('/') })
+    } else {
+      throw new Error(`Extension package contains a non-file entry: ${absolutePath}`)
     }
   }
   return files

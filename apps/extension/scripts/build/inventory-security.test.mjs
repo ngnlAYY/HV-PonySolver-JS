@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 
 import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 import { runtimeWasmFilename } from './config.mjs'
-import { auditTargetInventory } from './inventory.mjs'
+import { auditBuiltExtension, auditTargetInventory } from './inventory.mjs'
 import { createManifest } from './policy.mjs'
 
 const modelBytes = Buffer.from('local audit fixture, not a production model')
@@ -34,6 +37,30 @@ function inventory(target, modelDelivery, mutateManifest = () => {}, html = '<sc
   }
   if (modelDelivery === 'packaged') sources[`model/${model.filename}`] = modelBytes
   return Object.entries(sources).map(([relativePath, source]) => ({ relativePath, bytes: Buffer.from(source) }))
+}
+
+for (const entryType of ['file', 'directory']) {
+  test(`rejects an unreferenced ${entryType} symlink instead of silently omitting it from the audit`, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'hv-extension-inventory-link-'))
+    t.after(() => rm(root, { recursive: true, force: true }))
+    const targetDirectory = path.join(root, 'chromium')
+    for (const file of inventory('chromium', 'remote')) {
+      const filename = path.join(targetDirectory, file.relativePath)
+      await mkdir(path.dirname(filename), { recursive: true })
+      await writeFile(filename, file.bytes)
+    }
+    await auditBuiltExtension(targetDirectory, 'chromium')
+    const externalDirectory = path.join(root, 'external')
+    await mkdir(externalDirectory)
+    const externalScript = path.join(externalDirectory, 'payload.js')
+    await writeFile(externalScript, 'import("https://untrusted.invalid/payload.js")')
+    await symlink(
+      entryType === 'file' ? externalScript : externalDirectory,
+      path.join(targetDirectory, 'options', entryType === 'file' ? 'extra.js' : 'extra'),
+      entryType === 'file' ? 'file' : 'dir',
+    )
+    await assert.rejects(auditBuiltExtension(targetDirectory, 'chromium'), /contains a non-file entry/u)
+  })
 }
 
 const manifestMutations = [

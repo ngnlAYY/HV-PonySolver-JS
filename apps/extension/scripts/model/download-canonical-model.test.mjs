@@ -39,6 +39,24 @@ test('canonical downloader refuses redirects and sends an optional bearer token'
   assert.equal(request[1].signal.aborted, false)
 })
 
+test('canonical downloader does not dispatch fetch when cancelled before its queued operation starts', async () => {
+  const controller = new globalThis.AbortController()
+  const reason = new Error('fixture cancelled before dispatch')
+  let calls = 0
+  const download = fetchCanonicalModel({
+    identity,
+    url: 'https://models.example/canonical.ort',
+    signal: controller.signal,
+    fetchImpl: async () => {
+      calls += 1
+      return new globalThis.Response(bytes)
+    },
+  })
+  controller.abort(reason)
+  await assert.rejects(download, (error) => error === reason)
+  assert.equal(calls, 0)
+})
+
 test('canonical downloader separates encoded length from verified decoded bytes', async () => {
   for (const encoding of ['gzip', 'br']) {
     for (const declaredLength of [2, 24]) {

@@ -192,7 +192,10 @@ export class MockModelDownloadQuotaNamespace implements ModelDownloadQuotaNamesp
           return Response.json({
             allowed: false,
             reason: 'reservations-full',
-            retryAfterSeconds: Math.max(1, Math.ceil((earliestExpiry - now.getTime()) / 1_000)),
+            retryAfterSeconds: Math.min(
+              secondsUntilNextUtcMonth(now),
+              Math.max(1, Math.ceil((earliestExpiry - now.getTime()) / 1_000)),
+            ),
           })
         }
         const receiptId = crypto.randomUUID().replaceAll('-', '')

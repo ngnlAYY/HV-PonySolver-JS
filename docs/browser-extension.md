@@ -88,6 +88,8 @@ CSP 为 `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'se
 
 推理 Worker 内嵌固定上游的完整 MIT 许可，压缩产物同样保留；许可来源与 vendor 字节身份见[Runtime 专题](onnx-runtime.md#显式内置精简版)。
 
+产物 inventory 仅接受普通文件和目录，遇到符号链接或其他非普通条目立即失败，不能把未引用条目静默漏出审计与 ZIP 清单。
+
 审计锁定完整 MV3 清单：版本、后台、独立设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 和默认顶层隔离世界。拒绝 `optional_permissions`、`optional_host_permissions`、`externally_connectable`、`sandbox` 扩权；所有 `.html/.htm` 文件不区分后缀大小写进行审计，连同嵌套 template 拒绝内联脚本/事件、规范化后的 `javascript:`/`data:`/`vbscript:` URL、`srcdoc` 和 base URL 覆写。所有 `.js`、`.mjs`、`.cjs` 文件均进入执行代码审计，后缀比较不区分大小写；动态导入通过 AST 识别，注释分隔不能绕过，字符串或注释中的同名文本不误判，无效 JS 语法失败关闭。HTML 脚本引用必须指向这些已审类型的本地文件，其他后缀失败关闭。普通文本和合法本地资源不按可执行 URL 处理。
 
 ## Runtime architecture
@@ -208,7 +210,7 @@ mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 
 `REQUIRE_EXACT_MINIMUM_BROWSER=true` 要求真正运行 Chromium 116 或 Firefox Desktop 140，高版本不能替代。Chromium 116 在 Xvfb 下使用 `PACKAGED_E2E_HEADLESS=false`，该变量只接受 true/false。Firefox 需要 geckodriver（或 `GECKODRIVER_PATH`）及 openssl，并清理自建证书、代理和会话。CI 固定 geckodriver `0.37.1` 与压缩包 SHA-256；安装器在 60 秒总期限内最多尝试三次，仅重试网络和 HTTP 408/429/5xx，归档、哈希、路径或版本错误直接失败。
 
-geckodriver 下载按声明长度预分配自有缓冲，未知长度在上限内倍增并即时复制；不保留可被流源复用的分块或大 backing buffer。它与 canonical 下载器均清理取消后迟到的响应正文，不等待可能挂起的取消 Promise，原错误和既有重试预算不变。
+geckodriver 下载按声明长度预分配自有缓冲，未知长度在上限内倍增并即时复制；不保留可被流源复用的分块或大 backing buffer。它与 canonical 下载器在排队的 fetch、读取或重试操作实际开始前再次复核取消，清理取消后迟到的响应正文，不等待可能挂起的取消 Promise，原错误和既有重试预算不变。
 
 ### Firefox Android 142 external release gate
 

@@ -66,7 +66,7 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 
 ## 开发与维护
 
-最新维护结果见 [2026-10-27 额度与工具链复核](docs/audits/2026-10-27-quota-and-tooling-audit.md)，涵盖跨月/TTL、取消结果交付、构建审计与测试精简；[前次审计](docs/audits/2026-10-27-maintainability-follow-up.md)保留历史缓存、Offscreen 和依赖声明精简证据。
+最新维护结果见 [2026-10-27 结果交付与工具链复核](docs/audits/2026-10-27-delivery-and-tooling-audit.md)，涵盖核心取消交付、月界重试、产物审计、下载取消及验证去重；[前次审计](docs/audits/2026-10-27-quota-and-tooling-audit.md)保留跨月/TTL、扩展交付与标题锚点优化证据。
 
 从[文档导航](docs/README.md)选择主题；修改前阅读 [AGENTS.md](AGENTS.md)。常用入口：
 

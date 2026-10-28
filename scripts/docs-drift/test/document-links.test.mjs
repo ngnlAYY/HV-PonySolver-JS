@@ -72,6 +72,25 @@ test('reports malformed links and ignores links in fenced code blocks', async (c
   assert.ok(errors[0].includes('docs/%E0%A4%A.md'))
 })
 
+test('checks active note links while ignoring their inline and fenced examples', async (context) => {
+  const note = 'docs/decisions/implemented/process/2026-10-27-example.md'
+  const root = await createFixture(context, {
+    [note]: [
+      '# Agent Note: Example',
+      '`[inline](missing-inline.md)`',
+      '```markdown',
+      '[example](missing-example.md)',
+      '```',
+      '[missing](2026-09-16-missing.md)',
+    ].join('\n'),
+  })
+
+  const errors = await checkDocumentationLinks(root)
+  assert.equal(errors.length, 1)
+  assert.match(errors[0], /2026-09-16-missing\.md.*does not exist/u)
+  assert.ok(errors[0].startsWith(`${note}:6:`))
+})
+
 for (const delimiter of ['```', '~~~']) {
   test(`only a matching bare ${delimiter} fence closes the code block`, async (context) => {
     const root = await createFixture(context, {

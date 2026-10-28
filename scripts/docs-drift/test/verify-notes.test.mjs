@@ -101,25 +101,26 @@ test('note sections inside tilde or longer backtick fences do not satisfy requir
   })
 })
 
-test('note format ignores status, proposal headings and comments within matching fences', async () => {
+test('notes gate ignores status, proposal headings, links and comments within matching fences', async () => {
   await fixture(async (root, note) => {
     for (const [opening, closing] of [
       ['~~~markdown', '~~~'],
       ['````markdown\n```', '````'],
       ['```markdown\n```not-a-closing-fence', '```'],
     ]) {
-      await writeFile(note, `${valid}\n${opening}\nStatus: proposed\n## Proposal\n<!--\n${closing}\n`)
+      await writeFile(
+        note,
+        `${valid}\n${opening}\nStatus: proposed\n## Proposal\n[example](missing-example.md)\n<!--\n${closing}\n`,
+      )
       const result = run(root)
       assert.equal(result.status, 0, result.stderr)
     }
   })
 })
 
-test('notes gate rejects lifecycle mismatch, invalid class and dangling note links', async () => {
+test('notes gate rejects lifecycle mismatch and invalid class', async () => {
   await fixture(async (root, note) => {
     await writeFile(note, valid.replace('Status: implemented', 'Status: proposed'))
-    assert.notEqual(run(root).status, 0)
-    await writeFile(note, `${valid}\n[missing](2026-09-16-missing.md)\n`)
     assert.notEqual(run(root).status, 0)
     await writeFile(note, valid)
     const bad = join(root, 'docs/decisions/implemented/misc/2026-09-16-example.md')

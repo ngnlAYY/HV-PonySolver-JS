@@ -31,7 +31,7 @@ Runtime 表中的 `<sha256>` 只是缩写，路由仅匹配配置中的一个完
 | `OPTIONS /runtime/ort-wasm-simd-<sha256>.wasm`                                       | `204`，`Access-Control-Allow-Methods: GET, HEAD, OPTIONS`，`Access-Control-Allow-Origin: *`，不声明允许的请求头                                 |
 | 非 `GET` / `HEAD` / `OPTIONS` 方法                                                   | 模型和 Runtime 返回 `405 Method Not Allowed`，`Allow: GET, HEAD, OPTIONS`；额度路由不支持的方法使用 `Allow: GET, POST, OPTIONS`                 |
 | 同一 Key 当月已确认 5 次，再次 GET 真实模型                                          | `429`，正文 `Monthly model download quota exceeded`；`Retry-After` 为距下个 UTC 月的秒数                                                        |
-| 已确认与有效 pending 合计占满 5 个槽位                                               | `503 Service Unavailable`；`Retry-After` 为距最早 pending 过期的秒数                                                                            |
+| 已确认与有效 pending 合计占满 5 个槽位                                               | `503 Service Unavailable`；`Retry-After` 为距最早 pending 过期或下个 UTC 月界的较小秒数，向上取整且至少一秒                                     |
 | 额度查询、预留或确认依赖失败                                                         | `503 Service Unavailable`，`Retry-After: 5`                                                                                                     |
 | 选中的 R2 object 缺失                                                                | `500 Internal Server Error`                                                                                                                     |
 | 真实模型/Runtime 的长度、已有 SHA-256 元数据漂移，或 GET 对象缺少 body               | `500 Internal Server Error`，不返回对象内容、不预留额度                                                                                         |

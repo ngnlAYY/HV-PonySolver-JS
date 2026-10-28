@@ -16,6 +16,8 @@ import {
   utcMonthKey,
 } from '../src/model-download-quota'
 import type { ModelDownloadQuotaNamespace } from '../src/worker-types'
+import { createEnv, createModelFixture, fetchWorker } from './helpers/model-worker-fixture'
+import { authorizedModelRequest } from './helpers/model-worker-test-support'
 
 const quotaNamespace = (env as unknown as { MODEL_DOWNLOAD_QUOTAS: DurableObjectNamespace<ModelDownloadQuota> })
   .MODEL_DOWNLOAD_QUOTAS
@@ -185,6 +187,38 @@ describe('ModelDownloadQuota', () => {
     vi.setSystemTime(new Date('2026-09-01T00:00:00.000Z'))
     await expect((await confirm(quota, RECEIPT_ID)).json()).resolves.toMatchObject({ confirmed: false, used: 0 })
   })
+
+  it.each(['2026-08-31T23:59:59.000Z', '2026-12-31T23:59:59.999Z'])(
+    'caps a full-reservation HTTP Retry-After at the UTC reset after %s',
+    async (timestamp) => {
+      vi.useFakeTimers()
+      const now = new Date(timestamp)
+      vi.setSystemTime(now)
+      const fixture = createModelFixture()
+      const workerEnv = createEnv(fixture, {
+        keyValues: new Map([[fixture.validKey, '1']]),
+        quotaNamespace,
+      })
+      for (let index = 0; index < MODEL_MONTHLY_DOWNLOAD_LIMIT; index += 1) {
+        const response = await fetchWorker(authorizedModelRequest(fixture, 'GET'), workerEnv)
+        expect(response.status).toBe(200)
+        await response.arrayBuffer()
+      }
+
+      const full = await fetchWorker(authorizedModelRequest(fixture, 'GET'), workerEnv)
+      expect(full.status).toBe(503)
+      expect(full.headers.get('retry-after')).toBe('1')
+      expect(full.headers.get('access-control-expose-headers')).toBe('Retry-After')
+      expect(full.headers.has(MODEL_DOWNLOAD_RECEIPT_HEADER)).toBe(false)
+      expect(await full.text()).toBe('Service Unavailable')
+
+      vi.setSystemTime(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+      const renewed = await fetchWorker(authorizedModelRequest(fixture, 'GET'), workerEnv)
+      expect(renewed.status).toBe(200)
+      expect(renewed.headers.get(MODEL_DOWNLOAD_RECEIPT_HEADER)).toMatch(/^[0-9a-f]{32}$/)
+      expect(await renewed.arrayBuffer()).toEqual(new TextEncoder().encode(fixture.realBody).buffer)
+    },
+  )
 
   it.each(['status', 'reserve', 'confirm'] as const)(
     'uses the current UTC month when %s storage reads span a month boundary',

@@ -97,7 +97,7 @@ rg --hidden --glob '!docs/decisions/archived/**' '机制名或关键词' docs/de
 
 直接入口仅在 Git 明确报告非仓库、且笔记根所有祖先均无 `.git` 元数据时跳过追加基线，仍校验磁盘封印。Git 不可用、配置、权限、仓库发现或查询失败必须停止，不能创建或改写 manifest；错误只报告固定诊断，不回显环境、配置值或原始 Git 错误。
 
-笔记格式检查屏蔽 backtick 与 tilde 围栏，关闭标记须匹配字符、长度且无尾随内容；示例中的标题不能补足正文必需章节。
+笔记格式检查同时验证生命周期、分类、文件名及正文结构；屏蔽 backtick 与 tilde 围栏，关闭标记须匹配字符、长度且无尾随内容，示例中的标题不能补足正文必需章节。笔记链接统一由 `document-links.mjs` 检查，`verify-notes.mjs` 仅调度结构/格式与归档封印；完整文档门禁使用 `pnpm docs:check`，不重复遍历笔记树或另用简化正则扫描示例链接。
 
 CI guardrails 读取完整 Git 历史，PR 对比 base SHA，push 对比 before SHA，不用本次 HEAD 冒充变更前状态；本地及无前后版本对的手动校验使用 HEAD。
 

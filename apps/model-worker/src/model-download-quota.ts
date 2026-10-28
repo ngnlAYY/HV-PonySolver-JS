@@ -304,7 +304,8 @@ export class ModelDownloadQuota extends DurableObject<Record<string, never>> {
         return {
           allowed: false,
           reason: 'reservations-full',
-          retryAfterSeconds: reservationRetryAfterSeconds(state, nowMs),
+          // A new UTC month releases every pending slot even when its TTL runs longer.
+          retryAfterSeconds: Math.min(retryAfterSeconds, reservationRetryAfterSeconds(state, nowMs)),
         } as const
       }
       let nextReceiptId = createReceiptId()

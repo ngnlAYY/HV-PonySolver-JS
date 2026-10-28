@@ -113,6 +113,22 @@ test('geckodriver downloader streams bounded bytes with the fixed URL and hash',
   assert.ok(requestOptions.signal instanceof globalThis.AbortSignal)
 })
 
+test('geckodriver does not dispatch fetch when cancelled before its queued operation starts', async () => {
+  const controller = new globalThis.AbortController()
+  const reason = new Error('fixture cancelled before dispatch')
+  let calls = 0
+  const download = fetchGeckodriverArchive({
+    signal: controller.signal,
+    fetchImpl: async () => {
+      calls += 1
+      return new globalThis.Response(Uint8Array.from([1]))
+    },
+  })
+  controller.abort(reason)
+  await assert.rejects(download, (error) => error === reason)
+  assert.equal(calls, 0)
+})
+
 test('geckodriver hashes the received bytes when the stream reuses a large backing buffer', async () => {
   const expected = Uint8Array.from({ length: 65_538 }, (_, index) => index % 251)
   const expectedHash = createHash('sha256').update(expected).digest('hex')

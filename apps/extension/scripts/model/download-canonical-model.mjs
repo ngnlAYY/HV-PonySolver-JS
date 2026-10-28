@@ -101,7 +101,10 @@ function awaitWithSignal(operation, signal, label, onAbortedValue) {
     }
     signal.addEventListener('abort', abort, { once: true })
     Promise.resolve()
-      .then(operation)
+      .then(() => {
+        throwIfAborted(signal, label)
+        return operation()
+      })
       .then(
         (value) => {
           signal.removeEventListener('abort', abort)

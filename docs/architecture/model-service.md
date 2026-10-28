@@ -75,7 +75,7 @@ stateDiagram-v2
 
 ### Reserve
 
-内部 `POST /reserve` 在事务内读取有效状态：`used >= 5` 返回 `quota-exhausted`；`used + pending 数量 >= 5` 返回 `reservations-full` 和最早过期时间；否则生成唯一随机回执，写入十分钟有效期。reserve 只占槽位，不增加 `used`。调用方独立校验成功响应的回执必须是规范化字符串，`null` 等非字符串按依赖异常失败关闭，不能写入 HTTP 回执头。
+内部 `POST /reserve` 在事务内读取有效状态：`used >= 5` 返回 `quota-exhausted`；`used + pending 数量 >= 5` 返回 `reservations-full`，重试秒数取最早 pending 到期与下个 UTC 月界中的较早者，向上取整且至少一秒；否则生成唯一随机回执，写入十分钟有效期。reserve 只占槽位，不增加 `used`。调用方独立校验成功响应的回执必须是规范化字符串，`null` 等非字符串按依赖异常失败关闭，不能写入 HTTP 回执头。
 
 ### Confirm
 

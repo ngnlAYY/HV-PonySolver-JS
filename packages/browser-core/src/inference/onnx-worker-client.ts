@@ -81,7 +81,8 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
       return
     }
     const operation = this.preparation ?? this.startPreparation({ type: 'repository' }, options?.silent === true)
-    return this.joinPreparation(operation, signal)
+    await this.joinPreparation(operation, signal)
+    this.assertRequestActive(signal)
   }
 
   /** Retire an old credential generation for every caller, without discarding a ready session. */
@@ -127,7 +128,8 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
     }
 
     const operation = this.startPreparation({ type: 'verified-buffer', modelBuffer }, options?.silent === true)
-    return this.joinPreparation(operation, signal)
+    await this.joinPreparation(operation, signal)
+    this.assertRequestActive(signal)
   }
 
   detect(blob: Blob, signal?: AbortSignal): Promise<YoloParseResult> {
@@ -149,6 +151,8 @@ export class OnnxWorkerClient implements VerifiedModelDetectorService {
             const result = await this.runDetect(blob, signal, () => {
               workerPosted = true
             })
+            // Cancellation may arrive after runDetect settles but before this continuation.
+            this.assertRequestActive(signal)
             finish(() => resolve(result))
           } catch (error) {
             finish(() => reject(error))

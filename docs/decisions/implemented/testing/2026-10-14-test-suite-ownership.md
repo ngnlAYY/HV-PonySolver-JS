@@ -76,3 +76,9 @@ Status: implemented
 | Runtime verifier 的 wording/命令文本测试                               | 实际 bundle 字节得到正确长度/摘要；同长度损坏必须拒绝，不能先输出成功                                       |
 
 bootstrap 原自比较换成独立 PRNG/分位参考与自定义统计样本所有权回归；新增稀疏构建目标保护与许可产物断言。连续两次推理超时后成功、再连续两次超时的回归明确验证计数重置，不能以一次超时成功掩盖状态未清零。具体源码变化、局部测量和本轮验证见[后续复审](../bug-fix/2026-10-22-audit-lifecycle-and-admission.md#525db8f-后的算法测试与依赖复审)。
+
+## 2026-10-27 交付边界复核
+
+移除只锁定聚合脚本、benchmark 命令和 Corepack 文本的四项断言，不改变实际检查链。工作区覆盖率、根级测试与全部静态/构建门禁继续通过完整 `pnpm check` 执行；CI 的发布授权、已测 ZIP 复用、canonical 下载后验证和工具链供应链约束仍有回归。
+
+用户脚本页面 smoke 删除无消费者的 cache fixture，并在同一 Playwright worker 内复用 bundle 构建，全部九个页面场景保持独立上下文。笔记断链回归迁至统一链接检查器，结构、格式和归档保护保留。取舍见[交付边界与审计归并](../bug-fix/2026-10-27-delivery-boundaries-and-audit-ownership.md)；以上历史数字不变。
