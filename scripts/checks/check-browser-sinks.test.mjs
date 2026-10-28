@@ -108,6 +108,9 @@ describe('checkBrowserSinks', () => {
     "new (self[`Function`])('return input')",
     "(Function as FunctionConstructor)('return input')",
     "(globalThis as typeof globalThis).Function('return input')",
+    "(<FunctionConstructor>Function)('return input')",
+    "new (<FunctionConstructor>Function)('return input')",
+    "(<typeof globalThis>globalThis).Function('return input')",
   ]) {
     it(`rejects the global Function constructor through ${source}`, async () => {
       await withRepo(async (repoRoot) => {

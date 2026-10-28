@@ -6,8 +6,10 @@ import {
   decodeImage,
   errorResponse,
   successResponse,
+  type DetectRequest,
   type HostRequest,
   type HostResponse,
+  type PrepareRequest,
   type SerializedModelRequest,
 } from '../protocol/messages'
 
@@ -42,7 +44,8 @@ export class InferenceHost {
 
   constructor(private readonly dependencies: InferenceHostDependencies) {}
 
-  async handle(request: HostRequest, callerSignal?: AbortSignal): Promise<HostResponse> {
+  // Return the guarded promise directly: async adoption adds an unchecked delivery boundary.
+  handle(request: HostRequest, callerSignal?: AbortSignal): Promise<HostResponse> {
     if (
       request.type === 'verify-key' ||
       request.type === 'clear-key' ||
@@ -51,6 +54,13 @@ export class InferenceHost {
     ) {
       return this.handleModelIntent(request, callerSignal)
     }
+    return this.handleInference(request, callerSignal)
+  }
+
+  private async handleInference(
+    request: PrepareRequest | DetectRequest,
+    callerSignal?: AbortSignal,
+  ): Promise<HostResponse> {
     const controller = new AbortController()
     const abort = (): void => controller.abort()
     callerSignal?.addEventListener('abort', abort, { once: true })
@@ -151,6 +161,8 @@ export class InferenceHost {
 
     try {
       const notice = await operation
+      // The dependency may finish before cancellation or a newer intent wins this continuation.
+      this.assertModelIntentActive(intent, callerSignal)
       return successResponse(request.requestId, undefined, notice)
     } catch (error) {
       return errorResponse(

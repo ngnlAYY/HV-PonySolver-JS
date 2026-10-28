@@ -15,7 +15,6 @@ MODEL_OUTPUT="$BUILD_ROOT/model-output"
 BUILD_DIR="$BUILD_ROOT/build"
 JS_BUILD_ROOT="$BUILD_ROOT/js-build"
 RUNTIME_OUTPUT_DIR="${ORT_RUNTIME_OUTPUT_DIR:-$ROOT_DIR/other}"
-ORT_BUILD_SCRIPT="$JS_BUILD_ROOT/web/script/build.ts"
 INSTALL=0
 BUILD_ROOT_ID=
 
@@ -121,54 +120,8 @@ cd "$ORT_SOURCE"
   --skip_tests \
   --parallel "${ORT_BUILD_JOBS:-8}"
 
-mkdir -p "$JS_BUILD_ROOT/web/dist"
-cp "$BUILD_DIR/MinSizeRel/ort-wasm-simd.mjs" "$JS_BUILD_ROOT/web/dist/ort-wasm-simd-threaded.mjs"
-node - "$ORT_BUILD_SCRIPT" <<'NODE'
-const fs = require('node:fs')
-const path = process.argv[2]
-let source = fs.readFileSync(path, 'utf8')
-source = source.replace('if (matches.length !== 1) {', 'if (matches.length > 1) {')
-const startNeedle = "  if (BUNDLE_MODE === 'prod') {\n    // ort.all"
-const endNeedle = "  if (BUNDLE_MODE === 'dev' || BUNDLE_MODE === 'perf')"
-const start = source.indexOf(startNeedle)
-if (start >= 0) {
-  const end = source.indexOf(endNeedle, start)
-  if (end < 0) throw new Error('Unable to isolate ONNX Runtime production bundle block')
-  const replacement = `  if (BUNDLE_MODE === 'prod') {
-    await buildOrt({
-      isProduction: true,
-      outputName: 'ort.wasm.bundle',
-      format: 'esm',
-      define: {
-        ...DEFAULT_DEFINE,
-        'BUILD_DEFS.DISABLE_JSEP': 'true',
-        'BUILD_DEFS.DISABLE_WEBNN': 'true',
-        'BUILD_DEFS.DISABLE_WEBGL': 'true',
-        'BUILD_DEFS.DISABLE_WASM_PROXY': 'true',
-        'BUILD_DEFS.ENABLE_BUNDLE_WASM_JS': 'true',
-      },
-    });
-  }
-
-`
-  source = source.slice(0, start) + replacement + source.slice(end)
-}
-if (!source.includes('void addAllWebBuildTasks;')) {
-  source = source.replace(
-    "  if (BUNDLE_MODE === 'node' || BUNDLE_MODE === 'prod') {",
-    "  void addAllWebBuildTasks;\n\n  if (BUNDLE_MODE === 'node' || BUNDLE_MODE === 'prod') {",
-  )
-}
-fs.writeFileSync(path, source)
-NODE
-
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT" ci --ignore-scripts --no-audit --no-fund
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT" run prepare
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/common" ci --ignore-scripts --no-audit --no-fund
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/common" run prepare
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/web" ci --ignore-scripts --no-audit --no-fund
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/web" run prepare
-NPM_CONFIG_USERCONFIG=/dev/null npm --prefix "$JS_BUILD_ROOT/web" run build -- --bundle-mode=prod
+node "$ROOT_DIR/scripts/ort-runtime/build-minimal-ort-glue.mjs" \
+  "$JS_BUILD_ROOT" "$BUILD_DIR/MinSizeRel/ort-wasm-simd.mjs" "$JS_BUILD_ROOT/web/dist"
 
 ARTIFACT_DIR="$BUILD_ROOT/artifacts"
 remove_build_paths "$ARTIFACT_DIR"

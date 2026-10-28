@@ -66,7 +66,7 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 
 ## 开发与维护
 
-最新维护结果见 [2026-10-27 结果交付与工具链复核](docs/audits/2026-10-27-delivery-and-tooling-audit.md)，涵盖核心取消交付、月界重试、产物审计、下载取消及验证去重；[前次审计](docs/audits/2026-10-27-quota-and-tooling-audit.md)保留跨月/TTL、扩展交付与标题锚点优化证据。
+最新维护结果见 [2026-10-27 运行时与最小构建依赖复核](docs/audits/2026-10-27-runtime-and-dependency-audit.md)，涵盖异步结果交付、解析与产物读量优化、闲置适配层清理，以及 ORT 上游开发依赖移除；[前次审计](docs/audits/2026-10-27-delivery-and-tooling-audit.md)保留原验证证据。
 
 从[文档导航](docs/README.md)选择主题；修改前阅读 [AGENTS.md](AGENTS.md)。常用入口：
 
@@ -75,6 +75,6 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 - [HTTP 契约](docs/reference/model-worker-http.md)、[CI 与发布](docs/development/releases.md)、[Worker 运维](docs/model-worker-ops.md)
 - [文档维护与检查](docs/development/documentation.md#验证文档修改)
 
-完整检查为 `mise exec -- pnpm check`，先按[验证手册](docs/development/verification.md#model-worker-测试配置)备份并准备 Worker 测试配置。工作区覆盖率与根级 `test:root` 各执行一次，不重复普通工作区测试；覆盖率门槛不变。
+完整检查为 `mise exec -- pnpm check`。Worker 自动生成[隔离测试配置](docs/development/verification.md#model-worker-测试配置)，无需覆盖本地开发/部署配置。工作区覆盖率与根级 `test:root` 各执行一次，不重复普通工作区测试；覆盖率门槛不变。
 
 普通检查和构建不发布产品；commit、push、artifact、Release 和部署需明确授权。CodeQL 需要仓库可用的 Code Scanning；依赖漏洞与平台权限失败分别处理，不跳过安全门禁。详见[CI 故障定位](docs/development/releases.md#ci-故障定位)。本地通过不代表远程鉴权、最低版本或 Android 验收完成。

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -84,13 +84,13 @@ async function assertInvalidArchiveCause(packagedArtifact, causePattern) {
 async function createFixtureArtifact(
   outputRoot,
   {
+    target = 'chromium',
     includeOracle = true,
     modelBytes = Buffer.from([1, 2, 3, 4]),
     archiveEntries = {},
     transformArchiveBytes = (bytes) => bytes,
   } = {},
 ) {
-  const target = 'chromium'
   const model = {
     filename: 'deterministic-captcha.ort',
     byteLength: modelBytes.byteLength,
@@ -99,7 +99,10 @@ async function createFixtureArtifact(
   }
   const manifestBytes = jsonBytes({
     manifest_version: 3,
-    background: { service_worker: 'background/background.js' },
+    background:
+      target === 'chromium'
+        ? { service_worker: 'background/background.js' }
+        : { scripts: ['background/background.js'] },
     host_permissions: ['https://hentaiverse.org/*'],
   })
   const backgroundBytes = Buffer.from('globalThis.fixture = true\n')
@@ -125,7 +128,7 @@ async function createFixtureArtifact(
     model,
     files,
   }
-  const archiveName = 'hv-pony-solver-chromium-packaged-fixture-0.1.1.zip'
+  const archiveName = `hv-pony-solver-${target}-packaged-fixture-0.1.1.zip`
   const archiveBytes = Buffer.from(
     transformArchiveBytes(
       Buffer.from(
@@ -144,7 +147,7 @@ async function createFixtureArtifact(
   }
   const artifact = { ...buildManifest, archive }
   await Promise.all([
-    writeFile(path.join(outputRoot, 'chromium.artifact.json'), `${JSON.stringify(artifact)}\n`),
+    writeFile(path.join(outputRoot, `${target}.artifact.json`), `${JSON.stringify(artifact)}\n`),
     writeFile(path.join(outputRoot, archiveName), archiveBytes),
     writeFile(path.join(outputRoot, `${archiveName}.sha256`), `${archive.sha256}  ${archiveName}\n`),
   ])
@@ -262,6 +265,61 @@ test('extracted tree verification rejects post-extraction tampering', async (con
   await writeFile(path.join(extractedRoot, 'background/background.js'), 'tampered tree')
   await assert.rejects(verifyExtractedPackagedTree(extractedRoot, verification), /does not match the tested archive/u)
 })
+
+test('extracted tree checks reread model and manifest files on every invocation', async (context) => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-packaged-tree-rescan-'))
+  context.after(() => rm(temporaryRoot, { recursive: true, force: true }))
+  await createFixtureArtifact(temporaryRoot)
+  const packagedArtifact = await discoverPackagedArtifact(temporaryRoot, 'chromium')
+  const extractedRoot = path.join(temporaryRoot, 'extracted')
+  const verification = await extractAndVerifyPackagedArchive(packagedArtifact, extractedRoot)
+  for (const name of ['manifest.json', 'build-manifest.json', `model/${verification.model.filename}`]) {
+    const filename = path.join(extractedRoot, name)
+    const original = await readFile(filename)
+    await writeFile(filename, 'tampered')
+    await assert.rejects(verifyExtractedPackagedTree(extractedRoot, verification), /does not match the tested archive/u)
+    await writeFile(filename, original)
+    assert.equal(await verifyExtractedPackagedTree(extractedRoot, verification), true)
+  }
+  for (const [field, value, diagnostic] of [
+    ['manifest', {}, /extracted manifest changed/u],
+    ['buildManifest', {}, /extracted build manifest changed/u],
+    ['model', { ...verification.model, sha256: 'f'.repeat(64) }, /extracted model changed/u],
+  ]) {
+    await assert.rejects(verifyExtractedPackagedTree(extractedRoot, { ...verification, [field]: value }), diagnostic)
+  }
+})
+
+for (const target of ['chromium', 'firefox']) {
+  test(`${target} evidence requires an observation at every claimed inference index`, async (context) => {
+    const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-packaged-evidence-observations-'))
+    context.after(() => rm(outputRoot, { recursive: true, force: true }))
+    await createFixtureArtifact(outputRoot, { target })
+    const packagedArtifact = await discoverPackagedArtifact(outputRoot, target)
+    const options = {
+      target,
+      packagedArtifact,
+      archiveVerification: await verifyPackagedArchive(packagedArtifact),
+      browserVersion: target === 'chromium' ? '116.0.5845.96' : '140.0',
+      ...(target === 'firefox' ? { driverVersion: '0.37.1' } : {}),
+    }
+    const partial = [successfulObservation()]
+    partial.length = 2
+    for (const observations of [new Array(2), partial]) {
+      await assert.rejects(createPackagedE2eRecord({ ...options, observations }), /inference run \d must be an object/u)
+    }
+    const record = await createPackagedE2eRecord({
+      ...options,
+      observations: [successfulObservation(), successfulObservation()],
+    })
+    assert.equal(record.passed, true)
+    assert.equal(record.inference.runCount, 2)
+    assert.deepEqual(
+      record.inference.results.map(({ type }) => type),
+      ['success', 'success'],
+    )
+  })
+}
 
 test('evidence creation binds the exact verified archive and inference oracle', async (context) => {
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-packaged-evidence-'))

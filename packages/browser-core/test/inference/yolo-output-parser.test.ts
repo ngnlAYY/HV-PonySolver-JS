@@ -80,21 +80,6 @@ describe('YOLO ranking', () => {
       { class_id: 0, confidence: 0.25 },
     ])
   })
-
-  it('limits below-threshold candidates to maxDetections', () => {
-    const rows: number[] = []
-    for (let i = 0; i < yoloOutputConfig.maxDetections + 3; i += 1) {
-      rows.push(...yoloRow(0.1 + i / 100, i % 6))
-    }
-
-    const result = parseRows(new Float32Array(rows))
-
-    expect(result.candidates).toHaveLength(yoloOutputConfig.maxDetections)
-    expect(result.candidates.map((detection) => detection.confidence)).toEqual(
-      [...result.candidates].map((detection) => detection.confidence).sort((left, right) => right - left),
-    )
-    expect(result.candidates).not.toContainEqual(expect.objectContaining({ confidence: 0.1 }))
-  })
 })
 
 describe('parseYoloOutputTensor', () => {

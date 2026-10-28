@@ -116,6 +116,23 @@ describe('ExtensionStorageMirror', () => {
     expect(api.storage.onChanged.addListener).not.toHaveBeenCalled()
   })
 
+  it('rejects cancellation after snapshot settlement and removes the inactive listener', async () => {
+    const api = rawExtensionApi()
+    const snapshot = deferred<Record<string, unknown>>()
+    vi.mocked(api.storage.local.get).mockReturnValue(snapshot.promise)
+    vi.stubGlobal('browser', api)
+    const controller = new AbortController()
+    const reason = new Error('abandoned after snapshot')
+    const creation = ExtensionStorageMirror.create({ signal: controller.signal })
+    snapshot.resolve({ setting: 'old' })
+    // Let the async storage adapter adopt the snapshot and raceAbort settle,
+    // then cancel before create resumes and publishes a mirror.
+    queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => controller.abort(reason))))
+
+    await expect(creation).rejects.toBe(reason)
+    expect(api.storage.onChanged.removeListener).toHaveBeenCalledOnce()
+  })
+
   it('keeps prefix indices current through writes, rollback and external deletion', async () => {
     const api = rawExtensionApi()
     vi.mocked(api.storage.local.get).mockResolvedValue({ 'history:a': 'old', unrelated: 'x' })

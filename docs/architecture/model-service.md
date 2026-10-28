@@ -98,7 +98,7 @@ stateDiagram-v2
 | [ort-runtime.ts](../../packages/shared/src/ort-runtime.ts) | 内容寻址 WASM 身份                        |
 | [ort-assets.ts](../../packages/shared/src/ort-assets.ts)   | ORT/WASM 公开路径和 R2 对象键             |
 
-ONNX 与其 ORT 构建必须从同一导出一起再生；清单、Worker 模板、R2 对象、客户端下载、构建审计和文档同步更新。shared 常量测试不能代替实际模型、glue 和 WASM 的字节审计。
+ONNX 与其 ORT 构建必须从同一导出一起再生；清单、Worker 模板、R2 对象、客户端下载、构建审计和文档同步更新。模型、glue 和 WASM 的身份由实际字节校验、产物审计与 HTTP 行为验证，不另在 shared 测试复制常量值。
 
 ## 改动与测试矩阵
 
@@ -107,12 +107,12 @@ ONNX 与其 ORT 构建必须从同一导出一起再生；清单、Worker 模板
 | 改动               | 定向测试与边界                                                                                                                              |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | 方法、CORS、Bearer | `http-cors.test.ts`、`quota-http.test.ts`、`packages/shared/test/token.test.ts`；受信/未知/无 Origin、query 不授权、大小写兼容、decoy/error |
-| 资产身份           | `model-runtime-assets.test.ts`、`packages/shared/test/ort-assets.test.ts`；GET/HEAD、缺对象/元数据、漂移失败关闭                            |
+| 资产身份           | `model-runtime-assets.test.ts`、扩展 `scripts/build/build-extension.test.mjs` 和用户脚本资产校验器；真实字节/ZIP、GET/HEAD、漂移失败关闭    |
 | 额度状态           | `model-download-quota.test.ts`、`quota-http.test.ts`；并发、幂等、TTL、UTC 月切换、跨格式共用、存储故障                                     |
 | 配置/绑定          | `env.test.ts`、`apps/model-worker/scripts/*wrangler*.test.mjs`；缺值、路径冲突、DO 类/迁移、额度开关                                        |
 | 超时/脱敏          | `failure-timeout.test.ts`、`request-timeout.test.ts`；KV/R2/DO 挂起、body 取消、日志边界                                                    |
 
-先按[验证手册](../development/verification.md#model-worker-测试配置)备份生成配置并准备测试绑定，再运行定向测试、受影响包测试及根 `mise exec -- pnpm check`。精确命令见[命令参考](../development/commands.md)。
+Worker 测试自动使用[隔离配置](../development/verification.md#model-worker-测试配置)，不覆盖工作区根的开发/部署配置。按影响范围运行定向测试、受影响包测试及根 `mise exec -- pnpm check`，精确命令见[命令参考](../development/commands.md)。
 
 ## 运维入口
 

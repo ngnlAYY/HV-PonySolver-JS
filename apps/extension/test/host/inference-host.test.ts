@@ -4,7 +4,7 @@ import type { DetectorService, YoloParseResult } from '@hv-pony-solver/browser-c
 import { ModelAccessKeyRejectedError } from '@hv-pony-solver/browser-core/model/model-download-error'
 
 import { InferenceHost, type InferenceHostDependencies } from '../../src/host/inference-host'
-import { PROTOCOL_VERSION } from '../../src/protocol/messages'
+import { PROTOCOL_VERSION, type HostResponse } from '../../src/protocol/messages'
 
 const detectionResult: YoloParseResult = {
   success: true,
@@ -293,6 +293,55 @@ describe('InferenceHost', () => {
 
     expect(receivedSignal?.aborted).toBe(true)
     await expect(response).resolves.toMatchObject({ ok: false, requestId: 'verify-disconnect' })
+  })
+
+  it.each([
+    ['operation', 'abort'],
+    ['operation', 'destroy'],
+    ['operation', 'replace'],
+    ['delivery', 'abort'],
+    ['delivery', 'destroy'],
+    ['delivery', 'replace'],
+  ] as const)('honors %s settlement before %s without retracting a delivered response', async (stage, action) => {
+    const deps = dependencies()
+    const caller = new AbortController()
+    let resolveVerification: ((notice: string) => void) | undefined
+    const verification = new Promise<string | undefined>((resolve) => {
+      resolveVerification = resolve
+    })
+    vi.mocked(deps.verifyKey!).mockReturnValueOnce(verification)
+    const host = new InferenceHost(deps)
+    const response = host.handle(
+      { protocol: PROTOCOL_VERSION, type: 'verify-key', requestId: 'delivery-old', candidateKey: 'a'.repeat(64) },
+      caller.signal,
+    )
+    await Promise.resolve()
+    expect(deps.verifyKey).toHaveBeenCalledTimes(1)
+    let replacement: Promise<HostResponse> | undefined
+    let deliveredAtInterruption: Promise<HostResponse | null> | undefined
+    resolveVerification?.('模型 Key 已提交')
+    const interrupt = (): void => {
+      // An already-settled public response wins this race; pending work loses to null.
+      deliveredAtInterruption = Promise.race([response, Promise.resolve(null)])
+      if (action === 'abort') caller.abort()
+      else if (action === 'destroy') host.destroy()
+      else {
+        replacement = host.handle({ protocol: PROTOCOL_VERSION, type: 'clear-key', requestId: 'delivery-new' })
+      }
+    }
+    // Cover the dependency continuation and the former public async-adoption gap.
+    queueMicrotask(stage === 'operation' ? interrupt : () => queueMicrotask(interrupt))
+
+    const result = await response
+    if (!deliveredAtInterruption) throw new Error('Host interruption did not run')
+    const delivered = await deliveredAtInterruption
+    if (delivered) expect(result).toBe(delivered)
+    else expect(result).toMatchObject({ ok: false, requestId: 'delivery-old' })
+    if (action === 'replace') {
+      await expect(replacement).resolves.toMatchObject({ ok: true, requestId: 'delivery-new' })
+      expect(deps.clearKey).toHaveBeenCalledTimes(1)
+    }
+    host.destroy()
   })
 
   it('destroys the detector and closes extra dependencies', () => {

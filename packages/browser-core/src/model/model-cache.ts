@@ -15,6 +15,7 @@ export { createCachedModelRow, readCachedModelBuffer } from './model-cache-recor
 export class ModelCache {
   private readonly store: IndexedDbModelStore
   private readonly downloads: SharedModelDownloads
+  private downloadGeneration = 0
 
   constructor(
     private readonly statusSink: CacheStatusSink,
@@ -67,8 +68,13 @@ export class ModelCache {
   ): Promise<ArrayBuffer> {
     if (signal?.aborted) throw new ModelCacheLifecycleError('模型缓存操作已取消')
     const startedAt = Date.now()
+    const generation = this.downloadGeneration
     this.statusSink.setStatus({ model: '下载中' })
     const buffer = await this.downloads.download(signal, verifyIntegrity, accessKeyOverride)
+    // Shared download delivery and this public continuation are separate cancellation boundaries.
+    if (signal?.aborted || generation !== this.downloadGeneration) {
+      throw new ModelCacheLifecycleError('模型缓存操作已取消')
+    }
     this.statusSink.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
     return buffer
   }
@@ -124,6 +130,7 @@ export class ModelCache {
   }
 
   close(): void {
+    this.downloadGeneration += 1
     this.store.close()
     this.downloads.close()
   }

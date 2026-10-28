@@ -41,6 +41,7 @@ import { confirmCachedModelDownload, type downloadModel } from '../../src/model/
 import { verifyModelIntegrity } from '../../src/model/model-integrity'
 import { modelConfig } from '../../src/model/model-config'
 import { MODEL_CONFIRMATION_KEY } from '../../src/model/model-cache-schema'
+import { SharedModelDownloads } from '../../src/model/shared-model-downloads'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
 
 const TEST_SHA256 = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81'
@@ -661,6 +662,40 @@ describe('ModelCache', () => {
     await expect(download).rejects.toThrow('模型缓存操作已取消')
     expect(sharedSignal?.aborted).toBe(true)
   })
+
+  it.each(['abort', 'close', 'versionchange', 'database-close'] as const)(
+    'rejects %s after shared download delivery and permits a fresh request',
+    async (ending) => {
+      const { database } = stubIndexedDb()
+      const panel = createStatusPanel()
+      const cache = new ModelCache(panel)
+      await cache.getCached()
+      vi.mocked(panel.setStatus).mockClear()
+      const controller = new AbortController()
+      const download = SharedModelDownloads.prototype.download
+      vi.spyOn(SharedModelDownloads.prototype, 'download').mockImplementationOnce(async function (
+        this: SharedModelDownloads,
+        ...args: Parameters<SharedModelDownloads['download']>
+      ) {
+        const buffer = await download.apply(this, args)
+        queueMicrotask(() => {
+          if (ending === 'abort') controller.abort()
+          else if (ending === 'close') cache.close()
+          else if (ending === 'versionchange') {
+            database.onversionchange?.(new Event('versionchange') as IDBVersionChangeEvent)
+          } else database.onclose?.(new Event('close'))
+        })
+        return buffer
+      })
+
+      await expect(cache.download(controller.signal, false)).rejects.toThrow('模型缓存操作已取消')
+      expect(panel.setStatus).toHaveBeenCalledTimes(1)
+      expect(panel.setStatus).toHaveBeenCalledWith({ model: '下载中' })
+      await expect(cache.download(undefined, false)).resolves.toHaveProperty('byteLength', 3)
+      expect(panel.setStatus).toHaveBeenCalledWith({ model: expect.stringMatching(/^下载完成 \d+ms$/) })
+      cache.close()
+    },
+  )
 
   it('does not reuse a finished download for later callers', async () => {
     const downloadModelImpl = vi.fn(async () => new Uint8Array([1, 2, 3]).buffer)

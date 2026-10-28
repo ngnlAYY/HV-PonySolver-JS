@@ -133,7 +133,7 @@ packaged Host 不构造远程能力、不打开或修改原 Key、不声明模�
 | 模型 Key       | 独立秘密 IndexedDB | 不读、不改      | 不可见           |
 | 普通设置与历史 | `storage.local`    | `storage.local` | 通过内存镜像读取 |
 
-内容镜像只含应用命名空间，两个世界的历史供预热。初始化先监听再读快照，按 key 合并最早旧值与最新新值；5 秒超时、取消、超过 1024 个不同缓冲 key 或读取失败均清理监听器。最多四个前缀索引；预先取消不访问存储，销毁后拒绝启动排队写入与删除，已发起调用按真实结果结算，不能撤销已提交变更。
+内容镜像只含应用命名空间，两个世界的历史供预热。初始化先监听再读快照，按 key 合并最早旧值与最新新值；5 秒超时、取消、超过 1024 个不同缓冲 key 或读取失败均清理监听器。快照已经结算、镜像尚未交付时取消，也必须销毁并拒绝，不能返回停止同步的快照。最多四个前缀索引；预先取消不访问存储，销毁后拒绝启动排队写入与删除，已发起调用按真实结果结算，不能撤销已提交变更。
 
 历史解析缓存按序列化值复用、返回副本，写后最终校对。裁剪只依据完整已提交快照，未决写入不挤掉旧记录，读取失败跳过删除。面板恢复与历史规则见[设置说明](usage/settings.md)，存储时序见[设置镜像](architecture/extension-runtime.md#普通设置镜像)。
 
@@ -206,7 +206,7 @@ mise exec -- pnpm --filter @hv-pony-solver/extension test:e2e:packaged
 | packaged Chromium          | 校验 ZIP 与元数据，解压并只加载该临时树，两次成功推理    | Edge/商店验收      |
 | packaged Firefox           | WebDriver 安装已校验的实际 ZIP，两个新会话成功推理       | AMO 签名、Android  |
 
-内置证据 schema 2 绑定 archive 名称/长度/SHA-256、解压树哈希、模型、浏览器版本、成功结果类型、checkbox index 与 confidence。fixture 必须匹配 oracle，随机兜底无效；Chromium 加载受测 ZIP 解压树，Firefox 直接安装该 ZIP。
+内置证据 schema 2 绑定 archive 名称/长度/SHA-256、解压树哈希、模型、浏览器版本、成功结果类型、checkbox index 与 confidence。至少两次推理，声明的每个索引都须存在有效观察；稀疏数组不得生成通过证据。fixture 必须匹配 oracle，随机兜底无效；Chromium 加载受测 ZIP 解压树，Firefox 直接安装该 ZIP。解压树校验在同次扫描复用清单字节与模型摘要，不重复读取模型；每次调用重新读盘，仍逐项核对归档、两份清单和模型身份。
 
 `REQUIRE_EXACT_MINIMUM_BROWSER=true` 要求真正运行 Chromium 116 或 Firefox Desktop 140，高版本不能替代。Chromium 116 在 Xvfb 下使用 `PACKAGED_E2E_HEADLESS=false`，该变量只接受 true/false。Firefox 需要 geckodriver（或 `GECKODRIVER_PATH`）及 openssl，并清理自建证书、代理和会话。CI 固定 geckodriver `0.37.1` 与压缩包 SHA-256；安装器在 60 秒总期限内最多尝试三次，仅重试网络和 HTTP 408/429/5xx，归档、哈希、路径或版本错误直接失败。
 

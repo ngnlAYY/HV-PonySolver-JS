@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// Import adapters after resetModules so each case uses its own GM globals and storage state.
+
 const gmGetValue = vi.fn()
 const gmSetValue = vi.fn(async () => undefined)
 
@@ -21,18 +23,18 @@ beforeEach(() => {
 describe('timing-settings', () => {
   it('falls back to default timing ranges when storage is empty', async () => {
     gmGetValue.mockReturnValue('')
-    const { getSubmitDelayRangeSync, getMultiClickDelayRangeSync } = await import('../../src/captcha/timing-settings')
+    const { getSubmitDelayRange, getMultiClickDelayRange } = await import('../../src/captcha/timing-settings')
 
-    expect(getSubmitDelayRangeSync()).toEqual([3000, 5000])
-    expect(getMultiClickDelayRangeSync()).toEqual([1000, 1500])
+    await expect(getSubmitDelayRange()).resolves.toEqual([3000, 5000])
+    await expect(getMultiClickDelayRange()).resolves.toEqual([1000, 1500])
   })
 
   it('reads fixed and ranged timing values from userscript storage', async () => {
     gmGetValue.mockImplementation((key: string) => (key === 'hvPonySolverSubmitDelay' ? '2500' : '300-800'))
-    const { getSubmitDelayRangeSync, getMultiClickDelayRangeSync } = await import('../../src/captcha/timing-settings')
+    const { getSubmitDelayRange, getMultiClickDelayRange } = await import('../../src/captcha/timing-settings')
 
-    expect(getSubmitDelayRangeSync()).toEqual([2500, 2500])
-    expect(getMultiClickDelayRangeSync()).toEqual([300, 800])
+    await expect(getSubmitDelayRange()).resolves.toEqual([2500, 2500])
+    await expect(getMultiClickDelayRange()).resolves.toEqual([300, 800])
   })
 
   it('saves canonical timing range values', async () => {

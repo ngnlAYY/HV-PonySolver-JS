@@ -1,14 +1,7 @@
 import {
-  clearPanelHistoryLimit as clearCorePanelHistoryLimit,
   clearPanelPosition as clearCorePanelPosition,
   getPanelHistoryLimit as getCorePanelHistoryLimit,
-  getPanelHistoryLimitSync as getCorePanelHistoryLimitSync,
   getPanelPosition as getCorePanelPosition,
-  getPanelPositionSync as getCorePanelPositionSync,
-  isPanelCompactMode as isCorePanelCompactMode,
-  isPanelCompactModeSync as isCorePanelCompactModeSync,
-  isPanelCspVisibilityRequired as isCorePanelCspVisibilityRequired,
-  isPanelCspVisibilityRequiredSync as isCorePanelCspVisibilityRequiredSync,
   serializePanelPosition,
   setPanelCompactMode as setCorePanelCompactMode,
   setPanelCspVisibilityRequired as setCorePanelCspVisibilityRequired,
@@ -22,10 +15,6 @@ import { gmSettingsStorage } from '../userscript/gm-storage'
 
 export type { PanelPosition }
 
-export function getPanelPositionSync(): PanelPosition {
-  return getCorePanelPositionSync(gmSettingsStorage)
-}
-
 export function getPanelPosition(): Promise<PanelPosition> {
   return getCorePanelPosition(gmSettingsStorage)
 }
@@ -38,14 +27,6 @@ export function clearPanelPosition(): Promise<void> {
   return clearCorePanelPosition(gmSettingsStorage)
 }
 
-export function isPanelCompactModeSync(): boolean {
-  return isCorePanelCompactModeSync(gmSettingsStorage)
-}
-
-export function isPanelCompactMode(): Promise<boolean> {
-  return isCorePanelCompactMode(gmSettingsStorage)
-}
-
 export function setPanelCompactMode(enabled: boolean): Promise<void> {
   return setCorePanelCompactMode(gmSettingsStorage, enabled)
 }
@@ -54,20 +35,8 @@ export function clearPanelCompactMode(): Promise<void> {
   return setCorePanelCompactMode(gmSettingsStorage, false)
 }
 
-export function isPanelCspVisibilityRequiredSync(): boolean {
-  return isCorePanelCspVisibilityRequiredSync(gmSettingsStorage)
-}
-
-export function isPanelCspVisibilityRequired(): Promise<boolean> {
-  return isCorePanelCspVisibilityRequired(gmSettingsStorage)
-}
-
 export function setPanelCspVisibilityRequired(enabled: boolean): Promise<void> {
   return setCorePanelCspVisibilityRequired(gmSettingsStorage, enabled)
-}
-
-export function getPanelHistoryLimitSync(): number {
-  return getCorePanelHistoryLimitSync(gmSettingsStorage)
 }
 
 export function getPanelHistoryLimit(): Promise<number> {
@@ -76,10 +45,6 @@ export function getPanelHistoryLimit(): Promise<number> {
 
 export function setPanelHistoryLimit(value: string): Promise<void> {
   return setCorePanelHistoryLimit(gmSettingsStorage, value)
-}
-
-export function clearPanelHistoryLimit(): Promise<void> {
-  return clearCorePanelHistoryLimit(gmSettingsStorage)
 }
 
 export async function setPanelPositionFromPrompt(): Promise<void> {

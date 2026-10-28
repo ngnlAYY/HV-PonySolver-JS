@@ -82,6 +82,8 @@ export class ExtensionStorageMirror implements SettingsStorage, EnumerableTextSt
       })
 
       const stored = await raceAbort(storageGet(null), controller.signal)
+      // Snapshot settlement can precede cancellation before this continuation runs.
+      if (controller.signal.aborted) throw controller.signal.reason
       mirror.finishInitialization(stored)
       return mirror
     } catch (error) {

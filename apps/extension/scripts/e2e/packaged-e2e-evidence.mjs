@@ -84,13 +84,16 @@ export async function createPackagedE2eRecord({
   ) {
     throw new Error(`${target} archive changed between browser execution and evidence creation`)
   }
-  const results = observations.map((observation, index) =>
-    validatePackagedInferenceObservation(
-      observation,
-      packagedArtifact.oracle,
-      `${target} packaged inference run ${index + 1}`,
-    ),
-  )
+  const results = []
+  for (const [index, observation] of observations.entries()) {
+    results.push(
+      validatePackagedInferenceObservation(
+        observation,
+        packagedArtifact.oracle,
+        `${target} packaged inference run ${index + 1}`,
+      ),
+    )
+  }
   return {
     schemaVersion: 2,
     kind: 'packaged-browser-e2e',

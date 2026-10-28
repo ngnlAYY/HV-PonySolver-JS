@@ -21,7 +21,7 @@
 
 ## 复现与采用
 
-仓库根运行 `mise exec -- pnpm build:onnx-runtime` 生成隔离产物；核对版本、长度和哈希后，用 `mise exec -- pnpm build:onnx-runtime -- --install` 安装 bundle 和生成算子配置。随后至少验证：
+仓库根运行 `mise exec -- pnpm build:onnx-runtime` 生成隔离产物。当前构建器直接打包固定上游的 web/common 源码，工具依赖来自根 pnpm 锁，不安装上游三套 npm 开发依赖。工具版本变化可能改变生成字节；本页身份仍描述当前已采用的 vendor 文件。核对 glue/WASM 配对及实际推理、同步新清单后，才用 `mise exec -- pnpm build:onnx-runtime -- --install` 安装 bundle 和生成算子配置。随后至少验证：
 
 ```bash
 mise exec -- pnpm verify:onnx-runtime

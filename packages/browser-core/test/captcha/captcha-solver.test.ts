@@ -332,6 +332,75 @@ describe('CaptchaSolver', () => {
     expect(answerSubmitter.submit).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['image', 'abort'],
+    ['image', 'navigation'],
+    ['detection', 'abort'],
+    ['detection', 'navigation'],
+  ] as const)('drops a settled %s result invalidated by %s before stage delivery', async (stage, cancellation) => {
+    appendCaptcha()
+    const originalUrl = location.href
+    const controller = new AbortController()
+    const entered = Promise.withResolvers<void>()
+    const image = Promise.withResolvers<Blob>()
+    const detection = Promise.withResolvers<YoloParseResult>()
+    const detectionResult: YoloParseResult = {
+      success: true,
+      ponies: ['TS'],
+      confidences: { TS: 0.9 },
+      detections: [],
+      candidates: [],
+    }
+    const detector = createDetector(
+      vi.fn(() => {
+        if (stage !== 'detection') return Promise.resolve(detectionResult)
+        entered.resolve()
+        return detection.promise
+      }),
+    )
+    const getAnswerMode = vi.fn(async () => 'manual' as const)
+    const { solver, panel, answerSubmitter } = createSolver({
+      detector,
+      imageLoader: {
+        get: () => {
+          if (stage !== 'image') return Promise.resolve(new Blob(['captcha']))
+          entered.resolve()
+          return image.promise
+        },
+      },
+      getAnswerMode,
+      getAbortSignal: () => controller.signal,
+    })
+    try {
+      const solving = solver.trigger()
+      await entered.promise
+      // The retry continuation runs first; invalidate before solve receives its successful outcome.
+      const invalidated = (stage === 'image' ? image.promise : detection.promise).then(() => {
+        if (cancellation === 'abort') controller.abort()
+        else history.replaceState(null, '', '/next')
+        vi.mocked(panel.setStatus).mockClear()
+      })
+      image.resolve(new Blob(['captcha']))
+      detection.resolve(detectionResult)
+      await invalidated
+      expect(await solving).toMatchObject({ handled: false, failure: null })
+
+      expect(panel.setStatus).not.toHaveBeenCalled()
+      expect(getAnswerMode).not.toHaveBeenCalled()
+      expect(panel.addError).not.toHaveBeenCalled()
+      expect(panel.addManualResult).not.toHaveBeenCalled()
+      expect(answerSubmitter.submit).not.toHaveBeenCalled()
+      expect(detector.detect).toHaveBeenCalledTimes(stage === 'image' ? 0 : 1)
+      expect(solver.isBusy).toBe(false)
+
+      expect(await solver.trigger(undefined, undefined, new AbortController().signal)).toMatchObject({ handled: true })
+      expect(panel.addManualResult).toHaveBeenCalledOnce()
+      expect(getAnswerMode).toHaveBeenCalledOnce()
+    } finally {
+      history.replaceState(null, '', originalUrl)
+    }
+  })
+
   it('does not record or submit when the captcha DOM is replaced after detection', async () => {
     appendCaptcha()
     const detector = createDetector(

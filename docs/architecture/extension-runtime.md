@@ -46,7 +46,7 @@ Broker 通过按请求类型穷尽定义的策略表统一读取端口/全局上
 
 Chromium service worker 不持有推理会话。[chromium-bootstrap.ts](../../apps/extension/src/background/chromium-bootstrap.ts) 每次启动生成 epoch 并接管匹配的 Offscreen context；[chromium-offscreen.ts](../../apps/extension/src/background/chromium-offscreen.ts) 管理创建、准入与空闲关闭。[Offscreen 入口](../../apps/extension/src/offscreen/offscreen-bootstrap.ts) 校验来源/epoch，维护活动请求、取消历史和空闲通知退避，销毁时终止 Host。Firefox 的 [bootstrap](../../apps/extension/src/background/firefox-bootstrap.ts) 在 background script 直接持有 Host。
 
-[InferenceHost](../../apps/extension/src/host/inference-host.ts) 解码图片后调用 Detector，模型管理意图通过串行尾链执行，新代际取消旧操作；销毁终止 Detector、模型操作和底层资源。[Worker 入口](../../apps/extension/src/host/inference-worker-entry.ts) 构建为 `runtime/inference-worker.js`。
+[InferenceHost](../../apps/extension/src/host/inference-host.ts) 同步分派并直接返回对应处理 Promise，避免额外异步转交窗口。模型管理意图通过串行尾链执行，新代际取消旧操作；依赖结算后、成功响应交付前复核调用方、Host 与意图代次。已结算的公开响应不撤回，Key commit 的独立通知不受影响。推理路径解码图片后调用 Detector，销毁终止 Detector、模型操作和底层资源。[Worker 入口](../../apps/extension/src/host/inference-worker-entry.ts) 构建为 `runtime/inference-worker.js`。
 
 构建与运行时共用 [EXTENSION_PATHS](../../apps/extension/src/platform/extension-paths.ts)；路径变更须核对清单、设置页来源、Offscreen 和 Worker URL。[产物目录](../browser-extension.md#build-outputs-and-local-loading)保持同步。
 
@@ -66,7 +66,7 @@ Chromium service worker 不持有推理会话。[chromium-bootstrap.ts](../../ap
 
 普通设置与历史存于 `storage.local`，[storage-mirror.ts](../../apps/extension/src/content/storage-mirror.ts) 提供内容侧同步镜像。初始化先监听再读快照，合并变更并限制期限、取消与不同 key 数量。写入按 key 串行，乐观值供普通读取，`storage.onChanged` 后校正。有限前缀索引用于历史扫描；`getCommittedItemsByPrefix()` 还原未决键的已提交值，包含未决删除与外部写入，供安全裁剪。
 
-销毁拒绝尚未开始的写入/删除，包括首个微任务；已发起调用仍按真实结果结算，不能撤销已提交变更。预先取消不注册监听器、不读取快照。
+初始化快照等待结束后、交付镜像前仍复核取消；此时失效须销毁镜像并移除监听，不能返回停止同步的旧快照。销毁拒绝尚未开始的写入/删除，包括首个微任务；已发起调用仍按真实结果结算，不能撤销已提交变更。预先取消不注册监听器、不读取快照。
 
 ### Key 提交与凭证修订
 

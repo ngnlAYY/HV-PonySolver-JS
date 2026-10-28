@@ -87,6 +87,12 @@ https://models.ngnl.host/runtime/ort-wasm-simd-25d707460dd5286203299356b17f4262a
 
 Python 转换工具单独维护于 [requirements.in](../scripts/ort-runtime/requirements.in) 和带哈希的 [requirements.txt](../scripts/ort-runtime/requirements.txt)：ONNX `1.22.0`、ONNX Runtime `1.27.0`，bootstrap pip `26.2.0`。两个生成入口都使用精确 pip 版本及 `--require-hashes`。Python 工具升级不自动替换已采用的模型/glue/WASM；重新生成后仍按固定字节身份与转换结果验收。
 
+JS glue 由 [build-minimal-ort-glue.mjs](../scripts/ort-runtime/build-minimal-ort-glue.mjs) 直接打包固定上游的 `web/lib/index.ts` 与 `common/lib/index.ts`，使用根 pnpm 锁内的 esbuild、Terser 和已有 TypeScript AST。只执行必要的 Emscripten 两轮压缩、浏览器分支裁剪和精简构建标志；不安装上游测试、文档、Electron 或 Node 工具依赖，也不再运行三套 `npm ci`/`prepare`。生成物保留上游许可声明和 source map，写出前拒绝外部模块导入、语法错误和未解析构建标志。
+
+构建工具升级可能改变生成字节，不能仅凭功能验证沿用旧摘要。采用重建产物时须重新核对 glue/WASM 配对、完整许可与实际推理，并按下述清单同步字节身份；更新构建流程本身不改写既有 vendor 资产。
+
+新构建器主动拒绝外部 Runtime module override，只支持内嵌 glue；仍保留上游浏览器分支隔离的三个 Node require fallback。采用其产物时还须同步扩展 `extensionRuntimeGluePlugin` 对旧 vendor 唯一动态导入的替换约定，不能只覆盖 vendor 文件。
+
 ## 复现与采用
 
 在仓库根目录执行：
@@ -105,14 +111,14 @@ other/ort-wasm-simd-25d707460dd5286203299356b17f4262ace93b712e4708b893d4cfd902da
 
 - 解析现存祖先与符号链接后，`ORT_BUILD_ROOT` 末级名匹配 `hv-pony-ort-*`；拒绝文件系统根、仓库内目录，以及等于或包含仓库、启动 cwd、home 的目录。
 - 每次递归清理重新核对构建根身份和目标规范路径，目标必须位于专用根内，不能覆盖受保护目录。cwd 保护值在启动时固定。
-- 上游 checkout 开始/结束均须干净；依赖安装、临时 `build.ts` 修改与 bundle 生成位于一次性 `js-build` 副本。下次运行可安全重建；未知 tracked/untracked 改动阻断构建。
+- 上游 checkout 开始/结束均须干净；JS 源码复制到一次性 `js-build`，glue 构建不修改源文件，也不在上游安装依赖。下次运行可安全重建；未知 tracked/untracked 改动阻断构建。
 - 专用根可复用，但同一时刻只允许一个构建进程持锁。对已验证的构建根目录只读描述符加 `flock` 并复核目录身份，不创建或截断 `.build.lock`；遗留同名符号链接不能影响目录外文件或绕开互斥。
 
 脚本不上传 R2、部署服务或发布客户端。采用新产物须同步 glue、`ONNX_RUNTIME_ASSETS`、shared 的模型/WASM 身份、`wrangler.template.toml`、测试、文档和 R2 对象；完整路径见下方清单链接。
 
 ### 安装生成的 glue
 
-明确采用时执行 `mise exec -- pnpm build:onnx-runtime -- --install`，替换受版本控制的 glue 并生成被忽略的算子配置。随后先准备[测试绑定](development/verification.md#model-worker-测试配置)，再验证：
+明确采用时执行 `mise exec -- pnpm build:onnx-runtime -- --install`，替换受版本控制的 glue 并生成被忽略的算子配置。随后验证；Worker 测试会自动生成[隔离配置](development/verification.md#model-worker-测试配置)：
 
 ```bash
 mise exec -- pnpm verify:onnx-runtime

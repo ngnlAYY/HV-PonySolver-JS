@@ -133,6 +133,7 @@ function unwrapExpression(expression) {
   while (
     ts.isParenthesizedExpression(expression) ||
     ts.isAsExpression(expression) ||
+    ts.isTypeAssertionExpression(expression) ||
     ts.isSatisfiesExpression(expression) ||
     ts.isNonNullExpression(expression)
   ) {

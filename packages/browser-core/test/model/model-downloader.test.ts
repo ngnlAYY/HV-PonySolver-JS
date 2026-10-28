@@ -398,6 +398,25 @@ describe('downloadModel', () => {
     },
   )
 
+  it.each(['quota', 'probe'] as const)('rejects %s aborted before public delivery', async (operation) => {
+    const controller = new AbortController()
+    const response = Response.json({ enabled: true, limit: 5, used: 0, remaining: 5, retryAfterSeconds: 30 })
+    const parse = JSON.parse
+    const parseSpy = vi.spyOn(JSON, 'parse').mockImplementation((text: string) => {
+      const value: unknown = parse(text)
+      // Let the internal quota request settle, then cancel before its public caller resumes.
+      queueMicrotask(() => queueMicrotask(() => controller.abort()))
+      return value
+    })
+    try {
+      await expect(requestModelJson(operation, response, controller.signal)).rejects.toThrow('已取消')
+      expect(controller.signal.aborted).toBe(true)
+      expect(response.body?.locked).toBe(false)
+    } finally {
+      parseSpy.mockRestore()
+    }
+  })
+
   it.each(['quota', 'probe', 'confirmation'] as const)(
     'cancels and unlocks an unfinished %s JSON body after abort and timeout',
     async (operation) => {

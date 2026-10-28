@@ -1,8 +1,6 @@
 import {
   getMultiClickDelayRange as getCoreMultiClickDelayRange,
-  getMultiClickDelayRangeSync as getCoreMultiClickDelayRangeSync,
   getSubmitDelayRange as getCoreSubmitDelayRange,
-  getSubmitDelayRangeSync as getCoreSubmitDelayRangeSync,
   serializeDelayRange,
   setMultiClickDelayRange as setCoreMultiClickDelayRange,
   setSubmitDelayRange as setCoreSubmitDelayRange,
@@ -13,14 +11,6 @@ import { alertUser, promptUser } from '../userscript/gm-bridge'
 import { gmSettingsStorage } from '../userscript/gm-storage'
 
 export type { DelayRange }
-
-export function getSubmitDelayRangeSync(): DelayRange {
-  return getCoreSubmitDelayRangeSync(gmSettingsStorage)
-}
-
-export function getMultiClickDelayRangeSync(): DelayRange {
-  return getCoreMultiClickDelayRangeSync(gmSettingsStorage)
-}
 
 export function getSubmitDelayRange(): Promise<DelayRange> {
   return getCoreSubmitDelayRange(gmSettingsStorage)

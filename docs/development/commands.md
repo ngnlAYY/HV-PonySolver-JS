@@ -17,7 +17,7 @@ mise install
 mise exec -- pnpm install --frozen-lockfile
 ```
 
-准备 [Worker 测试绑定](verification.md#model-worker-测试配置)后运行 `mise exec -- pnpm check`。
+安装后运行 `mise exec -- pnpm check`；Worker 自动生成[隔离测试配置](verification.md#model-worker-测试配置)，不需预先运行 `render-config`。
 
 ## 仓库级命令
 
@@ -148,7 +148,7 @@ product 基准要求固定 ORT 模型和 Chromium，默认连续识别 100 次�
 
 ## Model Worker 命令
 
-先按[测试配置](verification.md#model-worker-测试配置)或[运维手册](../model-worker-ops.md)准备环境；渲染会覆盖生成的 `wrangler.toml`。
+测试会自动生成[隔离配置](verification.md#model-worker-测试配置)，`typecheck`/`build` 不读取 Wrangler 配置。仅 `render-config`、`dev`、`deploy` 需按[运维手册](../model-worker-ops.md)准备绑定；显式渲染会覆盖工作区根的生成 `wrangler.toml`。以下是独立命令，不要整段顺序执行。
 
 ```bash
 pnpm --filter @hv-pony-solver/model-worker render-config

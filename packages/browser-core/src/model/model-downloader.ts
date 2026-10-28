@@ -444,7 +444,9 @@ export async function queryModelDownloadQuota(
   const label = '模型下载次数查询'
   const deadline = createDownloadDeadline(signal, label, inferenceTimeoutConfig.modelProbeTimeoutMs)
   try {
-    return await requestModelDownloadQuota(deadline, options, environment, label)
+    const quota = await requestModelDownloadQuota(deadline, options, environment, label)
+    deadline.throwIfExpired()
+    return quota
   } finally {
     deadline.dispose()
   }
@@ -471,6 +473,7 @@ export async function probeModelAccessKey(
   const deadline = createDownloadDeadline(signal, label, inferenceTimeoutConfig.modelProbeTimeoutMs)
   try {
     const quota = await requestModelDownloadQuota(deadline, options, environment, label)
+    deadline.throwIfExpired()
     return {
       valid: true,
       quotaExceededRetryAfterSeconds: quota.enabled && quota.remaining === 0 ? quota.retryAfterSeconds : null,

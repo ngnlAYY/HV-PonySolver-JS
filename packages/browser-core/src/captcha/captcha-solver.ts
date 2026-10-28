@@ -143,7 +143,8 @@ export class CaptchaSolver {
         isCurrent,
         signal,
       )
-      if (imageOutcome.state === 'cancelled') {
+      // retryTransient 结算后仍有一次微任务交接；状态和后续工作由当前轮次接收。
+      if (imageOutcome.state === 'cancelled' || !isCurrent()) {
         return result(false)
       }
       if (imageOutcome.state === 'failed') {
@@ -163,7 +164,7 @@ export class CaptchaSolver {
         // immediate retry; surface it instead of burning the attempts.
         (error) => !isPermanentModelError(error),
       )
-      if (detectionOutcome.state === 'cancelled') {
+      if (detectionOutcome.state === 'cancelled' || !isCurrent()) {
         return result(false)
       }
       if (detectionOutcome.state === 'failed') {

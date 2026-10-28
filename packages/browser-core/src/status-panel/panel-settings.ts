@@ -145,7 +145,3 @@ export function getPanelHistoryLimitSync(storage: SettingsStorage): number {
 export async function setPanelHistoryLimit(storage: SettingsStorage, value: string): Promise<void> {
   await storage.set(PANEL_HISTORY_LIMIT_STORAGE_KEY, String(parsePanelHistoryLimit(value)))
 }
-
-export async function clearPanelHistoryLimit(storage: SettingsStorage): Promise<void> {
-  await storage.remove(PANEL_HISTORY_LIMIT_STORAGE_KEY)
-}

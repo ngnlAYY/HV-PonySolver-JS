@@ -28,9 +28,9 @@ function insertTopDetection(classIds: number[], confidences: number[], classId: 
   confidences[index] = confidence
 }
 
-function buildDetections(classIds: number[], confidences: number[], count: number = classIds.length): Detection[] {
+function buildDetections(classIds: number[], confidences: number[]): Detection[] {
   const detections: Detection[] = []
-  for (let i = 0; i < count; i += 1) {
+  for (let i = 0; i < classIds.length; i += 1) {
     const classId = classIds[i]
     const confidence = confidences[i]
     if (classId === undefined || confidence === undefined) {
@@ -57,12 +57,11 @@ function createRankingAccumulator(): RankingAccumulator {
 }
 
 function finalizeRanking(state: RankingAccumulator): YoloParseResult {
-  // Both lists rank the same rows, so threshold detections are a prefix of the
-  // top candidates. Compare raw confidences before rounding the public result.
+  // 先以原始置信度确定前缀，再复用只读检测项，避免重复舍入和分配。
   const belowThreshold = state.candidateConfidences.findIndex((confidence) => confidence < confidenceThreshold)
   const detectionCount = belowThreshold === -1 ? state.candidateClassIds.length : Math.max(1, belowThreshold)
-  const detections = buildDetections(state.candidateClassIds, state.candidateConfidences, detectionCount)
   const candidates = buildDetections(state.candidateClassIds, state.candidateConfidences)
+  const detections = candidates.slice(0, detectionCount)
 
   const ponies: AnswerCode[] = []
   const confidences: Partial<Record<AnswerCode, number>> = {}

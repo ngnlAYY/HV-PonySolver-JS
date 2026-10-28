@@ -48,6 +48,8 @@ JPX 的 `AjaxRound` 会批量清除页面定时器，留下失效的待扫描句
 
 答题模式、提交延迟和多选延迟的异步设置读取受取消信号与 `inferenceTimeoutConfig.settingsReadTimeoutMs` 约束：模式读取最多 5 秒，两种延迟并行读取合计最多 5 秒。预先取消不发起读取；取消或超时释放 Solver 等待，迟到成功或拒绝不能重新点击、提交或写历史。这只结束调用方等待，不宣称撤销 GM 已发起的存储操作。
 
+图片和推理的每个重试阶段结算后，Solver 在接收结果的续体中再次复核当前目标与取消信号，再更新状态或读取设置；内部重试已成功不授权旧轮次继续执行。只改变 URL 的过期轮次也不会再启动可能挂起的设置读取。
+
 一次自动处理的主链路是：
 
 ```mermaid
@@ -95,7 +97,7 @@ sequenceDiagram
 
 RGBA 转 CHW 在写入前一次验证像素数量及两个缓冲区长度，再按 RGB 平面写入。256 项 Float32 归一化表在模块加载时创建，逐帧复用，替代每个通道的除法；全字节值回归保证与原 `value / 255` 写入 Float32 的结果相同，保留非零视图偏移和 alpha 忽略行为。
 
-生产与基准共用严格的 `parseYoloOutputTensor`，不保留跳过非法行的宽松解析入口。候选只维护一次有界 top-N 排名，原地右移替代 `splice` 临时数组；检测列表取原始置信度满足阈值的前缀，保留最高分兜底与稳定同分顺序。阈值判断先于展示舍入，低排名行仍完整校验。结构化响应逐项检查 `detections`/`candidates`，拒绝 structured clone 保留的稀疏数组。Worker 请求、响应、推理结果与扩展协议复用 [utils/guards.ts](../../packages/browser-core/src/utils/guards.ts) 的对象/字段集合检查，各自保留领域校验。
+生产与基准共用严格的 `parseYoloOutputTensor`，不保留跳过非法行的宽松解析入口。候选只维护一次有界 top-N 排名，原地右移替代 `splice` 临时数组；检测列表取原始置信度满足阈值的前缀，保留最高分兜底与稳定同分顺序。候选检测项只舍入、构造一次，两个独立数组复用只读项，避免重复分配。阈值判断先于展示舍入，低排名行仍完整校验。结构化响应逐项检查 `detections`/`candidates`，拒绝 structured clone 保留的稀疏数组。Worker 请求、响应、推理结果与扩展协议复用 [utils/guards.ts](../../packages/browser-core/src/utils/guards.ts) 的对象/字段集合检查，各自保留领域校验。
 
 用户脚本的 [onnx-worker-client.ts](../../apps/userscript/src/inference/onnx-worker-client.ts) 注入 [blob-worker.ts](../../apps/userscript/src/inference/blob-worker.ts) 创建的 Worker，并把构建时内联的脚本文本交给它。两个入口分别是：
 
@@ -164,7 +166,7 @@ App 在 `prepareTarget()` 前用 `performance.now()` 取开始时间，与手动
 | 面板和历史               | 两个包的 `test/status-panel` 与 `test/persistence` | csp 可见性、重新挂载、异步设置和持久化失败        |
 | 构建/metadata/资产       | `apps/userscript/scripts/*test.mjs`                | 实际 external/bundled 产物、完整许可与包体预算    |
 
-定向命令与完整检查统一见[验证手册](../development/verification.md#按修改区域选择验证)；包含 Worker 的检查先准备测试绑定，用户脚本 Runtime 变更分别验证 external/bundled，不能用后一份产物替代前一份。
+定向命令与完整检查统一见[验证手册](../development/verification.md#按修改区域选择验证)；Worker 测试自动生成隔离配置，用户脚本 Runtime 变更分别验证 external/bundled，不能用后一份产物替代前一份。
 
 上述测试主要证明模拟 DOM、Worker、Fetch、存储和构建门禁；它们不自动证明真实页面、真实 GM 管理器、真实远程模型鉴权或浏览器多引擎兼容性。涉及这些边界时，在报告中单独列出已运行的 E2E 和未覆盖项。
 

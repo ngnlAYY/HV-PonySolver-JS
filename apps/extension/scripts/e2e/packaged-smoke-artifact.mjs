@@ -377,29 +377,31 @@ async function walkExtractedFiles(root, current = root) {
 export async function verifyExtractedPackagedTree(root, verification) {
   const files = await walkExtractedFiles(root)
   const records = {}
+  // Retain only the two JSON documents; model bytes are hashed once and released after each read.
+  let buildManifestBytes
+  let manifestBytes
   for (const file of files) {
     const bytes = await readFile(file.absolutePath)
     records[file.relativePath] = { byteLength: bytes.byteLength, sha256: sha256(bytes) }
+    if (file.relativePath === 'build-manifest.json') buildManifestBytes = bytes
+    else if (file.relativePath === 'manifest.json') manifestBytes = bytes
   }
   if (!isDeepStrictEqual(records, verification.files)) {
     throw new Error(`${verification.target} extracted packaged tree does not match the tested archive`)
   }
-  const [buildManifest, manifest, modelBytes] = await Promise.all([
-    readFile(path.join(root, 'build-manifest.json')).then((bytes) =>
-      parseJsonBytes(bytes, `${verification.target} extracted build-manifest.json`),
-    ),
-    readFile(path.join(root, 'manifest.json')).then((bytes) =>
-      parseJsonBytes(bytes, `${verification.target} extracted manifest.json`),
-    ),
-    readFile(path.join(root, 'model', verification.model.filename)),
-  ])
+  const buildManifest = parseJsonBytes(buildManifestBytes, `${verification.target} extracted build-manifest.json`)
+  const manifest = parseJsonBytes(manifestBytes, `${verification.target} extracted manifest.json`)
   if (!isDeepStrictEqual(buildManifest, verification.buildManifest)) {
     throw new Error(`${verification.target} extracted build manifest changed after ZIP verification`)
   }
   if (!isDeepStrictEqual(manifest, verification.manifest)) {
     throw new Error(`${verification.target} extracted manifest changed after ZIP verification`)
   }
-  if (modelBytes.byteLength !== verification.model.byteLength || sha256(modelBytes) !== verification.model.sha256) {
+  const modelIdentity = records[`model/${verification.model.filename}`]
+  if (
+    modelIdentity?.byteLength !== verification.model.byteLength ||
+    modelIdentity?.sha256 !== verification.model.sha256
+  ) {
     throw new Error(`${verification.target} extracted model changed after ZIP verification`)
   }
   return true

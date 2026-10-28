@@ -13,27 +13,23 @@
 
 Vitest 与两个 coverage provider 同步采用兼容版本；npm 安全补丁同样遵守等待期和 trust policy。依赖审计须包含开发依赖：本仓库的 ORT、构建器和测试工具均声明在 devDependencies，`audit --prod` 的空结果不证明客户端没有第三方代码。当前 Cloudflare 测试集成仍使用已弃用的 `@cloudflare/vitest-pool-workers`；迁移到 `@cloudflare/vitest-plugin` 涉及独立的 Wrangler/Miniflare 版本与运行时验证，不与无关补丁混合。
 
-Vite 由 Vitest 引入，根包只通过 workspace override 统一版本，不重复声明直接依赖。TypeScript 7 原生 CLI 负责类型检查，TypeScript 6 兼容包供 ESLint 和资产/架构检查器的编译器 API 使用；两个 coverage provider 分别覆盖浏览器/普通 Node 测试与 Cloudflare Worker，不按名称相近删除。TypeScript 6 仅由调用编译器 API 的根包、用户脚本资产解析器和扩展产物审计器直接声明；shared、browser-core 与 Model Worker 保留原生 CLI，不重复声明兼容包。当前依赖用途复核见[本轮审计](../audits/2026-10-27-delivery-and-tooling-audit.md)，声明精简证据见[前次审计](../audits/2026-10-27-maintainability-follow-up.md)，既有安全补丁见[同日初次审计](../audits/2026-10-27-repository-audit.md)。
+Vite 由 Vitest 引入，根包只通过 workspace override 统一版本，不重复声明直接依赖。TypeScript 7 原生 CLI 由五个工作区直接声明，负责各包类型检查；根包保留 TypeScript 6 编译器 API，供 ESLint 和资产/架构检查器使用，不重复声明无根命令消费者的原生 CLI。两个 coverage provider 分别覆盖浏览器/普通 Node 测试与 Cloudflare Worker，不按名称相近删除。TypeScript 6 仅由调用编译器 API 的根包、用户脚本资产解析器和扩展产物审计器直接声明；shared、browser-core 与 Model Worker 保留原生 CLI，不重复声明兼容包。
 
 另核对 `scripts/ort-runtime/requirements.in`、哈希锁和两个生成脚本的 pip bootstrap 版本；npm 审计不覆盖这些 Python 构建依赖。升级后在仓库外的隔离环境执行实际模型转换，比较 fixture 字节身份并复验对应产物；不以模型输入受信任为由忽略工具漏洞，也不无意重建/替换 canonical 资产。
+
+精简 ORT 的 JS 构建同样属于依赖审计范围。它通过根 pnpm 锁中的 esbuild、Terser 与已有 TypeScript API 构建固定上游源码，不再安装上游 `js/`、`js/common/`、`js/web/` 三套 npm 开发依赖。根冻结安装、七天等待、trust policy 和完整依赖审计覆盖这些工具；不能只审本仓库 pnpm 图后推定另行安装的上游锁也安全。
 
 Node.js 工具链另查[官方安全公告](https://nodejs.org/en/blog/vulnerability)，npm 审计与 `undici` override 不覆盖 Node 内置 TLS、DNS、Brotli 或 Fetch。工具链升级须同步 mise、根包最低版本、命令文档并实际运行完整检查。2026-10-23 经维护者明确批准，仅 Node.js `24.22.1` 安全补丁提前采用；npm 七天等待、trust policy 和锁文件不变，后续例外仍需另行授权。
 
 工作区职责见[整体架构](../architecture/overview.md)。新增跨包导入、移动目录或修改 package export 后运行 `architecture:check`；类型边界同时检查 `import type`、`import('…').Type` 与 `typeof import('…')`。
 
-源码边界与危险调用门禁覆盖 `.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs`。静态模板 import、`require`、TypeScript import-equals 与类型导入同样受依赖方向约束；全局或静态 computed 的危险调用不能绕过检查。CLI 缺少受保护源码目录时失败关闭。
+源码边界与危险调用门禁覆盖 `.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs`。静态模板 import、`require`、TypeScript import-equals 与类型导入同样受依赖方向约束；全局或静态 computed 的危险调用不能绕过检查，`as` 与 `<T>` 类型断言均须剥离后检查实际表达式。CLI 缺少受保护源码目录时失败关闭。
 
 ## Model Worker 测试配置
 
-包含 Worker 的测试或构建（包括根 `pnpm check`）前准备占位绑定。`apps/model-worker/wrangler.toml` 是生成物；已有自定义配置时，先在仓库外备份，验证后按字节恢复，禁止输出其中的绑定或凭据。不要手改或提交生成配置，权威来源是 [wrangler.template.toml](../../apps/model-worker/wrangler.template.toml) 和渲染器。
+Worker 的 [vitest.config.ts](../../apps/model-worker/vitest.config.ts) 每次启动都以固定 `testWranglerConfigEnv` 和 `renderMode: 'test'`，从权威 [wrangler.template.toml](../../apps/model-worker/wrangler.template.toml) 自动生成 `.wrangler/vitest/wrangler.toml`，只把该隔离配置交给 Cloudflare 测试插件。它忽略继承的部署绑定和额度开关，不读取或覆盖 `apps/model-worker/wrangler.toml`。
 
-```bash
-MODEL_KEYS_KV_NAMESPACE_ID=test-kv \
-MODEL_BUCKET_NAME=test-bucket \
-mise exec -- pnpm --filter @hv-pony-solver/model-worker render-config
-```
-
-然后运行离线检查：
+`build` 与 `typecheck` 均为 `tsc --noEmit`，不需要 Wrangler 配置。普通测试、构建和根 `pnpm check` 可直接执行：
 
 ```bash
 mise exec -- pnpm --filter @hv-pony-solver/model-worker typecheck
@@ -42,19 +38,21 @@ mise exec -- pnpm --filter @hv-pony-solver/model-worker test
 
 配置渲染测试只按白名单复制模板和必需脚本，不递归复制生成的 `wrangler.toml`、环境文件或 `.wrangler/` 本地状态。测试配置隔离通过原生 Node 导入真实 config，检查生成的测试绑定；不再嵌套启动整套 Vitest 环境测试。环境行为仍由完整检查中的 Worker 测试验证。普通测试不用生产 KV/R2 标识或 Key。`check:deployment` 是独立线上探测，需要明确目标环境和服务可达性，不能用占位绑定代替线上证据。部署 job 的 secrets、dry-run 和发布条件见[部署工作流](releases.md#model-worker-部署工作流)。仅审阅源码不需要渲染配置。
 
+`render-config`、`dev` 和 `deploy` 才使用工作区根的生成配置。显式渲染前按[运维手册](../model-worker-ops.md#生成-wrangler-配置)准备对应绑定；若只做临时验证，先在仓库外备份已有根配置，结束按字节恢复，不输出绑定或凭据。
+
 ## 按修改区域选择验证
 
 先运行定向测试，再按影响的边界扩大；各工作区完整命令见[命令参考](commands.md)。
 
-| 修改区域                           | 最小验证                                  | 补充验证                                     |
-| ---------------------------------- | ----------------------------------------- | -------------------------------------------- |
-| shared 契约或资产                  | shared `typecheck`、`test`                | 文档漂移与受影响应用                         |
-| browser-core DOM、答题、面板或推理 | browser-core `typecheck`、`test`          | 架构、危险调用、页面 E2E                     |
-| 用户脚本构建或 Runtime             | userscript `typecheck`、`test`、`build`   | 两个 bundle profile、页面 E2E                |
-| 扩展消息、权限、缓存或打包         | extension `typecheck`、`test`、对应构建   | content、双浏览器、remote/packaged、最低版本 |
-| Worker 路由、额度或配置            | 测试配置、worker `typecheck`、`test`      | 文档漂移；需要线上验收时另做部署探测         |
-| scripts、根配置或工作流            | 对应 Node 测试或 `pnpm test`              | 格式、lint、相关静态门禁与 Action pin        |
-| README 或 docs                     | [文档验证](documentation.md#验证文档修改) | vendor Runtime README 单独检查               |
+| 修改区域                           | 最小验证                                   | 补充验证                                     |
+| ---------------------------------- | ------------------------------------------ | -------------------------------------------- |
+| shared 契约或资产                  | shared `typecheck`、`test`                 | 文档漂移与受影响应用                         |
+| browser-core DOM、答题、面板或推理 | browser-core `typecheck`、`test`           | 架构、危险调用、页面 E2E                     |
+| 用户脚本构建或 Runtime             | userscript `typecheck`、`test`、`build`    | 两个 bundle profile、页面 E2E                |
+| 扩展消息、权限、缓存或打包         | extension `typecheck`、`test`、对应构建    | content、双浏览器、remote/packaged、最低版本 |
+| Worker 路由、额度或配置            | worker `typecheck`、`test`（自动隔离配置） | 文档漂移；需要线上验收时另做部署探测         |
+| scripts、根配置或工作流            | 对应 Node 测试或 `pnpm test`               | 格式、lint、相关静态门禁与 Action pin        |
+| README 或 docs                     | [文档验证](documentation.md#验证文档修改)  | vendor Runtime README 单独检查               |
 
 公开命令、默认值、路由、资产或构建变化按[文档联动表](documentation.md#按修改类型同步)检查 README、专题、测试和漂移提取器。
 
@@ -71,6 +69,7 @@ Vitest 主要验证 TypeScript/运行时逻辑；包内 Node 测试覆盖构建�
 - 文档静态关键词检查按校验分支和每篇专题选代表负例；保留逐篇失败、README 不能补足专题、源码提取和伪装事实的负例，不逐词重复全仓扫描。
 - 清单共有字段的负例覆盖两种后台形态，不重复四种模型/浏览器组合；四种有效清单、权限/CSP/模型身份差异、危险 HTML 及产物/E2E 矩阵仍独立验证。
 - WASM 单测用小型确定性字节和对应测试身份驱动真实读取/哈希路径，不反复深比较完整 WASM；真实文件身份归构建审计与浏览器 E2E。
+- shared 的模型文件名、哈希和额度常量不另写字面量副本断言；实际文件/ZIP 身份由资产校验器与构建测试验证，路径和额度由 Worker HTTP/DO 回归验证。Key 与回执解析仍由 shared 行为测试负责。
 - 不复制配置数值、package 脚本文字或纯转发返回值作测试；实际覆盖率命令、include 与门槛保持不变。等价静态安全负例可在进程内运行真实检查器，但保留 CLI 的真实成功、拒绝与清理回归。
 - 构建测试显式覆盖可选输出路径和 Runtime override，不能从调用者环境继承并写到 fixture 外；敏感 Key 的失败/取消断言使用实际 GM 存储边界。
 - 不降低覆盖率门槛，不用 skip/todo、改 include 或合并用例计数冒充精简；[精简决定](../decisions/implemented/testing/2026-10-14-test-suite-ownership.md)记录归属和取舍。
@@ -122,11 +121,11 @@ Vitest 主要验证 TypeScript/运行时逻辑；包内 Node 测试覆盖构建�
 
 精简 ORT 构建涉及下载、Python 环境、大型资产编译和构建根清理，前提见[Runtime 专题](../onnx-runtime.md)。普通文档或源码审阅优先使用已有资产、Node 测试和静态检查。
 
-`dist/`、coverage、ZIP/manifest/metafile、生成的 `wrangler.toml`、`config/`、`other/` 运行时输出、下载模型、临时浏览器目录和 E2E 证据均不作为普通源码提交。验证后恢复备份配置，检查工作区，保留原有用户改动；不用 `git reset --hard` 或 `git checkout --` 清理。
+`dist/`、coverage、ZIP/manifest/metafile、生成的 `wrangler.toml`、`config/`、`other/` 运行时输出、下载模型、临时浏览器目录和 E2E 证据均不作为普通源码提交。若显式渲染过临时根配置，验证后恢复备份；检查工作区，保留原有用户改动，不用 `git reset --hard` 或 `git checkout --` 清理。
 
 ## 交付前检查
 
-准备测试配置后，提交前默认执行：
+安装工作区依赖后，提交前默认执行：
 
 ```bash
 mise exec -- pnpm check
