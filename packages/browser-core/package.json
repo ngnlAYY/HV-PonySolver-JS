@@ -35,6 +35,7 @@
     "./status-panel/status-panel-types": "./src/status-panel/status-panel-types.ts",
     "./utils/abort-race": "./src/utils/abort-race.ts",
     "./utils/errors": "./src/utils/errors.ts",
+    "./utils/guards": "./src/utils/guards.ts",
     "./utils/logger": "./src/utils/logger.ts"
   },
   "scripts": {
@@ -50,7 +51,6 @@
     "@typescript/native": "npm:typescript@^7.0.2",
     "jsdom": "^30.0.1",
     "onnxruntime-web": "1.27.0",
-    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "^4.1.12"
   }
 }

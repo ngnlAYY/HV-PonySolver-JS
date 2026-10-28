@@ -95,7 +95,7 @@ sequenceDiagram
 
 RGBA 转 CHW 在写入前一次验证像素数量及两个缓冲区长度，再按 RGB 平面写入。256 项 Float32 归一化表在模块加载时创建，逐帧复用，替代每个通道的除法；全字节值回归保证与原 `value / 255` 写入 Float32 的结果相同，保留非零视图偏移和 alpha 忽略行为。
 
-生产与基准共用严格的 `parseYoloOutputTensor`，不保留跳过非法行的宽松解析入口。候选只维护一次有界 top-N 排名，原地右移替代 `splice` 临时数组；检测列表取原始置信度满足阈值的前缀，保留最高分兜底与稳定同分顺序。阈值判断先于展示舍入，低排名行仍完整校验。结构化响应逐项检查 `detections`/`candidates`，拒绝 structured clone 保留的稀疏数组。
+生产与基准共用严格的 `parseYoloOutputTensor`，不保留跳过非法行的宽松解析入口。候选只维护一次有界 top-N 排名，原地右移替代 `splice` 临时数组；检测列表取原始置信度满足阈值的前缀，保留最高分兜底与稳定同分顺序。阈值判断先于展示舍入，低排名行仍完整校验。结构化响应逐项检查 `detections`/`candidates`，拒绝 structured clone 保留的稀疏数组。Worker 请求、响应、推理结果与扩展协议复用 [utils/guards.ts](../../packages/browser-core/src/utils/guards.ts) 的对象/字段集合检查，各自保留领域校验。
 
 用户脚本的 [onnx-worker-client.ts](../../apps/userscript/src/inference/onnx-worker-client.ts) 注入 [blob-worker.ts](../../apps/userscript/src/inference/blob-worker.ts) 创建的 Worker，并把构建时内联的脚本文本交给它。两个入口分别是：
 
@@ -135,6 +135,8 @@ HTTP `Content-Length` 描述线上编码长度，不等于 Fetch 解压后的字
 同文档跨世界导航在下一次创建、状态更新、历史活动或相关 DOM 恢复时刷新世界标题和历史，复用原面板节点。每次写入绑定发起时的世界；另一世界的迟到成功或失败不能覆盖当前记录或保存错误。返回原世界后，迟到失败仍校对该世界的实时回滚结果，但不恢复旧访问的错误提示。
 
 [HistoryStore](../../packages/browser-core/src/persistence/answer-history-store.ts) 在写入前分配每世界的正安全整数 `sequence`：本实例已分配与当前可见序号的最大值加一，失败可留空洞，重建后从已保存记录恢复。独立键按序号、时间戳、稳定 key 排序裁剪；未互相可见的并发写可同序号，再以后二者排序。没有旧根记录时复用独立键的已排序结果；本实例新序号最高，乐观追加直接前置，不重复排序。非法序号视为损坏，上限耗尽走保存失败通道。无序号旧记录按原时间戳读取，非枚举旧数组保留原顺序；旧根收满每世界 50 条有效记录即停止尾部校验，不构造完整过滤数组，仍不改写旧数据。显示用 `timestamp`/`time` 不单调化。
+
+独立键的解析缓存最多保留 100 项，按 key 与原始序列化值复用；损坏 JSON 同样缓存失败结果，避免重复解析与告警。外部值变化时重新解析，枚举发现键已删除时淘汰缓存；损坏项仍进入已提交快照的清理名单，读取不触发删除。
 
 历史文本各自仍限 1024 个 UTF-16 code unit、每世界仍读 50 条。JSON 防御上限按三个文本字段最坏六字符转义加结构余量计算：单条 19456 字符、双世界旧根 1946624 字符，避免合法引号、反斜杠或控制字符记录被自行裁剪。精确值归 [answer-history-config.ts](../../packages/browser-core/src/persistence/answer-history-config.ts)。追加后的旧根清理只读取一次；读取失败不证明损坏，不删除有效根，也不把已经提交的独立键追加改报失败。
 

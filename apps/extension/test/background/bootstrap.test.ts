@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import type { HostInvoker } from '../../src/background/broker'
 import type * as BrokerModule from '../../src/background/broker'
+import type * as OffscreenModule from '../../src/background/chromium-offscreen'
 import { InferenceHost } from '../../src/host/inference-host'
 import type { RuntimeMessageListener } from '../../src/platform/webextension'
 import {
@@ -10,7 +11,7 @@ import {
   type HostRequest,
   type HostResponse,
 } from '../../src/protocol/messages'
-import { OFFSCREEN_CLAIM_TIMEOUT_MS } from '../../src/protocol/deadlines'
+import { OFFSCREEN_CONTROL_TIMEOUT_MS } from '../../src/protocol/deadlines'
 
 const mocks = vi.hoisted(() => ({
   acquireOffscreenAdmission: vi.fn(),
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   runtimeGetUrl: vi.fn((path: string) => `chrome-extension://extension-id/${path}`),
   runtimeId: vi.fn(() => 'extension-id'),
   sendRuntimeMessage: vi.fn(),
+  getChromiumOffscreenApi: vi.fn(),
 }))
 
 vi.mock('../../src/background/broker', async (importOriginal) => ({
@@ -42,6 +44,7 @@ vi.mock('../../src/platform/webextension', () => ({
   runtimeGetUrl: mocks.runtimeGetUrl,
   runtimeId: mocks.runtimeId,
   sendRuntimeMessage: mocks.sendRuntimeMessage,
+  getChromiumOffscreenApi: mocks.getChromiumOffscreenApi,
 }))
 
 import { registerChromiumBackground } from '../../src/background/chromium-bootstrap'
@@ -378,7 +381,7 @@ describe('target-specific extension bootstraps', () => {
     await expect(pending).rejects.toThrow('推理请求已取消')
     const release = vi.fn()
     completeAdmission(release)
-    await vi.advanceTimersByTimeAsync(OFFSCREEN_CLAIM_TIMEOUT_MS)
+    await vi.advanceTimersByTimeAsync(OFFSCREEN_CONTROL_TIMEOUT_MS)
     expect(release).toHaveBeenCalledTimes(1)
     expect(warning).toHaveBeenCalled()
     expect(mocks.sendRuntimeMessage.mock.calls.filter(([message]) => message.operation === 'request')).toHaveLength(0)
@@ -989,6 +992,68 @@ describe('target-specific extension bootstraps', () => {
     )
     expect(broadcastContentStatus).toHaveBeenCalledTimes(1)
   })
+
+  it.each(['resolve', 'reject'] as const)(
+    'releases admission after a hung idle confirmation and ignores its late %s',
+    async (settlement) => {
+      vi.useFakeTimers()
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const offscreen = await vi.importActual<typeof OffscreenModule>('../../src/background/chromium-offscreen')
+      const closeDocument = vi.fn().mockResolvedValue(undefined)
+      mocks.getChromiumOffscreenApi.mockReturnValue({
+        getContexts: vi.fn().mockResolvedValue([{ contextId: `idle-${settlement}` }]),
+        closeDocument,
+      })
+      mocks.closeOffscreenDocumentIfIdle.mockImplementation(offscreen.closeOffscreenDocumentIfIdle)
+      mocks.offscreenDocumentIdentity.mockReturnValue(`idle-${settlement}`)
+      let resolveLate!: (response: unknown) => void
+      let rejectLate!: (error: Error) => void
+      const late = new Promise((resolve, reject) => {
+        resolveLate = resolve
+        rejectLate = reject
+      })
+      const original = mocks.sendRuntimeMessage.getMockImplementation()!
+      mocks.sendRuntimeMessage.mockImplementation((message: Record<string, unknown>) =>
+        message.operation === 'confirm-idle' && message.generation === 1 ? late : original(message),
+      )
+      registerChromiumBackground()
+      const relay = mocks.addRuntimeMessageListener.mock.calls.at(-1)![0] as RuntimeMessageListener
+      const notifyIdle = (generation: number): void => {
+        relay(
+          { type: OFFSCREEN_MESSAGE_TYPE, operation: 'idle', epoch: 'wake-up', generation },
+          offscreenSender,
+          vi.fn(),
+        )
+      }
+      notifyIdle(1)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.sendRuntimeMessage).toHaveBeenCalledWith(expect.objectContaining({ operation: 'confirm-idle' }))
+      let admitted = false
+      const admission = offscreen.acquireOffscreenAdmission().then((release) => {
+        admitted = true
+        release()
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(admitted).toBe(false)
+      await vi.advanceTimersByTimeAsync(OFFSCREEN_CONTROL_TIMEOUT_MS)
+      expect(admitted).toBe(true)
+      await admission
+      expect(closeDocument).not.toHaveBeenCalled()
+      expect(warning.mock.calls.flat().join(' ')).toContain('空闲确认超时')
+
+      const sent = mocks.sendRuntimeMessage.mock.calls.find(([message]) => message.operation === 'confirm-idle')![0]
+      if (settlement === 'resolve') resolveLate(await original(sent))
+      else rejectLate(new Error('late confirmation failure'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(closeDocument).not.toHaveBeenCalled()
+      notifyIdle(2)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(closeDocument).toHaveBeenCalledOnce()
+      expect(vi.getTimerCount()).toBe(0)
+      warning.mockRestore()
+      vi.useRealTimers()
+    },
+  )
 
   it('relays committed credentials only from the exact Offscreen sender', () => {
     const broadcastCredentialsChanged = vi.fn()

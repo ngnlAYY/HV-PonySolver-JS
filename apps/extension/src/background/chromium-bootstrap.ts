@@ -21,7 +21,9 @@ import {
   type HostRequest,
   type HostResponse,
   type HostStatusUpdate,
+  type OffscreenClaimRequest,
   type OffscreenClaimResponse,
+  type OffscreenIdleConfirmationRequest,
 } from '../protocol/messages'
 import { registerBroker, type BrokerHandle, type BrokerPolicy } from './broker'
 import {
@@ -30,7 +32,7 @@ import {
   hasOffscreenDocument,
   offscreenDocumentIdentity,
 } from './chromium-offscreen'
-import { OFFSCREEN_CLAIM_TIMEOUT_MS } from '../protocol/deadlines'
+import { OFFSCREEN_CONTROL_TIMEOUT_MS } from '../protocol/deadlines'
 
 const serviceWorkerEpoch = (() => {
   try {
@@ -47,24 +49,31 @@ function nextOffscreenRequestId(): string {
   return `sw-${serviceWorkerEpoch}-${offscreenRequestSequence.toString(36)}`.slice(0, 80)
 }
 
+async function sendOffscreenControl(
+  message: OffscreenClaimRequest | OffscreenIdleConfirmationRequest,
+  timeoutMessage: string,
+): Promise<unknown> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(new Error(timeoutMessage)), OFFSCREEN_CONTROL_TIMEOUT_MS)
+  try {
+    return await raceAbort(sendRuntimeMessage(message), controller.signal)
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 async function claimOffscreenHost(signal?: AbortSignal): Promise<OffscreenClaimResponse> {
   const contextId = offscreenDocumentIdentity()
   let promise = contextId !== null && claimedHost?.contextId === contextId ? claimedHost.promise : undefined
   if (!promise) {
-    let timeout: ReturnType<typeof setTimeout> | undefined
-    const expired = new Promise<never>((_resolve, reject) => {
-      timeout = setTimeout(() => reject(new Error('Offscreen 推理 Host 接管超时')), OFFSCREEN_CLAIM_TIMEOUT_MS)
+    promise = sendOffscreenControl(
+      { type: OFFSCREEN_MESSAGE_TYPE, operation: 'claim', epoch: serviceWorkerEpoch },
+      'Offscreen 推理 Host 接管超时',
+    ).then((response) => {
+      if (!isOffscreenClaimResponse(response) || response.epoch !== serviceWorkerEpoch)
+        throw new Error('Offscreen 推理 Host 接管失败')
+      return response
     })
-    promise = Promise.race([
-      sendRuntimeMessage({ type: OFFSCREEN_MESSAGE_TYPE, operation: 'claim', epoch: serviceWorkerEpoch }),
-      expired,
-    ])
-      .then((response) => {
-        if (!isOffscreenClaimResponse(response) || response.epoch !== serviceWorkerEpoch)
-          throw new Error('Offscreen 推理 Host 接管失败')
-        return response
-      })
-      .finally(() => clearTimeout(timeout))
     const attempt = promise
     // 首次创建后尚不知道 contextId 时不缓存；下一次 getContexts 会给出真实身份。
     claimedHost = contextId === null ? null : { contextId, promise }
@@ -122,37 +131,15 @@ function waitForOffscreenResponse(
   signal: AbortSignal,
   offscreenRequestId: string,
 ): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let settled = false
-    const cleanup = (): void => signal.removeEventListener('abort', onAbort)
-    const finish = (callback: () => void): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      cleanup()
-      callback()
-    }
-    const onAbort = (): void => {
-      if (settled) {
-        return
-      }
+  return raceAbort(responsePromise, signal, () => new Error('推理请求已取消'), {
+    onAbort: () => {
       void sendRuntimeMessage({
         type: OFFSCREEN_MESSAGE_TYPE,
         operation: 'cancel',
         epoch: serviceWorkerEpoch,
         requestId: offscreenRequestId,
       }).catch(() => undefined)
-      finish(() => reject(new Error('推理请求已取消')))
-    }
-    signal.addEventListener('abort', onAbort, { once: true })
-    responsePromise.then(
-      (response) => finish(() => resolve(response)),
-      (error: unknown) => finish(() => reject(error)),
-    )
-    if (signal.aborted) {
-      onAbort()
-    }
+    },
   })
 }
 
@@ -204,12 +191,15 @@ function isTrustedOffscreenSender(sender: Readonly<{ id?: string; url?: string; 
 async function confirmAndCloseIdleGeneration(generation: number): Promise<void> {
   await closeOffscreenDocumentIfIdle(async () => {
     await claimOffscreenHost()
-    const response = await sendRuntimeMessage({
-      type: OFFSCREEN_MESSAGE_TYPE,
-      operation: 'confirm-idle',
-      epoch: serviceWorkerEpoch,
-      generation,
-    })
+    const response = await sendOffscreenControl(
+      {
+        type: OFFSCREEN_MESSAGE_TYPE,
+        operation: 'confirm-idle',
+        epoch: serviceWorkerEpoch,
+        generation,
+      },
+      'Offscreen 空闲确认超时',
+    )
     return (
       isOffscreenIdleConfirmationResponse(response) &&
       response.epoch === serviceWorkerEpoch &&

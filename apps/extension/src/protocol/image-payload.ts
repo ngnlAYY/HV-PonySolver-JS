@@ -1,6 +1,7 @@
+import { imagePreprocessConfig } from '@hv-pony-solver/browser-core/inference/inference-config'
 import type { DetectRequest } from './port-messages'
 
-export const MAX_IMAGE_BYTE_LENGTH = 2 * 1024 * 1024
+export const MAX_IMAGE_BYTE_LENGTH = imagePreprocessConfig.maxEncodedBytes
 const MAX_IMAGE_BASE64_LENGTH = Math.ceil(MAX_IMAGE_BYTE_LENGTH / 3) * 4
 
 export function isMimeType(value: unknown): value is string {

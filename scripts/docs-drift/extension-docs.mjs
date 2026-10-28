@@ -71,6 +71,8 @@ export function checkExtensionDocs(extensionPackageJson, browserSupport, readme,
     'PWDEBUG',
     '不传递 Playwright call log',
     '数量与 config 完全一致',
+    'confirm-idle',
+    'OFFSCREEN_CONTROL_TIMEOUT_MS',
   ]) {
     if (!extensionDoc.includes(fact)) errors.push(`extension documentation omits ${fact}`)
   }

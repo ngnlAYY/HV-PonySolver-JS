@@ -261,24 +261,24 @@ export class HistoryStore {
       invalidKeys.push(key)
       return null
     }
-    try {
-      let cached = this.parsedEntries.get(key)
-      if (!cached || cached.raw !== value) {
+    let cached = this.parsedEntries.get(key)
+    if (!cached || cached.raw !== value) {
+      let record: HistoryRecord | null = null
+      try {
         const parsed: unknown = JSON.parse(value)
-        cached = { raw: value, record: isHistoryRecord(parsed) ? parsed : null }
-        this.cacheParsedEntry(key, cached)
+        if (isHistoryRecord(parsed)) record = parsed
+      } catch (error) {
+        warn('读取单条记录失败:', formatErrorMessage(error))
       }
-      if (!cached.record) {
-        invalidKeys.push(key)
-        return null
-      }
-      return { key, record: cached.record }
-    } catch (error) {
-      this.parsedEntries.delete(key)
+      // 损坏值也占用同一有界缓存；外部替换后重新解析，避免重复告警。
+      cached = { raw: value, record }
+      this.cacheParsedEntry(key, cached)
+    }
+    if (!cached.record) {
       invalidKeys.push(key)
-      warn('读取单条记录失败:', formatErrorMessage(error))
       return null
     }
+    return { key, record: cached.record }
   }
 
   private getKeyedRecords(

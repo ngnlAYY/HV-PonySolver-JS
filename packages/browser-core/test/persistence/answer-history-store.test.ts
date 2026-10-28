@@ -153,6 +153,34 @@ describe('HistoryStore', () => {
     expect(repaired.main[0]).toMatchObject({ answers: 'RA(88.8)', elapsed: 99 })
   })
 
+  it('deduplicates malformed entry warnings, observes replacements and still trims corrupt entries', async () => {
+    const storage = new MemoryEnumerableStorage()
+    const key = `${HISTORY_ENTRY_PREFIX}main:corrupt`
+    const store = new HistoryStore(storage)
+    const warnings = vi.mocked(globalThis.console.warn).mockClear()
+    storage.values.set(key, '{bad json')
+    expect(store.get('main')).toEqual([])
+    expect(store.get('main')).toEqual([])
+    expect(warnings).toHaveBeenCalledTimes(1)
+
+    storage.values.set(key, '{different bad json')
+    expect(store.get('main')).toEqual([])
+    expect(store.get('main')).toEqual([])
+    expect(warnings).toHaveBeenCalledTimes(2)
+
+    storage.values.set(key, JSON.stringify(validSuccessRecord))
+    expect(store.get('main')).toEqual([validSuccessRecord])
+    storage.values.delete(key)
+    expect(store.get('main')).toEqual([])
+    storage.values.set(key, '{bad json')
+    expect(store.get('main')).toEqual([])
+    expect(warnings).toHaveBeenCalledTimes(3)
+
+    await store.add('main', validManualRecord).persisted
+    expect(storage.values.has(key)).toBe(false)
+    expect(warnings).toHaveBeenCalledTimes(3)
+  })
+
   it('keeps up to fifty legacy records', async () => {
     const store = new HistoryStore(localStorage)
     const persisted: Promise<HistoryRecord[]>[] = []

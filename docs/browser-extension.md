@@ -105,7 +105,7 @@ flowchart TD
 
 Broker 在监听消息或调用 Host 前校验本扩展 ID 与实际 `sender.url`，不以 `sender.tab.url` 兜底。内容 Port 仅接受两个 Hentaiverse HTTPS 标准端口 origin，拒绝 URL 凭据；设置 Port 仅接受本扩展设置页及 query/hash。若提供 `sender.origin`，须与发送页面一致且非 opaque（`null`）；若提供 `frameId`，须为 0。字段缺省不免除 URL/扩展 ID 校验。
 
-内容脚本不接收 Key 或模型字节。图片只在浏览器上下文间传递，原始图片最多 2 MiB，Base64 按编码后上限另行校验。HTTP Content-Type 验证后规范为小写基础 MIME，消息仍使用精确白名单。Firefox 隔离世界以 `FileReader.readAsDataURL()` 读 Blob，避免依赖可能被拒绝的 `Blob.arrayBuffer()`。
+内容脚本不接收 Key 或模型字节。图片只在浏览器上下文间传递，原始图片最多 2 MiB，直接复用核心 `imagePreprocessConfig.maxEncodedBytes`；Base64 按编码后上限另行校验。HTTP Content-Type 验证后规范为小写基础 MIME，消息仍使用精确白名单。Firefox 隔离世界以 `FileReader.readAsDataURL()` 读 Blob，避免依赖可能被拒绝的 `Blob.arrayBuffer()`。
 
 模型使用可转移 `ArrayBuffer`，不转 Base64 或分片；Worker 用 WASM Execution Provider 串行推理。两模式共用内容脚本：DOM、同源图片、历史、勾选与原生提交。
 
@@ -113,7 +113,7 @@ Broker 在监听消息或调用 Host 前校验本扩展 ID 与实际 `sender.url
 
 每个内容 Port 最多保留两个 detect 和两个并行 prepare；后台全局最多六个 detect、四个 prepare。设置 Port 的清除 Key 另限每 Port 一个、后台全局两个。Chromium Offscreen 也独立保留两个清除槽位，不与验证、下载、额度查询的两个普通槽位争用，确保普通池满时仍可抢占。取消或断连不立即释放容量，具体结算边界见[扩展运行时](architecture/extension-runtime.md#一次识别请求的生命周期)。这些计数随后台代际重置，不是整个浏览器会话的永久限额。取消只影响指定请求；尚未开始的 detect 立即从队列移除并释放图片，运行中的请求结算或终止后才执行下一项。
 
-Offscreen claim 仅在同一 epoch/contextId 复用，等待者共享握手、独立取消；失败、超时、文档替换或后台重启后重新 claim，每次启动安排空闲回收。Firefox 直接持有 Host，不声明 `background.persistent`。细节见[扩展运行时](architecture/extension-runtime.md)。
+Offscreen claim 仅在同一 epoch/contextId 复用，等待者共享握手、独立取消；失败、超时、文档替换或后台重启后重新 claim，每次启动安排空闲回收。`claim` 与 `confirm-idle` 共用 `OFFSCREEN_CONTROL_TIMEOUT_MS` 上限；空闲确认超时释放关闭等待，迟到响应不关闭文档，后续请求与有限退避仍可继续。Firefox 直接持有 Host，不声明 `background.persistent`。细节见[扩展运行时](architecture/extension-runtime.md)。
 
 ## Model and runtime ownership
 

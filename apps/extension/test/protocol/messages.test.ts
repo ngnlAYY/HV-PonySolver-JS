@@ -159,49 +159,26 @@ describe('extension protocol', () => {
     // Padding distinguishes that valid boundary from MAX + 1 bytes at the same encoded length.
     const maxBase64Length = Math.ceil(MAX_IMAGE_BYTE_LENGTH / 3) * 4
     const exactLimitBase64 = `${'A'.repeat(maxBase64Length - 1)}=`
-    expect(
-      isHostRequest({
-        protocol: PROTOCOL_VERSION,
-        type: 'detect',
-        requestId: 'request-1',
-        imageBase64: exactLimitBase64,
-        mimeType: 'image/png',
-      }),
-    ).toBe(true)
-    expect(
-      isHostRequest({
-        protocol: PROTOCOL_VERSION,
-        type: 'detect',
-        requestId: 'request-1b',
-        imageBase64: 'A'.repeat(maxBase64Length),
-        mimeType: 'image/png',
-      }),
-    ).toBe(false)
-    expect(
-      isHostRequest({
-        protocol: PROTOCOL_VERSION,
-        type: 'detect',
-        requestId: 'request-1c',
-        imageBase64: 'A'.repeat(maxBase64Length + 4),
-        mimeType: 'image/png',
-      }),
-    ).toBe(false)
-    expect(
-      isHostRequest({
-        protocol: PROTOCOL_VERSION,
-        type: 'verify-key',
-        requestId: 'request-2',
-        candidateKey: '',
-      }),
-    ).toBe(false)
-    expect(
-      isHostRequest({
-        protocol: PROTOCOL_VERSION,
-        type: 'verify-key',
-        requestId: 'request-2b',
-        candidateKey: 'not-a-64-character-hex-key',
-      }),
-    ).toBe(false)
+    for (const [imageBase64, valid] of [
+      [exactLimitBase64, true],
+      ['A'.repeat(maxBase64Length), false],
+      ['A'.repeat(maxBase64Length + 4), false],
+    ] as const) {
+      expect(
+        isHostRequest({
+          protocol: PROTOCOL_VERSION,
+          type: 'detect',
+          requestId: 'request-1',
+          imageBase64,
+          mimeType: 'image/png',
+        }),
+      ).toBe(valid)
+    }
+    for (const candidateKey of ['', 'not-a-64-character-hex-key']) {
+      expect(
+        isHostRequest({ protocol: PROTOCOL_VERSION, type: 'verify-key', requestId: 'request-2', candidateKey }),
+      ).toBe(false)
+    }
     expect(isHostRequest({ protocol: 'unknown', type: 'prepare', requestId: 'request-3' })).toBe(false)
     expect(
       isHostRequest({
@@ -228,24 +205,11 @@ describe('extension protocol', () => {
       type: 'clear-key',
       requestId: 'clear-1',
     } as const
-    expect(isHostRequest(clearRequest)).toBe(true)
-    expect(isHostRequest({ ...clearRequest, candidateKey: 'a'.repeat(64) })).toBe(false)
-
-    const downloadRequest = {
-      protocol: PROTOCOL_VERSION,
-      type: 'download-model',
-      requestId: 'download-1',
-    } as const
-    expect(isHostRequest(downloadRequest)).toBe(true)
-    expect(isHostRequest({ ...downloadRequest, candidateKey: 'a'.repeat(64) })).toBe(false)
-
-    const quotaRequest = {
-      protocol: PROTOCOL_VERSION,
-      type: 'query-model-quota',
-      requestId: 'quota-1',
-    } as const
-    expect(isHostRequest(quotaRequest)).toBe(true)
-    expect(isHostRequest({ ...quotaRequest, candidateKey: 'a'.repeat(64) })).toBe(false)
+    for (const type of ['clear-key', 'download-model', 'query-model-quota'] as const) {
+      const request = { ...clearRequest, type }
+      expect(isHostRequest(request)).toBe(true)
+      expect(isHostRequest({ ...request, candidateKey: 'a'.repeat(64) })).toBe(false)
+    }
 
     const claim = {
       type: 'hv-pony-solver:offscreen-request',

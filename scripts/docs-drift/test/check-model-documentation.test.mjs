@@ -5,26 +5,28 @@ import { parseOnnxRuntimeAssetsManifest } from '../check-docs-drift.mjs'
 import { readFile, runCheck, withFixture, writeFile } from './fixtures.mjs'
 
 for (const [document, facts] of [
-  // 每篇专题保留负向覆盖；不为同一 includes 分支逐一重跑整仓文档扫描。
-  ['docs/architecture/browser-runtime.md', ['取消不等待防抖', '外层 fieldset']],
+  ['docs/architecture/browser-runtime.md', ['取消不等待防抖', '外层 fieldset', '损坏 JSON']],
   ['docs/model-cache-strategy.md', ['16 KiB']],
   ['docs/onnx-runtime.md', ['Content-Length']],
 ]) {
-  for (const fact of facts) {
-    test(`browser runtime contract cannot be replaced by a README mention: ${document} ${fact}`, async () => {
-      await withFixture(async (root) => {
-        const path = join(root, document)
-        const source = await readFile(path, 'utf8')
+  test(`browser runtime contracts cannot be replaced by README mentions: ${document}`, async () => {
+    await withFixture(async (root) => {
+      const path = join(root, document)
+      let source = await readFile(path, 'utf8')
+      for (const fact of facts) {
         assert.ok(source.includes(fact), `fixture must document ${fact}`)
-        await writeFile(path, source.replaceAll(fact, 'omitted-io-contract'))
-        const readmePath = join(root, 'README.md')
-        await writeFile(readmePath, `${await readFile(readmePath, 'utf8')}\n${fact}\n`)
-        const result = await runCheck(root)
-        assert.equal(result.exitCode, 1)
+        source = source.replaceAll(fact, 'omitted-io-contract')
+      }
+      await writeFile(path, source)
+      const readmePath = join(root, 'README.md')
+      await writeFile(readmePath, `${await readFile(readmePath, 'utf8')}\n${facts.join('\n')}\n`)
+      const result = await runCheck(root)
+      assert.equal(result.exitCode, 1)
+      for (const fact of facts) {
         assert.ok(result.stderr.includes(`${document}`) && result.stderr.includes(fact), result.stderr)
-      })
+      }
     })
-  }
+  })
 }
 
 test('fails clearly when the Model Worker probe example uses a shell placeholder', async () => {

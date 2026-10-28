@@ -11,7 +11,7 @@ import { imagePreprocessConfig } from './inference-config'
 import type { WorkerMessage, WorkerRequest } from './inference-types'
 import { parseYoloOutputTensor } from './yolo-output-parser'
 import { formatErrorMessage } from '../utils/errors'
-import { isRecordObject } from '../utils/guards'
+import { hasExactKeys, isRecordObject } from '../utils/guards'
 
 const INPUT_SIZE = imagePreprocessConfig.imageSize
 const INPUT_NAME = 'images'
@@ -39,11 +39,6 @@ class FatalInferenceError extends Error {
 
 function isSafeRequestId(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
-}
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && keys.every((key) => expected.includes(key))
 }
 
 function isWorkerRequest(value: unknown): value is WorkerRequest {

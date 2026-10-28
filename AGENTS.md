@@ -43,6 +43,7 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - `browser-core` 可依赖 `shared`；存储、网络和页面能力通过平台接口传入，不依赖应用实现。
 - 用户脚本和扩展可依赖共用包，彼此不得导入源码；Worker 只依赖 `shared` 纯契约，不导入浏览器代码。
 - 超时、面板、模型资产与协议常量由[权威模块](docs/architecture/overview.md#权威模块与变更入口)管理，不在调用方复制。
+- Worker、推理结果与扩展协议的对象/字段集合校验复用 `browser-core/utils/guards`，各层保留领域与来源校验；扩展图片字节上限复用 `imagePreprocessConfig.maxEncodedBytes`。
 - 共用包保留显式 exports；新增公共子路径先确认调用者，不恢复通配导出或以深层相对路径绕过边界。
 - 跨包导入或移动文件后运行 `architecture:check`。缺失受保护目录须失败关闭；覆盖 `.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs`、静态模板 import、require/import-equals，以及反向类型依赖 `import type`、`import('…').Type`、`typeof import('…')`。
 
@@ -80,11 +81,11 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - GM Key 新设置/清除先淘汰未写入的旧验证，不能让迟到验证恢复已清除或覆盖新 Key。同页实际写入串行，等待旧写入结算；前次失败或提交回调挂起不得阻断后续写入，不假称撤销在途 GM 操作或提供跨标签事务。实际提交后才取消并等待旧未完成初始化，再恢复当前失败目标；已就绪会话复用。取消输入、验证或存储失败不恢复，旧提交和销毁后回调不得唤醒旧 App。
 - 扩展 Key 事务提交独立驱动共享 Host 的同类恢复，再通知内容页，不依赖原请求成功响应。调用方取消仍报告取消，不能声称撤销已提交变更；提交前回滚不通知，关闭后的 Host 不复活，已就绪会话可复用。
 - 扩展 Key IndexedDB 的异常 `close` 与 `versionchange` 均使旧连接和未决事务失效，下次操作重开；旧连接迟到事件不得影响新连接。下载、准备及额度查询取消贯穿 Key 打开与读取，迟到连接不得启动已取消的读取。普通设置首次加载前的用户编辑身份独立于字段值，改回初始显示值仍不能被迟到快照覆盖；保存 dirty 同时比较已提交与在途值，回退提交和失败后的重复提交不得丢失。
-- 内容设置镜像按 key 合并初始化变更，限制超时、取消和不同 key 数量。快照失败清理监听器；预取消不读快照或监听。销毁后不启动排队写入/删除，已发起调用按真实结果结算。历史解析缓存观察外部写入并保留写后最终校对。
+- 内容设置镜像按 key 合并初始化变更，限制超时、取消和不同 key 数量。快照失败清理监听器；预取消不读快照或监听。销毁后不启动排队写入/删除，已发起调用按真实结果结算。历史解析缓存观察外部写入并保留写后最终校对；损坏 JSON 同样进入有界缓存，值变化重解析，删除后淘汰，仍参与已提交快照清理。
 - 原生 `fetch` 通过已有解析辅助函数调用，保留接收者，避免 `Illegal invocation`。
 - 消息严格校验 schema、来源、大小、超时和取消，`unknown` 不直接断言可信；推理列表逐项校验，不能让稀疏数组绕过检查。Broker 只用实际 `sender.url`，不以 `sender.tab.url` 兜底；提供的 `sender.origin` 须一致且非 opaque，提供 `frameId` 时须为 0。内容仅限两个 Hentaiverse HTTPS 标准端口 origin，设置仅限本扩展设置页。
 - Broker 的清除 Key 使用独立每 Port/全局限额，Chromium Offscreen 也使用独立清除池，不妨碍清除抢占验证；取消或断连不立即释放槽位，Broker 等 Host 返回或自身超时结算，Offscreen 等 Host 实际结算。设置页只读普通字段所需键，内容镜像仍读取完整命名空间快照。
-- Port 断连在回调内经平台助手同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。BFCache 断连取消未决请求，恢复后按需连接，不自动重放下载或 Key 操作。Offscreen 同一空闲代际的确认不重置关闭重试次数或退避预算，新活动/代际才恢复预算；新 epoch 接管已空闲文档须迁移剩余通知，取消后迟到创建也须独立有界 claim，不重放原请求。
+- Port 断连在回调内经平台助手同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。BFCache 断连取消未决请求，恢复后按需连接，不自动重放下载或 Key 操作。Offscreen 同一空闲代际的确认不重置关闭重试次数或退避预算，新活动/代际才恢复预算；新 epoch 接管已空闲文档须迁移剩余通知，取消后迟到创建也须独立有界 claim，不重放原请求。claim 与 confirm-idle 都须有界；空闲确认超时释放关闭等待，迟到响应不能关闭文档。
 - RGBA 转 CHW 在写入前验证输入、输出和像素数量；归一化表覆盖全部字节值，保持原 Float32 结果与 RGB 平面顺序。
 - 图片消息有明确上限；HTTP Content-Type 严格校验后规范化基础 MIME，消息保持精确白名单。排队 detect 取消即移除并释放图片，不等队头。模型用可转移 `ArrayBuffer`，不改成无界 Base64 或重复拷贝。
 - 已取消准备退场时，新 prepare/detect 不得继承旧调用方取消；等待可独立取消，销毁后不得读取模型或创建 Worker。

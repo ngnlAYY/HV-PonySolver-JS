@@ -52,6 +52,7 @@ function checkUserscriptConfigDocs(inferenceConfigSource, readme) {
     '选择器属性 `id/name`',
     '旧验证',
     '异常关闭',
+    '损坏 JSON',
   ]) {
     if (!readme.includes(fact)) errors.push(`docs/architecture/browser-runtime.md must mention ${fact}`)
   }

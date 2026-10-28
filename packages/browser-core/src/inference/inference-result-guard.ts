@@ -1,12 +1,7 @@
 import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
 import { yoloOutputConfig } from './inference-config'
 import type { Detection, YoloParseResult } from './inference-types'
-import { isRecordObject } from '../utils/guards'
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && keys.every((key) => expected.includes(key))
-}
+import { hasExactKeys, isRecordObject } from '../utils/guards'
 
 function isAnswerCode(value: unknown): value is AnswerCode {
   return typeof value === 'string' && ANSWER_CODES.includes(value as AnswerCode)

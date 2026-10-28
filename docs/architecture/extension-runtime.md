@@ -94,7 +94,7 @@ Firefox 注入回调、Chromium Offscreen 发送严格来源校验的 runtime �
 2. Broker/Offscreen 将取消传播到 Host，保留并发槽位直至 Host 结算；Broker 也可在自身超时后释放。过期响应不会覆盖新请求。
 3. Host 将取消传给模型缓存、网络、IndexedDB 事务和推理 Worker；尚未开始的 detect 从可移除队列中直接删除并释放图片，不再保留到队头完成。运行中的 detect 仍等待 Worker 结束或取消宽限到期才放行下一项；销毁路径同时拒绝排队项并终止所有活动模型意图。
 
-Port 断开会拒绝该 Port 上所有未决内容请求并允许下一次请求重新连接。Chromium 后台重启后，新的 epoch 会使旧 Offscreen 请求失效，再由新请求重新 claim；空闲 Offscreen 关闭失败会用有限次数的指数退避重试。同一空闲代际的 confirm-idle 只确认空闲，不重置退避或次数预算；新 epoch 接管已 idle 文档时迁移剩余通知，首次关闭失败仍可继续退避。新活动/新代际才重新获得预算。创建期间取消不重放原请求；迟到文档独立执行受现有 claim 超时约束的接管，释放 admission 后进入空闲回收。Firefox 页面卸载直接销毁 Host。有关超时层级的权威说明见 [`src/protocol/deadlines.ts`](../../apps/extension/src/protocol/deadlines.ts)。
+Port 断开会拒绝该 Port 上所有未决内容请求并允许下一次请求重新连接。Chromium 后台重启后，新的 epoch 会使旧 Offscreen 请求失效，再由新请求重新 claim；空闲 Offscreen 关闭失败会用有限次数的指数退避重试。同一空闲代际的 confirm-idle 只确认空闲，不重置退避或次数预算；新 epoch 接管已 idle 文档时迁移剩余通知，首次关闭失败仍可继续退避。新活动/新代际才重新获得预算。创建期间取消不重放原请求；迟到文档独立执行受现有 claim 超时约束的接管，释放 admission 后进入空闲回收。`claim` 与 `confirm-idle` 均受 `OFFSCREEN_CONTROL_TIMEOUT_MS` 的 5 秒上限约束；空闲确认超时释放关闭等待，后续准入与退避可继续，迟到结果不能关闭文档。业务请求的取消等待复用核心 `raceAbort`，仍向原 epoch/request id 发送取消。Firefox 页面卸载直接销毁 Host。有关超时层级的权威说明见 [`src/protocol/deadlines.ts`](../../apps/extension/src/protocol/deadlines.ts)。
 
 所有 `onDisconnect` 回调通过 [readPortDisconnectError](../../apps/extension/src/platform/webextension-runtime.ts) 同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。失效 Port 也先读取再判身份，不能推迟到 Promise continuation，否则可能报告 `Unchecked runtime.lastError`。内容/设置页保留原因并拒绝未决请求，Broker 取消 Host 工作，不为预期页面离开额外记日志。
 

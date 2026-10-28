@@ -11,7 +11,7 @@ import type {
   WorkerResponse,
 } from './inference-types'
 import { formatErrorMessage } from '../utils/errors'
-import { isRecordObject } from '../utils/guards'
+import { hasAllowedKeys, hasExactKeys, isRecordObject } from '../utils/guards'
 
 type PendingRequest = Readonly<{
   requestType: WorkerRequestPayload['type']
@@ -19,20 +19,6 @@ type PendingRequest = Readonly<{
   reject: (error: unknown) => void
   timeoutId: ReturnType<typeof setTimeout>
 }>
-
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Object.keys(value)
-  return keys.length === expected.length && keys.every((key) => expected.includes(key))
-}
-
-function hasAllowedKeys(
-  value: Record<string, unknown>,
-  required: readonly string[],
-  optional: readonly string[],
-): boolean {
-  const allowed = new Set([...required, ...optional])
-  return required.every((key) => key in value) && Object.keys(value).every((key) => allowed.has(key))
-}
 
 function isWorkerErrorResponse(
   message: Record<string, unknown>,
