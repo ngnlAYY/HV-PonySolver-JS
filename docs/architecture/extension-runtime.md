@@ -42,7 +42,7 @@
 
 [Broker](../../apps/extension/src/background/broker.ts) 在监听消息前校验扩展 ID、实际 `sender.url` 与 Port 名称，再校验 schema/request id 并按端口与后台代际限流。它不以 `sender.tab.url` 兜底；`sender.origin`、`frameId` 与 HTTPS origin 的规则见[来源边界](../browser-extension.md#runtime-architecture)。每个 Host 调用绑定 `AbortSignal`，断连、取消或超时终止对应请求。单向状态广播不结算请求；凭证版本同时广播与持久化，供下一代内容脚本恢复。
 
-设置 Port 的 `clear-key` 与验证/下载各自限流：每 Port 最多一个清除、后台全局最多两个。Chromium Offscreen 同样保留两个独立清除槽位，验证、下载和额度查询共用另外两个普通槽位；普通池饱和不能阻止清除抢占旧意图。取消或断连不立即释放槽位：Broker 等 Host 返回或自身期限结算，Offscreen 等 Host 实际结算。实际 Key 存储另有打开/事务超时；若注入的依赖永久忽略取消和超时，Broker 限流不保证其内部尾链绝对有界。
+Broker 通过按请求类型穷尽定义的策略表统一读取端口/全局上限、超时和繁忙提示；计数仍按请求类型独立，取得与释放走同一条路径。设置 Port 的 `clear-key` 与验证/下载各自限流：每 Port 最多一个清除、后台全局最多两个。Chromium Offscreen 同样保留两个独立清除槽位，验证、下载和额度查询共用另外两个普通槽位；普通池饱和不能阻止清除抢占旧意图。取消或断连不立即释放槽位：Broker 等 Host 返回或自身期限结算，Offscreen 等 Host 实际结算。实际 Key 存储另有打开/事务超时；若注入的依赖永久忽略取消和超时，Broker 限流不保证其内部尾链绝对有界。
 
 Chromium service worker 不持有推理会话。[chromium-bootstrap.ts](../../apps/extension/src/background/chromium-bootstrap.ts) 每次启动生成 epoch 并接管匹配的 Offscreen context；[chromium-offscreen.ts](../../apps/extension/src/background/chromium-offscreen.ts) 管理创建、准入与空闲关闭。[Offscreen 入口](../../apps/extension/src/offscreen/offscreen-bootstrap.ts) 校验来源/epoch，维护活动请求、取消历史和空闲通知退避，销毁时终止 Host。Firefox 的 [bootstrap](../../apps/extension/src/background/firefox-bootstrap.ts) 在 background script 直接持有 Host。
 
@@ -56,7 +56,7 @@ Chromium service worker 不持有推理会话。[chromium-bootstrap.ts](../../ap
 
 [remote-inference-host.ts](../../apps/extension/src/host/remote-inference-host.ts) 组装模型缓存与 Key IndexedDB；下载校验并写入后才确认额度。下载、准备和额度查询的取消信号贯穿已保存 Key 的 IndexedDB 打开与读取事务；等待打开时已取消，迟到连接不能再启动 Key 读取。[远程设置页](../../apps/extension/src/options/remote.ts) 经独立 options Port 验证、查询、下载或清除。候选 Key 只短暂经过该 Port、Broker 与 Host 内存，不进入内容消息、普通存储、URL 或日志。
 
-[packaged-inference-host.ts](../../apps/extension/src/host/packaged-inference-host.ts) 只组装包内资产，不构造远程能力、不读改旧 Key、不声明模型服务 Host 权限；[设置页](../../apps/extension/src/options/packaged.ts) 禁用 Key 控件。[packaged-asset.ts](../../apps/extension/src/host/packaged-asset.ts) 校验状态、重定向、声明/实际长度及 SHA-256。确定性模型/WASM 完整性错误经严格 Worker 协议保留永久分类，不自动重试；网络与取消另行分类。
+[packaged-inference-host.ts](../../apps/extension/src/host/packaged-inference-host.ts) 只组装包内资产，不构造远程能力、不读改旧 Key、不声明模型服务 Host 权限；[设置页](../../apps/extension/src/options/packaged.ts) 禁用 Key 控件。[packaged-asset.ts](../../apps/extension/src/host/packaged-asset.ts) 校验状态、重定向、声明/实际长度及 SHA-256。确定性模型/WASM 完整性错误经严格 Worker 协议保留永久分类，不自动重试；网络与取消另行分类。已取消的内置资产请求不启动 Fetch；Fetch、正文和摘要等待均响应取消，忽略信号的 Fetch 迟到返回时尽力取消正文，不等待清理 Promise。
 
 两模式共用内容脚本、Broker、协议、Worker 和普通设置；远程专属模块不得进入内置产物，可执行资产一律随包分发。完整清单/CSP/HTML 审计见[权限契约](../browser-extension.md#permission-matrix)，故障注入覆盖双浏览器、双模式的 `scripts/build/inventory-security.test.mjs`。
 
@@ -91,7 +91,7 @@ Firefox 注入回调、Chromium Offscreen 发送严格来源校验的 runtime �
 取消分为三层：
 
 1. 内容或设置页的 `AbortSignal` 先让本地 lifecycle 结算，并尽力发送 `cancel`。
-2. Broker/Offscreen 将取消传播到 Host；活动请求从并发表中移除，过期响应不会覆盖新请求。
+2. Broker/Offscreen 将取消传播到 Host，保留并发槽位直至 Host 结算；Broker 也可在自身超时后释放。过期响应不会覆盖新请求。
 3. Host 将取消传给模型缓存、网络、IndexedDB 事务和推理 Worker；尚未开始的 detect 从可移除队列中直接删除并释放图片，不再保留到队头完成。运行中的 detect 仍等待 Worker 结束或取消宽限到期才放行下一项；销毁路径同时拒绝排队项并终止所有活动模型意图。
 
 Port 断开会拒绝该 Port 上所有未决内容请求并允许下一次请求重新连接。Chromium 后台重启后，新的 epoch 会使旧 Offscreen 请求失效，再由新请求重新 claim；空闲 Offscreen 关闭失败会用有限次数的指数退避重试。同一空闲代际的 confirm-idle 只确认空闲，不重置退避或次数预算；新 epoch 接管已 idle 文档时迁移剩余通知，首次关闭失败仍可继续退避。新活动/新代际才重新获得预算。创建期间取消不重放原请求；迟到文档独立执行受现有 claim 超时约束的接管，释放 admission 后进入空闲回收。Firefox 页面卸载直接销毁 Host。有关超时层级的权威说明见 [`src/protocol/deadlines.ts`](../../apps/extension/src/protocol/deadlines.ts)。

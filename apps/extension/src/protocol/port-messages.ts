@@ -25,12 +25,7 @@ export type KeyIntentRequest = VerifyKeyRequest | ClearKeyRequest | QueryModelQu
 export type SerializedModelRequest = KeyIntentRequest | DownloadModelRequest
 export type HostRequest = PrepareRequest | DownloadModelRequest | DetectRequest | KeyIntentRequest
 
-/**
- * Asks the broker to abort one still-active request from the same Port.
- *
- * Unlike a Port disconnect this is request-scoped: it frees the queued or
- * running work without disturbing sibling requests on the same Port.
- */
+/** 只取消同一 Port 的指定请求；并发槽位按 Host/超时结算释放，不影响其他请求。 */
 export type CancelRequest = RequestBase & Readonly<{ type: 'cancel'; cancelRequestId: string }>
 
 export type HostSuccessResponse = RequestBase &

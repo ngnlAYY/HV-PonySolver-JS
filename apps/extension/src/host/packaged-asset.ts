@@ -1,16 +1,16 @@
 import { ModelIntegrityVerificationError } from '@hv-pony-solver/browser-core/model/permanent-model-error'
 import { resolveFetchImplementation } from '@hv-pony-solver/browser-core/platform/fetch'
-import { cancelByteStream, readBoundedByteStream, sha256Hex } from '@hv-pony-solver/browser-core/platform/byte-stream'
+import {
+  cancelByteStream as cancelBody,
+  readBoundedByteStream,
+  sha256Hex,
+} from '@hv-pony-solver/browser-core/platform/byte-stream'
 import { raceAbort } from '@hv-pony-solver/browser-core/utils/abort-race'
 
 export type PackagedAssetIntegrity = Readonly<{
   byteLength: number
   sha256: string
 }>
-
-async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void> {
-  cancelByteStream(body)
-}
 
 function declaredLength(response: Response, label: string): number | null {
   const value = response.headers.get('content-length')
@@ -31,7 +31,7 @@ function abortError(label: string): Error {
   return new Error(`${label} 加载已取消`)
 }
 
-function waitForAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined, label: string): Promise<T> {
+function waitForAbort<T>(promise: PromiseLike<T>, signal: AbortSignal | undefined, label: string): Promise<T> {
   return raceAbort(promise, signal, () => abortError(label))
 }
 
@@ -45,7 +45,7 @@ async function readExactBody(
     expectedByteLength,
     maxByteLength: expectedByteLength,
     sizeError: () => new ModelIntegrityVerificationError(`${label} 大小校验失败`),
-    wait: (promise) => raceAbort(promise, signal, () => abortError(label)),
+    wait: (promise) => waitForAbort(promise, signal, label),
   })
 }
 
@@ -56,17 +56,23 @@ export async function loadPackagedAsset(
   fetchImpl?: typeof fetch,
   signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
+  if (signal?.aborted) throw abortError(label)
   const init: RequestInit = { cache: 'force-cache', redirect: 'error' }
   if (signal) {
     init.signal = signal
   }
-  const response = await resolveFetchImplementation(fetchImpl)(url, init)
+  const pendingResponse = resolveFetchImplementation(fetchImpl)(url, init)
+  const response = await waitForAbort(pendingResponse, signal, label).catch((error: unknown) => {
+    // Fetch 可能忽略取消；调用方先退出，迟到的正文仍须释放。
+    void pendingResponse.then((lateResponse) => cancelBody(lateResponse.body)).catch(() => undefined)
+    throw error
+  })
   if (signal?.aborted) {
-    await cancelBody(response.body)
-    throw new Error(`${label} 加载已取消`)
+    cancelBody(response.body)
+    throw abortError(label)
   }
   if (!response.ok) {
-    await cancelBody(response.body)
+    cancelBody(response.body)
     throw new Error(`${label} 读取失败: HTTP ${response.status}`)
   }
 
@@ -74,11 +80,11 @@ export async function loadPackagedAsset(
   try {
     contentLength = declaredLength(response, label)
   } catch (error) {
-    await cancelBody(response.body)
+    cancelBody(response.body)
     throw error
   }
   if (contentLength !== null && contentLength !== integrity.byteLength) {
-    await cancelBody(response.body)
+    cancelBody(response.body)
     throw new ModelIntegrityVerificationError(`${label} 大小校验失败`)
   }
   if (!response.body) {

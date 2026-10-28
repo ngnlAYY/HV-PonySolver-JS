@@ -456,88 +456,78 @@ describe('broker queue and privilege boundaries', () => {
     expect(invokeHost).not.toHaveBeenCalled()
   })
 
-  it('allows model downloads only from options Ports and bounds their concurrency', async () => {
-    const pending = new Map<string, (response: HostResponse) => void>()
-    const invokeHost = vi.fn(
-      (request: { requestId: string }) =>
-        new Promise<HostResponse>((resolve) => {
-          pending.set(request.requestId, resolve)
+  it.each([
+    ['download-model', downloadModelRequest, MAX_PORT_DOWNLOAD_MODEL_REQUESTS, MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS, ''],
+    [
+      'query-model-quota',
+      queryModelQuotaRequest,
+      MAX_PORT_QUERY_MODEL_QUOTA_REQUESTS,
+      MAX_GLOBAL_QUERY_MODEL_QUOTA_REQUESTS,
+      '本月模型下载额度：已用 0/5 次，剩余 5 次',
+    ],
+  ] as const)(
+    'restricts %s to options Ports and releases per-Port/global capacity',
+    async (_kind, request, portLimit, globalLimit, notice) => {
+      vi.useFakeTimers()
+      const pending = new Map<string, (response: HostResponse) => void>()
+      const invokeHost = vi.fn(
+        (request: HostRequest) =>
+          new Promise<HostResponse>((resolve) => {
+            pending.set(request.requestId, resolve)
+          }),
+      )
+      registerBroker(invokeHost)
+      const clients = Array.from({ length: globalLimit + 1 }, () =>
+        port(OPTIONS_PORT_NAME, {
+          id: 'extension-id',
+          url: 'moz-extension://extension-id/options/options.html',
         }),
-    )
-    registerBroker(invokeHost)
-    const options = port(OPTIONS_PORT_NAME, {
-      id: 'extension-id',
-      url: 'moz-extension://extension-id/options/options.html',
-    })
-    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
-    platformMocks.connectListener?.(options)
-    platformMocks.connectListener?.(content)
+      )
+      for (const client of clients) platformMocks.connectListener?.(client)
+      const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+      platformMocks.connectListener?.(content)
 
-    options.emitMessage(downloadModelRequest(0))
-    options.emitMessage(downloadModelRequest(1))
-    expect(MAX_PORT_DOWNLOAD_MODEL_REQUESTS).toBe(1)
-    expect(MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS).toBe(2)
-    expect(invokeHost).toHaveBeenCalledTimes(1)
-    expect(options.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: 'download-1', ok: false, error: expect.stringContaining('繁忙') }),
-    )
+      for (let index = 0; index < globalLimit; index += 1) {
+        clients[Math.floor(index / portLimit)]!.emitMessage(request(index))
+      }
+      expect(invokeHost).toHaveBeenCalledTimes(globalLimit)
+      clients[0]!.emitMessage(request(100))
+      clients[globalLimit]!.emitMessage(request(200))
+      for (const [client, id] of [
+        [clients[0]!, 100],
+        [clients[globalLimit]!, 200],
+      ] as const) {
+        expect(client.postMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            requestId: request(id).requestId,
+            ok: false,
+            error: expect.stringContaining('繁忙'),
+          }),
+        )
+      }
+      content.emitMessage(request(300))
+      expect(content.disconnect).toHaveBeenCalledOnce()
+      expect(invokeHost).toHaveBeenCalledTimes(globalLimit)
 
-    content.emitMessage(downloadModelRequest(2))
-    expect(content.disconnect).toHaveBeenCalledTimes(1)
-    expect(invokeHost).toHaveBeenCalledTimes(1)
+      const firstId = invokeHost.mock.calls[0]![0].requestId
+      const response: HostResponse = {
+        protocol: PROTOCOL_VERSION,
+        type: 'result',
+        requestId: firstId,
+        ok: true,
+        ...(notice ? { notice } : {}),
+      }
+      pending.get(firstId)?.(response)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(clients[0]!.postMessage).toHaveBeenCalledWith(response)
+      clients[0]!.emitMessage(request(400))
+      expect(invokeHost).toHaveBeenCalledTimes(globalLimit + 1)
 
-    pending.get('download-0')?.({
-      protocol: PROTOCOL_VERSION,
-      type: 'result',
-      requestId: 'download-0',
-      ok: true,
-    })
-    await vi.waitFor(() =>
-      expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'download-0', ok: true })),
-    )
-  })
-
-  it('allows quota queries only from options Ports and bounds their concurrency', async () => {
-    const pending = new Map<string, (response: HostResponse) => void>()
-    const invokeHost = vi.fn(
-      (request: { requestId: string }) =>
-        new Promise<HostResponse>((resolve) => {
-          pending.set(request.requestId, resolve)
-        }),
-    )
-    registerBroker(invokeHost)
-    const options = port(OPTIONS_PORT_NAME, {
-      id: 'extension-id',
-      url: 'moz-extension://extension-id/options/options.html',
-    })
-    const content = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
-    platformMocks.connectListener?.(options)
-    platformMocks.connectListener?.(content)
-
-    options.emitMessage(queryModelQuotaRequest(0))
-    options.emitMessage(queryModelQuotaRequest(1))
-    expect(MAX_PORT_QUERY_MODEL_QUOTA_REQUESTS).toBe(1)
-    expect(MAX_GLOBAL_QUERY_MODEL_QUOTA_REQUESTS).toBe(2)
-    expect(invokeHost).toHaveBeenCalledTimes(1)
-    expect(options.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: 'quota-1', ok: false, error: expect.stringContaining('繁忙') }),
-    )
-
-    content.emitMessage(queryModelQuotaRequest(2))
-    expect(content.disconnect).toHaveBeenCalledTimes(1)
-    expect(invokeHost).toHaveBeenCalledTimes(1)
-
-    pending.get('quota-0')?.({
-      protocol: PROTOCOL_VERSION,
-      type: 'result',
-      requestId: 'quota-0',
-      ok: true,
-      notice: '本月模型下载额度：已用 0/5 次，剩余 5 次',
-    })
-    await vi.waitFor(() =>
-      expect(options.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'quota-0', ok: true })),
-    )
-  })
+      for (const [requestId, resolve] of pending)
+        resolve({ protocol: PROTOCOL_VERSION, type: 'result', requestId, ok: true })
+      await vi.advanceTimersByTimeAsync(0)
+    },
+  )
 
   it('applies independent per-Port and global verify-key limits and releases capacity', async () => {
     const pending = new Map<string, (response: HostResponse) => void>()

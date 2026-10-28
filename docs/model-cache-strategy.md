@@ -14,7 +14,7 @@
 | 用户脚本内置精简 Runtime WASM | 首方内容寻址 URL，公开一年 `immutable`                     |
 | 扩展 Runtime WASM             | 随包分发的 `runtime/` 资产，不访问 Worker                  |
 
-所有模型来源都执行最大长度、声明长度、实际长度和 SHA-256 校验。HTTP `Content-Length` 只描述编码后的表示；远程模型允许的编码声明预算为清单长度加 `max(64 KiB, ceil(清单长度 / 1024))`，容纳 gzip/br 的编码开销，不扩大解压后正文的 canonical 长度上限。实际模型仍须匹配清单长度和 SHA-256，不能依赖 CORS 是否暴露 `Content-Encoding`。重定向、HTTP/完整性错误、下载或缓存事务失败的内容不能成为有效缓存。下载正文必须可流式读取；`body === null` 时失败，不退回无界 `arrayBuffer()`。Runtime profile 和字节读取细节见[资产专题](onnx-runtime.md)。
+所有模型来源都执行最大长度、声明长度、实际长度和 SHA-256 校验。HTTP `Content-Length` 只描述编码后的表示；远程模型允许的编码声明预算为清单长度加 `max(64 KiB, ceil(清单长度 / 1024))`，容纳 gzip/br 的编码开销，不扩大解压后正文的 canonical 长度上限。实际模型仍须匹配清单长度和 SHA-256，不能依赖 CORS 是否暴露 `Content-Encoding`。声明长度无效时只报告固定的 Content-Length 错误；合法但超限时只使用已解析的安全整数，原始头值不进入提示或日志。重定向、HTTP/完整性错误、下载或缓存事务失败的内容不能成为有效缓存。下载正文必须可流式读取；`body === null` 时失败，不退回无界 `arrayBuffer()`。Runtime profile 和字节读取细节见[资产专题](onnx-runtime.md)。
 
 ## 为什么模型响应保持 `no-store`
 

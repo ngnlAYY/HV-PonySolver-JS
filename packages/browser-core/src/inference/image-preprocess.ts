@@ -232,18 +232,18 @@ export function calculateLetterboxLayout(
   }
 }
 
+// 字节通道仅有 256 个值；预先按 Float32 舍入，逐帧复用同一份归一化结果。
+const NORMALIZED_CHANNELS = Float32Array.from({ length: 256 }, (_, value) => value / 255)
+
 export function copyRgbaToChwFloat32(rgba: Uint8ClampedArray, output: Float32Array, plane: number): void {
-  // getImageData guarantees one RGBA quad per pixel, so no per-channel
-  // fallback is needed here.
+  if (!Number.isSafeInteger(plane) || plane < 0 || rgba.length < plane * 4 || output.length < plane * 3) {
+    throw new Error('RGBA/CHW 图像缓冲区长度无效')
+  }
+  const bluePlane = plane * 2
+  // 长度已在循环外验证，三个通道均在缓冲区内，避免逐像素重复检查。
   for (let index = 0, offset = 0; index < plane; index += 1, offset += 4) {
-    const red = rgba[offset]
-    const green = rgba[offset + 1]
-    const blue = rgba[offset + 2]
-    if (red === undefined || green === undefined || blue === undefined) {
-      throw new Error('RGBA 图像数据长度不足')
-    }
-    output[index] = red / 255
-    output[plane + index] = green / 255
-    output[plane * 2 + index] = blue / 255
+    output[index] = NORMALIZED_CHANNELS[rgba[offset] as number] as number
+    output[plane + index] = NORMALIZED_CHANNELS[rgba[offset + 1] as number] as number
+    output[bluePlane + index] = NORMALIZED_CHANNELS[rgba[offset + 2] as number] as number
   }
 }

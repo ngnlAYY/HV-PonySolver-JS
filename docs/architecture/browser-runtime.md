@@ -93,6 +93,8 @@ sequenceDiagram
 
 [Worker 入口](../../packages/browser-core/src/inference/onnx-worker-entry.ts) 验证 `unknown` 请求，初始化 Runtime，复用 OffscreenCanvas/CHW 缓冲并执行 WASM 推理；[request bridge](../../packages/browser-core/src/inference/worker-request-bridge.ts) 验证结构化响应、管理 request id 与超时。
 
+RGBA 转 CHW 在写入前一次验证像素数量及两个缓冲区长度，再按 RGB 平面写入。256 项 Float32 归一化表在模块加载时创建，逐帧复用，替代每个通道的除法；全字节值回归保证与原 `value / 255` 写入 Float32 的结果相同，保留非零视图偏移和 alpha 忽略行为。
+
 生产与基准共用严格的 `parseYoloOutputTensor`，不保留跳过非法行的宽松解析入口。候选只维护一次有界 top-N 排名，原地右移替代 `splice` 临时数组；检测列表取原始置信度满足阈值的前缀，保留最高分兜底与稳定同分顺序。阈值判断先于展示舍入，低排名行仍完整校验。结构化响应逐项检查 `detections`/`candidates`，拒绝 structured clone 保留的稀疏数组。
 
 用户脚本的 [onnx-worker-client.ts](../../apps/userscript/src/inference/onnx-worker-client.ts) 注入 [blob-worker.ts](../../apps/userscript/src/inference/blob-worker.ts) 创建的 Worker，并把构建时内联的脚本文本交给它。两个入口分别是：

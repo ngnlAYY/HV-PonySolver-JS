@@ -87,67 +87,50 @@ const additionalEncodedDimensionCases = [
 ] as const
 
 describe('image preprocessing helpers', () => {
-  it('calculates centered letterbox layout for wide images', () => {
-    expect(calculateLetterboxLayout(200, 100, 640)).toEqual({
-      width: 640,
-      height: 320,
-      x: 0,
-      y: 160,
-    })
+  it.each([
+    ['wide', 200, 100, { width: 640, height: 320, x: 0, y: 160 }],
+    ['tall', 100, 200, { width: 320, height: 640, x: 160, y: 0 }],
+    ['one pixel wide', 1, 640, { width: 1, height: 640, x: 319, y: 0 }],
+    ['one pixel tall', 640, 1, { width: 640, height: 1, x: 0, y: 319 }],
+    ['square', 320, 320, { width: 640, height: 640, x: 0, y: 0 }],
+    ['upscaled', 32, 16, { width: 640, height: 320, x: 0, y: 160 }],
+  ] as const)('centers the %s letterbox', (_name, width, height, expected) => {
+    expect(calculateLetterboxLayout(width, height, 640)).toEqual(expected)
   })
 
-  it('calculates centered letterbox layout for tall images', () => {
-    expect(calculateLetterboxLayout(100, 200, 640)).toEqual({
-      width: 320,
-      height: 640,
-      x: 160,
-      y: 0,
-    })
+  it('normalizes every byte exactly into separate RGB planes, respecting view offsets and ignoring alpha', () => {
+    const plane = 256
+    const rgba = new Uint8ClampedArray(plane * 4 + 8).subarray(4, plane * 4 + 4)
+    const storage = new Float32Array(plane * 3 + 2).fill(-1)
+    const output = storage.subarray(1, -1)
+    const expected = new Float32Array(plane * 3)
+    for (let value = 0; value < plane; value += 1) {
+      rgba.set([value, 255 - value, (value + 128) % 256, value % 2 ? 0 : 255], value * 4)
+      expected[value] = value / 255
+      expected[plane + value] = (255 - value) / 255
+      expected[plane * 2 + value] = ((value + 128) % 256) / 255
+    }
+
+    copyRgbaToChwFloat32(rgba, output, plane)
+
+    expect(output).toEqual(expected)
+    expect(storage[0]).toBe(-1)
+    expect(storage.at(-1)).toBe(-1)
   })
 
-  it('keeps a 1xN image at one pixel wide and centers it horizontally', () => {
-    expect(calculateLetterboxLayout(1, 640, 640)).toEqual({
-      width: 1,
-      height: 640,
-      x: 319,
-      y: 0,
-    })
-  })
+  it.each([
+    ['truncated RGBA', 7, 6, 2],
+    ['truncated CHW', 8, 5, 2],
+    ['negative plane', 8, 6, -1],
+    ['fractional plane', 8, 6, 1.5],
+    ['non-finite plane', 8, 6, Number.POSITIVE_INFINITY],
+  ])('rejects %s before changing the output', (_name, rgbaLength, outputLength, plane) => {
+    const output = new Float32Array(outputLength).fill(-1)
 
-  it('keeps an Nx1 image at one pixel high and centers it vertically', () => {
-    expect(calculateLetterboxLayout(640, 1, 640)).toEqual({
-      width: 640,
-      height: 1,
-      x: 0,
-      y: 319,
-    })
-  })
-
-  it('fills the target for square images', () => {
-    expect(calculateLetterboxLayout(320, 320, 640)).toEqual({
-      width: 640,
-      height: 640,
-      x: 0,
-      y: 0,
-    })
-  })
-
-  it('scales small images up while preserving aspect ratio', () => {
-    expect(calculateLetterboxLayout(32, 16, 640)).toEqual({
-      width: 640,
-      height: 320,
-      x: 0,
-      y: 160,
-    })
-  })
-
-  it('copies RGBA image data into CHW float32 RGB planes', () => {
-    const rgba = new Uint8ClampedArray([255, 0, 0, 255, 0, 128, 255, 255])
-    const output = new Float32Array(6)
-
-    copyRgbaToChwFloat32(rgba, output, 2)
-
-    expect([...output]).toEqual([1, 0, 0, expect.closeTo(128 / 255), 0, 1])
+    expect(() => copyRgbaToChwFloat32(new Uint8ClampedArray(rgbaLength), output, plane)).toThrow(
+      'RGBA/CHW 图像缓冲区长度无效',
+    )
+    expect(output.every((value) => value === -1)).toBe(true)
   })
 
   it('reads PNG dimensions from encoded bytes before decode', async () => {

@@ -8,8 +8,8 @@ overrides:
   brace-expansion@1: ^1.1.18
   brace-expansion@5: ^5.0.12
   nanoid@3: ^3.3.18
-  undici@7: 7.29.1
-  undici@8: 8.10.2
+  undici@7: 7.30.1
+  undici@8: 8.12.2
   esbuild: 0.28.2
   js-yaml: 4.3.1
   postcss: ^8.5.26
@@ -18,6 +18,7 @@ overrides:
   source-map-js: ^1.2.2
   vite: 8.2.4
   ws: 8.21.3
+  zod@4: 4.6.6
 
 importers:
 
@@ -50,9 +51,6 @@ importers:
       typescript-eslint:
         specifier: ^8.66.0
         version: 8.66.0(@typescript/typescript6@6.0.2)(eslint@10.8.1(supports-color@10.2.2))(supports-color@10.2.2)
-      vite:
-        specifier: 8.2.4
-        version: 8.2.4(@types/node@26.2.0)(esbuild@0.28.2)
       vitest:
         specifier: ^4.1.12
         version: 4.1.12(@types/node@26.2.0)(@vitest/coverage-istanbul@4.1.12)(@vitest/coverage-v8@4.1.12)(jsdom@30.0.1)(vite@8.2.4(@types/node@26.2.0)(esbuild@0.28.2))
@@ -1793,12 +1791,12 @@ packages:
   undici-types@8.3.0:
     resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
-  undici@7.29.1:
-    resolution: {integrity: sha512-RYONW2MeafgYlkVOKYKkA/Ag7BmXqgIWCa8t1m0JcxrQg9pI9lEqRhAOruOBCbAohOa/gkCF+iPi9hrgvTzu6Q==}
+  undici@7.30.1:
+    resolution: {integrity: sha512-03KrMbjIFDWQR5RNPrSw3bd1r12JpyFQl9/yxjUbJtqkjmllqC5lFjZh6ujeuJCKr8EOQvRW872Oy/az+nLYxg==}
     engines: {node: '>=20.18.1'}
 
-  undici@8.10.2:
-    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
+  undici@8.12.2:
+    resolution: {integrity: sha512-XtuDWVdqTLr3NAxm2ly9/hU6kUsJOgGh1RASzMBbsw6aWCOaQzHdW+QQDfdERjfJ2V5vL5pRPa4RetO9UfivDg==}
     engines: {node: '>=22.19.0'}
 
   unenv@2.0.0-rc.24:
@@ -1978,8 +1976,8 @@ packages:
   youch@4.1.0-beta.10:
     resolution: {integrity: sha512-rLfVLB4FgQneDr0dv1oddCVZmKjcJ6yX6mS4pU82Mq/Dt9a3cLZQ62pDBL4AUO+uVrCvtWz3ZFUL2HFAFJ/BXQ==}
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+  zod@4.6.6:
+    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
 snapshots:
 
@@ -2121,7 +2119,7 @@ snapshots:
       miniflare: 5.20260801.1-alpha(@types/node@26.2.0)
       vitest: 4.1.12(@types/node@26.2.0)(@vitest/coverage-istanbul@4.1.12)(@vitest/coverage-v8@4.1.12)(jsdom@30.0.1)(vite@8.2.4(@types/node@26.2.0)(esbuild@0.28.2))
       wrangler: 4.120.0(@cloudflare/workers-types@5.20260810.1)(@types/node@26.2.0)
-      zod: 4.4.3
+      zod: 4.6.6
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@types/node'
@@ -3052,7 +3050,7 @@ snapshots:
       saxes: 6.0.0
       symbol-tree: 3.2.4
       tough-cookie: 6.0.2
-      undici: 8.10.2
+      undici: 8.12.2
       w3c-xmlserializer: 5.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
@@ -3163,7 +3161,7 @@ snapshots:
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
       sharp: 0.35.5(@types/node@26.2.0)
-      undici: 7.29.1
+      undici: 7.30.1
       workerd: 1.20260801.1
       ws: 8.21.3
       youch: 4.1.0-beta.10
@@ -3416,9 +3414,9 @@ snapshots:
 
   undici-types@8.3.0: {}
 
-  undici@7.29.1: {}
+  undici@7.30.1: {}
 
-  undici@8.10.2: {}
+  undici@8.12.2: {}
 
   unenv@2.0.0-rc.24:
     dependencies:
@@ -3560,4 +3558,4 @@ snapshots:
       cookie: 1.1.1
       youch-core: 0.3.3
 
-  zod@4.4.3: {}
+  zod@4.6.6: {}

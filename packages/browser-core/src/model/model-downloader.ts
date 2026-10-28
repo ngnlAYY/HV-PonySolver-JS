@@ -246,11 +246,11 @@ function parseDeclaredByteLength(contentLength: string | null): number | null {
     return null
   }
   if (!contentLengthPattern.test(contentLength)) {
-    throw new Error(`下载模型大小校验失败: ${contentLength}`)
+    throw new Error('下载模型大小校验失败: Content-Length 无效')
   }
   const byteLength = Number(contentLength)
   if (!Number.isSafeInteger(byteLength)) {
-    throw new Error(`下载模型大小校验失败: ${contentLength}`)
+    throw new Error('下载模型大小校验失败: Content-Length 无效')
   }
   return byteLength
 }
@@ -276,7 +276,7 @@ async function readModelResponse(
   const maxEncodedByteLength = maxByteLength + Math.max(64 * 1024, Math.ceil(maxByteLength / 1024))
   if (declaredByteLength !== null && declaredByteLength > maxEncodedByteLength) {
     cancelByteStream(response.body)
-    throw new Error(`下载模型大小校验失败: ${contentLength} > ${maxEncodedByteLength}`)
+    throw new Error(`下载模型大小校验失败: ${declaredByteLength} > ${maxEncodedByteLength}`)
   }
   if (!response.body) {
     // Response.arrayBuffer() allocates the full payload before its size can be

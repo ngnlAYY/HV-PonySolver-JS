@@ -70,6 +70,8 @@ mise exec -- pnpm install --frozen-lockfile
 | `pnpm test:e2e:extension:chromium:authenticated` | 先构建 remote，再用受保护 `KvKey` 下载并完成真实 `detect`；缺 Key 失败 |
 | `pnpm test:e2e:extension:packaged`               | 先构建 fixture，再执行 Chromium/Firefox 无 Key 推理                    |
 
+`benchmark:inference` 先预热一个批次，再报告 7 批次的每次操作耗时中位数；RGBA 预处理每批 100 次，YOLO 解析每批 1000 次。比较时使用相同 Node/机器与输入，真实浏览器整链耗时另测。
+
 性能入口彼此独立。transport 矩阵只测浏览器 Blob 复制和全缓冲 digest，不测扩展消息或推理；product 才测实际链路。smoke 和合成图片不提供识别准确率或发布证据：
 
 | 命令                                  | 负载与用途                                                                |

@@ -707,8 +707,8 @@ describe('downloadModel', () => {
     expect(arrayBuffer).not.toHaveBeenCalled()
   })
 
-  it.each(['', '0x3', '1e3', '+3', '-0'])(
-    'rejects non-decimal declared content length "%s" before reading the body',
+  it.each(['', '0x3', '1e3', '+3', '-0', '9007199254740992', 'private-header-marker'])(
+    'rejects invalid declared content length %j without echoing it or reading the body',
     async (contentLength) => {
       const arrayBuffer = vi.fn()
       const cancel = vi.fn()
@@ -725,7 +725,7 @@ describe('downloadModel', () => {
       )
 
       await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
-        '下载模型大小校验失败:',
+        new Error('下载模型大小校验失败: Content-Length 无效'),
       )
 
       expect(cancel).toHaveBeenCalledTimes(1)
@@ -733,28 +733,6 @@ describe('downloadModel', () => {
       expect(arrayBuffer).not.toHaveBeenCalled()
     },
   )
-
-  it('rejects unsafe decimal content lengths before reading the body', async () => {
-    const cancel = vi.fn()
-    const getReader = vi.fn()
-    const contentLength = '9007199254740992'
-    const response = {
-      ok: true,
-      headers: new Headers({ 'content-length': contentLength }),
-      body: { cancel, getReader },
-    } as unknown as Response
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => response),
-    )
-
-    await expect(downloadModel(undefined, { integrity: TEST_INTEGRITY, verifyIntegrity: false })).rejects.toThrow(
-      `下载模型大小校验失败: ${contentLength}`,
-    )
-
-    expect(cancel).toHaveBeenCalledTimes(1)
-    expect(getReader).not.toHaveBeenCalled()
-  })
 
   it('rejects downloaded models with unexpected integrity by default', async () => {
     const response = new Response(new Uint8Array([1, 2, 3]))

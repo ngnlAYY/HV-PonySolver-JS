@@ -50,32 +50,59 @@ describe('loadPackagedAsset', () => {
     })
   })
 
-  it('hands the caller signal to the fetch and aborts after resolution', async () => {
+  it('rejects a pre-aborted load without calling fetch', async () => {
     const controller = new AbortController()
-    const fetchImpl = vi.fn(
-      async () =>
-        new Response(exactBytes, {
-          status: 200,
-          headers: { 'content-length': String(exactBytes.byteLength) },
-        }),
-    ) as unknown as typeof fetch
+    const fetchImpl = vi.fn<typeof fetch>()
+    controller.abort()
 
-    controller.abort(new Error('推理请求已取消'))
     await expect(
-      loadPackagedAsset(
-        'chrome-extension://extension-id/model/yolo26n-640.ort',
+      loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl, controller.signal),
+    ).rejects.toThrow('模型 加载已取消')
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it.each(['resolve', 'reject'] as const)(
+    'abandons an unresponsive fetch and handles its late %s',
+    async (settlement) => {
+      const controller = new AbortController()
+      let resolveResponse: ((response: Response) => void) | undefined
+      let rejectResponse: ((error: Error) => void) | undefined
+      const fetchImpl = vi.fn<typeof fetch>(
+        () =>
+          new Promise<Response>((resolve, reject) => {
+            resolveResponse = resolve
+            rejectResponse = reject
+          }),
+      )
+      const cancel = vi.fn(() => new Promise<void>(() => undefined))
+      const getReader = vi.fn()
+      const loading = loadPackagedAsset(
+        'moz-extension://id/model/test.ort',
         exactIntegrity,
-        '扩展内置模型',
+        '模型',
         fetchImpl,
         controller.signal,
-      ),
-    ).rejects.toThrow('扩展内置模型 加载已取消')
-    expect(fetchImpl).toHaveBeenCalledWith('chrome-extension://extension-id/model/yolo26n-640.ort', {
-      cache: 'force-cache',
-      redirect: 'error',
-      signal: controller.signal,
-    })
-  })
+      )
+      expect(fetchImpl).toHaveBeenCalledWith('moz-extension://id/model/test.ort', {
+        cache: 'force-cache',
+        redirect: 'error',
+        signal: controller.signal,
+      })
+      controller.abort()
+      // 必须在 Fetch 结算前拒绝，迟到清理也不能等待底层 cancel Promise。
+      await expect(loading).rejects.toThrow('模型 加载已取消')
+
+      if (settlement === 'resolve') {
+        resolveResponse?.(responseWithBody({ cancel, getReader } as unknown as ReadableStream<Uint8Array>))
+        await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce())
+      } else {
+        rejectResponse?.(new Error('late fetch failure'))
+        await Promise.resolve()
+        expect(cancel).not.toHaveBeenCalled()
+      }
+      expect(getReader).not.toHaveBeenCalled()
+    },
+  )
 
   it('cancels a non-success response without replacing the HTTP error', async () => {
     const body = { cancel: vi.fn(async () => Promise.reject(new Error('cancel failed'))) }
@@ -231,14 +258,18 @@ describe('loadPackagedAsset', () => {
 
   it('checks cancellation again after the digest settles', async () => {
     const controller = new AbortController()
-    let removals = 0
+    let digestStarted = false
+    const originalDigest = crypto.subtle.digest.bind(crypto.subtle)
+    const digest = vi.spyOn(crypto.subtle, 'digest').mockImplementation((algorithm, bytes) => {
+      digestStarted = true
+      return originalDigest(algorithm, bytes)
+    })
     const originalRemove = controller.signal.removeEventListener.bind(controller.signal)
     const removeListener = vi
       .spyOn(controller.signal, 'removeEventListener')
       .mockImplementation((type, listener, options) => {
         originalRemove(type, listener, options)
-        removals += 1
-        if (removals === 3) {
+        if (digestStarted) {
           controller.abort()
         }
       })
@@ -260,10 +291,11 @@ describe('loadPackagedAsset', () => {
       await expect(
         loadPackagedAsset('moz-extension://id/model/test.ort', exactIntegrity, '模型', fetchImpl, controller.signal),
       ).rejects.toThrow('模型 加载已取消')
-      expect(removals).toBe(3)
+      expect(digest).toHaveBeenCalledOnce()
       expect(reader.cancel).not.toHaveBeenCalled()
     } finally {
       removeListener.mockRestore()
+      digest.mockRestore()
     }
   })
 

@@ -66,6 +66,8 @@ mise exec -- pnpm --filter @hv-pony-solver/extension build:packaged
 
 ## 开发与维护
 
+本轮维护结果见 [2026-10-27 审计](docs/audits/2026-10-27-repository-audit.md)，涵盖预处理、取消、Broker 精简及依赖修复。
+
 从[文档导航](docs/README.md)选择主题；修改前阅读 [AGENTS.md](AGENTS.md)。常用入口：
 
 - [整体架构](docs/architecture/overview.md)与[目录组织](docs/development/directory-layout.md)

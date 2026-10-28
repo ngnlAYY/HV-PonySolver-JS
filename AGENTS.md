@@ -1,6 +1,6 @@
 # AGENTS.md — HV-PonySolver-JS
 
-适用于仓库及全部子目录；更具体的 `AGENTS.md` 仅覆盖其目录。最后复核：2026-10-23。
+适用于仓库及全部子目录；更具体的 `AGENTS.md` 仅覆盖其目录。最后复核：2026-10-27。
 
 ## 项目定位
 
@@ -85,10 +85,13 @@ TypeScript/pnpm 单仓库，包含用户脚本、Chromium/Firefox MV3 扩展、C
 - 消息严格校验 schema、来源、大小、超时和取消，`unknown` 不直接断言可信；推理列表逐项校验，不能让稀疏数组绕过检查。Broker 只用实际 `sender.url`，不以 `sender.tab.url` 兜底；提供的 `sender.origin` 须一致且非 opaque，提供 `frameId` 时须为 0。内容仅限两个 Hentaiverse HTTPS 标准端口 origin，设置仅限本扩展设置页。
 - Broker 的清除 Key 使用独立每 Port/全局限额，Chromium Offscreen 也使用独立清除池，不妨碍清除抢占验证；取消或断连不立即释放槽位，Broker 等 Host 返回或自身超时结算，Offscreen 等 Host 实际结算。设置页只读普通字段所需键，内容镜像仍读取完整命名空间快照。
 - Port 断连在回调内经平台助手同步读取 Chromium `runtime.lastError`，兼容 Firefox `port.error`。BFCache 断连取消未决请求，恢复后按需连接，不自动重放下载或 Key 操作。Offscreen 同一空闲代际的确认不重置关闭重试次数或退避预算，新活动/代际才恢复预算；新 epoch 接管已空闲文档须迁移剩余通知，取消后迟到创建也须独立有界 claim，不重放原请求。
+- RGBA 转 CHW 在写入前验证输入、输出和像素数量；归一化表覆盖全部字节值，保持原 Float32 结果与 RGB 平面顺序。
 - 图片消息有明确上限；HTTP Content-Type 严格校验后规范化基础 MIME，消息保持精确白名单。排队 detect 取消即移除并释放图片，不等队头。模型用可转移 `ArrayBuffer`，不改成无界 Base64 或重复拷贝。
 - 已取消准备退场时，新 prepare/detect 不得继承旧调用方取消；等待可独立取消，销毁后不得读取模型或创建 Worker。
 - 识别遵循 latest-wins，迟到旧结果不覆盖新状态。图片、模型和 Runtime 共用有界字节读取；未知长度在上限内增长自有缓冲并即时复制，不保留任意分块或外部大缓冲视图。
 - HTTP 编码声明长度与 Fetch 解压后正文长度分开约束；模型即使 CORS 隐藏 Content-Encoding 也须按清单实际长度和 SHA-256 校验，编码开销预算不扩大模型正文上限。
+- 内置资产预取消不发起 Fetch；等待 Fetch、正文和摘要均可取消，忽略取消的 Fetch 迟到返回时释放正文。
+- 模型响应声明长度错误只报告固定分类或已验证数字，不回显原始头值。
 - 浏览器和 Worker 流取消仅尽力清理，不等待可能挂起的取消 Promise，不覆盖原 HTTP、完整性或调用方取消错误。图片、模型、Key/额度请求及 R2 读取超时后的迟到正文也须清理；客户端额度/确认与 Worker 内部额度 JSON 均采用 16 KiB 有界可取消读取，解析错误不回显正文。缓存超时须释放取消监听器，用户脚本模型取消贯穿 GM 读取、正文和摘要，不重复包装流。
 
 ## 模型、运行时与扩展产物

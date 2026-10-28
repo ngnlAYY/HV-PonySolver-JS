@@ -16,8 +16,9 @@ const outputPath = resolve(tmpDir, 'entry.mjs')
 const pixelChannels = 4
 const rgbChannels = 3
 const yoloRows = 256
-const preprocessIterations = 20
+const preprocessIterations = 100
 const parserIterations = 1000
+const sampleCount = 7
 
 async function loadBenchmarkedFunctions() {
   await writeFile(
@@ -41,12 +42,20 @@ async function loadBenchmarkedFunctions() {
 }
 
 function time(label, iterations, run) {
-  const startedAt = performance.now()
   for (let index = 0; index < iterations; index += 1) {
     run()
   }
-  const elapsedMs = performance.now() - startedAt
-  process.stdout.write(`${label}: ${(elapsedMs / iterations).toFixed(4)}ms/op\n`)
+  const samples = []
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    const startedAt = performance.now()
+    for (let index = 0; index < iterations; index += 1) run()
+    samples.push((performance.now() - startedAt) / iterations)
+  }
+  samples.sort((left, right) => left - right)
+  const median = samples[Math.floor(samples.length / 2)]
+  process.stdout.write(
+    `${label}: ${median.toFixed(4)}ms/op (median of ${sampleCount} batches, ${iterations} ops/batch)\n`,
+  )
 }
 
 function createRgbaFixture(imageSize) {

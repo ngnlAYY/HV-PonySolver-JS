@@ -81,20 +81,51 @@ export function isTrustedPort(port: ExtensionPort, ownExtensionId: string, optio
   return false
 }
 
-function requestTimeoutMs(request: HostRequest): number {
-  if (request.type === 'detect') {
-    return BROKER_DETECT_TIMEOUT_MS
-  }
-  if (request.type === 'prepare') {
-    return BROKER_PREPARE_TIMEOUT_MS
-  }
-  if (request.type === 'download-model') {
-    return BROKER_DOWNLOAD_MODEL_TIMEOUT_MS
-  }
-  if (request.type === 'query-model-quota') {
-    return BROKER_QUERY_MODEL_QUOTA_TIMEOUT_MS
-  }
-  return BROKER_DEFAULT_TIMEOUT_MS
+type RequestKind = HostRequest['type']
+type RequestPolicy = Readonly<{
+  portLimit: number
+  globalLimit: number
+  timeoutMs: number
+  busyMessage: string
+}>
+
+const REQUEST_POLICIES: Readonly<Record<RequestKind, RequestPolicy>> = {
+  detect: {
+    portLimit: MAX_PORT_DETECT_REQUESTS,
+    globalLimit: MAX_GLOBAL_DETECT_REQUESTS,
+    timeoutMs: BROKER_DETECT_TIMEOUT_MS,
+    busyMessage: '推理队列繁忙，请稍后重试',
+  },
+  prepare: {
+    portLimit: MAX_PORT_PREPARE_REQUESTS,
+    globalLimit: MAX_GLOBAL_PREPARE_REQUESTS,
+    timeoutMs: BROKER_PREPARE_TIMEOUT_MS,
+    busyMessage: '推理初始化繁忙，请稍后重试',
+  },
+  'verify-key': {
+    portLimit: MAX_PORT_VERIFY_KEY_REQUESTS,
+    globalLimit: MAX_GLOBAL_VERIFY_KEY_REQUESTS,
+    timeoutMs: BROKER_DEFAULT_TIMEOUT_MS,
+    busyMessage: '模型 Key 验证队列繁忙，请稍后重试',
+  },
+  'clear-key': {
+    portLimit: MAX_PORT_CLEAR_KEY_REQUESTS,
+    globalLimit: MAX_GLOBAL_CLEAR_KEY_REQUESTS,
+    timeoutMs: BROKER_DEFAULT_TIMEOUT_MS,
+    busyMessage: '模型 Key 清除队列繁忙，请稍后重试',
+  },
+  'download-model': {
+    portLimit: MAX_PORT_DOWNLOAD_MODEL_REQUESTS,
+    globalLimit: MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS,
+    timeoutMs: BROKER_DOWNLOAD_MODEL_TIMEOUT_MS,
+    busyMessage: '模型下载队列繁忙，请稍后重试',
+  },
+  'query-model-quota': {
+    portLimit: MAX_PORT_QUERY_MODEL_QUOTA_REQUESTS,
+    globalLimit: MAX_GLOBAL_QUERY_MODEL_QUOTA_REQUESTS,
+    timeoutMs: BROKER_QUERY_MODEL_QUOTA_TIMEOUT_MS,
+    busyMessage: '模型下载次数查询队列繁忙，请稍后重试',
+  },
 }
 
 function invokeWithTimeout(
@@ -121,7 +152,7 @@ function invokeWithTimeout(
     const timeoutId = setTimeout(() => {
       controller.abort(new Error('推理 Host 请求超时'))
       finish(() => reject(new Error('推理 Host 请求超时')))
-    }, requestTimeoutMs(request))
+    }, REQUEST_POLICIES[request.type].timeoutMs)
     hostPromise.then(
       (response) => finish(() => resolve(response)),
       (error: unknown) => finish(() => reject(error)),
@@ -130,12 +161,7 @@ function invokeWithTimeout(
 }
 
 export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = { allowOptions: true }): BrokerHandle {
-  let globalDetectRequests = 0
-  let globalPrepareRequests = 0
-  let globalVerifyKeyRequests = 0
-  let globalClearKeyRequests = 0
-  let globalDownloadModelRequests = 0
-  let globalQueryModelQuotaRequests = 0
+  const globalRequests = new Map<RequestKind, number>()
   let latestHostStatus: HostStatusUpdate = {}
   let pendingCredentialsRevision: string | null = null
   let credentialsRevisionWriteRunning = false
@@ -196,12 +222,7 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
     }
 
     let connected = true
-    let portDetectRequests = 0
-    let portPrepareRequests = 0
-    let portVerifyKeyRequests = 0
-    let portClearKeyRequests = 0
-    let portDownloadModelRequests = 0
-    let portQueryModelQuotaRequests = 0
+    const portRequests = new Map<RequestKind, number>()
     type RequestEntry = {
       readonly requestId: string
       readonly controller: AbortController
@@ -253,25 +274,8 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
       if (entries.get(entry.requestId) === entry) {
         entries.delete(entry.requestId)
       }
-      if (entry.kind === 'detect') {
-        portDetectRequests -= 1
-        globalDetectRequests -= 1
-      } else if (entry.kind === 'prepare') {
-        portPrepareRequests -= 1
-        globalPrepareRequests -= 1
-      } else if (entry.kind === 'verify-key') {
-        portVerifyKeyRequests -= 1
-        globalVerifyKeyRequests -= 1
-      } else if (entry.kind === 'clear-key') {
-        portClearKeyRequests -= 1
-        globalClearKeyRequests -= 1
-      } else if (entry.kind === 'download-model') {
-        portDownloadModelRequests -= 1
-        globalDownloadModelRequests -= 1
-      } else if (entry.kind === 'query-model-quota') {
-        portQueryModelQuotaRequests -= 1
-        globalQueryModelQuotaRequests -= 1
-      }
+      portRequests.set(entry.kind, (portRequests.get(entry.kind) ?? 0) - 1)
+      globalRequests.set(entry.kind, (globalRequests.get(entry.kind) ?? 0) - 1)
     }
 
     port.onDisconnect.addListener(() => {
@@ -314,49 +318,12 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         disconnect()
         return
       }
+      const { portLimit, globalLimit, busyMessage } = REQUEST_POLICIES[message.type]
       if (
-        message.type === 'detect' &&
-        (portDetectRequests >= MAX_PORT_DETECT_REQUESTS || globalDetectRequests >= MAX_GLOBAL_DETECT_REQUESTS)
+        (portRequests.get(message.type) ?? 0) >= portLimit ||
+        (globalRequests.get(message.type) ?? 0) >= globalLimit
       ) {
-        post(errorResponse(message.requestId, '推理队列繁忙，请稍后重试'))
-        return
-      }
-      if (
-        message.type === 'prepare' &&
-        (portPrepareRequests >= MAX_PORT_PREPARE_REQUESTS || globalPrepareRequests >= MAX_GLOBAL_PREPARE_REQUESTS)
-      ) {
-        post(errorResponse(message.requestId, '推理初始化繁忙，请稍后重试'))
-        return
-      }
-      if (
-        message.type === 'verify-key' &&
-        (portVerifyKeyRequests >= MAX_PORT_VERIFY_KEY_REQUESTS ||
-          globalVerifyKeyRequests >= MAX_GLOBAL_VERIFY_KEY_REQUESTS)
-      ) {
-        post(errorResponse(message.requestId, '模型 Key 验证队列繁忙，请稍后重试'))
-        return
-      }
-      if (
-        message.type === 'clear-key' &&
-        (portClearKeyRequests >= MAX_PORT_CLEAR_KEY_REQUESTS || globalClearKeyRequests >= MAX_GLOBAL_CLEAR_KEY_REQUESTS)
-      ) {
-        post(errorResponse(message.requestId, '模型 Key 清除队列繁忙，请稍后重试'))
-        return
-      }
-      if (
-        message.type === 'download-model' &&
-        (portDownloadModelRequests >= MAX_PORT_DOWNLOAD_MODEL_REQUESTS ||
-          globalDownloadModelRequests >= MAX_GLOBAL_DOWNLOAD_MODEL_REQUESTS)
-      ) {
-        post(errorResponse(message.requestId, '模型下载队列繁忙，请稍后重试'))
-        return
-      }
-      if (
-        message.type === 'query-model-quota' &&
-        (portQueryModelQuotaRequests >= MAX_PORT_QUERY_MODEL_QUOTA_REQUESTS ||
-          globalQueryModelQuotaRequests >= MAX_GLOBAL_QUERY_MODEL_QUOTA_REQUESTS)
-      ) {
-        post(errorResponse(message.requestId, '模型下载次数查询队列繁忙，请稍后重试'))
+        post(errorResponse(message.requestId, busyMessage))
         return
       }
       const entry: RequestEntry = {
@@ -366,25 +333,8 @@ export function registerBroker(invokeHost: HostInvoker, policy: BrokerPolicy = {
         released: false,
       }
       entries.set(entry.requestId, entry)
-      if (entry.kind === 'detect') {
-        portDetectRequests += 1
-        globalDetectRequests += 1
-      } else if (entry.kind === 'prepare') {
-        portPrepareRequests += 1
-        globalPrepareRequests += 1
-      } else if (entry.kind === 'verify-key') {
-        portVerifyKeyRequests += 1
-        globalVerifyKeyRequests += 1
-      } else if (entry.kind === 'clear-key') {
-        portClearKeyRequests += 1
-        globalClearKeyRequests += 1
-      } else if (entry.kind === 'download-model') {
-        portDownloadModelRequests += 1
-        globalDownloadModelRequests += 1
-      } else if (entry.kind === 'query-model-quota') {
-        portQueryModelQuotaRequests += 1
-        globalQueryModelQuotaRequests += 1
-      }
+      portRequests.set(entry.kind, (portRequests.get(entry.kind) ?? 0) + 1)
+      globalRequests.set(entry.kind, (globalRequests.get(entry.kind) ?? 0) + 1)
       void invokeWithTimeout(invokeHost, message, entry.controller)
         .then((response) => {
           if (!isHostResponse(response) || response.requestId !== message.requestId) {
