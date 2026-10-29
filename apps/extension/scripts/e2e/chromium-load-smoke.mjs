@@ -11,6 +11,7 @@ import { MODEL_MONTHLY_DOWNLOAD_LIMIT } from '@hv-pony-solver/shared/model'
 import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 
 import { assertBrowserVersionForRun } from '../browser/browser-support.mjs'
+import { saveSmokeSettings } from './ordinary-settings-smoke.mjs'
 
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const transparentPng = Buffer.from(
@@ -201,22 +202,7 @@ export async function runRemoteChromiumSmoke(args = process.argv.slice(2), envir
     page.on('pageerror', (error) => browserErrors.push(`options: ${error.message}`))
     await page.goto(`chrome-extension://${extensionId}/${EXTENSION_PATHS.optionsPage}`)
     assert.equal(await page.title(), 'HV Pony Solver 设置')
-    await page.locator('#answer-mode').selectOption('auto')
-    await page.locator('#submit-delay').fill('0')
-    await page.locator('#multi-click-delay').fill('0')
-    await page.locator('#random-on-fail').uncheck()
-    await page.locator('button[type="submit"]').click()
-    await page.locator('#status').filter({ hasText: '设置已保存' }).waitFor()
-
-    const saved = await page.evaluate(
-      () =>
-        new Promise((resolve) => {
-          globalThis.chrome.storage.local.get(null, resolve)
-        }),
-    )
-    assert.equal(saved.hvPonySolverSubmitDelay, '0')
-    assert.equal(saved.hvPonySolverMultiClickDelay, '0')
-    assert.equal(saved.hvPonySolverRandomOnFail, '0')
+    await saveSmokeSettings(page)
 
     if (policy.mode === 'load-only') {
       assert.deepEqual(browserErrors, [])

@@ -10,6 +10,7 @@ import { chromium } from '@playwright/test'
 import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 
 import { assertBrowserVersionForRun, resolvePackagedChromiumHeadless } from '../browser/browser-support.mjs'
+import { saveSmokeSettings } from './ordinary-settings-smoke.mjs'
 import { validatePackagedInferenceObservation, writePackagedE2eEvidence } from './packaged-e2e-evidence.mjs'
 import {
   discoverPackagedArtifact,
@@ -254,23 +255,7 @@ try {
   assert.equal(await options.locator('#packaged-model-hint').isVisible(), true)
   assert.equal((await options.locator('#packaged-model-hint').textContent())?.trim(), packagedHint)
 
-  await options.locator('#answer-mode').selectOption('auto')
-  await options.locator('#submit-delay').fill('0')
-  await options.locator('#multi-click-delay').fill('0')
-  await options.locator('#random-on-fail').uncheck()
-  assert.equal(await options.locator('#random-on-fail').isChecked(), false)
-  await options.locator('button[type="submit"]').click()
-  await options.locator('#status').filter({ hasText: '设置已保存' }).waitFor()
-  const savedFallback = await options.evaluate(
-    () =>
-      new Promise((resolve) => {
-        globalThis.chrome.storage.local.get('hvPonySolverRandomOnFail', (values) => {
-          resolve(values.hvPonySolverRandomOnFail)
-        })
-      }),
-  )
-  assert.equal(savedFallback, '0')
-  const randomFallbackDisabled = savedFallback === '0'
+  const { randomFallbackDisabled } = await saveSmokeSettings(options)
 
   await context.route('https://hentaiverse.org/**', async (route) => {
     const url = new globalThis.URL(route.request().url())

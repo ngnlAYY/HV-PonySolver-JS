@@ -1,14 +1,101 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { spawnSync } from 'node:child_process'
-import { copyFile, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runInContext } from 'node:vm'
 
+import { build } from 'esbuild'
 import { JSDOM } from 'jsdom'
 
 import { fillRemoteModelKey, resolveRemoteSmokeMode, verifyRemoteModelKey } from './chromium-load-smoke.mjs'
+import { saveSmokeSettings } from './ordinary-settings-smoke.mjs'
+
+for (const mode of ['remote', 'packaged']) {
+  test(`${mode} smoke saves random fallback opt-out after a delayed ordinary-settings load`, async (context) => {
+    const extensionRoot = fileURLToPath(new globalThis.URL('../../', import.meta.url))
+    const dom = new JSDOM(await readFile(path.join(extensionRoot, 'public/options.html'), 'utf8'), {
+      runScripts: 'outside-only',
+    })
+    context.after(() => dom.window.close())
+    const stored = {}
+    let initialRead = true
+    let deliverInitialSnapshot
+    dom.window.chrome = {
+      runtime: {},
+      storage: {
+        local: {
+          get(keys, callback) {
+            if (initialRead) {
+              initialRead = false
+              deliverInitialSnapshot = () => callback({ ...stored })
+            } else {
+              callback(
+                Object.fromEntries(keys.filter((key) => Object.hasOwn(stored, key)).map((key) => [key, stored[key]])),
+              )
+            }
+          },
+          set(values, callback) {
+            Object.assign(stored, values)
+            callback()
+          },
+        },
+      },
+    }
+    const bundle = await build({
+      entryPoints: [path.join(extensionRoot, `src/options/${mode}.ts`)],
+      bundle: true,
+      write: false,
+      format: 'iife',
+    })
+    const vmContext = dom.getInternalVMContext()
+    runInContext(bundle.outputFiles[0].text, vmContext)
+    assert.equal(typeof deliverInitialSnapshot, 'function')
+    assert.equal(dom.window.document.querySelector('#random-on-fail').checked, false)
+
+    const evaluate = (callback) => runInContext(`(${callback.toString()})()`, vmContext)
+    const waitFor = async (predicate) => {
+      // Deliver storage only once automation waits, exposing uncheck()'s no-op on the initial HTML.
+      deliverInitialSnapshot?.()
+      deliverInitialSnapshot = undefined
+      const deadline = Date.now() + 1_000
+      while (!predicate()) {
+        if (Date.now() >= deadline) throw new Error('settings fixture wait timed out')
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 1))
+      }
+    }
+    const page = {
+      evaluate,
+      waitForFunction: (predicate) => waitFor(() => evaluate(predicate)),
+      locator(selector) {
+        const element = dom.window.document.querySelector(selector)
+        const edit = (value) => {
+          element.value = value
+          element.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+          element.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+        }
+        return {
+          selectOption: edit,
+          fill: edit,
+          uncheck() {
+            if (element.checked) element.click()
+          },
+          isChecked: () => element.checked,
+          async click() {
+            await waitFor(() => !element.disabled)
+            element.click()
+          },
+          filter: ({ hasText }) => ({ waitFor: () => waitFor(() => element.textContent.includes(hasText)) }),
+        }
+      },
+    }
+
+    await saveSmokeSettings(page)
+    assert.equal(dom.window.document.querySelector('#random-on-fail').checked, false)
+  })
+}
 
 test('remote load-only mode never requires or implies an authenticated Key', () => {
   assert.deepEqual(resolveRemoteSmokeMode(['--load-only'], {}), { mode: 'load-only' })
@@ -91,6 +178,7 @@ async function createSmokeFixture(context) {
   const extensionRoot = fileURLToPath(new globalThis.URL('../../', import.meta.url))
   for (const file of [
     'scripts/e2e/chromium-load-smoke.mjs',
+    'scripts/e2e/ordinary-settings-smoke.mjs',
     'scripts/e2e/chromium-content-smoke.mjs',
     'scripts/browser/browser-support.mjs',
     'src/platform/extension-paths.ts',
