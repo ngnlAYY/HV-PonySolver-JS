@@ -13,13 +13,16 @@
 
 前三项属于 Repository CI，最后一项属于独立部署 workflow，默认均关闭。普通 push、PR 和未选择发布的手动运行不创建 Release 或发布产品 artifact；测试报告等 CI 证据仍可上传。
 
+`userscript-artifact` 整个 job 仅在显式选择 `publish_userscript_artifact` 且所需门禁通过时启动；未选择时跳过该 job 的安装与发布构建。普通验证仍由 coverage-build 检查两种用户脚本包体。
+
 ## 仓库验证工作流
 
 [verify-monorepo.yml](../../.github/workflows/verify-monorepo.yml) 在 PR、main push 和手动触发时运行；逐 job 的检查内容见[本地命令映射](verification.md#ci-job-与本地命令)。维护时保留以下边界：
 
 - `jdx/mise-action` 读取根 `mise.toml`，保留 pnpm store 缓存与冻结安装；仅需 Node 的发布步骤可限定安装 Node。
 - 外部 Action 固定完整 commit SHA，Docker Action 固定完整 `sha256` digest；每次 checkout 均设置 `persist-credentials: false`。guardrails 获取完整历史，供归档封印比较。
-- `test` 包含工作区和根级 `scripts/**/*.test.mjs`；覆盖率不替代根测试。coverage-build 分别检查默认 `256 KiB` 与内置 Runtime `1 MiB` 用户脚本预算。
+- 仓库 CI 不预生成工作区根 Wrangler 配置；Worker 测试自行生成隔离配置，类型检查和构建不读取部署配置。
+- `test` 包含工作区和根级 `scripts/**/*.test.mjs`；覆盖率不替代根测试。coverage-build 分别检查默认 `256 KiB` 与内置 Runtime `1 MiB` 用户脚本预算，两者均使用未压缩产物；发布 job 可另行压缩。
 - 用户脚本 E2E 在 PR/main push 执行，手动运行由 `run_userscript_e2e` 控制。extension-e2e 内构建一次 remote，供基准和双浏览器 load-only 复用；Release 发布这份已测试产物，不二次构建。
 - remote 鉴权与 canonical 模型受环境/仓库变量控制。job 未运行或 `enabled=false` 都不产生相应证据；发布 gate 同时检查成功状态与 enabled 输出。显式 authenticated 命令缺 Key 必须失败。
 - 两种扩展发布均显式依赖本次 CodeQL 成功。内置 artifact 还要求 `firefox_android_e2e_run_id` 指向受信任外部 workflow 的成功 run，核对 commit、事件、Android 142 推理以及同一 Firefox ZIP 的名称、长度和 SHA-256。

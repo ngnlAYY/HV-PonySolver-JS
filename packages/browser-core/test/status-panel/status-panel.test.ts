@@ -563,6 +563,35 @@ describe('StatusPanel history persistence', () => {
     panel.destroy()
   })
 
+  it('keeps visibility tied to any div#csp when earlier duplicate IDs belong to other elements', async () => {
+    const wrongElement = document.createElement('span')
+    wrongElement.id = 'csp'
+    const firstWindow = document.createElement('div')
+    firstWindow.id = 'csp'
+    const container = document.createElement('section')
+    const secondWindow = document.createElement('div')
+    secondWindow.id = 'csp'
+    container.append(secondWindow)
+    document.body.append(wrongElement, firstWindow, container)
+    const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage())
+    panel.create()
+    const element = document.querySelector<HTMLDivElement>('.ponyLog')!
+    expect(element.hidden).toBe(false)
+
+    firstWindow.remove()
+    await Promise.resolve()
+    expect(element.hidden).toBe(false)
+    container.remove()
+    await Promise.resolve()
+    expect(element.hidden).toBe(true)
+    wrongElement.replaceWith(container)
+    await Promise.resolve()
+    expect(element.hidden).toBe(false)
+    secondWindow.removeAttribute('id')
+    await Promise.resolve()
+    expect(element.hidden).toBe(true)
+  })
+
   it('preserves external visibility changes while draining its own render mutations', async () => {
     const panel = createPanel(historyStore(Promise.resolve([])), settingsStorage())
     panel.create()

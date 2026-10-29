@@ -34,7 +34,7 @@ App
 
 [App](../../packages/browser-core/src/app/app.ts) 在 documentElement 上观察验证码相关变化，以启动延迟和 MutationObserver 防抖调度扫描，覆盖 body 替换和暂时缺失。验证码选择器属性 `id/name` 的补齐会补扫；移除时还按旧活动目标判断相关性，先取消再防抖。扫描与面板各自维护观察器；App 保存当前、失败和准备中的目标，在销毁、切页或 Key 变化时取消旧任务或推进凭据修订号。
 
-mutation 按其目标的最近验证码容器定位候选，不依赖文档中第一个同 ID 节点。前方残留的不完整容器不能遮挡后续验证码的属性/子节点补齐、action 更新或外层 fieldset 恢复；旧活动容器仍参与即时取消判断。
+目标扫描先使用 ID 索引读取常见单题，首个候选无效时仍遍历后续同 ID 容器；只有实际 HTML img/form 才进入原生属性读取，SVG 等外来命名空间同名节点会被跳过。mutation 按其目标的最近验证码容器定位候选，不依赖文档中第一个同 ID 节点。前方残留的不完整容器不能遮挡后续验证码的属性/子节点补齐、action 更新或外层 fieldset 恢复；旧活动容器仍参与即时取消判断。
 
 JPX 的 `AjaxRound` 会批量清除页面定时器，留下失效的待扫描句柄。每次相关 mutation 都重挂定时器，保留基于 `performance.now()` 的原扫描截止时间；已过期则立即排队，不再等待完整 100ms，持续变化也不延后截止时间。无关 mutation 不重挂，去重、失败冷却与销毁约束不变；这不是全页定时器保护或轮询恢复。
 
@@ -74,18 +74,20 @@ sequenceDiagram
     Solver->>Panel: 状态与历史
 ```
 
-`CaptchaTarget` 在模型准备前捕获解析后的 `form.action`、原生提交控件的实际 action、类型及答案/提交控件的实际 `.form`。表单地址统一通过 `HTMLFormElement.prototype` 的原生 getter 读取，不能被 `name="action"` 或 `id="action"` 控件遮蔽；同源检查、目标快照与提交前复核使用同一读取规则。`App` 和 `CaptchaSolver` 贯穿准备、图片、推理、提交阶段用 `isSameCaptchaTarget` 复核；相对与绝对写法解析到同一 URL 时等价。`form` 属性使控件失联或换归属时立即取消，恢复关联后补扫；显式关联仍指向原表单时不重启。取消、超时或新目标使旧任务停止点击。
+`CaptchaTarget` 在模型准备前捕获解析后的 `form.action`、原生提交控件的实际 action、类型及答案/提交控件的实际 `.form`。表单地址统一通过 `HTMLFormElement.prototype` 的原生 getter 读取，不能被 `name="action"` 或 `id="action"` 控件遮蔽；同一次同步复核只读取一次 action，并将该值用于提交地址解析、同源检查与身份比较。每次等待后和点击前仍重新获取，不跨异步或取消事件缓存目标。`App` 和 `CaptchaSolver` 贯穿准备、图片、推理、提交阶段用 `isSameCaptchaTarget` 复核；相对与绝对写法解析到同一 URL 时等价。`form` 属性使控件失联或换归属时立即取消，恢复关联后补扫；显式关联仍指向原表单时不重启。取消、超时或新目标使旧任务停止点击。
 
 显式 `form` 关联还受验证码容器外同 ID 节点影响。外部节点插入、移除、改名或重排后，复核已跟踪控件的实际 `.form`；归属改变即取消旧准备或恢复扫描。已脱离页面的旧目标不因此触发无关扫描。
 
-[AnswerSubmitter](../../packages/browser-core/src/captcha/answer-submitter.ts) 在开始、等待后及每次点击前后复核地址、checkbox 数量/类型/身份、所属表单、连接与有效禁用状态；`formaction` 不能绕过同源检查，`fieldset` 继承禁用包含首个 `legend` 例外。手动模式只记录结果，随机兜底由 [CaptchaSolver](../../packages/browser-core/src/captcha/captcha-solver.ts) 配置。
+[AnswerSubmitter](../../packages/browser-core/src/captcha/answer-submitter.ts) 在开始、等待后及每次点击前后复核地址、checkbox 数量/类型/身份、所属表单、连接与有效禁用状态；`formaction` 不能绕过同源检查，`fieldset` 继承禁用包含首个 `legend` 例外。手动模式只记录结果，随机兜底由 [CaptchaSolver](../../packages/browser-core/src/captcha/captcha-solver.ts) 配置，默认值直接取 `fallback-settings.ts` 的 `DEFAULT_RANDOM_ON_FAIL`；两平台不再维护 `solverConfig` 包装别名。
+
+提交入口还要求实际 `HTMLInputElement` 或 `HTMLButtonElement`；`object` 等节点即使具有相同 `form/type` 也不能充当提交控件。用户脚本在依赖装配处直接创建核心 Solver，平台行为通过已有接口注入，不再保留纯转发子类。
 
 保留答案依靠 WeakMap 与 `change` 监听维护归属：
 
 - 仅本轮实际点击成功或原有自动标记的项可更新置信度；候选中的手动项不会被接管，后续轮次合并也保留其身份。
 - 模型准备前捕获手动变更基线；本轮手动取消项在初始裁剪前排除，每次自动勾选前再复核，贯穿图片读取、推理和等待。下一轮重取基线，关闭保留模式则接管选择。
 - 合计不超过 4 项时保留，超过时只从自动项按低置信度裁剪至最多 3 项，或直到无自动项。提交等待后按实时状态再次裁剪，始终保留手动项。
-- 初始和最终裁剪每次点击前都重查自动归属，防止上一项的 `change` 回调把下一项变为手动后仍被清除。
+- 初始和最终裁剪每次点击前都重查自动归属，防止上一项的 `change` 回调把下一项变为手动后仍被清除。最终裁剪单遍统计当前勾选数并选择最低置信自动项，不为取一项反复构造数组和排序；同分按 DOM 顺序，缺失置信度仍最低。
 
 ## 推理 Worker 与 Runtime profile
 
@@ -110,15 +112,19 @@ RGBA 转 CHW 在写入前一次验证像素数量及两个缓冲区长度，再�
 
 图片、模型与 Runtime 共用 `readBoundedByteStream`：已知长度分配最终缓冲，未知长度在上限内倍增并即时复制，结束只返回实际字节，不积累分块或外部大缓冲视图。增长/裁剪时新旧缓冲可能并存，字节上限不是进程内存上限。HTTP/头校验失败后尽力清理流，不等待取消 Promise；清理抛错、拒绝或挂起不能阻塞图片回退或覆盖原始错误。图片 fetch 忽略取消、在超时或取消后迟到返回时，也须取消无人消费的正文。
 
+正文块必须是真实的单字节元素视图，跨 realm 的字节视图仍可读取；DataView、多字节元素数组和伪造长度对象立即拒绝并释放 reader。扩容只复制已写入区间。共用 `raceAbort` 先保存取消原因，再尽力调用清理；清理抛错、拒绝或未决均不阻止取消结算，自定义错误工厂失败时沿用信号原因。错误展示同样容忍异常 getter 或字符串转换，回退固定中文提示。
+
 HTTP `Content-Length` 描述线上编码长度，不等于 Fetch 解压后的字节数。图片存在内容编码时按实际正文上限读取，未编码响应仍复核声明长度；模型即使无法读取 CORS 隐藏的 `Content-Encoding`，也按清单长度和 SHA-256 验证解压后正文。模型编码声明预算见[缓存专题](../model-cache-strategy.md#缓存分层)。
 
 核心[下载器](../../packages/browser-core/src/model/model-downloader.ts) 统一管理调用方取消和截止时间，覆盖凭据读取、Bearer 请求、重定向拒绝、有界读取、完整性及回执；用户脚本[适配器](../../apps/userscript/src/model/model-downloader.ts) 只提供 GM Key 与原取消信号，不再重复包装信号、Response 或字节流。
 
 [ModelCache](../../packages/browser-core/src/model/model-cache.ts) 编排读取、共享下载、写入与确认；[IndexedDB store](../../packages/browser-core/src/model/indexeddb-model-store.ts) 管理事务，[record](../../packages/browser-core/src/model/model-cache-record.ts) 校验记录，[shared downloads](../../packages/browser-core/src/model/shared-model-downloads.ts) 合并并发下载。带回执的模型与待确认元数据同事务落盘，确认并更新匹配元数据后才允许后续缓存命中；无回执不确认。关闭、`versionchange` 或数据库异常关闭事件 `close` 取消数据库操作与共享下载，并使未完成确认失效。连接被清除后下次操作重新打开，旧连接迟到事件不影响新连接。
 
+敏感 GM 读取、写入和删除的同步异常或异步拒绝统一转换为固定操作错误，不附带管理器原异常或 cause；普通设置仍保留原失败原因。
+
 用户脚本 Key 经 [model-settings.ts](../../apps/userscript/src/model/model-settings.ts) 存入 [sensitiveGmSettingsStorage](../../apps/userscript/src/userscript/gm-storage.ts)，GM 不可用时拒绝降级到页面存储。
 
-- 意图代次阻止尚未写入的旧验证迟到提交，取消输入不淘汰原操作。
+- 意图代次阻止尚未写入的旧验证迟到提交，验证结束和排队写入真正开始前都复核；被淘汰的排队项不调用 GM、不通知提交或显示成功。取消输入不淘汰原操作。
 - 同页设置/清除共用写入尾链，等待已发起的 GM 操作真实结算；前次失败不阻断后续写入。提交回调位于尾链之外，不能卡住新写入。不提供跨标签事务，也不跳过永久挂起的旧写入。
 - 实际提交后才通知组装层，取消并等待旧 prepare 后恢复 App；已就绪会话复用，并发按修订号取最新。取消输入、验证/存储失败或销毁后的迟到回调不恢复。
 
@@ -133,6 +139,8 @@ HTTP `Content-Length` 描述线上编码长度，不等于 Fetch 解压后的字
 [StatusPanel](../../packages/browser-core/src/status-panel/status-panel.ts) 管理状态、历史代次、异步设置与 `div#csp` 可见性；[renderer](../../packages/browser-core/src/status-panel/status-panel-renderer.ts) 只用安全 DOM API，不引入 `innerHTML` 或动态执行。持久化先乐观显示，失败后回滚到已保存历史并报错。破坏性裁剪只使用异步存储的 `getCommittedItemsByPrefix()` 已提交快照，未决写入不挤掉旧记录；快照失败则跳过删除，同步存储仍普通枚举。
 
 面板观察器独立于 csp 开关，观察 documentElement 下 body 及子节点。首次初始化也允许 body 缺失，先注册观察、等待插入，不因面板尚未挂载而中止 App 启动。AADB 等脚本移除 `.ponyLog` 后挂回原节点，不重建应用或重读历史。渲染先复核挂载，再命中缓存或消费自身 mutation，避免遗漏外部移除。destroy 断开观察并清空引用，迟到回调不能复活面板。
+
+每批 mutation 按当前 DOM 的 ID 索引判断 csp 可见性，不遍历新增或删除的无关子树；首个同 ID 节点不是 div 时仍回退查询后续有效容器。渲染前后复核最终 DOM，覆盖页面向面板内插入 csp 后被重绘移除的情况，无需保存并重放 MutationRecord。
 
 同文档跨世界导航在下一次创建、状态更新、历史活动或相关 DOM 恢复时刷新世界标题和历史，复用原面板节点。每次写入绑定发起时的世界；另一世界的迟到成功或失败不能覆盖当前记录或保存错误。返回原世界后，迟到失败仍校对该世界的实时回滚结果，但不恢复旧访问的错误提示。
 

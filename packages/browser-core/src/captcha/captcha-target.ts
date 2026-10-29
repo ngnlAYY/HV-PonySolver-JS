@@ -1,11 +1,13 @@
 import { captchaSelectors } from './captcha-selectors'
 
+export type CaptchaSubmitControl = HTMLInputElement | HTMLButtonElement
+
 export type CaptchaControlsSnapshot = Readonly<{
   answers: readonly HTMLInputElement[]
   answerDisabled: readonly boolean[]
   answerTypes: readonly string[]
   answerForms: readonly (HTMLFormElement | null)[]
-  submit: HTMLInputElement | null
+  submit: CaptchaSubmitControl | null
   submitForm: HTMLFormElement | null
   submitDisabled: boolean
   submitType: string | null
@@ -74,9 +76,9 @@ function isSameImageSource(left: CaptchaImageSource, right: CaptchaImageSource):
   )
 }
 
-function captureControls(form: HTMLFormElement): CaptchaControlsSnapshot {
+function captureControls(form: HTMLFormElement, formAction: string | null): CaptchaControlsSnapshot {
   const answers = Array.from(form.querySelectorAll<HTMLInputElement>(captchaSelectors.answers))
-  const submit = form.querySelector<HTMLInputElement>(captchaSelectors.submit)
+  const submit = form.querySelector<CaptchaSubmitControl>(captchaSelectors.submit)
   return {
     answers,
     answerDisabled: answers.map((answer) => answer.matches(':disabled')),
@@ -86,7 +88,7 @@ function captureControls(form: HTMLFormElement): CaptchaControlsSnapshot {
     submitForm: submit?.form ?? null,
     submitDisabled: submit?.matches(':disabled') ?? false,
     submitType: submit?.type ?? null,
-    submitAction: getSubmissionAction(form, submit),
+    submitAction: getSubmissionAction(form, submit, formAction),
   }
 }
 
@@ -136,9 +138,13 @@ export function getFormAction(form: HTMLFormElement): string | null {
   return typeof action === 'string' ? action : null
 }
 
-export function getSubmissionAction(form: HTMLFormElement, submit: HTMLInputElement | null): string | null {
+export function getSubmissionAction(
+  form: HTMLFormElement,
+  submit: CaptchaSubmitControl | null,
+  formAction: string | null,
+): string | null {
   if (!submit || !['submit', 'image'].includes(submit.type) || !submit.hasAttribute('formaction')) {
-    return getFormAction(form)
+    return formAction
   }
   const override = submit.getAttribute('formaction') ?? ''
   // 显式空 formaction 使用文档地址，不继承 form.action 或 base 的地址。
@@ -150,50 +156,58 @@ export function getSubmissionAction(form: HTMLFormElement, submit: HTMLInputElem
   }
 }
 
-export function isSameOriginForm(form: HTMLFormElement, submit: HTMLInputElement | null = null): boolean {
-  const formAction = getFormAction(form)
-  const submissionAction = getSubmissionAction(form, submit)
+export function areSameOriginActions(formAction: string | null, submissionAction: string | null): boolean {
   return (
-    formAction !== null && isSameOriginUrl(formAction) && submissionAction !== null && isSameOriginUrl(submissionAction)
+    formAction !== null &&
+    submissionAction !== null &&
+    isSameOriginUrl(formAction) &&
+    (submissionAction === formAction || isSameOriginUrl(submissionAction))
   )
 }
 
-export function findCaptchaTarget(): CaptchaTarget | null {
-  const masters = document.querySelectorAll(captchaSelectors.master)
-  for (let index = 0; index < masters.length; index += 1) {
-    const master = masters.item(index)
-    const imageContainer = master.querySelector<HTMLElement>('[id="riddleimage"]')
-    const image = imageContainer?.querySelector<HTMLImageElement>('img')
-    const form = master.querySelector<HTMLFormElement>(captchaSelectors.form)
-    if (!image) continue
-    const imageSource = captureImageSource(image)
-    const responsive =
-      imageSource.srcset.trim() !== '' || imageSource.sources.some((source) => source.srcset.trim() !== '')
-    // 响应式选源可能暂时清空或保留旧 currentSrc；加载完成前不能退回旧 src 答题。
-    if (responsive && (!image.complete || !image.currentSrc)) continue
-    const captchaKey = responsive ? image.currentSrc : imageSource.src
-    const controls = form ? captureControls(form) : null
-    const formAction = form ? getFormAction(form) : null
-    if (
-      form &&
-      formAction !== null &&
-      controls &&
-      image &&
-      captchaKey &&
-      isSameOriginUrl(captchaKey) &&
-      isSameOriginForm(form, controls.submit)
-    ) {
-      return {
-        master,
-        form,
-        formAction,
-        pageUrl: location.href,
-        image,
-        imageSource,
-        controls,
-        captchaKey,
-      }
+function captureTarget(master: Element): CaptchaTarget | null {
+  const imageContainer = master.querySelector<HTMLElement>('[id="riddleimage"]')
+  const image = imageContainer?.querySelector<HTMLImageElement>('img')
+  const form = master.querySelector<HTMLFormElement>(captchaSelectors.form)
+  if (!(image instanceof HTMLImageElement) || !(form instanceof HTMLFormElement)) return null
+  const imageSource = captureImageSource(image)
+  const responsive =
+    imageSource.srcset.trim() !== '' || imageSource.sources.some((source) => source.srcset.trim() !== '')
+  // 响应式选源可能暂时清空或保留旧 currentSrc；加载完成前不能退回旧 src 答题。
+  if (responsive && (!image.complete || !image.currentSrc)) return null
+  const captchaKey = responsive ? image.currentSrc : imageSource.src
+  const formAction = getFormAction(form)
+  const controls = captureControls(form, formAction)
+  if (
+    formAction !== null &&
+    captchaKey &&
+    isSameOriginUrl(captchaKey) &&
+    areSameOriginActions(formAction, controls.submitAction)
+  ) {
+    return {
+      master,
+      form,
+      formAction,
+      pageUrl: location.href,
+      image,
+      imageSource,
+      controls,
+      captchaKey,
     }
+  }
+  return null
+}
+
+export function findCaptchaTarget(): CaptchaTarget | null {
+  const first = document.getElementById(captchaSelectors.master.slice(1))
+  if (!first) return null
+  const target = captureTarget(first)
+  if (target) return target
+  // 常见单题走 ID 索引；前方残留的不完整同 ID 容器仍不能遮挡后续题目。
+  for (const master of document.querySelectorAll(captchaSelectors.master)) {
+    if (master === first) continue
+    const candidate = captureTarget(master)
+    if (candidate) return candidate
   }
   return null
 }

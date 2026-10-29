@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -8,6 +9,26 @@ import test from 'node:test'
 import { runCli } from './verify-onnx-runtime-assets.mjs'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
+
+test('runtime asset CLI rejects unsupported and incomplete arguments before checking assets', () => {
+  for (const [args, message] of [
+    [['--repo-rooot', '/unused'], 'Unknown argument: --repo-rooot'],
+    [['--repo-root'], '--repo-root requires a path'],
+    [['--repo-root', '--help'], '--repo-root requires a path'],
+  ]) {
+    const result = spawnSync(
+      process.execPath,
+      [resolve(import.meta.dirname, 'verify-onnx-runtime-assets.mjs'), ...args],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, ORT_RUNTIME_WASM_FILE: '' },
+      },
+    )
+    assert.equal(result.status, 1)
+    assert.equal(result.stdout, '')
+    assert.equal(result.stderr.trim(), message)
+  }
+})
 
 test('verifies actual bundle bytes and rejects same-length corruption without reporting success', async () => {
   const root = await mkdtemp(join(tmpdir(), 'hv-pony-runtime-verifier-'))

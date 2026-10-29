@@ -159,4 +159,24 @@ describe('loadVerifiedRuntimeWasm', () => {
     resolveResponse({ body: { cancel } } as unknown as Response)
     await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(1))
   })
+
+  it('rejects cancellation after hashing settles but before verified bytes are delivered', async () => {
+    const controller = new AbortController()
+    const reason = new Error('runtime delivery cancelled')
+    const digestBytes = Uint8Array.from(expectedAsset.sha256.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16))
+    const digest = vi.spyOn(crypto.subtle, 'digest').mockImplementationOnce(() => {
+      const settled = Promise.resolve(digestBytes.buffer)
+      void settled.then(() => queueMicrotask(() => queueMicrotask(() => controller.abort(reason))))
+      return settled
+    })
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1, 2, 3])))
+    try {
+      await expect(
+        loadVerifiedRuntimeAsset('ONNX Runtime WASM', expectedAsset, fetchImpl, controller.signal),
+      ).rejects.toBe(reason)
+      expect(controller.signal.aborted).toBe(true)
+    } finally {
+      digest.mockRestore()
+    }
+  })
 })

@@ -1,11 +1,7 @@
 type ErrorLike = Readonly<{
   name?: unknown
   message?: unknown
-  /**
-   * Optional already-user-facing text. Errors carrying it (for example
-   * PermanentModelError subclasses) are formatted verbatim instead of with the
-   * class-name prefix, which would be noise in panel messages.
-   */
+  /** 已面向用户的文案，直接显示，不加错误类名前缀。 */
   userMessage?: unknown
 }>
 
@@ -20,16 +16,23 @@ export function formatErrorMessage(error: unknown): string {
   if (error === undefined || error === null) {
     return '未知错误'
   }
-  if (isErrorLike(error)) {
-    if (typeof error.userMessage === 'string' && error.userMessage) {
-      return error.userMessage
+  try {
+    if (isErrorLike(error)) {
+      const userMessage = error.userMessage
+      if (typeof userMessage === 'string' && userMessage) {
+        return userMessage
+      }
+      const message = error.message
+      const name = error.name
+      if (message) {
+        return name ? `${String(name)}: ${String(message)}` : String(message)
+      }
+      if (name) {
+        return String(name)
+      }
     }
-    if (error.message) {
-      return error.name ? `${String(error.name)}: ${String(error.message)}` : String(error.message)
-    }
-    if (error.name) {
-      return String(error.name)
-    }
+    return String(error)
+  } catch {
+    return '未知错误'
   }
-  return String(error)
 }

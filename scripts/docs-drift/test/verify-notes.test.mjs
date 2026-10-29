@@ -86,6 +86,33 @@ test('notes gate accepts implemented records and rejects missing alternatives or
   })
 })
 
+for (const part of ['implemented', 'implemented/process', 'implemented/process/2026-09-16-example.md']) {
+  test(`notes gate rejects linked and dangling active paths: ${part}`, async () => {
+    await fixture(async (root) => {
+      const source = join(root, 'docs/decisions', part)
+      const target = join(root, 'moved-note')
+      await rename(source, target)
+      await symlink(target, source)
+      for (const dangling of [false, true]) {
+        if (dangling) await rm(target, { recursive: true })
+        const result = run(root)
+        assert.equal(result.status, 1, result.stdout)
+        assert.match(result.stderr, /symbolic link/u)
+      }
+    })
+  })
+}
+
+test('notes gate rejects an active Markdown file replaced by a directory', async () => {
+  await fixture(async (root, note) => {
+    await rm(note)
+    await mkdir(note)
+    const result = run(root)
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /regular files/u)
+  })
+})
+
 test('note sections inside tilde or longer backtick fences do not satisfy required prose', async () => {
   await fixture(async (root, note) => {
     const sectionStart = valid.indexOf('## Problem')

@@ -11,21 +11,8 @@ import { PermanentModelError } from '../../src/model/permanent-model-error'
 import { downloadModel } from '../../src/model/model-downloader'
 import { HistoryStore } from '../../src/persistence/answer-history-store'
 import { StatusPanel as BrowserStatusPanel } from '../../src/status-panel/status-panel'
-import type { StatusPanel } from '../../src/status-panel/status-panel-types'
 import { appendCaptcha } from '../../../../test/support/captcha-fixture'
-
-function createPanel(): StatusPanel {
-  return {
-    addError: vi.fn(),
-    addManualResult: vi.fn(),
-    addRandomFailure: vi.fn(),
-    addSuccess: vi.fn(),
-    create: vi.fn(),
-    destroy: vi.fn(),
-    setSessionReady: vi.fn(),
-    setStatus: vi.fn(),
-  }
-}
+import { createMockPanel as createPanel } from '../helpers/mock-panel'
 
 function createDetector(): DetectorService {
   return {

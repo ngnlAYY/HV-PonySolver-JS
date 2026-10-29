@@ -26,6 +26,23 @@ function mirrorWithListeners(): {
 }
 
 describe('watchModelCredentialsRevision', () => {
+  it('recovers after a background restart when the wall clock repeats a prior commit time', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_234_567)
+    vi.resetModules()
+    const firstBackground = await import('../../src/protocol/model-credentials-revision')
+    const previous = firstBackground.nextModelCredentialsRevision()
+    vi.resetModules()
+    const replacementBackground = await import('../../src/protocol/model-credentials-revision')
+    const current = replacementBackground.nextModelCredentialsRevision()
+    const { mirror, emit } = mirrorWithListeners()
+    const onCredentialsChanged = vi.fn()
+    watchModelCredentialsRevision(mirror, onCredentialsChanged)
+
+    emit(MODEL_CREDENTIALS_REVISION_KEY, current, previous)
+
+    expect(onCredentialsChanged).toHaveBeenCalledOnce()
+  })
+
   it('recovers only on real revision changes', () => {
     const { mirror, emit } = mirrorWithListeners()
     const onCredentialsChanged = vi.fn()

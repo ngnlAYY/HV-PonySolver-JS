@@ -23,11 +23,11 @@ Node.js 工具链另查[官方安全公告](https://nodejs.org/en/blog/vulnerabi
 
 工作区职责见[整体架构](../architecture/overview.md)。新增跨包导入、移动目录或修改 package export 后运行 `architecture:check`；类型边界同时检查 `import type`、`import('…').Type` 与 `typeof import('…')`。
 
-源码边界与危险调用门禁覆盖 `.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs`。静态模板 import、`require`、TypeScript import-equals 与类型导入同样受依赖方向约束；全局或静态 computed 的危险调用不能绕过检查，`as` 与 `<T>` 类型断言均须剥离后检查实际表达式。CLI 缺少受保护源码目录时失败关闭。
+源码边界与危险调用门禁覆盖 `.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs`。静态模板 import、`require`、TypeScript import-equals 与类型导入同样受依赖方向约束；全局或静态 computed 的危险调用不能绕过检查，`as` 与 `<T>` 类型断言均须剥离后检查实际表达式。innerHTML 写入包含嵌套解构、rest、默认值及 for-in/of 赋值，普通读取仍允许。CLI 缺少受保护源码目录、源码根或内部条目为符号链接、AST 语法错误时失败关闭；生成目录仍按既有规则排除，不能用解析器错误恢复或扫描遗漏绕过门禁。
 
 ## Model Worker 测试配置
 
-Worker 的 [vitest.config.ts](../../apps/model-worker/vitest.config.ts) 每次启动都以固定 `testWranglerConfigEnv` 和 `renderMode: 'test'`，从权威 [wrangler.template.toml](../../apps/model-worker/wrangler.template.toml) 自动生成 `.wrangler/vitest/wrangler.toml`，只把该隔离配置交给 Cloudflare 测试插件。它忽略继承的部署绑定和额度开关，不读取或覆盖 `apps/model-worker/wrangler.toml`。
+Worker 的 [vitest.config.ts](../../apps/model-worker/vitest.config.ts) 每次启动都以固定 `testWranglerConfigEnv` 和 `renderMode: 'test'`，从权威 [wrangler.template.toml](../../apps/model-worker/wrangler.template.toml) 自动生成 `.wrangler/vitest/wrangler.toml`，只把该隔离配置交给 Cloudflare 测试插件。它忽略继承的部署绑定和额度开关，不读取或覆盖 `apps/model-worker/wrangler.toml`。Repository CI 的 guardrails、test 与 coverage-build 同样直接运行检查，不另行调用根配置渲染。
 
 `build` 与 `typecheck` 均为 `tsc --noEmit`，不需要 Wrangler 配置。普通测试、构建和根 `pnpm check` 可直接执行：
 
@@ -65,6 +65,7 @@ Vitest 主要验证 TypeScript/运行时逻辑；包内 Node 测试覆盖构建�
 ### 测试归属与精简
 
 - 共用 DOM、答题、推理、模型下载和历史逻辑归 browser-core；用户脚本只补 GM、菜单、存储和 Runtime 适配，不重复整套共用行为。
+- 用户脚本直接装配核心 Solver；原转发类的默认随机兜底、历史和提交断言由核心 Solver 测试保留，应用装配 smoke 与浏览器 E2E 验证平台接线。
 - 删除等价用例前指出仍保留的行为断言；取消时点、手动答案归属、Key 隔离、事务身份、来源校验和既有缺陷回归不能仅凭行覆盖率删除。
 - 文档静态关键词检查按校验分支和每篇专题选代表负例；保留逐篇失败、README 不能补足专题、源码提取和伪装事实的负例，不逐词重复全仓扫描。
 - 清单共有字段的负例覆盖两种后台形态，不重复四种模型/浏览器组合；四种有效清单、权限/CSP/模型身份差异、危险 HTML 及产物/E2E 矩阵仍独立验证。
@@ -107,7 +108,7 @@ Vitest 主要验证 TypeScript/运行时逻辑；包内 Node 测试覆盖构建�
 | extension-minimum-versions-e2e     | 精确 Chromium 116/Firefox 140 加 packaged smoke                                                                      |
 | extension-packaged-e2e             | 确定性 fixture 加桌面双浏览器 smoke                                                                                  |
 | extension-canonical-packaged-e2e   | canonical 下载、`build:packaged`、桌面双浏览器；显式发布时校验外部 Android 142 run、同一 ZIP 与 preflight 后首次上传 |
-| userscript-artifact                | bundled 构建/预算及手动 artifact 上传                                                                                |
+| userscript-artifact                | 显式选择发布时执行 bundled 构建/预算及 artifact 上传                                                                 |
 | extension-artifact                 | canonical 内置包发布 preflight                                                                                       |
 | extension-release                  | 复用已测试 remote ZIP，校验身份后创建 Release                                                                        |
 

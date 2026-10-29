@@ -1,9 +1,13 @@
-import { ModelAccessKeyRejectedError, probeModelAccessKey, type AppDependencies } from '@hv-pony-solver/browser-core'
+import {
+  CaptchaSolver,
+  ModelAccessKeyRejectedError,
+  probeModelAccessKey,
+  type AppDependencies,
+} from '@hv-pony-solver/browser-core'
 
 import { getAnswerMode } from '../captcha/answer-mode-settings'
 import { AnswerSubmitter } from '../captcha/answer-submitter'
 import { CachedImageLoader } from '../captcha/captcha-image-loader'
-import { CaptchaSolver } from '../captcha/captcha-solver'
 import { OnnxWorkerClient } from '../inference/onnx-worker-client'
 import { ModelCache } from '../model/model-cache'
 import { HistoryStore } from '../persistence/answer-history-store'

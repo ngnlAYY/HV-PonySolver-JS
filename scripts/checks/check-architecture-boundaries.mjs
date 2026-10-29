@@ -186,6 +186,7 @@ async function checkArchitectureBoundaries(repoRoot = defaultRepoRoot, { require
 
 function extractImportSpecifiers(source, fileName = 'architecture-boundary-source.ts') {
   const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false)
+  if (sourceFile.parseDiagnostics.length > 0) throw new Error(`Invalid architecture source syntax: ${fileName}`)
   const specifiers = []
 
   function visit(node) {

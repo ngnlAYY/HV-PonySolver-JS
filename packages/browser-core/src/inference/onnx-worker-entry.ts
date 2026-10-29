@@ -41,7 +41,7 @@ function isSafeRequestId(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 }
 
-function isWorkerRequest(value: unknown): value is WorkerRequest {
+export function isWorkerRequest(value: unknown): value is WorkerRequest {
   if (!isRecordObject(value) || !isSafeRequestId(value.requestId)) {
     return false
   }

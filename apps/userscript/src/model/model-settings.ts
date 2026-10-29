@@ -80,8 +80,16 @@ export async function setModelAccessKeyFromPrompt(
     return
   }
   if (generation !== keyIntentGeneration) return
-  await setModelAccessKey(accessKey, onCommitted)
-  alertUser('模型下载 Key 已验证并保存')
+  let committed = false
+  await commitKeyMutation(async () => {
+    // 排队等待旧 GM 写入时，新的验证也可能淘汰本次尚未提交的 Key。
+    if (generation !== keyIntentGeneration) return
+    await setCoreModelAccessKey(modelAccessKeyStorage, accessKey)
+    committed = true
+  })
+  if (!committed) return
+  await onCommitted?.()
+  if (generation === keyIntentGeneration) alertUser('模型下载 Key 已验证并保存')
 }
 
 export async function clearSavedModelAccessKey(onCommitted?: ModelAccessKeyCommitted): Promise<void> {

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseRepoRootArgs } from '../../../scripts/lib/cli.mjs'
 import { readModelManifest } from '../../../scripts/model/model-manifest.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -17,8 +18,9 @@ if (isDirectRun()) {
 }
 
 async function runCli(modelFile) {
+  const { repoRoot } = parseRepoRootArgs(process.argv.slice(2), defaultRepoRoot)
   const actual = await readModelStats(modelFile)
-  const expected = await readExpectedIntegrity(resolveRepoRoot(process.argv.slice(2)))
+  const expected = await readExpectedIntegrity(repoRoot)
   if (!modelIntegrityMatches(actual, expected)) {
     writeError('Model integrity mismatch')
     writeError(`Expected: byteLength: ${expected.byteLength}, sha256: ${expected.sha256}`)
@@ -31,18 +33,6 @@ async function runCli(modelFile) {
 
 function isDirectRun() {
   return process.argv[1] ? resolve(process.argv[1]) === fileURLToPath(import.meta.url) : false
-}
-
-function resolveRepoRoot(args) {
-  const repoRootIndex = args.indexOf('--repo-root')
-  if (repoRootIndex === -1) {
-    return defaultRepoRoot
-  }
-  const repoRoot = args[repoRootIndex + 1]
-  if (!repoRoot) {
-    throw new Error('--repo-root requires a path')
-  }
-  return resolve(repoRoot)
 }
 
 function modelIntegrityMatches(actual, expected) {

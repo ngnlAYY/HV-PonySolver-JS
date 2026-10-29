@@ -93,7 +93,7 @@ describe('model settings', () => {
     })
 
     const older = setModelAccessKey(VALID_TOKEN, onCommitted)
-    const rejected = expect(older).rejects.toThrow('GM write failed')
+    const rejected = expect(older).rejects.toThrow('模型下载 Key 保存失败，请检查脚本管理器的 GM 存储')
     await vi.waitFor(() => expect(setValue).toHaveBeenCalledTimes(1))
     const clearing = clearModelAccessKey(onCommitted)
     firstCommit.reject(new Error('GM write failed'))
@@ -267,6 +267,40 @@ describe('model settings', () => {
     await older
 
     expect(setValue).toHaveBeenCalledExactlyOnceWith(STORAGE_KEY, 'cD'.repeat(32))
+  })
+
+  it('discards a verified Key queued behind a GM write when a newer verification starts', async () => {
+    const { getModelAccessKey, setModelAccessKey, setModelAccessKeyFromPrompt } =
+      await import('../../src/model/model-settings')
+    const firstCommit = Promise.withResolvers<void>()
+    const newestVerification = Promise.withResolvers<void>()
+    const stored = new Map<string, string>()
+    const setValue = vi.fn(async (key: string, value: string) => {
+      if (value === VALID_TOKEN) await firstCommit.promise
+      stored.set(key, value)
+    })
+    vi.stubGlobal('GM_setValue', setValue)
+    vi.stubGlobal('GM_getValue', (key: string, fallback: string) => stored.get(key) ?? fallback)
+    vi.stubGlobal('prompt', vi.fn().mockReturnValueOnce('cD'.repeat(32)).mockReturnValueOnce('eF'.repeat(32)))
+    vi.stubGlobal('alert', vi.fn())
+    const staleCommitted = vi.fn()
+
+    const first = setModelAccessKey(VALID_TOKEN)
+    await vi.waitFor(() => expect(setValue).toHaveBeenCalledOnce())
+    const stale = setModelAccessKeyFromPrompt(async () => undefined, staleCommitted)
+    await Promise.resolve()
+    const newest = setModelAccessKeyFromPrompt(() => newestVerification.promise)
+    firstCommit.resolve()
+    await Promise.all([first, stale])
+
+    expect(setValue).toHaveBeenCalledExactlyOnceWith(STORAGE_KEY, VALID_TOKEN)
+    expect(staleCommitted).not.toHaveBeenCalled()
+    expect(globalThis.alert).not.toHaveBeenCalledWith('模型下载 Key 已验证并保存')
+    await expect(getModelAccessKey()).resolves.toBe(VALID_TOKEN)
+
+    newestVerification.resolve()
+    await newest
+    await expect(getModelAccessKey()).resolves.toBe('eF'.repeat(32))
   })
 
   it('keeps a pending verification when a later prompt is cancelled', async () => {

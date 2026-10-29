@@ -123,6 +123,49 @@ describe('gm-bridge', () => {
     expect(localStorage.getItem('key')).toBeNull()
   })
 
+  it.each(['modern', 'legacy'] as const)('sanitizes sensitive %s GM storage failures', async (api) => {
+    const { deleteGmValue, getGmValue, getGmValueSync, setGmValue } = await import('../../src/userscript/gm-bridge')
+    const failure = new Error('fixture-private-value')
+    const getValue = vi.fn(() => {
+      throw failure
+    })
+    const setValue = vi.fn(async () => {
+      throw failure
+    })
+    const deleteValue = vi.fn(async () => {
+      throw failure
+    })
+    if (api === 'modern') testGlobal.GM = { getValue, setValue, deleteValue }
+    else {
+      testGlobal.GM_getValue = getValue
+      testGlobal.GM_setValue = setValue
+      testGlobal.GM_deleteValue = deleteValue
+    }
+
+    for (const [operation, message] of [
+      [() => getGmValue('key', '', { sensitive: true }), '模型下载 Key 读取失败，请检查脚本管理器的 GM 存储'],
+      [
+        () => setGmValue('key', 'fixture-private-value', { sensitive: true }),
+        '模型下载 Key 保存失败，请检查脚本管理器的 GM 存储',
+      ],
+      [() => deleteGmValue('key', { sensitive: true }), '模型下载 Key 删除失败，请检查脚本管理器的 GM 存储'],
+    ] as const) {
+      const error = await operation().catch((error: unknown) => error)
+      expect(error).toBeInstanceOf(Error)
+      expect(error).toMatchObject({ message })
+      expect(error).not.toHaveProperty('cause')
+      expect(String(error)).not.toContain('fixture-private-value')
+    }
+    if (api === 'legacy') {
+      expect(() => getGmValueSync('key', '', { sensitive: true })).toThrow(
+        '模型下载 Key 读取失败，请检查脚本管理器的 GM 存储',
+      )
+    }
+    await expect(getGmValue('key')).rejects.toBe(failure)
+    await expect(setGmValue('key', 'setting')).rejects.toBe(failure)
+    await expect(deleteGmValue('key')).rejects.toBe(failure)
+  })
+
   it('refuses the localStorage fallback for sensitive values when GM storage is unavailable', async () => {
     const { setGmValue } = await import('../../src/userscript/gm-bridge')
 

@@ -35,7 +35,7 @@
 
 [documentation-paths.mjs](../../scripts/docs-drift/documentation-paths.mjs)列出当前命令维护页；新增带命令的指南须加入。校验按包清单核对行内命令与 shell 代码块，历史审计和决定不参与当前命令存在性检查。
 
-新增契约先写能拒绝实际漂移的回归，再扩展事实提取器；不删断言以适应正文。字符串与正则事实检查完整 initializer，`as`/`satisfies` 后接运行时运算不得当字面量；Bearer 正则后接逻辑表达式也不能只读取前缀。HTTP 状态读取完整数字实参，不接受数字前缀。模型清单必须是完整对象字面量，可附 `as const` 和注释；属性选择、调用、运算等后续求值必须拒绝，不能在对象闭合花括号处截断。回归修改 fixture 源码前后都断言预期锚点和变体存在，避免迁移后替换空跑。R2 上传直接检查复制命令：必须显式选远程 R2，并从 `apps/model-worker` 定位 `../../other/` 对应资产；相邻文字不能补足缺失的 `--remote`、错误路径或覆盖远程选择的额外参数。结构/关键词检查不能证明全文语义正确。
+新增契约先写能拒绝实际漂移的回归，再扩展事实提取器；不删断言以适应正文。HTTP 常量与函数体统一由已有 TypeScript AST 提取：仅接受唯一的顶层 const 字面量与唯一函数实现，跳过无函数体重载，语法错误失败关闭。解析缓存按完整源码键控，最多保留八份，不按文件路径复用旧内容。字符串值由 TypeScript AST/scanner 按实际转义解码，包括十六进制、Unicode 和行续接；非法转义与未闭合字面量失败，转义后的 query Key 同样受限制。字符串与正则事实检查完整 initializer，`as`/`satisfies` 后接运行时运算不得当字面量；Bearer 正则后接逻辑表达式也不能只读取前缀。HTTP 状态读取完整数字实参，不接受数字前缀。模型清单必须是完整对象字面量，可附 `as const` 和注释；属性选择、调用、运算等后续求值必须拒绝，不能在对象闭合花括号处截断。回归修改 fixture 源码前后都断言预期锚点和变体存在，避免迁移后替换空跑。R2 上传直接检查复制命令：必须显式选远程 R2，并从 `apps/model-worker` 定位 `../../other/` 对应资产；相邻文字不能补足缺失的 `--remote`、错误路径或覆盖远程选择的额外参数。结构/关键词检查不能证明全文语义正确。
 
 同次事实/命令检查共享每个路径的读取结果；缓存仅活到本次调用，下一次检查重新读盘。模型与 Runtime 清单的完整 AST/属性限制见[资产专题](../onnx-runtime.md#清单字段与模型验证)。
 
@@ -93,7 +93,7 @@ rg --hidden --glob '!docs/decisions/archived/**' '机制名或关键词' docs/de
 
 仅归档已完成且参考价值低的 implemented：在 Status 后紧邻加 `Archived: YYYY-MM-DD`，移入 archived 对应类别，再执行 `AGENT_NOTE_ROOT=docs/decisions mise exec -- node scripts/docs-drift/notes/verify-archived-agent-notes.ts --write` 追加封印；不改写既有封印。
 
-笔记根及其祖先、归档目录/Markdown/manifest 必须为实际目录或普通文件，拒绝 symlink。包装器和直接入口都检查路径，不能因链接走出仓库而把 Git 基线校验降为可选；CI 事件 JSON 解析失败只报告固定错误，不回显内容。清单严格检查版本、归档相对 Markdown 路径、SHA-256；逐条读取并重算，路径存在或扫描命中不等于有效。缺失归档目录可选，但已有清单或路径异常时 `--write` 必须失败且不改清单。Git 仓库内直接验证/封印也先解析 `AGENT_NOTE_ARCHIVE_BASE_REF`（默认 HEAD）为可用 commit，再检查该树是否缺清单；无效引用、非 commit 或 Git 读取失败不能冒充首次封印。
+笔记根及其祖先、活跃生命周期/分类目录/Markdown、归档目录/Markdown/manifest 必须为实际目录或普通文件，拒绝 symlink（包括断链）；活跃 Markdown 被替换成目录也失败。包装器和直接入口都检查路径，不能因链接走出仓库而把 Git 基线校验降为可选；CI 事件 JSON 解析失败只报告固定错误，不回显内容。清单严格检查版本、归档相对 Markdown 路径、SHA-256；逐条读取并重算，路径存在或扫描命中不等于有效。缺失归档目录可选，但已有清单或路径异常时 `--write` 必须失败且不改清单。Git 仓库内直接验证/封印也先解析 `AGENT_NOTE_ARCHIVE_BASE_REF`（默认 HEAD）为可用 commit，再检查该树是否缺清单；无效引用、非 commit 或 Git 读取失败不能冒充首次封印。
 
 直接入口仅在 Git 明确报告非仓库、且笔记根所有祖先均无 `.git` 元数据时跳过追加基线，仍校验磁盘封印。Git 不可用、配置、权限、仓库发现或查询失败必须停止，不能创建或改写 manifest；错误只报告固定诊断，不回显环境、配置值或原始 Git 错误。
 

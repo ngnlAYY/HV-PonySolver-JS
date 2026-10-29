@@ -30,7 +30,7 @@ export class ModelCache {
     deadline: number = Date.now() + inferenceTimeoutConfig.modelCacheTimeoutMs,
   ): Promise<ArrayBuffer | null> {
     const context = this.store.createOperationContext(signal, deadline)
-    const startedAt = Date.now()
+    const startedAt = performance.now()
     this.statusSink.setStatus({ model: '确认缓存中' })
     try {
       this.store.assertOperationActive(context)
@@ -41,7 +41,7 @@ export class ModelCache {
         '模型缓存完整性校验超时',
       )
       this.store.assertOperationActive(context)
-      const elapsed = Date.now() - startedAt
+      const elapsed = Math.round(performance.now() - startedAt)
       if (cached) {
         this.statusSink.setStatus({ model: `缓存命中 ${elapsed}ms` })
         return cached
@@ -54,7 +54,7 @@ export class ModelCache {
       if (error instanceof ModelCacheLifecycleError) {
         throw error
       }
-      const elapsed = Date.now() - startedAt
+      const elapsed = Math.round(performance.now() - startedAt)
       this.statusSink.setStatus({ model: `缓存读取失败 ${elapsed}ms，准备下载` })
       warn('读取模型缓存失败，改为下载模型:', formatErrorMessage(error))
     }
@@ -67,7 +67,7 @@ export class ModelCache {
     accessKeyOverride?: string,
   ): Promise<ArrayBuffer> {
     if (signal?.aborted) throw new ModelCacheLifecycleError('模型缓存操作已取消')
-    const startedAt = Date.now()
+    const startedAt = performance.now()
     const generation = this.downloadGeneration
     this.statusSink.setStatus({ model: '下载中' })
     const buffer = await this.downloads.download(signal, verifyIntegrity, accessKeyOverride)
@@ -75,7 +75,7 @@ export class ModelCache {
     if (signal?.aborted || generation !== this.downloadGeneration) {
       throw new ModelCacheLifecycleError('模型缓存操作已取消')
     }
-    this.statusSink.setStatus({ model: `下载完成 ${Date.now() - startedAt}ms` })
+    this.statusSink.setStatus({ model: `下载完成 ${Math.round(performance.now() - startedAt)}ms` })
     return buffer
   }
 
@@ -85,8 +85,8 @@ export class ModelCache {
     skipIntegrityVerification: boolean = false,
     signal?: AbortSignal,
   ): Promise<void> {
-    const startedAt = Date.now()
-    const context = this.store.createOperationContext(signal, startedAt + inferenceTimeoutConfig.modelCacheTimeoutMs)
+    const startedAt = performance.now()
+    const context = this.store.createOperationContext(signal, Date.now() + inferenceTimeoutConfig.modelCacheTimeoutMs)
     try {
       this.store.assertOperationActive(context)
       const confirmationPending = getModelDownloadConfirmation(buffer) !== undefined
@@ -122,7 +122,7 @@ export class ModelCache {
       this.store.assertOperationActive(context)
       if (confirmationPending) await this.store.confirm(confirmation, context)
       this.store.assertOperationActive(context)
-      this.statusSink.setStatus({ model: `已缓存 ${Date.now() - startedAt}ms` })
+      this.statusSink.setStatus({ model: `已缓存 ${Math.round(performance.now() - startedAt)}ms` })
     } catch (error) {
       warn('模型缓存或下载次数确认失败，继续使用已下载模型:', formatErrorMessage(error))
       if (verifyIntegrity || error instanceof ModelCacheLifecycleError) throw error

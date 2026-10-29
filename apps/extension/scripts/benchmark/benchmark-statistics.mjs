@@ -37,8 +37,11 @@ function seededRandom(seed) {
 }
 
 export function deterministicBootstrapCi(values, options = {}) {
-  if (!Array.isArray(values) || values.length < 2 || values.some((value) => !Number.isFinite(value)))
+  if (!Array.isArray(values) || values.length < 2)
     throw new Error('Bootstrap input requires at least two finite samples')
+  for (const value of values) {
+    if (!Number.isFinite(value)) throw new Error('Bootstrap input requires at least two finite samples')
+  }
   const resamples = options.resamples ?? 2_000
   const seed = options.seed ?? 0x4856_5053
   const statistic = options.statistic ?? median

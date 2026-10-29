@@ -10,7 +10,7 @@ import type { AnswerSelectionSnapshot, AnswerSubmissionService, SubmitOptions } 
 import { findCaptchaTarget, isSameCaptchaTarget, type CaptchaTarget } from './captcha-target'
 import type { ImageLoader } from './captcha-types'
 import { readAnswerSettings } from './read-answer-settings'
-import { solverConfig } from './solver-config'
+import { DEFAULT_RANDOM_ON_FAIL } from './fallback-settings'
 
 /** Backoff schedule shared by every transient retry loop in the package. */
 export const TRANSIENT_RETRY_DELAYS_MS = [250, 750] as const
@@ -67,7 +67,7 @@ export class CaptchaSolver {
     private readonly answerSubmitter: AnswerSubmissionService,
     private readonly getAnswerMode: () => Promise<AnswerMode>,
     private readonly getAbortSignal?: () => AbortSignal | undefined,
-    private readonly randomOnFail: boolean = solverConfig.randomOnFail,
+    private readonly randomOnFail: boolean = DEFAULT_RANDOM_ON_FAIL,
   ) {}
 
   get isBusy(): boolean {

@@ -111,12 +111,6 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Render test Wrangler config
-        env:
-          MODEL_KEYS_KV_NAMESPACE_ID: test-kv
-          MODEL_BUCKET_NAME: test-bucket
-        run: pnpm --filter @hv-pony-solver/model-worker render-config
-
       - name: Docs drift
         run: pnpm docs:check
 
@@ -199,12 +193,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Render test Wrangler config
-        env:
-          MODEL_KEYS_KV_NAMESPACE_ID: test-kv
-          MODEL_BUCKET_NAME: test-bucket
-        run: pnpm --filter @hv-pony-solver/model-worker render-config
-
       - name: Test
         run: pnpm test
 
@@ -236,12 +224,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Render test Wrangler config
-        env:
-          MODEL_KEYS_KV_NAMESPACE_ID: test-kv
-          MODEL_BUCKET_NAME: test-bucket
-        run: pnpm --filter @hv-pony-solver/model-worker render-config
-
       - name: Coverage
         run: pnpm test:coverage
 
@@ -259,7 +241,7 @@ jobs:
         run: pnpm bundle:check:default
 
       - name: Build userscript with bundled minimal runtime
-        run: pnpm --filter @hv-pony-solver/userscript build:bundled-runtime -- --minify
+        run: pnpm --filter @hv-pony-solver/userscript build:bundled-runtime
 
       - name: Check bundled userscript bundle budget
         run: pnpm bundle:check:bundled
@@ -809,7 +791,7 @@ jobs:
       - test
       - coverage-build
       - userscript-e2e
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && ((inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'success') || (!inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'skipped')) }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.publish_userscript_artifact && needs.guardrails.result == 'success' && needs.test.result == 'success' && needs['coverage-build'].result == 'success' && ((inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'success') || (!inputs.run_userscript_e2e && needs['userscript-e2e'].result == 'skipped')) }}
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:

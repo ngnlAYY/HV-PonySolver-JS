@@ -57,6 +57,7 @@ async function checkBrowserSinks(repoRoot = defaultRepoRoot, { requireSourceDir 
 
 function findSinkKinds(source, fileName = 'browser-sink-source.ts') {
   const sourceFile = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, readScriptKind(fileName))
+  if (sourceFile.parseDiagnostics.length > 0) throw new Error(`Invalid browser source syntax: ${fileName}`)
   const sinks = []
 
   function visit(node) {
@@ -90,6 +91,7 @@ function readScriptKind(fileName) {
 }
 
 function isInnerHtmlAssignment(node) {
+  if (ts.isForInStatement(node) || ts.isForOfStatement(node)) return isInnerHtmlTarget(node.initializer)
   return ts.isBinaryExpression(node) && isAssignmentOperator(node.operatorToken.kind) && isInnerHtmlTarget(node.left)
 }
 
@@ -98,7 +100,20 @@ function isAssignmentOperator(kind) {
 }
 
 function isInnerHtmlTarget(node) {
-  return readPropertyName(unwrapExpression(node)) === 'innerHTML'
+  node = unwrapExpression(node)
+  if (readPropertyName(node) === 'innerHTML') return true
+  if (ts.isArrayLiteralExpression(node)) return node.elements.some(isInnerHtmlTarget)
+  if (ts.isObjectLiteralExpression(node)) {
+    return node.properties.some((property) =>
+      ts.isPropertyAssignment(property)
+        ? isInnerHtmlTarget(property.initializer)
+        : ts.isSpreadAssignment(property) && isInnerHtmlTarget(property.expression),
+    )
+  }
+  if (ts.isSpreadElement(node)) return isInnerHtmlTarget(node.expression)
+  return ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    ? isInnerHtmlTarget(node.left)
+    : false
 }
 
 function isFunctionConstructorCall(node) {

@@ -51,7 +51,7 @@ https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/ort-wasm-simd-threaded.
 
 推理 Worker 用 `redirect: error` 并行下载 JS/MJS/WASM，三者的声明大小、实际长度与 SHA-256 全部通过后才创建 Blob URL。classic JS 由 `importScripts()` 执行后立即撤销；MJS 交给 `wasmPaths.mjs`，已校验 WASM 通过 `wasmBinary` 注入，不让 ORT 另行下载辅助文件。
 
-MJS 交接前失败立即撤销；交接后由 `onFirstSessionInitSettled` 在首次 `InferenceSession.create` 成功或失败时撤销一次。启动最多暂存两个请求，失败后拒绝已排队及后续请求。运行时固定 `numThreads=1`、`proxy=false`、WASM Execution Provider；CDN 或完整性错误不会切换到精简版。
+MJS 交接前失败立即撤销；交接后由 `onFirstSessionInitSettled` 在首次 `InferenceSession.create` 成功或失败时撤销一次。启动最多暂存两个请求，入队前复用核心 `isWorkerRequest` 验证完整 init/detect schema；带合法 requestId 的畸形消息同样不能占用槽位。失败后拒绝已排队及后续请求。运行时固定 `numThreads=1`、`proxy=false`、WASM Execution Provider；CDN 或完整性错误不会切换到精简版。
 
 ### 显式内置精简版
 
@@ -131,11 +131,13 @@ mise exec -- pnpm check
 
 [model.ts](../packages/shared/src/model.ts) 的 `MODEL_VERSION`、`MODEL_INTEGRITY.byteLength`、`MODEL_INTEGRITY.sha256` 描述旧 ONNX；[ort-model.ts](../packages/shared/src/ort-model.ts) 描述对应 ORT；[ort-runtime.ts](../packages/shared/src/ort-runtime.ts) 描述精简 WASM；[ort-assets.ts](../packages/shared/src/ort-assets.ts) 组合路径与对象键。外部 JS/MJS/WASM 和 glue 由 `ONNX_RUNTIME_ASSETS` 管理。图片、输出和超时参数见[浏览器运行时](architecture/browser-runtime.md)。
 
-构建与文档工具用 TypeScript AST 读取完整清单 initializer，不执行源码。模型完整性字段须为直接、唯一的字面量属性；Runtime 清单须为静态对象。拒绝会覆盖身份的 spread、computed key、getter、重复字段或后缀运算，不能把合法前缀误当作实际资产值。
+构建与文档工具用 TypeScript AST 读取完整清单 initializer，不执行源码。模型清单声明必须为 const，字节长度必须为正安全整数；完整性字段须为直接、唯一的字面量属性，Runtime 清单须为静态对象。拒绝会覆盖身份的 spread、computed key、getter、重复字段或后缀运算，不能把合法前缀误当作实际资产值。
 
 用户脚本 Runtime 的 `Content-Length` 若存在，必须是规范十进制非负安全整数且不超上限；空值、符号、前导零、指数、十六进制和小数均拒绝。该头描述编码后的大小，不能直接等同 fetch 解压后的字节长度；无论 Content-Encoding 是否被 CORS 暴露，实际正文都须通过精确长度和 SHA-256 校验。缺长度头仍允许有界读取。
 
-资产只接受可流式正文；`body === null` 时失败，不回退无界 `arrayBuffer()`。已知长度预分配，未知长度按需倍增并即时复制分块，不保留分块数组或外部大缓冲。取消、超限或长度异常时发起 reader 取消并释放锁，不等待取消 Promise，清理错误不覆盖原始错误；失败内容不入缓存。
+资产只接受可流式正文；`body === null` 时失败，不回退无界 `arrayBuffer()`。已知长度预分配，未知长度按需倍增并即时复制分块，不保留分块数组或外部大缓冲。取消、超限或长度异常时发起 reader 取消并释放锁，不等待取消 Promise，清理错误不覆盖原始错误；失败内容不入缓存。 带取消信号的 Runtime 资产加载，在摘要结算后、成功交付前再次复核取消，保留调用方取消原因。
+
+`verify-model-integrity` 与 `verify-onnx-runtime-assets` 的 CLI 共用根参数解析器，只接受可选 `--repo-root <path>`，未知参数和缺值立即失败，避免拼错参数却验证了默认目录。
 
 旧 ONNX 可用 `MODEL_FILE` 指定本地文件运行 `verify-model-integrity`；ORT 由客户端下载器与内置扩展构建按 shared 清单验证：
 

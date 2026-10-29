@@ -1,7 +1,28 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { readConstRegexLiteral, readConstStringLiteral, readFunctionBodySource } from '../source-literals.mjs'
+import {
+  parseStringLiteral,
+  readConstRegexLiteral,
+  readConstStringLiteral,
+  readFunctionBodySource,
+} from '../source-literals.mjs'
+
+test('reads the runtime string value including escapes and line continuations', () => {
+  for (const [literal, expected] of [
+    [String.raw`'no\x2dstore'`, 'no-store'],
+    [String.raw`'no\u002dstore'`, 'no-store'],
+    [String.raw`'line\nnext'`, 'line\nnext'],
+    [String.raw`'quote\'value'`, "quote'value"],
+    ["'no-\\\nstore'", 'no-store'],
+  ]) {
+    assert.equal(readConstStringLiteral(`const VALUE = ${literal}`, 'VALUE'), expected)
+    assert.deepEqual(parseStringLiteral(`x, ${literal}, next`, 3), { value: expected, end: 3 + literal.length })
+  }
+  for (const literal of [String.raw`'invalid\xzz'`, "'unterminated", "'line\nnext'", '`template`']) {
+    assert.equal(parseStringLiteral(literal, 0), null)
+  }
+})
 
 for (const expression of [
   "'no-store' as const",
@@ -91,4 +112,30 @@ function target(value: string | number) {
 `
 
   assert.match(readFunctionBodySource(source, 'target'), /implementation-body/u)
+})
+
+test('reads only unique top-level const literals from syntactically valid source', () => {
+  for (const [reader, literal, expected] of [
+    [readConstStringLiteral, "'no-store'", 'no-store'],
+    [readConstRegexLiteral, '/^Bearer\\s+([^\\s]+)$/i', '/^Bearer\\s+([^\\s]+)$/i'],
+  ]) {
+    assert.equal(reader(`export const VALUE:\n unknown = (${literal} as const)`, 'VALUE'), expected)
+    for (const source of [
+      `const VALUE = ${literal}; const VALUE = ${literal}`,
+      `let VALUE = ${literal}`,
+      `function nested() { const VALUE = ${literal} }`,
+      `const VALUE = ${literal}; function broken(`,
+    ]) {
+      assert.equal(reader(source, 'VALUE'), null, source)
+    }
+  }
+})
+
+test('rejects ambiguous or invalid function implementations without reusing cached bodies', () => {
+  const source = 'function target() { return 1 }'
+  assert.match(readFunctionBodySource(source, 'target'), /return 1/u)
+  assert.equal(readFunctionBodySource(`${source}\n${source}`, 'target'), '')
+  assert.equal(readFunctionBodySource(`${source}\nfunction broken(`, 'target'), '')
+  assert.equal(readFunctionBodySource(`function outer() { ${source} }`, 'target'), '')
+  assert.match(readFunctionBodySource(source.replace('return 1', 'return 2'), 'target'), /return 2/u)
 })

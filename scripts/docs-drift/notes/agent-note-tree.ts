@@ -3,17 +3,20 @@
  * Shared structural source of truth for the Agent Note tree.
  * Portable: resolves docs/decisions from cwd (or AGENT_NOTE_ROOT env).
  */
-import { readdirSync, existsSync, lstatSync } from 'node:fs'
+import { readdirSync, lstatSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
-function listMd(dir: string, prefix: string): string[] {
-  if (!existsSync(dir)) return []
+function listMd(dir: string, prefix: string, errors: string[]): string[] {
   const out: string[] = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.')) continue
     const rel = prefix ? `${prefix}/${entry.name}` : entry.name
-    if (entry.isDirectory()) out.push(...listMd(resolve(dir, entry.name), rel))
-    else if (entry.isFile() && entry.name.endsWith('.md')) out.push(rel)
+    if (entry.isSymbolicLink()) {
+      errors.push(`structure: ${rel} — active note paths must not be symbolic links`)
+    } else if (entry.name.startsWith('.')) continue
+    else if (entry.name.endsWith('.md')) {
+      if (entry.isFile()) out.push(rel)
+      else errors.push(`structure: ${rel} — notes must be regular files`)
+    } else if (entry.isDirectory()) out.push(...listMd(resolve(dir, entry.name), rel, errors))
   }
   return out
 }
@@ -52,26 +55,32 @@ export interface AgentNote {
 export function walkAgentNoteTree(): { notes: AgentNote[]; errors: string[] } {
   const notes: AgentNote[] = []
   const errors: string[] = []
-  if (!existsSync(agentNoteRoot)) return { notes, errors }
   for (const entry of readdirSync(agentNoteRoot, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) {
+      errors.push(`structure: ${entry.name} — note paths must not be symbolic links`)
+      continue
+    }
     if (entry.name === 'INDEX.md') {
       errors.push(
         'structure: INDEX.md — centralized Agent Note indexes are forbidden; browse the lifecycle/class tree or search the repository',
       )
       continue
     }
-    if (
-      entry.isDirectory() &&
-      entry.name !== AGENT_NOTE_ARCHIVE &&
-      !(AGENT_NOTE_LIFECYCLES as readonly string[]).includes(entry.name)
-    ) {
-      errors.push(
-        `structure: ${entry.name}/ — unknown lifecycle folder (allowed: ${AGENT_NOTE_LIFECYCLES.join(', ')}, plus ${AGENT_NOTE_ARCHIVE}/)`,
-      )
+    if (entry.name === AGENT_NOTE_ARCHIVE) continue
+    if (!(AGENT_NOTE_LIFECYCLES as readonly string[]).includes(entry.name)) {
+      if (entry.isDirectory()) {
+        errors.push(
+          `structure: ${entry.name}/ — unknown lifecycle folder (allowed: ${AGENT_NOTE_LIFECYCLES.join(', ')}, plus ${AGENT_NOTE_ARCHIVE}/)`,
+        )
+      }
+      continue
     }
-  }
-  for (const lifecycle of AGENT_NOTE_LIFECYCLES) {
-    for (const match of listMd(resolve(agentNoteRoot, lifecycle), lifecycle).sort()) {
+    const lifecycle = entry.name
+    if (!entry.isDirectory()) {
+      errors.push(`structure: ${lifecycle} — lifecycle paths must be directories`)
+      continue
+    }
+    for (const match of listMd(resolve(agentNoteRoot, lifecycle), lifecycle, errors).sort()) {
       const segs = match.split('/')
       if (segs.length === 2 && ROOT_ALLOWLIST.has(segs[1] ?? '')) continue
       const cls = segs[1]

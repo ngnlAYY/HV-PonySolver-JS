@@ -39,6 +39,11 @@ function getUserscriptGlobal(): UserscriptGlobal {
   return globalThis as UserscriptGlobal
 }
 
+function gmStorageFailure(error: unknown, sensitive: boolean | undefined, action: string): unknown {
+  // GM 异常可能包含参数值，敏感操作不转发原异常或 cause。
+  return sensitive ? new Error(`模型下载 Key ${action}失败，请检查脚本管理器的 GM 存储`) : error
+}
+
 export const safeStorage = {
   getItem(key: string): string | null {
     try {
@@ -74,12 +79,16 @@ export const safeStorage = {
 export async function getGmValue(key: string, defaultValue = '', options: GetGmValueOptions = {}): Promise<string> {
   const userscriptGlobal = getUserscriptGlobal()
   const modernGm = userscriptGlobal.GM
-  if (typeof modernGm?.getValue === 'function') {
-    const value = await modernGm.getValue(key, defaultValue)
-    return String(value ?? defaultValue).trim()
-  }
-  if (typeof userscriptGlobal.GM_getValue === 'function') {
-    return String(await userscriptGlobal.GM_getValue(key, defaultValue)).trim()
+  try {
+    if (typeof modernGm?.getValue === 'function') {
+      const value = await modernGm.getValue(key, defaultValue)
+      return String(value ?? defaultValue).trim()
+    }
+    if (typeof userscriptGlobal.GM_getValue === 'function') {
+      return String(await userscriptGlobal.GM_getValue(key, defaultValue)).trim()
+    }
+  } catch (error) {
+    throw gmStorageFailure(error, options.sensitive, '读取')
   }
   return getGmValueSync(key, defaultValue, options)
 }
@@ -87,12 +96,16 @@ export async function getGmValue(key: string, defaultValue = '', options: GetGmV
 export function getGmValueSync(key: string, defaultValue = '', options: GetGmValueOptions = {}): string {
   const userscriptGlobal = getUserscriptGlobal()
   if (typeof userscriptGlobal.GM_getValue === 'function') {
-    const value = userscriptGlobal.GM_getValue(key, defaultValue)
-    if (typeof value === 'string') {
-      return value.trim()
+    try {
+      const value = userscriptGlobal.GM_getValue(key, defaultValue)
+      if (typeof value === 'string') {
+        return value.trim()
+      }
+      // 同步快照不能等待 GM Promise，但必须消费本次读取的拒绝；后续异步读取是另一次调用。
+      void Promise.resolve(value).catch(() => undefined)
+    } catch (error) {
+      throw gmStorageFailure(error, options.sensitive, '读取')
     }
-    // 同步快照不能等待 GM Promise，但必须消费本次读取的拒绝；后续异步读取是另一次调用。
-    void Promise.resolve(value).catch(() => undefined)
   }
   return (options.sensitive ? defaultValue : (safeStorage.getItem(key) ?? defaultValue)).trim()
 }
@@ -100,13 +113,17 @@ export function getGmValueSync(key: string, defaultValue = '', options: GetGmVal
 export async function setGmValue(key: string, value: string, options: SetGmValueOptions = {}): Promise<void> {
   const userscriptGlobal = getUserscriptGlobal()
   const modernGm = userscriptGlobal.GM
-  if (typeof modernGm?.setValue === 'function') {
-    await modernGm.setValue(key, value)
-    return
-  }
-  if (typeof userscriptGlobal.GM_setValue === 'function') {
-    await userscriptGlobal.GM_setValue(key, value)
-    return
+  try {
+    if (typeof modernGm?.setValue === 'function') {
+      await modernGm.setValue(key, value)
+      return
+    }
+    if (typeof userscriptGlobal.GM_setValue === 'function') {
+      await userscriptGlobal.GM_setValue(key, value)
+      return
+    }
+  } catch (error) {
+    throw gmStorageFailure(error, options.sensitive, '保存')
   }
   if (options.sensitive) {
     throw new Error('当前脚本管理器不支持 GM 存储，无法安全保存模型下载 Key；请改用支持 GM_setValue 的用户脚本管理器')
@@ -117,13 +134,17 @@ export async function setGmValue(key: string, value: string, options: SetGmValue
 export async function deleteGmValue(key: string, options: DeleteGmValueOptions = {}): Promise<void> {
   const userscriptGlobal = getUserscriptGlobal()
   const modernGm = userscriptGlobal.GM
-  if (typeof modernGm?.deleteValue === 'function') {
-    await modernGm.deleteValue(key)
-    return
-  }
-  if (typeof userscriptGlobal.GM_deleteValue === 'function') {
-    await userscriptGlobal.GM_deleteValue(key)
-    return
+  try {
+    if (typeof modernGm?.deleteValue === 'function') {
+      await modernGm.deleteValue(key)
+      return
+    }
+    if (typeof userscriptGlobal.GM_deleteValue === 'function') {
+      await userscriptGlobal.GM_deleteValue(key)
+      return
+    }
+  } catch (error) {
+    throw gmStorageFailure(error, options.sensitive, '删除')
   }
   const hasGmStorage =
     typeof modernGm?.getValue === 'function' ||

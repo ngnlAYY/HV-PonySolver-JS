@@ -569,6 +569,36 @@ describe('ModelDownloadQuota', () => {
     await Promise.all(pending)
   })
 
+  it('bounds quota identity hashing and does not acquire a stub after the deadline', async () => {
+    vi.useFakeTimers()
+    let resolveDigest: ((digest: ArrayBuffer) => void) | undefined
+    const digest = vi.spyOn(crypto.subtle, 'digest').mockImplementationOnce(
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          resolveDigest = resolve
+        }),
+    )
+    const namespace = responseQuotaNamespace(new Response())
+    const get = vi.spyOn(namespace, 'get')
+    const pending = readModelDownloadQuota(namespace, 'token').catch((error: unknown) => error)
+    let settled = false
+    void pending.then(() => {
+      settled = true
+    })
+    try {
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(settled).toBe(true)
+      expect(await pending).toMatchObject({ message: 'quota request dependency timed out' })
+      resolveDigest?.(new ArrayBuffer(32))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(get).not.toHaveBeenCalled()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      resolveDigest?.(new ArrayBuffer(32))
+      digest.mockRestore()
+    }
+  })
+
   it('rejects at the deadline even when an internal quota stub ignores abort', async () => {
     vi.useFakeTimers()
     const namespace = {

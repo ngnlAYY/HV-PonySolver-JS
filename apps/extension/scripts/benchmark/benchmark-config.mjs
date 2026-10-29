@@ -23,19 +23,23 @@ export const requiredBenchmarkDefaults = Object.freeze({
 })
 
 function assertUniqueAllowed(values, allowed, label) {
-  if (!Array.isArray(values) || values.length === 0 || values.some((value) => !allowed.has(value))) {
+  if (!Array.isArray(values) || values.length === 0) {
     throw new Error(`Invalid benchmark ${label}: ${JSON.stringify(values)}`)
+  }
+  for (const value of values) {
+    if (!allowed.has(value)) throw new Error(`Invalid benchmark ${label}: ${JSON.stringify(values)}`)
   }
   if (new Set(values).size !== values.length) throw new Error(`Benchmark ${label} must be unique`)
 }
 
 function assertPositiveIntegers(values, label) {
-  if (
-    !Array.isArray(values) ||
-    values.length === 0 ||
-    values.some((value) => !Number.isSafeInteger(value) || value < 1)
-  ) {
+  if (!Array.isArray(values) || values.length === 0) {
     throw new Error(`Invalid benchmark ${label}: ${JSON.stringify(values)}`)
+  }
+  for (const value of values) {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new Error(`Invalid benchmark ${label}: ${JSON.stringify(values)}`)
+    }
   }
   if (new Set(values).size !== values.length) throw new Error(`Benchmark ${label} must be unique`)
 }

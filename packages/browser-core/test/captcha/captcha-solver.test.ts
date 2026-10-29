@@ -6,10 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AnswerSubmitter } from '../../src/captcha/answer-submitter'
 import { CaptchaSolver } from '../../src/captcha/captcha-solver'
 import type { ImageLoader } from '../../src/captcha/captcha-types'
-import { solverConfig } from '../../src/captcha/solver-config'
 import type { DetectorService, YoloParseResult } from '../../src/inference/inference-types'
 import { ModelAccessKeyRejectedError } from '../../src/model/model-download-error'
 import type { StatusPanel } from '../../src/status-panel/status-panel-types'
+import { createMockPanel as createPanel } from '../helpers/mock-panel'
 
 function appendCaptcha(): HTMLDivElement {
   document.body.innerHTML = ''
@@ -43,19 +43,6 @@ function appendSubmittableCaptcha(): HTMLFormElement {
   submit.type = 'button'
   form.append(submit)
   return form
-}
-
-function createPanel(): StatusPanel {
-  return {
-    setStatus: vi.fn(),
-    setSessionReady: vi.fn(),
-    addSuccess: vi.fn(),
-    addManualResult: vi.fn(),
-    addRandomFailure: vi.fn(),
-    addError: vi.fn(),
-    create: vi.fn(),
-    destroy: vi.fn(),
-  }
 }
 
 function createDetector(detect: (...args: Parameters<DetectorService['detect']>) => Promise<object>): DetectorService {
@@ -116,7 +103,7 @@ function createSolver(
       answerSubmitter,
       getAnswerMode,
       overrides.getAbortSignal,
-      overrides.randomOnFail ?? solverConfig.randomOnFail,
+      overrides.randomOnFail,
     ),
     panel,
     detector,

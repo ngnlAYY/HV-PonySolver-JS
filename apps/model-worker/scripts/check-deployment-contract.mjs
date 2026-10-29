@@ -34,23 +34,21 @@ function assertExactTokenSet(response, headerName, expectedTokens, context) {
   const expected = new Set(expectedTokens)
   const matches = actual.size === expected.size && [...expected].every((token) => actual.has(token))
   if (!matches) {
-    throw new Error(
-      `${context}: ${headerName} mismatch; expected=[${formatTokenSet(expected)}] actual=[${formatTokenSet(actual)}]`,
-    )
+    throw new Error(`${context}: ${headerName} mismatch; expected=[${formatTokenSet(expected)}]`)
   }
 }
 
 function assertHeaderEquals(response, headerName, expected, context) {
   const actual = response.headers.get(headerName)
   if (actual !== expected) {
-    throw new Error(`${context}: ${headerName} mismatch; expected=${expected} actual=${actual ?? '<missing>'}`)
+    throw new Error(`${context}: ${headerName} mismatch; expected=${expected}`)
   }
 }
 
 function assertHeaderEqualsIgnoreCase(response, headerName, expected, context) {
   const actual = response.headers.get(headerName)
   if (actual?.trim().toLowerCase() !== expected.toLowerCase()) {
-    throw new Error(`${context}: ${headerName} mismatch; expected=${expected} actual=${actual ?? '<missing>'}`)
+    throw new Error(`${context}: ${headerName} mismatch; expected=${expected}`)
   }
 }
 
@@ -64,7 +62,7 @@ function assertHeaderPresent(response, headerName, context) {
 function assertVaryOrigin(response, context) {
   const vary = parseTokenSet(response.headers.get('vary'))
   if (!vary.has('origin')) {
-    throw new Error(`${context}: Vary must include Origin; actual=[${formatTokenSet(vary)}]`)
+    throw new Error(`${context}: Vary must include Origin`)
   }
 }
 

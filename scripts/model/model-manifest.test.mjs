@@ -8,6 +8,25 @@ import { parseModelManifest, readModelManifest } from './model-manifest.mjs'
 
 const sha256 = 'ABCDEFabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123'
 
+test('rejects mutable manifest declarations and empty model identities', () => {
+  for (const declaration of ['let', 'var']) {
+    for (const name of ['MODEL_VERSION', 'MODEL_INTEGRITY']) {
+      const source = `const MODEL_VERSION = 'model'; const MODEL_INTEGRITY = { byteLength: 3, sha256: '${sha256}' }`
+      assert.throws(
+        () => parseModelManifest(source.replace(`const ${name}`, `${declaration} ${name}`)),
+        /expected a const declaration/u,
+      )
+    }
+  }
+  assert.throws(
+    () =>
+      parseModelManifest(
+        `const MODEL_VERSION = 'model'; const MODEL_INTEGRITY = { byteLength: 0, sha256: '${sha256}' }`,
+      ),
+    /Invalid MODEL_INTEGRITY.byteLength/u,
+  )
+})
+
 test('manifest brace matching does not mistake unrelated divisions for regex literals', () => {
   const manifest = parseModelManifest(
     `

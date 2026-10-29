@@ -20,6 +20,12 @@ function getWorld(): World {
   return location.pathname.includes('/isekai/') ? 'isekai' : 'main'
 }
 
+function hasCspContainer(): boolean {
+  const first = document.getElementById('csp')
+  // 使用 ID 索引；较早的非 div 同 ID 节点不能遮挡有效容器。
+  return first !== null && (first.matches('div') || document.querySelector('div[id="csp"]') !== null)
+}
+
 function initialPanelStatus(): PanelStatus {
   return {
     model: '未开始',
@@ -242,44 +248,28 @@ export class StatusPanel implements StatusPanelContract {
     if (!root || typeof MutationObserver === 'undefined') {
       return
     }
-    this.domObserver = new MutationObserver((mutations) => {
+    this.domObserver = new MutationObserver(() => {
       if (
         !this.el?.isConnected ||
-        (this.cspVisibilityRequired && mutations.some((mutation) => this.mutationMayChangeCspVisibility(mutation)))
+        this.syncWorld() ||
+        (this.cspVisibilityRequired && this.el.hidden === hasCspContainer())
       ) {
         this.render()
       }
     })
     this.domObserver.observe(root, {
       attributeFilter: ['id'],
-      attributeOldValue: true,
       attributes: true,
       childList: true,
       subtree: true,
     })
   }
 
-  private mutationMayChangeCspVisibility(mutation: MutationRecord): boolean {
-    if (mutation.type === 'attributes') {
-      const target = mutation.target
-      return (
-        target instanceof Element && target.tagName === 'DIV' && (target.id === 'csp' || mutation.oldValue === 'csp')
-      )
-    }
-    const isCspNode = (node: Node): boolean => {
-      if (!(node instanceof Element)) {
-        return false
-      }
-      return (node.tagName === 'DIV' && node.id === 'csp') || node.querySelector('div#csp') !== null
-    }
-    return Array.from(mutation.addedNodes).some(isCspNode) || Array.from(mutation.removedNodes).some(isCspNode)
-  }
-
   private syncDom(): void {
     if (this.el) {
       // AADB 等局部切页会移除 body 子节点；重挂同一面板，不重置状态或历史。
       if (!this.el.isConnected && document.body) document.body.appendChild(this.el)
-      this.el.hidden = this.cspVisibilityRequired && document.querySelector('div#csp') === null
+      this.el.hidden = this.cspVisibilityRequired && !hasCspContainer()
     }
   }
 
@@ -307,9 +297,6 @@ export class StatusPanel implements StatusPanelContract {
       return
     }
     this.lastRenderKey = renderKey
-    // 先保留外部变更，随后只丢弃这次同步渲染生成的观察记录。
-    const externalMutations = this.domObserver?.takeRecords() ?? []
-    const removedCsp = this.domObserver !== null && this.el.querySelector('div#csp') !== null
     renderStatusPanelInto(
       this.el,
       this.world,
@@ -319,8 +306,8 @@ export class StatusPanel implements StatusPanelContract {
       this.historyLimit,
       this.persistenceError,
     )
+    // 渲染也可能移除页面放入面板的 csp；按最终 DOM 复核后清理自身 mutation。
+    this.syncDom()
     this.domObserver?.takeRecords()
-    if (removedCsp || externalMutations.some((mutation) => this.mutationMayChangeCspVisibility(mutation)))
-      this.syncDom()
   }
 }

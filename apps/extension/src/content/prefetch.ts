@@ -2,20 +2,10 @@ import type { DetectorService } from '@hv-pony-solver/browser-core/inference/inf
 import type { HistoryStore } from '@hv-pony-solver/browser-core/persistence/answer-history-store'
 
 /**
- * Warms the inference session right after page load instead of at the first
- * captcha, so the first captcha of a browsing session does not pay the
- * model-read and session-build cost.
- *
- * Gated on strictly validated answer history that contains at least one real
- * answer: a fresh install stays lazy and never spends a monthly download slot
- * before its first captcha. The warm-up is silent — the status panel only
- * reports the first real captcha's own prepare.
- *
- * Additionally gated by a sessionStorage miss counter so users who load pages
- * without ever solving keep their Offscreen document from being revived on
- * every navigation: after PREFETCH_MISS_LIMIT consecutive prefetches without a
- * detect on the same page, further page loads stay lazy until an actual detect
- * (which resets the counter) or a fresh session re-enables the warm-up.
+ * Warm experienced installs silently; fresh installs must not spend a download
+ * before their first captcha. Repeated warm-ups without a detect exhaust a
+ * same-tab budget so idle navigation stops reviving Offscreen. Real inference
+ * or a new session restores that budget; visible preparation keeps its own timing.
  */
 export const PREFETCH_MISS_STORAGE_KEY = 'hvPonySolverPrefetchMisses' as const
 export const PREFETCH_MISS_LIMIT = 3
@@ -49,10 +39,6 @@ function writePrefetchMisses(store: SessionStorageLike, misses: number): void {
   }
 }
 
-/**
- * Whether this page load still has idle-prefetch budget left. Unavailable or
- * hostile sessionStorage keeps the legacy always-warm behavior.
- */
 export function hasPrefetchBudget(): boolean {
   const store = safeSessionStorage()
   if (!store) {
@@ -61,10 +47,6 @@ export function hasPrefetchBudget(): boolean {
   return readPrefetchMisses(store) < PREFETCH_MISS_LIMIT
 }
 
-/**
- * Records that a page consumed one warm-up without a detect. Called only when
- * a prefetch actually fires.
- */
 export function recordPrefetchMiss(): void {
   const store = safeSessionStorage()
   if (!store) {
@@ -73,10 +55,6 @@ export function recordPrefetchMiss(): void {
   writePrefetchMisses(store, readPrefetchMisses(store) + 1)
 }
 
-/**
- * Clears the backoff budget once this page really issued a detect request,
- * so the next idle page loads warm up again.
- */
 export function resetPrefetchMisses(): void {
   const store = safeSessionStorage()
   if (!store) {

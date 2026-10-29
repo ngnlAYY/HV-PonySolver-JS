@@ -44,6 +44,18 @@ describe('findCaptchaTarget', () => {
     expect(findCaptchaTarget()).toMatchObject({ master })
   })
 
+  it.each(['img', 'form'] as const)('skips a foreign-namespace %s and still finds the next valid captcha', (tag) => {
+    const invalid = appendCandidate({ imageSrc: '/invalid.png' })
+    const original = invalid.querySelector(tag)!
+    const replacement = document.createElementNS('http://www.w3.org/2000/svg', tag)
+    for (const attribute of original.attributes) replacement.setAttribute(attribute.name, attribute.value)
+    original.replaceWith(replacement)
+    expect(findCaptchaTarget()).toBeNull()
+
+    const valid = appendCandidate({ imageSrc: '/valid.png' })
+    expect(findCaptchaTarget()?.master).toBe(valid)
+  })
+
   it('ignores candidates whose image URL is cross-origin', () => {
     appendCandidate({ imageSrc: 'https://example.invalid/captcha.png', formAction: '/submit' })
 

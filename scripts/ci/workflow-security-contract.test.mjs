@@ -186,6 +186,37 @@ function publicationContext(dependencies, input) {
   }
 }
 
+test('userscript artifact builds require explicit publication and every applicable gate', async () => {
+  const workflow = await readFile(join(repoRoot, '.github', 'workflows', 'verify-monorepo.yml'), 'utf8')
+  const job = workflowJobBlock(workflow, 'userscript-artifact')
+  const context = publicationContext(workflowNeeds(job), 'publish_userscript_artifact')
+  context.inputs.run_userscript_e2e = false
+  context.needs['userscript-e2e'].result = 'skipped'
+  assert.equal(conditionAllows(job, context, 4), true)
+  assert.equal(
+    conditionAllows(job, { ...context, inputs: { ...context.inputs, publish_userscript_artifact: false } }, 4),
+    false,
+    'an ordinary manual run must not reinstall dependencies and rebuild an unpublished artifact',
+  )
+  for (const event of ['push', 'pull_request']) {
+    assert.equal(conditionAllows(job, { ...context, github: { ...context.github, event_name: event } }, 4), false)
+  }
+  for (const dependency of ['guardrails', 'test', 'coverage-build']) {
+    for (const result of ['failure', 'skipped', 'cancelled']) {
+      const changed = globalThis.structuredClone(context)
+      changed.needs[dependency].result = result
+      assert.equal(conditionAllows(job, changed, 4), false)
+    }
+  }
+  context.inputs.run_userscript_e2e = true
+  for (const result of ['failure', 'skipped', 'cancelled']) {
+    context.needs['userscript-e2e'].result = result
+    assert.equal(conditionAllows(job, context, 4), false)
+  }
+  context.needs['userscript-e2e'].result = 'success'
+  assert.equal(conditionAllows(job, context, 4), true)
+})
+
 test('every checkout step disables persisted GitHub credentials', async () => {
   const sources = await Promise.all(
     ['verify-monorepo.yml', 'deploy-cloudflare-model-worker.yml'].map((name) =>

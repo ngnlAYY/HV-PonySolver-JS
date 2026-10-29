@@ -50,6 +50,9 @@ for (const entryType of ['file', 'directory']) {
       await writeFile(filename, file.bytes)
     }
     await auditBuiltExtension(targetDirectory, 'chromium')
+    const rootLink = path.join(root, 'linked-root')
+    await symlink(targetDirectory, rootLink, 'dir')
+    await assert.rejects(auditBuiltExtension(rootLink, 'chromium'), /root must be a directory without a symbolic link/u)
     const externalDirectory = path.join(root, 'external')
     await mkdir(externalDirectory)
     const externalScript = path.join(externalDirectory, 'payload.js')

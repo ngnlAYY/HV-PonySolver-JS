@@ -52,11 +52,13 @@ export class IndexedDbModelStore {
   }
 
   createOperationContext(signal: AbortSignal | undefined, deadline: number): CacheOperationContext {
+    // 外部绝对墙钟期限只换算一次；后续阶段共用单调预算，校时不能延长或提前结束操作。
+    const remainingMs = deadline - Date.now()
     return {
       generation: this.generation,
       ...(signal ? { signal } : {}),
       lifecycleSignal: this.lifecycleController.signal,
-      deadline,
+      deadline: performance.now() + Math.max(0, remainingMs),
     }
   }
 
@@ -295,7 +297,7 @@ export class IndexedDbModelStore {
     if (context.signal) controlSignals.push(context.signal)
     const timeoutId = setTimeout(
       () => timeoutController.abort(new Error(timeoutMessage)),
-      Math.max(0, context.deadline - Date.now()),
+      Math.max(0, context.deadline - performance.now()),
     )
     // The deadline must settle the abort race itself, releasing its listeners
     // even when the underlying request ignores cancellation and never settles.
@@ -318,7 +320,7 @@ export class IndexedDbModelStore {
     ) {
       throw new ModelCacheLifecycleError('模型缓存操作已取消')
     }
-    if (!Number.isFinite(context.deadline) || Date.now() >= context.deadline) {
+    if (!Number.isFinite(context.deadline) || performance.now() >= context.deadline) {
       throw new Error(timeoutMessage)
     }
   }

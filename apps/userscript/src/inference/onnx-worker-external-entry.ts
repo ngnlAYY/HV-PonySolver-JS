@@ -1,4 +1,6 @@
 import type * as Ort from 'onnxruntime-web/wasm'
+import { isWorkerRequest } from '@hv-pony-solver/browser-core/inference/onnx-worker-entry'
+import { isRecordObject } from '@hv-pony-solver/browser-core/utils/guards'
 
 import { loadVerifiedRuntimeAsset } from './verified-runtime-asset-loader'
 import { startOnnxWorker } from './onnx-worker-entry'
@@ -28,10 +30,10 @@ type ExternalWorkerScope = typeof globalThis & {
 const externalWorkerScope = globalThis as ExternalWorkerScope
 
 function requestIdOf(value: unknown): number | null {
-  if (!value || typeof value !== 'object') {
+  if (!isRecordObject(value)) {
     return null
   }
-  const requestId = (value as Record<string, unknown>).requestId
+  const requestId = value.requestId
   return typeof requestId === 'number' && Number.isSafeInteger(requestId) && requestId > 0 ? requestId : null
 }
 
@@ -44,7 +46,8 @@ function rejectStartupRequest(event: MessageEvent<unknown>, message: string): vo
 
 const startupRequests: MessageEvent<unknown>[] = []
 externalWorkerScope.onmessage = (event): void => {
-  if (requestIdOf(event.data) === null) {
+  if (!isWorkerRequest(event.data)) {
+    rejectStartupRequest(event, 'ONNX Worker 请求格式无效')
     return
   }
   if (startupRequests.length >= MAX_STARTUP_REQUESTS) {

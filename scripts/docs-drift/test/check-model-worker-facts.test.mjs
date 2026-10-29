@@ -3,6 +3,31 @@ import test from 'node:test'
 import { join } from 'node:path'
 import { readFile, runCheck, withFixture, writeFile } from './fixtures.mjs'
 
+test('decodes static HTTP strings and rejects escaped query-key access', async () => {
+  await withFixture(async (fixtureRoot) => {
+    const responsePath = join(fixtureRoot, 'apps/model-worker/src/model-response.ts')
+    const response = await readFile(responsePath, 'utf8')
+    await writeFile(
+      responsePath,
+      response
+        .replace("const CACHE_CONTROL = 'no-store'", String.raw`const CACHE_CONTROL = 'no\x2dstore'`)
+        .replaceAll("'cache-control'", String.raw`'cache\u002dcontrol'`),
+    )
+    const valid = await runCheck(fixtureRoot)
+    assert.equal(valid.exitCode, 0, valid.stderr)
+
+    const accessPath = join(fixtureRoot, 'apps/model-worker/src/model-access.ts')
+    const access = await readFile(accessPath, 'utf8')
+    await writeFile(
+      accessPath,
+      `${access}\n${String.raw`const queryKey = new URL(request.url).searchParams.get('\x6bey')`}`,
+    )
+    const invalid = await runCheck(fixtureRoot)
+    assert.equal(invalid.exitCode, 1)
+    assert.match(invalid.stderr, /must not read query-string key/u)
+  })
+})
+
 test('fails clearly when Model Worker source allowed methods drift from HTTP reference', async () => {
   await withFixture(async (fixtureRoot) => {
     const routerPath = join(fixtureRoot, 'apps/model-worker/src/request-router.ts')
@@ -82,16 +107,16 @@ test('fails clearly when Model Worker source string facts drift is masked by reg
     const responseSource = await readFile(responsePath, 'utf8')
     await writeFile(
       routerPath,
-      `/const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'/
-/const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'/
+      `/const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'/;
+/const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'/;
 ${routerSource
   .replace("const ALLOWED_METHODS = 'GET, HEAD, OPTIONS'", "const ALLOWED_METHODS = 'GET, HEAD'")
   .replace("const QUOTA_ALLOWED_METHODS = 'GET, POST, OPTIONS'", "const QUOTA_ALLOWED_METHODS = 'GET, OPTIONS'")}`,
     )
     await writeFile(
       responsePath,
-      `/const CACHE_CONTROL = 'no-store'/
-/if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) }/
+      `/const CACHE_CONTROL = 'no-store'/;
+/if (object === null) { return textResponse(request, INTERNAL_ERROR_MESSAGE, 500) }/;
 ${responseSource
   .replace("const CACHE_CONTROL = 'no-store'", "const CACHE_CONTROL = 'private, no-cache'")
   .replace('textResponse(request, INTERNAL_ERROR_MESSAGE, 500', 'textResponse(request, INTERNAL_ERROR_MESSAGE, 404')}`,

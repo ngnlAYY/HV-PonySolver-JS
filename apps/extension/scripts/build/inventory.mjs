@@ -1,4 +1,4 @@
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { lstat, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { JSDOM } from 'jsdom'
@@ -35,6 +35,9 @@ async function walkFiles(root, current = root) {
 }
 
 export async function createTargetInventory(targetDirectory, options = {}) {
+  if (!(await lstat(targetDirectory)).isDirectory()) {
+    throw new Error('Extension package root must be a directory without a symbolic link')
+  }
   const readFileImpl = options.readFileImpl ?? readFile
   const files = (await walkFiles(targetDirectory)).filter(({ relativePath }) => relativePath !== 'build-manifest.json')
   return Promise.all(

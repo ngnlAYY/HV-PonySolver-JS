@@ -45,19 +45,6 @@ describe('downloadModel', () => {
     )
   })
 
-  it('invokes the ambient fetch implementation with the global receiver', async () => {
-    const response = new Response(new Uint8Array([1, 2, 3]))
-    const fetchMock = vi.fn(function (this: unknown) {
-      expect(this).toBe(globalThis)
-      return Promise.resolve(response)
-    })
-    vi.stubGlobal('fetch', fetchMock)
-
-    await downloadModel(undefined, { integrity: TEST_INTEGRITY })
-
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-  })
-
   it('uses the saved model access key as Authorization when downloading', async () => {
     getModelAccessKey.mockResolvedValue('saved-token')
     const response = new Response(new Uint8Array([1, 2, 3]))

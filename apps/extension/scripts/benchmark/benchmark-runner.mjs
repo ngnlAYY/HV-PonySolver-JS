@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { TextDecoder, isDeepStrictEqual } from 'node:util'
 import { chromium, firefox } from '@playwright/test'
-import { unzipSync } from 'fflate'
+import { EXTENSION_ARCHIVE_LIMITS, unzipArtifactArchive } from '../build/archive-reader.mjs'
 
 import {
   benchmarkSchemaVersion,
@@ -237,8 +237,19 @@ async function verifyArtifactManifest(artifactRoot, artifact, artifactPath, brow
     throw new Error(`Artifact ${artifactPath} has an invalid archive byte length`)
   }
   assertSha256(artifact.archive.sha256, `Artifact ${artifactPath} archive`)
+  if (artifact.archive.byteLength > EXTENSION_ARCHIVE_LIMITS.archiveByteLength) {
+    throw new Error(`Artifact ${artifactPath} exceeds the compressed size limit`)
+  }
+  const fileRecords = artifact.files
+  if (!fileRecords || typeof fileRecords !== 'object' || Array.isArray(fileRecords)) {
+    throw new Error(`Artifact ${artifactPath} is missing file provenance`)
+  }
   const archivePath = path.join(artifactRoot, artifact.archive.archiveName)
-  const archiveBytes = new Uint8Array(await readFile(archivePath))
+  const archiveStats = await lstat(archivePath)
+  if (!archiveStats.isFile() || archiveStats.size !== artifact.archive.byteLength) {
+    throw new Error(`Artifact ${artifactPath} archive bytes do not match artifact metadata`)
+  }
+  const archiveBytes = await readFile(archivePath)
   const archiveHash = sha256(archiveBytes)
   if (archiveBytes.byteLength !== artifact.archive.byteLength || archiveHash !== artifact.archive.sha256) {
     throw new Error(`Artifact ${artifactPath} archive provenance does not match ${artifact.archive.archiveName}`)
@@ -251,13 +262,9 @@ async function verifyArtifactManifest(artifactRoot, artifact, artifactPath, brow
 
   let archive
   try {
-    archive = unzipSync(archiveBytes)
+    archive = unzipArtifactArchive(artifact, archiveBytes, `Artifact ${artifactPath} archive`)
   } catch (error) {
     throw new Error(`Artifact ${artifactPath} archive is not a valid ZIP`, { cause: error })
-  }
-  const fileRecords = artifact.files
-  if (!fileRecords || typeof fileRecords !== 'object' || Array.isArray(fileRecords)) {
-    throw new Error(`Artifact ${artifactPath} is missing file provenance`)
   }
   for (const [name, record] of Object.entries(fileRecords)) {
     if (name === 'build-manifest.json' || !(name in archive)) {

@@ -38,6 +38,16 @@ async function runCheckerWithSource(source) {
 }
 
 describe('checkBrowserSinks', () => {
+  it('rejects malformed source through both the API and CLI', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/extension/src/content/broken.ts', 'const value = ;')
+      await assert.rejects(checkBrowserSinks(repoRoot), /Invalid browser source syntax/u)
+    })
+    const result = await runCheckerWithSource('const value = ;')
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /Invalid browser source syntax/u)
+  })
+
   it('accepts known audited browser sink files', async () => {
     await withRepo(async (repoRoot) => {
       await writeSource(repoRoot, 'apps/userscript/src/inference/onnx-worker-external-entry.ts', 'importScripts(url)\n')
@@ -76,6 +86,22 @@ describe('checkBrowserSinks', () => {
 
       await assert.rejects(checkBrowserSinks(repoRoot), /unexpected innerHTML sink/)
     })
+  })
+
+  it('rejects destructuring and loop assignments that write innerHTML', async () => {
+    for (const source of [
+      '({ body: node.innerHTML } = payload)',
+      '({ body: [node["innerHTML"] = fallback] } = payload)',
+      '([...node.innerHTML] = payload)',
+      '({ ...node.innerHTML } = payload)',
+      'for (node.innerHTML of payload) {}',
+      'for (node.innerHTML in payload) {}',
+    ]) {
+      await withRepo(async (repoRoot) => {
+        await writeSource(repoRoot, 'apps/userscript/src/app/app.ts', source)
+        await assert.rejects(checkBrowserSinks(repoRoot), /unexpected innerHTML sink/, source)
+      })
+    }
   })
 
   it('rejects unexpected dynamic runtime sinks', async () => {
@@ -148,6 +174,8 @@ describe('checkBrowserSinks', () => {
     const result = await runCheckerWithSource(`
 function createFunction(source) { return source }
 createFunction('return input')
+const { html = node.innerHTML } = payload
+for (const html of payload) { consume(node.innerHTML) }
 const text = "Function(source); new Function(source)"
 const ignoredSinks = 'new Function(importScripts)'
 // node.innerHTML = userInput

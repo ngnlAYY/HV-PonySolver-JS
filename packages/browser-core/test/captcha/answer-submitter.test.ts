@@ -42,6 +42,44 @@ function createForm(includeSubmitButton: boolean): HTMLFormElement {
 }
 
 describe('AnswerSubmitter', () => {
+  it.each(['button', 'submit'])('rejects a form-associated object whose MIME type is %s', async (type) => {
+    const form = createForm(true)
+    const object = document.createElement('object')
+    object.id = 'riddlesubmit'
+    object.type = type
+    form.querySelector('#riddlesubmit')?.replaceWith(object)
+    expect(object.form).toBe(form)
+    const answers = Array.from(form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]'))
+    const checked = answers.map((answer) => answer.checked)
+    const click = vi.spyOn(object, 'click')
+    const onError = vi.fn()
+    const onSubmitted = vi.fn()
+
+    await createSubmitter([0, 0], [0, 0]).submit(form, ['RA'], onError, onSubmitted)
+
+    expect(onError).toHaveBeenCalledWith('答案控件不可用')
+    expect(click).not.toHaveBeenCalled()
+    expect(onSubmitted).not.toHaveBeenCalled()
+    expect(answers.map((answer) => answer.checked)).toEqual(checked)
+  })
+
+  it('accepts a native button submit control', async () => {
+    const form = createForm(true)
+    const button = document.createElement('button')
+    button.id = 'riddlesubmit'
+    button.type = 'submit'
+    form.querySelector('#riddlesubmit')?.replaceWith(button)
+    const click = vi.spyOn(button, 'click').mockImplementation(() => undefined)
+    const onError = vi.fn()
+    const onSubmitted = vi.fn()
+
+    await createSubmitter([0, 0], [0, 0]).submit(form, ['RA'], onError, onSubmitted)
+
+    expect(click).toHaveBeenCalledOnce()
+    expect(onError).not.toHaveBeenCalled()
+    expect(onSubmitted).toHaveBeenCalledOnce()
+  })
+
   it('does not change checkbox state when submit button is missing', async () => {
     const form = createForm(false)
     const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
@@ -620,6 +658,27 @@ describe('AnswerSubmitter', () => {
         expect(button.click).toHaveBeenCalledTimes(1)
         expect(onSubmitted).toHaveBeenCalledTimes(1)
         expect(onError).not.toHaveBeenCalled()
+      },
+    )
+
+    it.each([{}, { TS: 0.5, RA: 0.5, FS: 0.5 }])(
+      'keeps DOM-order tie breaking when final automatic confidence is %j',
+      async (confidences) => {
+        const form = createForm(true)
+        const checkboxes = [...form.querySelectorAll<HTMLInputElement>('input[name="riddleanswer[]"]')]
+        for (const checkbox of checkboxes) checkbox.checked = false
+        const button = form.querySelector<HTMLInputElement>('#riddlesubmit')!
+        button.click = vi.fn()
+        const submission = createSubmitter([1000, 1000], [0, 0]).submit(form, ['TS', 'RA', 'FS'], vi.fn(), vi.fn(), {
+          confidences,
+        })
+        await vi.advanceTimersByTimeAsync(1)
+        checkboxes[3]!.click()
+        checkboxes[4]!.click()
+        await vi.runAllTimersAsync()
+        await submission
+        expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual([false, false, true, true, true, false])
+        expect(button.click).toHaveBeenCalledTimes(1)
       },
     )
 

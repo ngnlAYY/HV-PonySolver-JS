@@ -218,7 +218,7 @@ test('拒绝缺失 Authorization 的 preflight 响应', async () => {
         return fixtureResponse(204, contractHeaders(origin, { 'access-control-allow-headers': '' }))
       },
     }),
-    /access-control-allow-headers mismatch; expected=\[authorization\] actual=\[<missing>\]/,
+    /access-control-allow-headers mismatch; expected=\[authorization\]/,
   )
 })
 
@@ -350,6 +350,60 @@ test('重试耗尽时保留次数和请求上下文，不暴露网络错误内�
   )
   assert.deepEqual(delays, [10])
 })
+
+for (const header of [
+  'access-control-allow-origin',
+  'access-control-allow-methods',
+  'access-control-allow-headers',
+  'access-control-max-age',
+  'cache-control',
+  'vary',
+]) {
+  test(`响应 ${header} 不匹配时错误链和 CLI 不回显受保护值`, async () => {
+    const protectedValue = 'synthetic-private-response-value'
+    const fetchImpl = async (_url, init) =>
+      fixtureResponse(204, contractHeaders(init.headers.Origin, { [header]: protectedValue }))
+
+    await assert.rejects(
+      checkDeploymentContract({
+        modelUrl: MODEL_URL,
+        invalidKeyMode: 'decoy',
+        probeId: PROBE_ID,
+        attempts: 1,
+        fetchImpl,
+      }),
+      (error) => {
+        assert.match(error.message, /OPTIONS origin=.*asset=legacy-model/)
+        for (let failure = error; failure; failure = failure.cause) {
+          assert.equal(failure.message.includes(protectedValue), false)
+        }
+        return true
+      },
+    )
+
+    const stdout = silentWriter()
+    const stderr = silentWriter()
+    const exitCode = await runCli({
+      env: {
+        MODEL_WORKER_URL: MODEL_URL,
+        MODEL_WORKER_ORT_URL: ORT_MODEL_URL,
+        MODEL_WORKER_RUNTIME_WASM_URL: RUNTIME_WASM_URL,
+        MODEL_WORKER_RUNTIME_WASM_BYTE_LENGTH: String(RUNTIME_WASM_BYTE_LENGTH),
+        MODEL_WORKER_INVALID_KEY_MODE: 'decoy',
+        MODEL_WORKER_PROBE_ID: PROBE_ID,
+        MODEL_WORKER_CHECK_ATTEMPTS: '1',
+      },
+      fetchImpl,
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+    })
+
+    assert.equal(exitCode, 1)
+    assert.equal(stdout.read(), '')
+    assert.match(stderr.read(), /OPTIONS origin=.*asset=legacy-model/)
+    assert.equal(stderr.read().includes(protectedValue), false)
+  })
+}
 
 test('无响应的请求按超时边界终止并耗尽有限重试', async () => {
   const signals = []

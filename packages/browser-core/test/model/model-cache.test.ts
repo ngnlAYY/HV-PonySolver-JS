@@ -202,6 +202,37 @@ afterEach(() => {
 })
 
 describe('IndexedDbModelStore operation lifetime', () => {
+  it.each([-3_600_000, 3_600_000])('preserves one timeout budget across a %ims wall-clock jump', async (jump) => {
+    vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(10_000)
+    const store = new IndexedDbModelStore()
+    const context = store.createOperationContext(undefined, Date.now() + 5_000)
+    const cancel = vi.fn()
+    try {
+      await store.waitForOperation(Promise.resolve(), context, 'operation timed out')
+      await vi.advanceTimersByTimeAsync(1_000)
+      vi.setSystemTime(Date.now() + jump)
+      expect(() => store.assertOperationActive(context)).not.toThrow()
+
+      let settled = false
+      const pending = store
+        .waitForOperation(new Promise<void>(() => undefined), context, 'operation timed out', cancel)
+        .catch((error: unknown) => {
+          settled = true
+          return error
+        })
+      await vi.advanceTimersByTimeAsync(3_999)
+      expect(settled).toBe(false)
+      expect(cancel).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(await pending).toEqual(new Error('operation timed out'))
+    } finally {
+      store.close()
+    }
+  })
+
   it('removes abort listeners when a deadline wins over a non-cooperative operation', async () => {
     vi.useFakeTimers()
     const store = new IndexedDbModelStore()
@@ -364,6 +395,64 @@ describe('readCachedModelBuffer', () => {
 })
 
 describe('ModelCache', () => {
+  it.each([-3_600_000, 3_600_000])('honors an external cache-read deadline across a %ims clock jump', async (jump) => {
+    vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(10_000)
+    const { request, transactions } = stubIndexedDb({ deferOpenSuccess: true, deferTransactionCompletion: true })
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const cache = new ModelCache(createStatusPanel())
+    let settled = false
+    const pending = cache.getCached(undefined, Date.now() + 1_000).then((value) => {
+      settled = true
+      return value
+    })
+    try {
+      await vi.advanceTimersByTimeAsync(400)
+      vi.setSystemTime(Date.now() + jump)
+      request.onsuccess?.(new Event('success'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(transactions).toHaveLength(1)
+
+      await vi.advanceTimersByTimeAsync(599)
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(pending).resolves.toBeNull()
+      expect(transactions[0]!.abort).toHaveBeenCalledOnce()
+    } finally {
+      cache.close()
+    }
+  })
+
+  it.each([
+    ['read', '缓存未命中'],
+    ['read-error', '缓存读取失败'],
+    ['download', '下载完成'],
+    ['write', '已缓存'],
+  ] as const)('measures %s elapsed time monotonically during wall-clock rollback', async (operation, status) => {
+    stubIndexedDb(operation === 'read-error' ? { openError: new DOMException('open failed') } : {})
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const panel = createStatusPanel()
+    const cache = new ModelCache(panel)
+    const wallClock = vi.spyOn(Date, 'now').mockReturnValue(1_000)
+    let monotonicTime = 100
+    vi.spyOn(performance, 'now').mockImplementation(() => monotonicTime)
+    try {
+      const pending = operation.startsWith('read')
+        ? cache.getCached()
+        : operation === 'download'
+          ? cache.download(undefined, false)
+          : cache.putCached(bufferFromBytes([1, 2, 3]), false)
+      wallClock.mockReturnValue(500)
+      monotonicTime = 125.4
+      await pending
+
+      const suffix = operation === 'read-error' ? '，准备下载' : ''
+      expect(panel.setStatus).toHaveBeenLastCalledWith({ model: `${status} 25ms${suffix}` })
+    } finally {
+      cache.close()
+    }
+  })
+
   it('reports elapsed time when cached model is found', async () => {
     const buffer = bufferFromBytes([9, 9, 9])
     vi.mocked(verifyModelIntegrity).mockResolvedValueOnce(undefined)

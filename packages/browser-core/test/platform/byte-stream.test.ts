@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { runInNewContext } from 'node:vm'
 
 import { readBoundedByteStream, sha256Hex } from '../../src/platform/byte-stream'
 import { raceAbort } from '../../src/utils/abort-race'
@@ -17,6 +18,36 @@ function stream(...chunks: number[][]): ReadableStream<Uint8Array> {
 }
 
 describe('bounded byte streams', () => {
+  it('accepts cross-realm byte views and preserves their offset and byte values', async () => {
+    const chunk: unknown = runInNewContext('new Uint8Array([9, 255, 2, 8]).subarray(1, 3)')
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(chunk as Uint8Array)
+        controller.close()
+      },
+    })
+    const result = await readBoundedByteStream(body, { expectedByteLength: 2, maxByteLength: 2, sizeError })
+    expect(Array.from(new Uint8Array(result))).toEqual([255, 2])
+  })
+
+  it.each([undefined, null, '123', { byteLength: 2 }, new DataView(new ArrayBuffer(2)), new Uint16Array([1])])(
+    'rejects a non-byte chunk instead of ignoring it or fabricating bytes: %s',
+    async (chunk) => {
+      const cancel = vi.fn()
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(chunk as unknown as Uint8Array)
+        },
+        cancel,
+      })
+      await expect(
+        readBoundedByteStream(body, { expectedByteLength: null, maxByteLength: 4, sizeError }),
+      ).rejects.toThrow('资产响应包含非字节数据块')
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(body.locked).toBe(false)
+    },
+  )
+
   it('allocates only the final known-size buffer for a multi-chunk asset', async () => {
     const body = stream([1], [2], [3])
     const allocations: number[] = []

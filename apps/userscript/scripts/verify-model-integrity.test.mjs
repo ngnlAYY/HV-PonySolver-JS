@@ -105,6 +105,19 @@ test('verify-model-integrity CLI exits 1 when MODEL_FILE is missing through the 
   assert.match(result.stderr, /MODEL_FILE is required/)
 })
 
+test('verify-model-integrity CLI rejects unsupported and incomplete arguments before reading a model', async () => {
+  for (const [args, message] of [
+    [['--repo-rooot', '/unused'], 'Unknown argument: --repo-rooot'],
+    [['--repo-root'], '--repo-root requires a path'],
+    [['--repo-root', '--help'], '--repo-root requires a path'],
+  ]) {
+    const result = await runCli(sourceScriptPath, withoutModelFile(process.env), args)
+    assert.equal(result.code, 1)
+    assert.equal(result.stdout, '')
+    assert.equal(result.stderr.trim(), message)
+  }
+})
+
 test('verify-model-integrity CLI reads the default canonical manifest when MODEL_FILE exists', async () => {
   const tempDir = await mkdtemp(join(tmpdir(), 'hv-pony-model-integrity-default-'))
   try {

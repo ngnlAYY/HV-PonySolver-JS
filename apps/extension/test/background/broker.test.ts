@@ -1088,12 +1088,32 @@ describe('broker queue and privilege boundaries', () => {
     expect(vi.mocked(storageSet)).toHaveBeenCalledTimes(2)
   })
 
-  it('derives the broker detect deadline from the shared detect deadline config', async () => {
-    const { DETECT_DEADLINE_CONFIG } = await import('../../src/protocol/deadlines')
-    expect(BROKER_DETECT_TIMEOUT_MS).toBe(DETECT_DEADLINE_CONFIG.brokerTimeoutMs)
-    // The staged budgets keep their historical values: worker 30s < client 35s < broker 40s.
-    expect(DETECT_DEADLINE_CONFIG.workerTimeoutMs).toBe(30_000)
-    expect(DETECT_DEADLINE_CONFIG.clientTimeoutMs).toBe(35_000)
-    expect(DETECT_DEADLINE_CONFIG.brokerTimeoutMs).toBe(40_000)
+  it('aborts a hanging detect at its deadline and ignores the late Host response', async () => {
+    vi.useFakeTimers()
+    let resolveHost!: (response: HostResponse) => void
+    const invokeHost = vi.fn(
+      (_request: HostRequest, _signal: AbortSignal) =>
+        new Promise<HostResponse>((resolve) => {
+          resolveHost = resolve
+        }),
+    )
+    registerBroker(invokeHost)
+    const client = port(CONTENT_PORT_NAME, { id: 'extension-id', url: 'https://hentaiverse.org/' })
+    platformMocks.connectListener?.(client)
+    client.emitMessage(detectRequest(0))
+    const signal = invokeHost.mock.calls[0]![1]
+
+    await vi.advanceTimersByTimeAsync(BROKER_DETECT_TIMEOUT_MS - 1)
+    expect(signal.aborted).toBe(false)
+    expect(client.postMessage).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(signal.aborted).toBe(true)
+    expect(client.postMessage).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ requestId: 'detect-0', ok: false, error: expect.stringContaining('超时') }),
+    )
+
+    resolveHost({ protocol: PROTOCOL_VERSION, type: 'result', requestId: 'detect-0', ok: true })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(client.postMessage).toHaveBeenCalledTimes(1)
   })
 })

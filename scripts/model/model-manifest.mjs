@@ -9,7 +9,7 @@ function parseByteLength(value, sourcePath) {
     throw new Error(`Invalid MODEL_INTEGRITY.byteLength in ${sourcePath}: ${value}`)
   }
   const parsedValue = Number(value.replaceAll('_', ''))
-  if (!Number.isSafeInteger(parsedValue)) {
+  if (!Number.isSafeInteger(parsedValue) || parsedValue <= 0) {
     throw new Error(`Invalid MODEL_INTEGRITY.byteLength in ${sourcePath}: ${value}`)
   }
   return parsedValue
@@ -78,6 +78,9 @@ function readManifestDeclarations(sourceFile, sourcePath) {
       if (!ts.isIdentifier(declaration.name)) continue
       const name = declaration.name.text
       if (name !== 'MODEL_VERSION' && name !== 'MODEL_INTEGRITY') continue
+      if (!(statement.declarationList.flags & ts.NodeFlags.Const)) {
+        throw new Error(`Invalid ${name} in ${sourcePath}: expected a const declaration`)
+      }
       if (declarations.has(name)) throw new Error(`Duplicate ${name} in ${sourcePath}`)
       declarations.set(name, declaration)
     }

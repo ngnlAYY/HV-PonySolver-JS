@@ -97,7 +97,7 @@ async function buildBrowserBundle(): Promise<string> {
     stdin: {
       contents: [
         "export { App } from './src/app/app'",
-        "export { CaptchaSolver } from './src/captcha/captcha-solver'",
+        "export { CaptchaSolver } from '@hv-pony-solver/browser-core'",
         "export { AnswerSubmitter } from './src/captcha/answer-submitter'",
         "export { getAnswerMode } from './src/captcha/answer-mode-settings'",
         "export { timingConfig } from '@hv-pony-solver/browser-core'",

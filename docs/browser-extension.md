@@ -88,7 +88,7 @@ CSP 为 `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; worker-src 'se
 
 推理 Worker 内嵌固定上游的完整 MIT 许可，压缩产物同样保留；许可来源与 vendor 字节身份见[Runtime 专题](onnx-runtime.md#显式内置精简版)。
 
-产物 inventory 仅接受普通文件和目录，遇到符号链接或其他非普通条目立即失败，不能把未引用条目静默漏出审计与 ZIP 清单。
+产物 inventory 与 E2E 解压树的根也必须是实际目录；仅接受普通文件和目录，遇到符号链接或其他非普通条目立即失败，不能把未引用条目静默漏出审计与 ZIP 清单。
 
 审计锁定完整 MV3 清单：版本、后台、独立设置页、无 popup 的 action，以及内容脚本的 matches、exclude_matches、document_idle 和默认顶层隔离世界。拒绝 `optional_permissions`、`optional_host_permissions`、`externally_connectable`、`sandbox` 扩权；所有 `.html/.htm` 文件不区分后缀大小写进行审计，连同嵌套 template 拒绝内联脚本/事件、规范化后的 `javascript:`/`data:`/`vbscript:` URL、`srcdoc` 和 base URL 覆写。所有 `.js`、`.mjs`、`.cjs` 文件均进入执行代码审计，后缀比较不区分大小写；动态导入通过 AST 识别，注释分隔不能绕过，字符串或注释中的同名文本不误判，无效 JS 语法失败关闭。HTML 脚本引用必须指向这些已审类型的本地文件，其他后缀失败关闭。普通文本和合法本地资源不按可执行 URL 处理。
 
@@ -148,7 +148,7 @@ remote 设置页在绑定处理器后才启用 Key 控件，已保存 Key 不回
 
 验证/清除只清空点击后未编辑的输入，重输同样文字也算编辑。Key commit 独立驱动 Host 等待旧初始化取消后再通知 Broker，覆盖静默预热和其他 Port，就绪会话复用。调用方取消不撤销 commit；回滚或 Host 关闭后的迟到回调不通知，详见[凭证修订](architecture/extension-runtime.md#key-提交与凭证修订)。
 
-页面销毁取消操作，错误保留实际 Host/HTTP/超时/浏览器原因。仅额度查询对 Port 瞬断重连一次，其他操作不重放。
+页面销毁取消操作，四类模型请求在最终结果交付前再次复核取消；已提交的 Key 或确认不回滚。错误保留实际 Host/HTTP/超时/浏览器原因。仅额度查询对 Port 瞬断重连一次，其他操作不重放。
 
 packaged 设置页不打开 Key Port，Key 控件禁用并显示“当前版本已内置模型，无需配置模型 Key。”，普通设置仍可修改。
 
@@ -158,7 +158,9 @@ packaged 设置页不打开 Key Port，Key 控件禁用并显示“当前版本�
 
 包内 Node 测试使用 `node --test "scripts/**/*.test.mjs"`，覆盖 build、benchmark、browser、E2E、fixture 与 release 契约。脚本按这七个职责目录组织，日常使用包命令。
 
-benchmark 按参数、统计、结果 schema、比较与 CSV 分模块，聚合入口只转发契约，runner 只编排采样。每次至少两个测量样本，`--samples 1` 在启动浏览器前拒绝。报告逐场景核对 invocation 总数、从零起连续且唯一的索引，以及每次 warmup/measured 数量与 config 完全一致；不能用满足最低采样量代替声明数量。入口与成本见[命令参考](development/commands.md)。
+benchmark 按参数、统计、结果 schema、比较与 CSV 分模块，聚合入口只转发契约，runner 只编排采样。每次至少两个测量样本，`--samples 1` 在启动浏览器前拒绝；场景维度和 bootstrap 样本逐项验证，稀疏数组不能绕过。报告逐场景核对 invocation 总数、从零起连续且唯一的索引，以及每次 warmup/measured 数量与 config 完全一致；不能用满足最低采样量代替声明数量。入口与成本见[命令参考](development/commands.md)。
+
+benchmark 与 packaged E2E 共用 ZIP 读取器：压缩文件最多 32 MiB、单条解压最多 16 MiB、全树最多 32 MiB、最多 128 条；解压前核对中央/本地头的名称、flags、压缩方式及尺寸（流式本地尺寸允许为零，以中央目录和实际输出为准），拒绝路径异常、重复或未声明条目、Unix 链接/特殊文件及长度漂移；原生 inflate 同时限制实际解压输出，随后用 Node 内置 crc32 核对解压字节；本地头与中央目录 CRC 须一致，流式描述符模式允许本地头未填值。只接受本项目的普通单盘 ZIP，不接受 ZIP64、加密或分卷。benchmark 同样先校验普通 ZIP 文件与声明长度，避免无界读取。
 
 浏览器完整版本比较只删除末尾零：`140.15.0` 等同 `140.15`，不等同 `140.15.1`。最低支持和精确最低执行使用 [browser-support.mjs](../apps/extension/scripts/browser/browser-support.mjs) 的 major 策略。
 

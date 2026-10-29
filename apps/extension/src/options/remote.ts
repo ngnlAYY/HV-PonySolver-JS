@@ -43,19 +43,19 @@ function nextRequestId(): string {
 
 class HostConnectionDisconnectedError extends Error {}
 
+const MODEL_OPERATION_NAMES: Readonly<Record<KeyIntentRequest['type'] | DownloadModelRequest['type'], string>> = {
+  'verify-key': 'Key 验证',
+  'clear-key': 'Key 清除',
+  'download-model': '模型下载',
+  'query-model-quota': '额度查询',
+}
+
 function requestHostAttempt(
   request: KeyIntentRequest | DownloadModelRequest,
   options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }>,
 ): Promise<HostSuccessResponse> {
   const { signal, timeoutMs = 95_000 } = options
-  let operationName = '模型下载'
-  if (request.type === 'verify-key') {
-    operationName = 'Key 验证'
-  } else if (request.type === 'clear-key') {
-    operationName = 'Key 清除'
-  } else if (request.type === 'query-model-quota') {
-    operationName = '额度查询'
-  }
+  const operationName = MODEL_OPERATION_NAMES[request.type]
   if (signal?.aborted) {
     return Promise.reject(new Error(`${operationName}已取消`))
   }
@@ -133,15 +133,17 @@ export async function requestHost(
   request: KeyIntentRequest | DownloadModelRequest,
   options: Readonly<{ signal?: AbortSignal; timeoutMs?: number }> = {},
 ): Promise<HostSuccessResponse> {
-  try {
-    return await requestHostAttempt(request, options)
-  } catch (error) {
+  const response = await requestHostAttempt(request, options).catch(async (error: unknown) => {
     if (request.type !== 'query-model-quota' || !(error instanceof HostConnectionDisconnectedError)) {
       throw error
     }
     await waitForQuotaQueryReconnect(options.signal)
     return requestHostAttempt(request, options)
+  })
+  if (options.signal?.aborted) {
+    throw new Error(`${MODEL_OPERATION_NAMES[request.type]}已取消`)
   }
+  return response
 }
 
 function isCurrentOperation(generation: number, signal: AbortSignal): boolean {

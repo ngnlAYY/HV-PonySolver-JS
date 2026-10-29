@@ -6,7 +6,7 @@ import {
   normalizeModelDownloadReceiptId,
 } from '@hv-pony-solver/shared'
 
-import type { ModelDownloadQuotaNamespace, ModelDownloadQuotaStub } from './worker-types'
+import type { ModelDownloadQuotaNamespace } from './worker-types'
 import { withModelWorkerDependencyTimeout } from './request-timeout'
 
 // v1 charged a request before its response body reached the client. A fresh key
@@ -329,10 +329,6 @@ async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function quotaStub(namespace: ModelDownloadQuotaNamespace, canonicalToken: string): Promise<ModelDownloadQuotaStub> {
-  return sha256Hex(canonicalToken).then((identity) => namespace.get(namespace.idFromName(identity)))
-}
-
 async function requestQuotaService<T>(
   namespace: ModelDownloadQuotaNamespace,
   canonicalToken: string,
@@ -340,7 +336,6 @@ async function requestQuotaService<T>(
   validate: (value: unknown) => value is T,
   headers?: HeadersInit,
 ): Promise<T> {
-  const stub = await quotaStub(namespace, canonicalToken)
   const controller = new AbortController()
   let bodyToCancel: Pick<ReadableStream<Uint8Array>, 'cancel'> | null = null
   const cancelBody = (): void => {
@@ -353,6 +348,9 @@ async function requestQuotaService<T>(
     }
   }
   const operation = (async () => {
+    const identity = await sha256Hex(canonicalToken)
+    controller.signal.throwIfAborted()
+    const stub = namespace.get(namespace.idFromName(identity))
     const response = await stub.fetch(
       new Request(url, {
         method: 'POST',

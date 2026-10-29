@@ -37,13 +37,16 @@ export async function readBoundedByteStream(
       const pending = reader.read()
       const { done, value } = await (options.wait ? options.wait(pending) : pending)
       if (done) break
-      if (!value?.byteLength) continue
+      if (!ArrayBuffer.isView(value) || value.BYTES_PER_ELEMENT !== 1) {
+        throw new Error('资产响应包含非字节数据块')
+      }
+      if (value.byteLength === 0) continue
       const nextOffset = offset + value.byteLength
       if (nextOffset > limit) throw sizeError(nextOffset, limit)
       if (nextOffset > output.byteLength) {
         const capacity = Math.min(limit, Math.max(nextOffset, output.byteLength * 2, 64 * 1024))
         const grown = new Uint8Array(capacity)
-        grown.set(output)
+        grown.set(output.subarray(0, offset))
         output = grown
       }
       output.set(value, offset)

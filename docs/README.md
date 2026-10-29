@@ -28,7 +28,7 @@
 
 ## 决策与历史
 
-[文档重建决定](decisions/implemented/process/2026-09-16-documentation-rebuild.md)说明契约归属与稳定路径。最新结果见[2026-10-27 运行时与最小构建依赖复核](audits/2026-10-27-runtime-and-dependency-audit.md)和[交付边界与最小 ORT 构建决定](decisions/implemented/bug-fix/2026-10-27-runtime-delivery-and-minimal-ort-build.md)；[前次审计](audits/2026-10-27-delivery-and-tooling-audit.md)保留原验证记录。其余记录按主题检索 [decisions](decisions/)，原验证结果保留各自日期含义。
+[文档重建决定](decisions/implemented/process/2026-09-16-documentation-rebuild.md)说明契约归属与稳定路径。最新结果见[2026-10-29 第三轮全仓审计](audits/2026-10-29-resource-and-maintainability-audit.md)和[流清理与面板观察决定](decisions/implemented/bug-fix/2026-10-29-stream-cleanup-and-panel-observation.md)；[第二轮审计](audits/2026-10-29-follow-up-audit.md)保留原验证记录。其余记录按主题检索 [decisions](decisions/)，原验证结果保留各自日期含义。
 
 | 历史记录                                                                 | 内容                                                                         |
 | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |

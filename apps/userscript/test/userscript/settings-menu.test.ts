@@ -248,7 +248,7 @@ describe('settings menu', () => {
     const prompt = vi.fn().mockReturnValueOnce('1').mockReturnValueOnce(VALID_KEY)
     const alert = vi.fn()
     const setValue = vi.fn(async () => {
-      throw new Error('write failed')
+      throw new Error(`write failed: ${VALID_KEY}`)
     })
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
     vi.stubGlobal('GM_setValue', setValue)
@@ -260,7 +260,10 @@ describe('settings menu', () => {
     await registerMenuCommand.mock.calls[0][1]()
 
     expect(setValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey', VALID_KEY)
-    expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: write failed')
+    expect(alert).toHaveBeenCalledWith(
+      '模型下载 Key 设置失败: Error: 模型下载 Key 保存失败，请检查脚本管理器的 GM 存储',
+    )
+    expect(alert.mock.calls.flat().join(' ')).not.toContain(VALID_KEY)
   })
 
   it('sets the panel position through the top-level settings menu', async () => {
@@ -340,7 +343,7 @@ describe('settings menu', () => {
     const prompt = vi.fn(() => '2')
     const alert = vi.fn()
     const deleteValue = vi.fn(async () => {
-      throw new Error('delete failed')
+      throw new Error(`delete failed: ${VALID_KEY}`)
     })
     vi.stubGlobal('GM_registerMenuCommand', registerMenuCommand)
     vi.stubGlobal('GM_deleteValue', deleteValue)
@@ -353,7 +356,10 @@ describe('settings menu', () => {
     await registerMenuCommand.mock.calls[0][1]()
 
     expect(deleteValue).toHaveBeenCalledWith('hvPonySolverModelAccessKey')
-    expect(alert).toHaveBeenCalledWith('模型下载 Key 设置失败: Error: delete failed')
+    expect(alert).toHaveBeenCalledWith(
+      '模型下载 Key 设置失败: Error: 模型下载 Key 删除失败，请检查脚本管理器的 GM 存储',
+    )
+    expect(alert.mock.calls.flat().join(' ')).not.toContain(VALID_KEY)
   })
 
   it('queries model download quota through the top-level settings menu', async () => {

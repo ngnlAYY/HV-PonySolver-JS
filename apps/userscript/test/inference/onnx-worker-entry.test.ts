@@ -281,6 +281,19 @@ describe('ONNX worker entry', () => {
 
     sendWorkerRequest(null)
     sendWorkerRequest({ type: 'init' })
+    for (const request of [
+      { type: 'init', requestId: 20, modelBuffer: 'not-a-buffer' },
+      { type: 'unknown', requestId: 21 },
+      { type: 'detect', requestId: 22, imageBlob: 'not-a-blob' },
+      { type: 'init', requestId: 23, modelBuffer: new ArrayBuffer(1), extra: true },
+    ]) {
+      sendWorkerRequest(request)
+      expect(responses).toContainEqual({
+        type: 'error',
+        requestId: request.requestId,
+        message: 'ONNX Worker 请求格式无效',
+      })
+    }
     const modelBuffer = new ArrayBuffer(1)
     sendWorkerRequest({ type: 'init', requestId: 12, modelBuffer })
     await vi.waitFor(() => expect(fetchResolvers).toHaveLength(3))

@@ -178,6 +178,23 @@ describe('App solve smoke', () => {
     expect(panelInstances[0]?.addSuccess).toHaveBeenCalledWith(['TS'], { TS: 0.91 }, expect.any(Number))
   })
 
+  it('uses the shared random fallback by default when detection finds no answer', async () => {
+    detect.mockResolvedValue({ success: false, ponies: [], confidences: {}, detections: [], candidates: [] })
+    const { App } = await import('../../src/app/app')
+    const captcha = appendCaptcha()
+    const app = new App()
+    apps.push(app)
+
+    app.init()
+    await vi.runAllTimersAsync()
+
+    expect(detect).toHaveBeenCalledTimes(1)
+    expect(captcha.checkboxes.filter((checkbox) => checkbox.checked)).toHaveLength(1)
+    expect(captcha.submitButton.click).toHaveBeenCalledTimes(1)
+    expect(panelInstances[0]?.addRandomFailure).toHaveBeenCalledExactlyOnceWith(expect.any(String), expect.any(Number))
+    expect(panelInstances[0]?.addSuccess).not.toHaveBeenCalled()
+  })
+
   it('keeps checkbox state, skips submit, records once, and handles later captchas in manual mode', async () => {
     localStorage.setItem('hvPonySolverAnswerMode', 'manual')
     const { App } = await import('../../src/app/app')

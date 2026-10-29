@@ -4,17 +4,16 @@ import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 
-import { unzipSync } from 'fflate'
+import { ANSWER_CODES } from '@hv-pony-solver/shared/answer'
+import {
+  EXTENSION_ARCHIVE_LIMITS as PACKAGED_ARCHIVE_LIMITS,
+  assertSafeArchiveEntryName as assertSafeArchiveName,
+  unzipArtifactArchive,
+} from '../build/archive-reader.mjs'
 import { EXTENSION_PATHS } from '../../src/platform/extension-paths.ts'
 
 const packagedTargets = new Set(['chromium', 'firefox'])
-const answerCount = 6
-export const PACKAGED_ARCHIVE_LIMITS = Object.freeze({
-  archiveByteLength: 32 * 1024 * 1024,
-  entryByteLength: 16 * 1024 * 1024,
-  entryCount: 128,
-  treeByteLength: 32 * 1024 * 1024,
-})
+export { PACKAGED_ARCHIVE_LIMITS }
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -44,26 +43,12 @@ function assertFileIdentity(identity, label) {
   }
 }
 
-function assertSafeArchiveName(name, label) {
-  if (
-    typeof name !== 'string' ||
-    name.length === 0 ||
-    name.includes('\\') ||
-    name.includes('\0') ||
-    path.posix.isAbsolute(name) ||
-    path.posix.normalize(name) !== name ||
-    name.split('/').some((part) => part === '' || part === '.' || part === '..')
-  ) {
-    throw new Error(`${label} has an unsafe path: ${String(name)}`)
-  }
-}
-
 export function validatePackagedOracle(value, label = 'Packaged fixture oracle') {
   assertPlainObject(value, label)
   if (!isDeepStrictEqual(Object.keys(value).sort(), ['classId', 'confidence'])) {
     throw new Error(`${label} must contain exactly classId and confidence`)
   }
-  if (!Number.isSafeInteger(value.classId) || value.classId < 0 || value.classId >= answerCount) {
+  if (!Number.isSafeInteger(value.classId) || value.classId < 0 || value.classId >= ANSWER_CODES.length) {
     throw new Error(`${label} has an invalid classId`)
   }
   if (!Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1) {
@@ -148,44 +133,6 @@ function validatePackagedArtifact(artifact, target, label) {
     throw new Error(`${label} must attest exactly one ORT model`)
   }
   return oracle
-}
-
-function unzipPackagedArchive(packagedArtifact, archiveBytes) {
-  const label = `${packagedArtifact.target} packaged archive`
-  const expectedNames = new Set([...Object.keys(packagedArtifact.artifact.files), 'build-manifest.json'])
-  const seenNames = new Set()
-  let treeByteLength = 0
-  return unzipSync(new Uint8Array(archiveBytes), {
-    filter(file) {
-      assertSafeArchiveName(file.name, `${label} entry`)
-      if (seenNames.has(file.name)) {
-        throw new Error(`${label} contains a duplicate entry: ${file.name}`)
-      }
-      seenNames.add(file.name)
-      if (seenNames.size > PACKAGED_ARCHIVE_LIMITS.entryCount) {
-        throw new Error(`${label} exceeds the entry-count limit`)
-      }
-      if (!expectedNames.has(file.name)) {
-        throw new Error(`${label} contains an unexpected entry: ${file.name}`)
-      }
-      if (
-        !Number.isSafeInteger(file.originalSize) ||
-        file.originalSize < 0 ||
-        file.originalSize > PACKAGED_ARCHIVE_LIMITS.entryByteLength
-      ) {
-        throw new Error(`${label} entry ${file.name} exceeds the uncompressed entry size limit`)
-      }
-      const declaredIdentity = packagedArtifact.artifact.files[file.name]
-      if (declaredIdentity && file.originalSize !== declaredIdentity.byteLength) {
-        throw new Error(`${label} entry ${file.name} size does not match artifact metadata`)
-      }
-      treeByteLength += file.originalSize
-      if (!Number.isSafeInteger(treeByteLength) || treeByteLength > PACKAGED_ARCHIVE_LIMITS.treeByteLength) {
-        throw new Error(`${label} exceeds the uncompressed tree size limit`)
-      }
-      return true
-    },
-  })
 }
 
 function parseJsonBytes(bytes, label) {
@@ -310,7 +257,11 @@ async function readAndVerifyPackagedArchive(packagedArtifact) {
 
   let entries
   try {
-    entries = unzipPackagedArchive(packagedArtifact, archiveBytes)
+    entries = unzipArtifactArchive(
+      packagedArtifact.artifact,
+      archiveBytes,
+      `${packagedArtifact.target} packaged archive`,
+    )
   } catch (error) {
     throw new Error(`${packagedArtifact.target} archive is not a valid ZIP`, { cause: error })
   }
@@ -375,6 +326,9 @@ async function walkExtractedFiles(root, current = root) {
 }
 
 export async function verifyExtractedPackagedTree(root, verification) {
+  if (!(await lstat(root)).isDirectory()) {
+    throw new Error('Extracted packaged tree root must be a directory without a symbolic link')
+  }
   const files = await walkExtractedFiles(root)
   const records = {}
   // Retain only the two JSON documents; model bytes are hashed once and released after each read.

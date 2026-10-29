@@ -27,6 +27,13 @@ async function writeSource(repoRoot, relativePath, content) {
 }
 
 describe('checkArchitectureBoundaries', () => {
+  it('rejects malformed source instead of trusting the recovered import tree', async () => {
+    await withRepo(async (repoRoot) => {
+      await writeSource(repoRoot, 'apps/extension/src/content/broken.ts', 'const value = ;')
+      await assert.rejects(checkArchitectureBoundaries(repoRoot), /Invalid architecture source syntax/u)
+    })
+  })
+
   it('accepts allowed userscript, model-worker, and type-only contract imports', async () => {
     await withRepo(async (repoRoot) => {
       await writeSource(

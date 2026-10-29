@@ -463,6 +463,55 @@ describe('default remote options entry', () => {
     expect(platformMocks.runtimeConnect).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['verify-key', 'Key 验证'],
+    ['clear-key', 'Key 清除'],
+    ['download-model', '模型下载'],
+    ['query-model-quota', '额度查询'],
+  ] as const)('rejects %s cancelled after its response settles but before delivery', async (type, operationName) => {
+    const port = controlledHostPort()
+    platformMocks.runtimeConnect.mockReset().mockReturnValue(port)
+    const { requestHost } = await import('../../src/options/remote')
+    const controller = new AbortController()
+    const request = {
+      protocol: 'hv-pony-solver/2',
+      requestId: 'cancel-before-delivery',
+      ...(type === 'verify-key' ? { type, candidateKey: 'a'.repeat(64) } : { type }),
+    } as const
+    const response = requestHost(request, { signal: controller.signal })
+
+    port.emitMessage({ protocol: request.protocol, type: 'result', requestId: request.requestId, ok: true })
+    controller.abort()
+
+    await expect(response).rejects.toThrow(`${operationName}已取消`)
+    expect(port.disconnect).toHaveBeenCalledTimes(1)
+    expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(1)
+  })
+
+  it('checks cancellation before delivering the reconnected quota response', async () => {
+    vi.useFakeTimers()
+    const interruptedPort = controlledHostPort()
+    const replacementPort = controlledHostPort()
+    platformMocks.runtimeConnect.mockReset().mockReturnValueOnce(interruptedPort).mockReturnValueOnce(replacementPort)
+    const { requestHost } = await import('../../src/options/remote')
+    const controller = new AbortController()
+    const request = {
+      protocol: 'hv-pony-solver/2',
+      type: 'query-model-quota',
+      requestId: 'quota-reconnect-delivery',
+    } as const
+    const response = requestHost(request, { signal: controller.signal })
+    interruptedPort.emitDisconnect()
+    await vi.advanceTimersByTimeAsync(100)
+
+    replacementPort.emitMessage({ protocol: request.protocol, type: 'result', requestId: request.requestId, ok: true })
+    controller.abort()
+
+    await expect(response).rejects.toThrow('额度查询已取消')
+    expect(replacementPort.disconnect).toHaveBeenCalledTimes(1)
+    expect(platformMocks.runtimeConnect).toHaveBeenCalledTimes(2)
+  })
+
   it('ignores unrelated messages and surfaces a matching Host failure', async () => {
     const port = controlledHostPort()
     platformMocks.runtimeConnect.mockReset().mockReturnValue(port)

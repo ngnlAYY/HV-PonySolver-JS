@@ -1,10 +1,8 @@
 import { resolve } from 'node:path'
 
 // Shared CLI parsing for scripts that accept a single optional --repo-root <path> flag.
-// Unknown arguments are rejected instead of being silently ignored, so typos fail fast.
 export function parseRepoRootArgs(args, defaultRepoRoot) {
   let repoRoot = defaultRepoRoot
-  let explicitRepoRoot = false
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
@@ -16,9 +14,8 @@ export function parseRepoRootArgs(args, defaultRepoRoot) {
       throw new Error('--repo-root requires a path')
     }
     repoRoot = resolve(value)
-    explicitRepoRoot = true
     index += 1
   }
 
-  return { repoRoot, explicitRepoRoot }
+  return { repoRoot }
 }

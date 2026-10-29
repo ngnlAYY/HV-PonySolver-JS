@@ -24,6 +24,54 @@ describe('raceAbort', () => {
     await expect(raceAbort(Promise.resolve('value'), undefined)).resolves.toBe('value')
   })
 
+  it.each([true, false])('preserves cancellation when cleanup throws (pre-aborted=%s)', async (preAborted) => {
+    const controller = new AbortController()
+    const reason = new Error('caller stopped')
+    if (preAborted) controller.abort(reason)
+    const operation = deferred<void>()
+    const raced = raceAbort(operation.promise, controller.signal, undefined, {
+      onAbort: () => {
+        throw new Error('cleanup failed')
+      },
+    })
+    if (!preAborted) controller.abort(reason)
+    operation.reject(new Error('late failure'))
+    await expect(raced).rejects.toBe(reason)
+  })
+
+  it.each(['rejected', 'pending'] as const)('does not wait for %s asynchronous cleanup', async (state) => {
+    const controller = new AbortController()
+    const reason = new Error('caller stopped')
+    const operation = deferred<void>()
+    const raced = raceAbort(operation.promise, controller.signal, undefined, {
+      onAbort: () => (state === 'rejected' ? Promise.reject(new Error('cleanup failed')) : new Promise<void>(() => {})),
+    })
+    controller.abort(reason)
+    await expect(raced).rejects.toBe(reason)
+  })
+
+  it('keeps the first signal reason when cleanup aborts a second signal', async () => {
+    const first = new AbortController()
+    const second = new AbortController()
+    const reason = new Error('first abort')
+    const raced = raceAbort(deferred<void>().promise, [second.signal, first.signal], undefined, {
+      onAbort: () => second.abort(new Error('cleanup abort')),
+    })
+    first.abort(reason)
+    await expect(raced).rejects.toBe(reason)
+  })
+
+  it.each([true, false])('settles despite an error factory failure (pre-aborted=%s)', async (preAborted) => {
+    const controller = new AbortController()
+    const reason = new Error('caller stopped')
+    if (preAborted) controller.abort(reason)
+    const raced = raceAbort(deferred<void>().promise, controller.signal, () => {
+      throw new Error('error factory failed')
+    })
+    if (!preAborted) controller.abort(reason)
+    await expect(raced).rejects.toBe(reason)
+  })
+
   it('rejects immediately with a pre-aborted signal and detaches the operation', async () => {
     const controller = new AbortController()
     controller.abort()

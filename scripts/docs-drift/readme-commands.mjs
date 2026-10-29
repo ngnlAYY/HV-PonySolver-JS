@@ -39,6 +39,7 @@ function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
     )
   }
   errors.push(...checkDocumentedPnpmCommands(rootPackageJson, workspacePackageJsons, readmeLines))
+  const checkDescription = readCommandDescription(readmeLines, 'pnpm check')
   for (const commandName of [
     'format:check',
     'lint',
@@ -52,7 +53,7 @@ function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
     'bundle:check',
     'build',
   ]) {
-    if (checkCommand.includes(commandName) && !commandDescriptionMentions(readme, 'pnpm check', commandName)) {
+    if (checkCommand.includes(commandName) && !checkDescription.includes(commandName)) {
       errors.push(
         `docs/development/commands.md pnpm check description must mention ${commandName} because package.json scripts.check runs it`,
       )
@@ -64,6 +65,7 @@ function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
     errors.push('package.json scripts.check:quick is missing')
     return errors
   }
+  const quickCheckDescription = readCommandDescription(readmeLines, 'pnpm check:quick')
   for (const commandName of [
     'format:check',
     'lint',
@@ -75,10 +77,7 @@ function checkRootCheckCommand(rootPackageJson, workspacePackageJsons, readme) {
     'extension:package-check',
     'bundle:check',
   ]) {
-    if (
-      quickCheckCommand.includes(commandName) &&
-      !commandDescriptionMentions(readme, 'pnpm check:quick', commandName)
-    ) {
+    if (quickCheckCommand.includes(commandName) && !quickCheckDescription.includes(commandName)) {
       errors.push(
         `docs/development/commands.md pnpm check:quick description must mention ${commandName} because package.json scripts.check:quick runs it`,
       )
@@ -119,13 +118,13 @@ function checkDocumentedPnpmCommands(rootPackageJson, workspacePackageJsons, rea
   return errors
 }
 
-function commandDescriptionMentions(readme, command, required) {
+function readCommandDescription(lines, command) {
   const commandRowPattern = /^\|\s*`([^`]*)`\s*\|/
-  for (const line of readme.split(/\r?\n/u)) {
+  for (const line of lines) {
     const match = commandRowPattern.exec(line)
-    if (match?.[1] === command) return line.slice(match[0].length).includes(required)
+    if (match?.[1] === command) return line.slice(match[0].length)
   }
-  return false
+  return ''
 }
 
 // Check copyable commands in both inline code and shell fences, without executing examples.

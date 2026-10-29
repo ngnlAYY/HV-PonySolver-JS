@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -10,6 +11,7 @@ import { chromium, firefox } from '@playwright/test'
 import { zipSync } from 'fflate'
 
 import { estimateBenchmarkBudget, findArtifactIdentity, main, parseArguments } from './benchmark-runner.mjs'
+import { EXTENSION_ARCHIVE_LIMITS } from '../build/archive-reader.mjs'
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
@@ -130,6 +132,46 @@ test('rejects artifact checksum and packaged model provenance drift', async () =
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('rejects oversized ZIP declarations before decompressing benchmark artifacts', async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'hv-benchmark-zip-limit-'))
+  context.after(() => rm(root, { recursive: true, force: true }))
+  const artifact = await writeArtifact(root)
+  const archivePath = path.join(root, artifact.archive.archiveName)
+  const archive = await readFile(archivePath)
+  const centralHeader = archive.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]))
+  assert.ok(centralHeader >= 0)
+  archive.writeUInt32LE(EXTENSION_ARCHIVE_LIMITS.entryByteLength + 1, centralHeader + 24)
+  artifact.archive.sha256 = sha256(archive)
+  await writeFile(archivePath, archive)
+  await writeFile(`${archivePath}.sha256`, `${artifact.archive.sha256}  ${artifact.archive.archiveName}\n`)
+  await writeFile(path.join(root, 'arbitrary-firefox-9.9.9.artifact.json'), JSON.stringify(artifact))
+  await assert.rejects(findArtifactIdentity(root, 'firefox'), (error) => {
+    assert.match(error.message, /archive is not a valid ZIP/u)
+    assert.match(error.cause?.message, /uncompressed entry size limit/u)
+    return true
+  })
+})
+
+test('rejects oversized compressed metadata and non-file benchmark archives before reading bytes', async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'hv-benchmark-archive-file-'))
+  context.after(() => rm(root, { recursive: true, force: true }))
+  const artifact = await writeArtifact(root)
+  const artifactPath = path.join(root, 'arbitrary-firefox-9.9.9.artifact.json')
+  const byteLength = artifact.archive.byteLength
+  artifact.archive.byteLength = EXTENSION_ARCHIVE_LIMITS.archiveByteLength + 1
+  await writeFile(artifactPath, JSON.stringify(artifact))
+  await assert.rejects(findArtifactIdentity(root, 'firefox'), /compressed size limit/u)
+
+  artifact.archive.byteLength = byteLength
+  await writeFile(artifactPath, JSON.stringify(artifact))
+  const archivePath = path.join(root, artifact.archive.archiveName)
+  const externalPath = path.join(root, 'external.zip')
+  await writeFile(externalPath, await readFile(archivePath))
+  await rm(archivePath)
+  await symlink(externalPath, archivePath)
+  await assert.rejects(findArtifactIdentity(root, 'firefox'), /archive bytes do not match/u)
 })
 
 test('reduced benchmark sampling rejects one sample and accepts the bootstrap minimum', () => {

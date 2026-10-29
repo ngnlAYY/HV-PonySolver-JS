@@ -209,6 +209,18 @@ describe('extension transport benchmark contract', () => {
     assert.equal('jsHeapPeakBytes' in summary, false)
   })
 
+  it('rejects missing dimension entries and missing bootstrap samples', () => {
+    for (const field of ['browsers', 'patterns', 'imageBytes', 'iterations']) {
+      const values = [...config()[field]]
+      values.length += 1
+      assert.throws(() => validateBenchmarkConfig(config({ [field]: values })), /Invalid benchmark/u)
+      assert.throws(() => buildScenarioMatrix(config({ [field]: values })), /Invalid benchmark/u)
+    }
+    const values = [1, 2, 3]
+    delete values[1]
+    assert.throws(() => deterministicBootstrapCi(values), /finite samples/u)
+  })
+
   it('matches an independent seeded-bootstrap oracle for odd, even and repeated samples', () => {
     for (const seed of [0, 7, 0xffff_ffff]) {
       for (const length of [2, 3, 4, 5, 10, 17]) {

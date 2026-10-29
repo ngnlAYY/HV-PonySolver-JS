@@ -1,14 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { DEFAULT_RANDOM_ON_FAIL } from '../../src/captcha/fallback-settings'
-import { solverConfig } from '../../src/captcha/solver-config'
 import { inferenceTimeoutConfig, prepareDeadlineConfig } from '../../src/inference/inference-config'
 import { randDelay, shuffle, sleep } from '../../src/utils/delay'
 import { formatErrorMessage } from '../../src/utils/errors'
 
 describe('configuration contracts', () => {
-  it('keeps consumers aligned with shared defaults and preparation deadlines', () => {
-    expect(solverConfig.randomOnFail).toBe(DEFAULT_RANDOM_ON_FAIL)
+  it('keeps preparation deadlines aligned and ordered', () => {
     expect(inferenceTimeoutConfig.workerPrepareTimeoutMs).toBe(prepareDeadlineConfig.workerTimeoutMs)
     expect(prepareDeadlineConfig.workerTimeoutMs).toBeLessThan(prepareDeadlineConfig.contentTimeoutMs)
     expect(prepareDeadlineConfig.contentTimeoutMs).toBeLessThan(prepareDeadlineConfig.brokerTimeoutMs)
@@ -34,6 +31,24 @@ describe('browser-core utility functions', () => {
     expect(formatErrorMessage({ name: 'NoisyError', message: 'raw text', userMessage: '' })).toBe(
       'NoisyError: raw text',
     )
+  })
+
+  it.each([
+    Object.create(null),
+    {
+      get userMessage() {
+        throw new Error('getter failed')
+      },
+    },
+    {
+      message: {
+        toString() {
+          throw new Error('coercion failed')
+        },
+      },
+    },
+  ])('keeps error reporting usable when the thrown value cannot be inspected', (error: unknown) => {
+    expect(formatErrorMessage(error)).toBe('未知错误')
   })
 
   it('returns random delays inside the inclusive range', () => {

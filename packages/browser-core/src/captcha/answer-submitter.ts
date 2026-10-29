@@ -1,7 +1,7 @@
 import { ANSWER_CODES, type AnswerCode } from '@hv-pony-solver/shared/answer'
 import { randDelay, shuffle, sleep } from '../utils/delay'
 import { captchaSelectors } from './captcha-selectors'
-import { getFormAction, getSubmissionAction, isSameOriginForm } from './captcha-target'
+import { areSameOriginActions, getFormAction, getSubmissionAction, type CaptchaSubmitControl } from './captcha-target'
 import { readAnswerSettings } from './read-answer-settings'
 import type { DelayRange } from './timing-settings'
 
@@ -33,16 +33,16 @@ export type PreserveCheckedAnswersProvider = () => boolean
 
 type SubmissionControls = Readonly<{
   checkboxes: readonly HTMLInputElement[]
-  button: HTMLInputElement
+  button: CaptchaSubmitControl
 }>
 
 function readControls(form: HTMLFormElement): Readonly<{
   checkboxes: readonly HTMLInputElement[]
-  button: HTMLInputElement | null
+  button: CaptchaSubmitControl | null
 }> {
   return {
     checkboxes: Array.from(form.querySelectorAll<HTMLInputElement>(captchaSelectors.answers)),
-    button: form.querySelector<HTMLInputElement>(captchaSelectors.submit),
+    button: form.querySelector<CaptchaSubmitControl>(captchaSelectors.submit),
   }
 }
 
@@ -58,6 +58,8 @@ function controlsAreUsable(form: HTMLFormElement, controls: SubmissionControls):
   return (
     form.isConnected &&
     controls.button.isConnected &&
+    // object 也有 form/type，但 type 表示 MIME，不能据此当作提交控件。
+    (controls.button instanceof HTMLInputElement || controls.button instanceof HTMLButtonElement) &&
     controls.button.form === form &&
     ['submit', 'button'].includes(controls.button.type) &&
     controls.checkboxes.every(
@@ -215,8 +217,8 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     }
     const expectedFormAction = getFormAction(form)
     const expectedSubmitType = expectedControls.button.type
-    const expectedSubmitAction = getSubmissionAction(form, expectedControls.button)
-    if (!isSameOriginForm(form, expectedControls.button) || !controlsAreUsable(form, expectedControls)) {
+    const expectedSubmitAction = getSubmissionAction(form, expectedControls.button, expectedFormAction)
+    if (!areSameOriginActions(expectedFormAction, expectedSubmitAction) || !controlsAreUsable(form, expectedControls)) {
       onError('答案控件不可用')
       return
     }
@@ -242,12 +244,14 @@ export class AnswerSubmitter implements AnswerSubmissionService {
         checkboxes: current.checkboxes,
         button: current.button,
       }
+      const formAction = getFormAction(form)
+      const submitAction = getSubmissionAction(form, controls.button, formAction)
       if (
         !hasSameControls(expectedControls, controls) ||
-        getFormAction(form) !== expectedFormAction ||
+        formAction !== expectedFormAction ||
         controls.button.type !== expectedSubmitType ||
-        getSubmissionAction(form, controls.button) !== expectedSubmitAction ||
-        !isSameOriginForm(form, controls.button) ||
+        submitAction !== expectedSubmitAction ||
+        !areSameOriginActions(formAction, submitAction) ||
         !controlsAreUsable(form, controls)
       ) {
         cleanStaleAutomaticConfidences()
@@ -364,25 +368,30 @@ export class AnswerSubmitter implements AnswerSubmissionService {
     if (!controls) {
       return
     }
-    if (preserveCheckedAnswers && controls.checkboxes.filter((checkbox) => checkbox.checked).length > 4) {
+    if (
+      preserveCheckedAnswers &&
+      controls.checkboxes.reduce((count, checkbox) => count + Number(checkbox.checked), 0) > 4
+    ) {
       // 等待期间用户可能新增或撤销答案。只裁剪当前仍归程序所有的勾选，
       // 每次 change 回调后重新读取，避免接管手动项或操作已替换的控件。
       for (let attempt = 0; attempt < ANSWER_CODES.length; attempt += 1) {
         controls = currentControls()
         if (!controls) return
-        const checked = controls.checkboxes.filter((checkbox) => checkbox.checked)
-        if (checked.length <= 3) break
-        const automatic = checked.filter((checkbox) => this.automaticConfidences.has(checkbox))
-        automatic.sort((left, right) => {
-          const difference =
-            (this.automaticConfidences.get(left) ?? Number.NEGATIVE_INFINITY) -
-            (this.automaticConfidences.get(right) ?? Number.NEGATIVE_INFINITY)
-          return Number.isNaN(difference) ? 0 : difference
-        })
-        const checkbox = automatic[0]
-        if (!checkbox) break
-        this.clickCheckbox(checkbox)
-        this.automaticConfidences.delete(checkbox)
+        let checkedCount = 0
+        let lowest: HTMLInputElement | null = null
+        let lowestConfidence = Number.POSITIVE_INFINITY
+        for (const checkbox of controls.checkboxes) {
+          if (!checkbox.checked) continue
+          checkedCount += 1
+          const confidence = this.automaticConfidences.get(checkbox)
+          if (confidence !== undefined && (lowest === null || confidence < lowestConfidence)) {
+            lowest = checkbox
+            lowestConfidence = confidence
+          }
+        }
+        if (checkedCount <= 3 || !lowest) break
+        this.clickCheckbox(lowest)
+        this.automaticConfidences.delete(lowest)
       }
       controls = currentControls()
       if (!controls) return

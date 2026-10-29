@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -248,9 +248,10 @@ test('archive verification rejects duplicate entries before extraction', async (
 test('artifact discovery rejects oversized uncompressed ZIP entries before extraction', async (context) => {
   const outputRoot = await mkdtemp(path.join(os.tmpdir(), 'hv-packaged-zip-bomb-'))
   context.after(() => rm(outputRoot, { recursive: true, force: true }))
-  await createFixtureArtifact(outputRoot, {
-    modelBytes: Buffer.alloc(PACKAGED_ARCHIVE_LIMITS.entryByteLength + 1),
-  })
+  const { artifact } = await createFixtureArtifact(outputRoot)
+  artifact.model.byteLength = PACKAGED_ARCHIVE_LIMITS.entryByteLength + 1
+  artifact.files[`model/${artifact.model.filename}`].byteLength = artifact.model.byteLength
+  await writeFile(path.join(outputRoot, 'chromium.artifact.json'), JSON.stringify(artifact))
 
   await assert.rejects(discoverPackagedArtifact(outputRoot, 'chromium'), /uncompressed entry size limit/u)
 })
@@ -262,6 +263,12 @@ test('extracted tree verification rejects post-extraction tampering', async (con
   const packagedArtifact = await discoverPackagedArtifact(temporaryRoot, 'chromium')
   const extractedRoot = path.join(temporaryRoot, 'extracted')
   const verification = await extractAndVerifyPackagedArchive(packagedArtifact, extractedRoot)
+  const rootLink = path.join(temporaryRoot, 'linked-root')
+  await symlink(extractedRoot, rootLink, 'dir')
+  await assert.rejects(
+    verifyExtractedPackagedTree(rootLink, verification),
+    /root must be a directory without a symbolic link/u,
+  )
   await writeFile(path.join(extractedRoot, 'background/background.js'), 'tampered tree')
   await assert.rejects(verifyExtractedPackagedTree(extractedRoot, verification), /does not match the tested archive/u)
 })

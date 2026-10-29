@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import { parseRepoRootArgs } from '../../../scripts/lib/cli.mjs'
 import {
   assetIntegrityMatches,
   readAssetStats,
@@ -30,16 +31,10 @@ export async function runCli(repoRoot, env = process.env, write = (chunk) => pro
   write(`ONNX Runtime assets verified: ${verified.join('; ')}\n`)
 }
 
-function resolveRepoRoot(args) {
-  const index = args.indexOf('--repo-root')
-  if (index === -1) return resolve(import.meta.dirname, '../../..')
-  if (!args[index + 1]) throw new Error('--repo-root requires a path')
-  return resolve(args[index + 1])
-}
-
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   try {
-    await runCli(resolveRepoRoot(process.argv.slice(2)))
+    const { repoRoot } = parseRepoRootArgs(process.argv.slice(2), resolve(import.meta.dirname, '../../..'))
+    await runCli(repoRoot)
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1

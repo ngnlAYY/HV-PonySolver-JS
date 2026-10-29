@@ -1,6 +1,6 @@
 export type RaceAbortOptions = Readonly<{
-  /** Runs when an abort wins the race, before the rejection is delivered. */
-  onAbort?: () => void
+  /** Best-effort cleanup when abort wins; failures and pending cleanup cannot delay rejection. */
+  onAbort?: () => void | PromiseLike<void>
 }>
 
 type AbortRejectionReason = Error | DOMException
@@ -18,6 +18,15 @@ function defaultAbortReason(signal: AbortSignal): AbortRejectionReason {
 
 function isAbortSignal(value: AbortSignal | readonly AbortSignal[]): value is AbortSignal {
   return typeof value === 'object' && value !== null && 'aborted' in value
+}
+
+function runAbortCleanup(cleanup: RaceAbortOptions['onAbort']): void {
+  if (!cleanup) return
+  try {
+    void Promise.resolve(cleanup()).catch(() => undefined)
+  } catch {
+    // 清理错误不得覆盖调用方取消，也不能使等待者永久悬挂。
+  }
 }
 
 /**
@@ -43,16 +52,21 @@ export function raceAbort<T>(
   }
   const buildReason = (): AbortRejectionReason => {
     if (createError) {
-      return normalizeAbortReason(createError(), '操作已取消')
+      try {
+        return normalizeAbortReason(createError(), '操作已取消')
+      } catch {
+        // 自定义错误构造失败仍以信号原因结算。
+      }
     }
     const aborted = watched.find((signal) => signal.aborted)
     return aborted ? defaultAbortReason(aborted) : new DOMException('操作已取消', 'AbortError')
   }
   const preAborted = watched.find((signal) => signal.aborted)
   if (preAborted) {
-    options.onAbort?.()
+    const reason = buildReason()
+    runAbortCleanup(options.onAbort)
     void Promise.resolve(promise).catch(() => undefined)
-    return Promise.reject(buildReason())
+    return Promise.reject(reason)
   }
   return new Promise<T>((resolve, reject) => {
     let settled = false
@@ -75,8 +89,9 @@ export function raceAbort<T>(
       }
       settled = true
       cleanup()
-      options.onAbort?.()
-      reject(buildReason())
+      const reason = buildReason()
+      runAbortCleanup(options.onAbort)
+      reject(reason)
     }
     for (const signal of watched) {
       signal.addEventListener('abort', onAbort, { once: true })

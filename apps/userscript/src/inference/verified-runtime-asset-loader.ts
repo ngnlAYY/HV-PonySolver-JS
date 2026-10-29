@@ -100,7 +100,9 @@ export async function loadVerifiedRuntimeAsset(
     throw error
   }
   const buffer = await readBoundedResponse(response, expected, label, signal)
-  if ((await raceAbort(sha256Hex(buffer), signal, () => abortReason(signal, label))) !== expected.sha256) {
+  const digest = await raceAbort(sha256Hex(buffer), signal, () => abortReason(signal, label))
+  if (signal?.aborted) throw abortReason(signal, label)
+  if (digest !== expected.sha256) {
     throw new Error(`${label} SHA-256 校验失败`)
   }
   return buffer
